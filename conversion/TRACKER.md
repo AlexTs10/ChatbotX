@@ -44,7 +44,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P2.2 | 2 | SQLite schema analysis: map all 224 Drizzle schema files (Postgres types, enums, jsonb, hypertables, pgvector, partial indexes, triggers) to libSQL; spec only | done | P2.1 | - | See "Proof P2.2" | commit `conversion(P2.2)` |
 | P2.3 | 2 | `db` crate: embedded SQLite file via `rusqlite` (bundled), migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | done | P2.2 | C:48 (+6 n/a) | See "Proof P2.3" | commit `conversion(P2.3)` |
 | P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | done | P2.3 | C:36 (+10 n/a) | See "Proof P2.4" | commit `59ae66f4f` |
-| P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | in_progress | P2.4 | C | | |
+| P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | done | P2.4 | C:37 (+6 n/a) | See "Proof P2.5" | commit `6839f5b73` |
 | P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | done | P2.3 | C:455 (+1 n/a) | See "Proof P2.6" | commit `c05a22f96` |
 | P2.7 | 2 | Redis replacement: locks (`tokio::sync::Mutex` map), pub/sub (`broadcast`), cache/presence/rate limits (in-memory), bloom filter (unique-index table); map each `packages/redis` use | todo | P2.6 | C | | |
 | P2.8 | 2 | `rt` crate: axum WebSocket endpoint + `broadcast` fan-out, protocol from `packages/realtime-protocol` | todo | P2.7 | C | | |
@@ -318,6 +318,19 @@ verifier run 1:  Test Files 13 passed (13)   Tests 399 passed (399)   159.65s   
 verifier run 2:  Test Files 13 passed (13)   Tests 399 passed (399)   141.44s   exit 0
 ```
 Minor gaps: `perPage` > 50 clamp not proven (only 11 rows); leaderboards `adjust`/`export`/`triggerRewards` field names checked by error codes only; unlimited 200 for `DELETE graph.instagram.com /v*/me/messenger_profile` in the fake upstream (check P1.9 IG tests do not expect an error there at P1.28).
+
+### Proof P2.5
+
+Analyst spec `conversion/specs/P2.5.md` → porter (37 tests, failing, `63beab6e2`) → implementer (`6839f5b73`) → independent verifier (PASS 9/9). Migration `0004_rest.sql`: 130 tables (all STRICT), 358 indexes, 300 FKs, 12 rollup triggers; `vector32` SQL function; exact cosine scan with `INDEXED BY "AIEmbedding_aiFileId_chunkIndex_idx"`.
+
+```
+git diff --stat 63beab6e2 HEAD -- crates/db/tests   (only the lint-only allow line from d0e4a791b)
+cargo fmt --check: OK; cargo clippy -p chatbotx-db --all-targets -- -D warnings: clean
+cargo test -p chatbotx-db: 121 integration passed (84 + 37), 88 unit passed, 0 failed
+cargo test -p chatbotx-jobs: 493 passed, 0 failed
+vector scan, 5,000 chunks, LIMIT 10, release on the Dell: median 28.4 ms (20 runs)
+```
+Verifier checks: rollups equal GROUP BY after insert/update/delete/cascade (NULL, '' and 0 separate); Asia/Kolkata day split matches the original `message-stats.repository.ts:213` (rollup path buckets at UTC hours); zero vector → NULL sorted last = pgvector NaN sorted last, callers treat both the same.
 
 ### Proof P2.6
 
