@@ -1,7 +1,7 @@
 # Tracker
 
 Status values: `todo`, `in_progress`, `blocked` (reason required), `done`, `dropped`.
-Only one unit can be `in_progress` at a time. Units for Phase 1 and later are added when Phase 0 is done.
+Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): units whose files do not overlap can run in parallel (for example a Phase 1 harness unit and a Phase 2 Rust unit). Units for Phase 1 and later are added when Phase 0 is done.
 
 | ID | Phase | Unit | Status | Depends on | Tests (A/B/C) | Proof | Commit |
 |----|-------|------|--------|------------|---------------|-------|--------|
@@ -11,7 +11,7 @@ Only one unit can be `in_progress` at a time. Units for Phase 1 and later are ad
 | P0.4 | 0 | Feature inventory in `FEATURES.md` (LOC + test count); keep/drop already decided (see DECISIONS 2026-11-11: drop Execute JavaScript only) | done | P0.1 | - | See "Proof P0.4" | commit `conversion(P0.4+P0.6)` |
 | P0.5 | 0 | Classify every test file A/B/C in `TEST_MAP.md`; mark dropped-feature tests `dropped` | done | P0.2, P0.4 | B:665 C:2426 dropped:13 | See "Proof P0.5" | commit `conversion(P0.5)` |
 | P0.6 | 0 | RSS baseline of original stack into `MEMORY.md` | done | P0.1 | - | User-set baseline 2 GB (no measurement, see DECISIONS) | commit `conversion(P0.4+P0.6)` |
-| P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | todo | P0.5 | A: smoke | | |
+| P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | in_progress | P0.5 | A: smoke | | |
 | P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | todo | P1.1 | A: 52 ops | | |
 | P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | todo | P1.1 | A: 49 ops | | |
 | P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | todo | P1.1 | A: 55 ops | | |
@@ -39,6 +39,15 @@ Only one unit can be `in_progress` at a time. Units for Phase 1 and later are ad
 | P1.26 | 1 | Public pages API: guest messages + realtime token, leaderboards, reflinks, email-topic open/click, `/r/*` | todo | P1.1 | A | | |
 | P1.27 | 1 | Realtime WebSocket events (`apps/realtime`) | todo | P1.1 | A | | |
 | P1.28 | 1 | Full Class A run against the original stack: 100% pass, then freeze `parity/` into `MANIFEST.sha256` | todo | P1.2–P1.27 | A | | |
+| P2.1 | 2 | Cargo workspace + one binary skeleton: crates `api` (axum), `core`, `db`, `jobs`, `rt`, `files`, bin `chatbotx-server`; config from env, tracing, `/api/health`, graceful shutdown; release profile for size/RSS | in_progress | P0.5 | - | | |
+| P2.2 | 2 | SQLite schema analysis: map all 224 Drizzle schema files (Postgres types, enums, jsonb, hypertables, pgvector, partial indexes, triggers) to libSQL; spec only | todo | P2.1 | - | | |
+| P2.3 | 2 | `db` crate: libSQL embedded file, migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | todo | P2.2 | C | | |
+| P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | todo | P2.3 | C | | |
+| P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | todo | P2.4 | C | | |
+| P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | todo | P2.3 | C | | |
+| P2.7 | 2 | Redis replacement: locks (`tokio::sync::Mutex` map), pub/sub (`broadcast`), cache/presence/rate limits (in-memory), bloom filter (unique-index table); map each `packages/redis` use | todo | P2.6 | C | | |
+| P2.8 | 2 | `rt` crate: axum WebSocket endpoint + `broadcast` fan-out, protocol from `packages/realtime-protocol` | todo | P2.7 | C | | |
+| P2.9 | 2 | `files` crate: `object_store` LocalFileSystem (S3 by config), presigned-style upload/download tokens | todo | P2.1 | C | | |
 
 ## Proof
 

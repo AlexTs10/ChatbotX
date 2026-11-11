@@ -45,3 +45,15 @@ Dated log of each decision and each question to the user. Newest entry at the bo
 - `packages/variables/src/javascript-interpolation.ts` and its test are part of the dropped Execute JavaScript feature → `dropped`.
 - Doubt to settle in Phase 3 (not blocking): pure zod schemas in `packages/flow-config` are class C now. If the TanStack frontend still imports that package, such tests can move to B; record the move here if it happens.
 - Phase 1 has 28 units: 17 public-API groups (811 operations in the committed public spec), internal `/rpc`, 7 route-handler/webhook groups, realtime, and the final freeze.
+
+## 2026-11-11 — P1.1 harness decisions (orchestrator; tell the user, change if they object)
+
+Spec: `conversion/specs/P1.1.md`. Answers to its 5 open questions:
+1. **Fixture driver = direct DB inserts, one adapter for each stack.** The setup (user, workspace, API token, platform credentials, channels) is written straight to the database: a Postgres adapter for the original stack, a SQLite adapter for the Rust stack. Build-specific Next.js server-action IDs are not used. All **assertions** stay black-box (HTTP, WebSocket, fake upstream records, files). The sign-up + email-verify + sign-in path is still tested over HTTP once (smoke test).
+2. The Rust stack does **not** keep the Postgres schema (target is libSQL). So the SQLite adapter is written in Phase 2/3 from the same fixture spec (same logical rows).
+3. The 514 server-action files become Rust HTTP routes in Phase 4. They have no stable HTTP contract in the original, so Class A does not cover them; their behavior is covered by Class B/C tests. No new Phase 1 units.
+4. Parity runs the **community** edition only. Paths gated to `cloud`/`enterprise` editions (private quota worker, signed licence) get no Class A tests; their Class C tests still port.
+5. The parity Docker network maps `1.1.1.1` (hard-coded DoH resolver of the SSRF guard) and the real upstream hostnames to the fake upstream, with a test CA trusted through `NODE_EXTRA_CA_CERTS` (Node) and `SSL_CERT_FILE` (Rust). Test-only; production code is not changed.
+
+- Dell: user `alextoska` added to group `docker`; Docker service enabled (2026-11-11, with the user's sudo password, given through a one-use secret card).
+- Dell memory: the Android emulator (~5 GB, Nana QA) runs there. It is not stopped by this project. If `next build` runs out of memory, the build is retried with lower concurrency; if it still fails, ask the user to stop the emulator.
