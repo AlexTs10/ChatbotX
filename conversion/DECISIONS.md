@@ -150,3 +150,14 @@ Spec: `conversion/specs/P2.4.md` (65 tables, 234 indexes, 155 FKs; 46 runtime ca
 - P1.5 findings the Rust port must match (`conversion/specs/P1.5.md`): `connectionProviders.list` → 422 `invalidRequestData` (bare zod issue array, `defined: false`) unless `kind=integration` (likely defect: the `chatbotx` adapter name is not a `channelTypes` value); a disconnected `api` channel's `cbx_api_` token still authenticates; disconnecting an integration-kind connection cascades the `Connection` row (later GET 404, reconnect = new id); provider-config ZodError → 422 with `data` = bare issue array; `connectSessionLimitReached` 429 is `defined: false`; a Telegram bot id is unique across workspaces (409 `connectionAlreadyConnected`); a Messenger subscribe that always fails still connects as `degraded`/`verify_failed`.
 - Open for the Phase 3 contacts unit: phone normalization of `+15550001111` was not deterministic in the original (once `+848864158`, once unchanged). Parity tests do not assert it. Find the cause before porting.
 - Checked: the P1.5 note that the P1.2 fixture encrypts `IntegrationMessenger.auth` is wrong — P1.2 writes it as plain JSON (only `MessagingAdsConnection.auth` is encrypted, as in the app).
+
+## 2026-11-11 — P2.6 porter results (user decision + orchestrator)
+
+- **User decision:** `packages/sequence-scheduler/__tests__/dispatch-manager.test.ts:312` ("calls useExisting to obtain the redis client before scheduling removal") is **not-applicable** — the Redis handle does not exist in Rust; removal itself is covered by the other dispatch-manager tests.
+- Sequence test seeds use the P2.4 DDL (integer snowflake ids, exact column names); assertions compare with the decimal string of the seeded id (API returns ids as strings). 76 tests changed only in this id mapping (noted in the tsv).
+- 4 ported tests are marked `adapted (weakened)`: the composite FK `(enrollmentId, workspaceId)` forces the other-workspace decoy to use a different enrollment id, so the workspace filter is not checked alone (`cancel_pending_dispatches::select_filters_enrollmentid_workspaceid_status_pending`, `cancel_pending_dispatches::update_where_has_id_workspaceid_status_redis_removed_per`, `sequence_dispatch::update_where_includes_workspaceid_and_status_pending`, `sequence_dispatch::uses_the_provided_workspaceid_and_enrollmentid_when`). The implementer must still filter by workspace (code review in verification).
+- Log format pinned by the ports: snake_case fields, Debug lists, "Unhandled rejection" at ERROR (tracing has no fatal).
+
+## 2026-11-11 — Subagent limit (user)
+
+- **User: at most 1–2 subagents at the same time** (helpers spawned by a subagent count too). Phase 1 units no longer run 3 in parallel.
