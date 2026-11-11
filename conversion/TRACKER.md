@@ -13,11 +13,11 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P0.5 | 0 | Classify every test file A/B/C in `TEST_MAP.md`; mark dropped-feature tests `dropped` | done | P0.2, P0.4 | B:665 C:2426 dropped:13 | See "Proof P0.5" | commit `conversion(P0.5)` |
 | P0.6 | 0 | RSS baseline of original stack into `MEMORY.md` | done | P0.1 | - | User-set baseline 2 GB (no measurement, see DECISIONS) | commit `conversion(P0.4+P0.6)` |
 | P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | done | P0.5 | A: smoke | See "Proof P1.1" | commit `conversion(P1.1)` |
-| P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | todo | P1.1 | A: 52 ops | | |
-| P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | todo | P1.1 | A: 49 ops | | |
-| P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | todo | P1.1 | A: 55 ops | | |
-| P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | todo | P1.1 | A: 25 ops | | |
-| P1.6 | 1 | Public API parity: `contacts` | todo | P1.1 | A: 58 ops | | |
+| P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | in_progress | P1.1 | A: 52 ops | | |
+| P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | in_progress | P1.1 | A: 49 ops | | |
+| P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | in_progress | P1.1 | A: 55 ops | | |
+| P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | in_progress | P1.1 | A: 25 ops | | |
+| P1.6 | 1 | Public API parity: `contacts` | in_progress | P1.1 | A: 58 ops | | |
 | P1.7 | 1 | Public API parity: `conversations`, `coupons`, `customFields`, `decisionConnections`, `decisionProfiles`, `discountCodes` | todo | P1.1 | A: 53 ops | | |
 | P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | todo | P1.1 | A: 48 ops | | |
 | P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | todo | P1.1 | A: 53 ops | | |
