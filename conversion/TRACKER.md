@@ -9,8 +9,36 @@ Only one unit can be `in_progress` at a time. Units for Phase 1 and later are ad
 | P0.2 | 0 | Copy all tests to `frozen-tests/` + `MANIFEST.sha256` | done | P0.1 | - | See "Proof P0.2" | commit `conversion(P0.2)` |
 | P0.3 | 0 | Run original suite (`pnpm install && pnpm test`), record baseline, mark `baseline-fail` | todo | P0.2 | - | | |
 | P0.4 | 0 | Feature inventory in `FEATURES.md` (LOC + test count); keep/drop already decided (see DECISIONS 2026-11-11: drop Execute JavaScript only) | done | P0.1 | - | See "Proof P0.4" | commit `conversion(P0.4+P0.6)` |
-| P0.5 | 0 | Classify every test file A/B/C in `TEST_MAP.md`; mark dropped-feature tests `dropped` | todo | P0.2, P0.3, P0.4 | - | | |
+| P0.5 | 0 | Classify every test file A/B/C in `TEST_MAP.md`; mark dropped-feature tests `dropped` | done | P0.2, P0.4 | B:665 C:2426 dropped:13 | See "Proof P0.5" | commit `conversion(P0.5)` |
 | P0.6 | 0 | RSS baseline of original stack into `MEMORY.md` | done | P0.1 | - | User-set baseline 2 GB (no measurement, see DECISIONS) | commit `conversion(P0.4+P0.6)` |
+| P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | todo | P0.5 | A: smoke | | |
+| P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | todo | P1.1 | A: 52 ops | | |
+| P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | todo | P1.1 | A: 49 ops | | |
+| P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | todo | P1.1 | A: 55 ops | | |
+| P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | todo | P1.1 | A: 25 ops | | |
+| P1.6 | 1 | Public API parity: `contacts` | todo | P1.1 | A: 58 ops | | |
+| P1.7 | 1 | Public API parity: `conversations`, `coupons`, `customFields`, `decisionConnections`, `decisionProfiles`, `discountCodes` | todo | P1.1 | A: 53 ops | | |
+| P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | todo | P1.1 | A: 48 ops | | |
+| P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | todo | P1.1 | A: 53 ops | | |
+| P1.10 | 1 | Public API parity: `inboxes`, `instagramChannels`, `integrations`, `keywords`, `leaderboards` | todo | P1.1 | A: 52 ops | | |
+| P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | todo | P1.1 | A: 52 ops | | |
+| P1.12 | 1 | Public API parity: `miniApps`, `minigames`, `openHours`, `orders`, `paymentProviders` | todo | P1.1 | A: 43 ops | | |
+| P1.13 | 1 | Public API parity: `pipelines`, `placeCategories`, `placeLocations`, `polls` | todo | P1.1 | A: 51 ops | | |
+| P1.14 | 1 | Public API parity: `productCategories`, `productVendors`, `products`, `qrCodes`, `questionnaires`, `realtime`, `reflinks` | todo | P1.1 | A: 54 ops | | |
+| P1.15 | 1 | Public API parity: `responseSla`, `savedReplies`, `schemas`, `sequences`, `shopify`, `smtpIntegrations`, `spreadsheets`, `tags`, `templateInstallations` | todo | P1.1 | A: 55 ops | | |
+| P1.16 | 1 | Public API parity: `templateMessages`, `templatePreviews`, `templates`, `threadsComments`, `tiktokChannels`, `tiktokComments`, `token`, `triggers`, `userPersistentMenus`, `webchats` | todo | P1.1 | A: 53 ops | | |
+| P1.17 | 1 | Public API parity: `webhooks`, `webshop`, `whatsappCalls`, `whatsappChannels`, `whatsappFlows`, `whatsappTemplates`, `woocommerce`, `workingHours`, `workspaceMembers`, `workspaceSettings` | todo | P1.1 | A: 55 ops | | |
+| P1.18 | 1 | Public API parity: `zaloChannels` | todo | P1.1 | A: 3 ops | | |
+| P1.19 | 1 | Internal `/rpc` procedures not in the public API (frontend calls) | todo | P1.1 | A | | |
+| P1.20 | 1 | Webhooks: WhatsApp (`/integrations/whatsapp/webhook/*`, callback, VoIP hangup, call recording) | todo | P1.1 | A | | |
+| P1.21 | 1 | Webhooks: Meta (Messenger, Instagram, Instagram-Facebook, Threads) via `/integrations/[...integration]` | todo | P1.1 | A | | |
+| P1.22 | 1 | Webhooks: Telegram, TikTok, Zalo (+ zalo-verifier), Webchat, API channel | todo | P1.1 | A | | |
+| P1.23 | 1 | Webhooks: payments (Stripe, PayPal), Shopify, WooCommerce, inbound hooks `/api/hooks/[token]` | todo | P1.1 | A | | |
+| P1.24 | 1 | Auth + OAuth routes (`/api/auth/*`, `/oauth/*`, `/.well-known/*`), invitations, magic links | todo | P1.1 | A | | |
+| P1.25 | 1 | Files: presigned upload, media attachment/avatar, mini-app uploads, dynamic images, exports and import templates | todo | P1.1 | A | | |
+| P1.26 | 1 | Public pages API: guest messages + realtime token, leaderboards, reflinks, email-topic open/click, `/r/*` | todo | P1.1 | A | | |
+| P1.27 | 1 | Realtime WebSocket events (`apps/realtime`) | todo | P1.1 | A | | |
+| P1.28 | 1 | Full Class A run against the original stack: 100% pass, then freeze `parity/` into `MANIFEST.sha256` | todo | P1.2–P1.27 | A | | |
 
 ## Proof
 
@@ -65,3 +93,19 @@ per-test feature: conversion/feature-of-test.tsv (3104 lines)
 ### Proof P0.6
 
 No measurement. The user set the baseline on 2026-11-11: original stack ≈ 2 GB RSS. Target stays ≤ 200 MB.
+
+### Proof P0.5
+
+Classifier: `conversion/tools/classify_tests.py` (rules in its docstring). Output: `conversion/TEST_MAP.md`.
+`baseline-fail` status is added by P0.3 (the baseline run on the Dell) over these rows.
+
+```
+$ python3 conversion/tools/classify_tests.py
+('-', 'dropped') 13
+('B', 'todo') 665
+('C', 'todo') 2426
+total 3104
+```
+
+Independent verifier (60-row sample, seed 7), first pass: builder-B 4/25 wrong (server tests without `@vitest-environment node`), builder-C 0/15, other-C 0/10, cli/mcp/ui-B 0/5, dropped 12/12 correct; 1 dropped-feature test not marked (`packages/variables/__tests__/interpolate-into-javascript.test.ts`).
+Fixes applied (DOM check + server-module rule, extra dropped path). Re-check of the 5 wrong rows: all now C; DOM test `use-mark-conversation-read.test.tsx` stays B; `interpolate-into-javascript.test.ts` now dropped.

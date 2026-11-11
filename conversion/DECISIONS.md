@@ -37,3 +37,11 @@ Dated log of each decision and each question to the user. Newest entry at the bo
 - P0.3 (baseline test run) runs on the Dell. The stack services (Postgres/Redis) are not started for it; tests that need them are recorded as `baseline-fail` with reason `needs-service`.
 - P0.4 analyst note: `packages/variables/src/javascript-interpolation.ts` (+ `interpolate-into-javascript.test.ts`) is used only by the Execute JavaScript step? To check when the step is deleted. If it is used only there, it is dropped too.
 - The repo commit-msg hook (lefthook) rejects the `conversion(<ID>): …` format. Conversion commits use `git commit -n` only when the staged files are all under `conversion/` or Rust (no TS staged), so no lint hook is skipped for TS code; the pre-commit hooks still run.
+
+## 2026-11-11 — P0.5 classification
+
+- Original tests are only class B or C. Class A tests are new (Phase 1, `conversion/parity/`).
+- `apps/cli` and `apps/mcp-server` stay TypeScript. They are HTTP clients of the public API (no business/database imports). Their tests are class B and must pass unchanged against the Rust API.
+- `packages/variables/src/javascript-interpolation.ts` and its test are part of the dropped Execute JavaScript feature → `dropped`.
+- Doubt to settle in Phase 3 (not blocking): pure zod schemas in `packages/flow-config` are class C now. If the TanStack frontend still imports that package, such tests can move to B; record the move here if it happens.
+- Phase 1 has 28 units: 17 public-API groups (811 operations in the committed public spec), internal `/rpc`, 7 route-handler/webhook groups, realtime, and the final freeze.
