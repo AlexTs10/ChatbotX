@@ -477,3 +477,55 @@ pub async fn query_i64(db: &Db, sql: &str, args: Vec<rusqlite::types::Value>) ->
     .await
     .expect("query_i64")
 }
+
+// ---------------------------------------------------------------------------
+// Part-2 rows (P2.4)
+// ---------------------------------------------------------------------------
+
+/// Inserts one `Conversation` of the seeded contact (P2.4; table of `0002_messaging.sql`).
+/// `source_id = None` is the contact's DM conversation.
+pub fn insert_conversation(
+    tx: &rusqlite::Connection,
+    seed: Seed,
+    id: i64,
+    source_id: Option<&str>,
+) -> Result<usize, DbError> {
+    Ok(tx.execute(
+        r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId", "sourceId")
+           VALUES (?1, ?2, ?3, ?4)"#,
+        params![id, seed.workspace_id, seed.contact_id, source_id],
+    )?)
+}
+
+/// Inserts (and commits) one more `User` and a `Workspace` that it owns. Returns
+/// `(user_id, workspace_id)`.
+pub async fn seed_workspace(db: &Db, user_id: i64, workspace_id: i64) -> (i64, i64) {
+    db.write(move |tx| {
+        tx.execute(
+            r#"INSERT INTO "User" ("id", "email") VALUES (?1, ?2)"#,
+            params![user_id, format!("owner-{user_id}@example.com")],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Workspace" ("id", "name", "ownerId") VALUES (?1, ?2, ?3)"#,
+            params![workspace_id, format!("Workspace {workspace_id}"), user_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed workspace");
+    (user_id, workspace_id)
+}
+
+/// The values of a CHECK `IN (...)` list text (from [`column_in_list`]), in order:
+/// `'a', 'b'` -> `["a", "b"]`. Panics on an item that is not a single-quoted literal.
+pub fn in_list_values(list: &str) -> Vec<String> {
+    list.split(',')
+        .map(str::trim)
+        .map(|item| {
+            item.strip_prefix('\'')
+                .and_then(|i| i.strip_suffix('\''))
+                .unwrap_or_else(|| panic!("not a string literal in the IN list: {item}"))
+                .replace("''", "'")
+        })
+        .collect()
+}
