@@ -1,0 +1,22 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`list / get > lists every value with its field definition; get by id or name 1`] = `
+{
+  "data": [
+    {
+      "description": null,
+      "id": "<id:1>",
+      "name": "f_number",
+      "type": "number",
+      "value": "42",
+    },
+    {
+      "description": null,
+      "id": "<id:2>",
+      "name": "f_shortText",
+      "type": "shortText",
+      "value": "hello",
+    },
+  ],
+}
+`;

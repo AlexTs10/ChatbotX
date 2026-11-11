@@ -1,0 +1,18 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`listTags > lists the contact's tags by name, as {id, name, folderId} 1`] = `
+{
+  "data": [
+    {
+      "folderId": null,
+      "id": "<id:1>",
+      "name": "alpha-list",
+    },
+    {
+      "folderId": null,
+      "id": "<id:2>",
+      "name": "beta-list",
+    },
+  ],
+}
+`;

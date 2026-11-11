@@ -1,0 +1,12 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`notes > create (200, trimmed), list newest first, update, delete 1`] = `
+{
+  "contactId": "<id:1>",
+  "createdAt": "<ts>",
+  "createdById": null,
+  "id": "<id:2>",
+  "text": "first note",
+  "updatedAt": "<ts>",
+}
+`;

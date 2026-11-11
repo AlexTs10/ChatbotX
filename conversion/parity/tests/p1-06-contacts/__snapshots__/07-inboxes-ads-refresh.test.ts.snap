@@ -1,0 +1,84 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`listAdReferrals > lists ad clicks newest first with cursor pages 1`] = `
+{
+  "data": [
+    {
+      "adGroupId": null,
+      "adId": "<id:1>",
+      "campaignId": "camp-1",
+      "channel": "messenger",
+      "id": "<id:2>",
+      "occurredAt": "<ts>",
+      "provider": "meta",
+      "source": "ADS",
+      "sourceUrl": "https://fb.me/ad",
+      "title": null,
+    },
+    {
+      "adGroupId": null,
+      "adId": "<id:3>",
+      "campaignId": "camp-1",
+      "channel": "messenger",
+      "id": "<id:4>",
+      "occurredAt": "<ts>",
+      "provider": "meta",
+      "source": "ADS",
+      "sourceUrl": "https://fb.me/ad",
+      "title": "Summer sale",
+    },
+    {
+      "adGroupId": null,
+      "adId": "<id:5>",
+      "campaignId": "camp-1",
+      "channel": "messenger",
+      "id": "<id:6>",
+      "occurredAt": "<ts>",
+      "provider": "meta",
+      "source": "ADS",
+      "sourceUrl": "https://fb.me/ad",
+      "title": "Spring sale",
+    },
+  ],
+  "nextCursor": null,
+}
+`;
+
+exports[`listInboxes > lists each channel identity of the contact with its inbox name 1`] = `
+{
+  "data": [
+    {
+      "channel": "telegram",
+      "contactId": "<id:1>",
+      "contactLastReadAt": null,
+      "id": "<id:2>",
+      "inbox": {
+        "name": "Bot B",
+      },
+      "inboxId": "<id:3>",
+      "language": null,
+      "lastIncomingMessageAt": null,
+      "source": "ads",
+      "sourceId": "tg-two",
+      "sourceUserId": null,
+      "sourceUsername": null,
+    },
+    {
+      "channel": "messenger",
+      "contactId": "<id:1>",
+      "contactLastReadAt": null,
+      "id": "<id:4>",
+      "inbox": {
+        "name": "Page A",
+      },
+      "inboxId": "<id:5>",
+      "language": "en",
+      "lastIncomingMessageAt": "<ts>",
+      "source": "direct",
+      "sourceId": "psid-two",
+      "sourceUserId": null,
+      "sourceUsername": null,
+    },
+  ],
+}
+`;

@@ -1,0 +1,12 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`contactCreatedAt: precision windows, time zone, offsets > value formats: rejected (422) or the condition is dropped (whole workspace) 1`] = `
+{
+  "contactCreatedAt 11/02/2025": "200 all",
+  "contactCreatedAt 2025-02-30": "200 all",
+  "contactCreatedAt 2025-13-01": "200 all",
+  "contactCreatedAt yesterday": "200 all",
+  "contactCreatedDateMinutesAgo 1.5": "200 all",
+  "contactCreatedDateMinutesAgo abc": "200 all",
+}
+`;

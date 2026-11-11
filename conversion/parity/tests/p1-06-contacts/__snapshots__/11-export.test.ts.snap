@@ -1,0 +1,36 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`export > exportAll writes a BOM-prefixed, always-quoted CSV with formula guards 1`] = `
+{
+  "downloadUrl": "<presigned GET url>",
+  "fileName": "contacts-<date>.csv",
+  "status": "uploaded",
+  "totalRecords": 2,
+}
+`;
+
+exports[`getExportFile / listExportFiles > lists exports newest first with cursor pages; unknown file 404 1`] = `
+{
+  "data": [
+    {
+      "createdAt": "<ts>",
+      "expiresAt": "<ts>",
+      "fileName": "contacts-<date>.csv",
+      "id": "<id:1>",
+      "requestedBy": null,
+      "status": "uploaded",
+      "totalRecords": 1,
+    },
+    {
+      "createdAt": "<ts>",
+      "expiresAt": "<ts>",
+      "fileName": "contacts-<date>.csv",
+      "id": "<id:2>",
+      "requestedBy": null,
+      "status": "uploaded",
+      "totalRecords": 1,
+    },
+  ],
+  "nextCursor": null,
+}
+`;

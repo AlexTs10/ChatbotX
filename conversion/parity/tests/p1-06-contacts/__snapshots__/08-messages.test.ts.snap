@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`sendMessage / listMessages / getMessage > sends a text (204); it is listed as an outgoing api message and readable by id 1`] = `
+{
+  "data": [
+    {
+      "attachments": [],
+      "attributes": null,
+      "contactInboxId": "<id:1>",
+      "contentAttributes": null,
+      "contentType": "text",
+      "conversationId": "<id:2>",
+      "createdAt": "<ts>",
+      "deletedAt": null,
+      "id": "<id:3>",
+      "messageType": "outgoing",
+      "parentId": null,
+      "sendError": null,
+      "senderId": null,
+      "senderType": "api",
+      "sourceId": null,
+      "text": "Hello from the API",
+      "type": "message",
+      "updatedAt": "<ts>",
+      "workspaceId": "<workspace>",
+    },
+  ],
+  "nextCursor": null,
+  "prevCursor": null,
+}
+`;

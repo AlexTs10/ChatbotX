@@ -16,8 +16,8 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | done | P1.1 | A: 52 ops, 260 tests | See "Proof P1.2" | commit `conversion(P1.2)` |
 | P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | done | P1.1 | A: 49 ops, 389 tests | See "Proof P1.3" | commit `conversion(P1.3)` |
 | P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | done | P1.1 | A: 55 ops, 355 tests | See "Proof P1.4" | commit `conversion(P1.4)` |
-| P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | in_progress | P1.1 | A: 25 ops | | |
-| P1.6 | 1 | Public API parity: `contacts` | in_progress | P1.1 | A: 58 ops | | |
+| P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | done | P1.1 | A: 25 ops, 210 tests | See "Proof P1.5" | commit `conversion(P1.5+P1.6)` |
+| P1.6 | 1 | Public API parity: `contacts` | done | P1.1 | A: 58 ops, 539 tests | See "Proof P1.6" | commit `conversion(P1.5+P1.6)` |
 | P1.7 | 1 | Public API parity: `conversations`, `coupons`, `customFields`, `decisionConnections`, `decisionProfiles`, `discountCodes` | in_progress | P1.1 | A: 53 ops | | |
 | P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | in_progress | P1.1 | A: 48 ops | | |
 | P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | in_progress | P1.1 | A: 53 ops | | |
@@ -246,3 +246,22 @@ verifier run 1:  Test Files 15 passed (15)   Tests 356 passed (356)   348.59s   
 verifier run 2:  Test Files 15 passed (15)   Tests 356 passed (356)   395.58s   exit 0
 ```
 Two earlier run-2 attempts failed before any test ran (infra): worker boot wait timed out under load (exit 4); rsync collision with another unit's sync (exit 23). See DECISIONS "Harness infra flakiness".
+
+### Proof P1.5
+
+Writer (spec `conversion/specs/P1.5.md`) → independent verifier (PASS 6/6, two runs; 8 operations cross-checked). 25/25 operations, 210 tests in `conversion/parity/tests/p1-05-channels-connections/` + interception check.
+
+```
+verifier run 1:  Test Files 10 passed (10)   Tests 211 passed (211)   85.10s   EXIT=0
+verifier run 2:  Test Files 10 passed (10)   Tests 211 passed (211)   89.99s   EXIT=0
+```
+Minor gaps: `connectTargets` outcomes failed/notSelectable, failed/inProgress, limitReached; some unused fake scripts on shared Graph paths may remain after a test.
+
+### Proof P1.6
+
+Writer (spec `conversion/specs/P1.6.md`) → independent verifier (PASS 6/6, two runs; 10 operations cross-checked incl. search/sort/count rules). 58/58 operations, 539 tests in `conversion/parity/tests/p1-06-contacts/` (11 normalized snapshot files) + interception check.
+
+```
+verifier run 1:  Test Files 14 passed (14)   Tests 540 passed (540)   35.56s
+verifier run 2:  Test Files 14 passed (14)   Tests 540 passed (540)   34.72s
+```
