@@ -688,7 +688,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/public-scheduled-deletion-routes.test.tsx` | C | tbd | todo | Scheduler and scheduled jobs; builder server code |
 | `apps/builder/__tests__/public-spec-json-route.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/public-spec-mcp.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
-| `apps/builder/__tests__/public-spec-operations.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
+| `apps/builder/__tests__/public-spec-operations.test.ts` | C | tbd | baseline-fail | Workspace API tokens and public API; builder server code; P0.3: beforeAll hook timeout 120 s (imports whole public router; Dell under memory pressure) — recheck in P0.7 |
 | `apps/builder/__tests__/public-spec-options.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/public-template-card.test.tsx` | C | tbd | todo | Template marketplace (install/share/sync); builder server code |
 | `apps/builder/__tests__/publish-flow-action.test.ts` | C | tbd | todo | Flow builder and execution; builder server code |
@@ -1354,14 +1354,14 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/integration-routing.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/integration-worker-boot.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/integration-worker-incoming-message.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `apps/worker/__tests__/integration/heavy-step-outcome.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
-| `apps/worker/__tests__/integration/inbox-sender.chain.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `apps/worker/__tests__/integration/inbox-sender.flow.test.ts` | C | tbd | todo | Flow builder and execution |
-| `apps/worker/__tests__/integration/instagram-story.chain.test.ts` | C | tbd | todo | Instagram channel |
-| `apps/worker/__tests__/integration/lead-ads.chain.test.ts` | C | tbd | todo | Facebook Lead Ads automation |
-| `apps/worker/__tests__/integration/variables.persisted.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
-| `apps/worker/__tests__/integration/whatsapp-ad.chain.test.ts` | C | tbd | todo | WhatsApp channel |
-| `apps/worker/__tests__/integration/whatsapp-conversation-routing.chain.test.ts` | C | tbd | todo | WhatsApp channel |
+| `apps/worker/__tests__/integration/heavy-step-outcome.test.ts` | C | tbd | baseline-skip | AI flow steps (text, image, speech, extraction); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `apps/worker/__tests__/integration/inbox-sender.chain.test.ts` | C | tbd | baseline-skip | Inbox and live chat (conversations, messages); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `apps/worker/__tests__/integration/inbox-sender.flow.test.ts` | C | tbd | baseline-skip | Flow builder and execution; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `apps/worker/__tests__/integration/instagram-story.chain.test.ts` | C | tbd | baseline-skip | Instagram channel; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `apps/worker/__tests__/integration/lead-ads.chain.test.ts` | C | tbd | baseline-skip | Facebook Lead Ads automation; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `apps/worker/__tests__/integration/variables.persisted.test.ts` | C | tbd | baseline-skip | Worker runtime (boot, queues, shutdown); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `apps/worker/__tests__/integration/whatsapp-ad.chain.test.ts` | C | tbd | baseline-skip | WhatsApp channel; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `apps/worker/__tests__/integration/whatsapp-conversation-routing.chain.test.ts` | C | tbd | baseline-skip | WhatsApp channel; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `apps/worker/__tests__/integrations-service-threads.test.ts` | C | tbd | todo | Threads channel |
 | `apps/worker/__tests__/is-bot-message-quota-reached.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `apps/worker/__tests__/job-attempts.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
@@ -2259,43 +2259,43 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/integration-whatsapp-token-refresh.service.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/business/__tests__/integration-whatsapp-webhook-verified.service.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/business/__tests__/integration-zalo-service.test.ts` | C | tbd | todo | Zalo channel |
-| `packages/business/__tests__/integration/bot-field-folder-tx-db.test.ts` | C | tbd | todo | Bot fields |
-| `packages/business/__tests__/integration/broadcast-activation-race.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/integration/broadcast-filtered-audience-scan.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/integration/connection-store-bindings-insert.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/business/__tests__/integration/email-topic-delete-reference.test.ts` | C | tbd | todo | Email topics and tracking |
-| `packages/business/__tests__/integration/human-reply-window-update.test.ts` | C | tbd | todo | Working hours |
-| `packages/business/__tests__/integration/inbox-create-revive-quota.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `packages/business/__tests__/integration/inbox-disconnect-tenancy.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/business/__tests__/integration/integration-threads-connect-reconnect.test.ts` | C | tbd | todo | Threads channel |
-| `packages/business/__tests__/integration/pipeline-automation.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/business/__tests__/integration/pipeline-service-hardening.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/business/__tests__/integration/pipeline-service.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/business/__tests__/integration/resource-deletion-log-channel-race.test.ts` | C | tbd | todo | Workspaces |
-| `packages/business/__tests__/integration/resource-deletion-log-workspace-race.test.ts` | C | tbd | todo | Workspaces |
-| `packages/business/__tests__/integration/response-sla-lifecycle.test.ts` | C | tbd | todo | Response SLA |
-| `packages/business/__tests__/integration/template-bot-field-collision-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-bot-field-token-order-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-concurrency-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-install-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-install-roots-uninstall-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-lease-fencing-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-lifecycle-stamps-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-list-page-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-locked-save-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-mutation-matrix-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-reference-safety-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-selectable-resources-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-sync-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-sync-reference-safety-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-uninstall-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-uninstall-effects-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-uninstall-engine-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/template-uninstall-lifecycle-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/tenant-default-template-db.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/business/__tests__/integration/user-quota-channel-count.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `packages/business/__tests__/integration/workspace-lifecycle-quota-release-deferral.test.ts` | C | tbd | todo | Licensing, billing and quotas |
+| `packages/business/__tests__/integration/bot-field-folder-tx-db.test.ts` | C | tbd | baseline-skip | Bot fields; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/broadcast-activation-race.test.ts` | C | tbd | baseline-skip | Broadcasts (incl. recurring); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/broadcast-filtered-audience-scan.test.ts` | C | tbd | baseline-skip | Broadcasts (incl. recurring); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/connection-store-bindings-insert.test.ts` | C | tbd | baseline-skip | Channel connection and OAuth connect flow; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/email-topic-delete-reference.test.ts` | C | tbd | baseline-skip | Email topics and tracking; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/human-reply-window-update.test.ts` | C | tbd | baseline-skip | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/inbox-create-revive-quota.test.ts` | C | tbd | baseline-skip | Licensing, billing and quotas; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/inbox-disconnect-tenancy.test.ts` | C | tbd | baseline-skip | Inbox and live chat (conversations, messages); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/integration-threads-connect-reconnect.test.ts` | C | tbd | baseline-skip | Threads channel; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/pipeline-automation.test.ts` | C | tbd | baseline-skip | Pipelines (CRM deals); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/pipeline-service-hardening.test.ts` | C | tbd | baseline-skip | Pipelines (CRM deals); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/pipeline-service.test.ts` | C | tbd | baseline-skip | Pipelines (CRM deals); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/resource-deletion-log-channel-race.test.ts` | C | tbd | baseline-skip | Workspaces; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/resource-deletion-log-workspace-race.test.ts` | C | tbd | baseline-skip | Workspaces; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/response-sla-lifecycle.test.ts` | C | tbd | baseline-skip | Response SLA; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-bot-field-collision-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-bot-field-token-order-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-concurrency-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-install-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-install-roots-uninstall-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-lease-fencing-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-lifecycle-stamps-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-list-page-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-locked-save-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-mutation-matrix-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-reference-safety-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-selectable-resources-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-sync-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-sync-reference-safety-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-uninstall-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-uninstall-effects-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-uninstall-engine-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/template-uninstall-lifecycle-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/tenant-default-template-db.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/user-quota-channel-count.test.ts` | C | tbd | baseline-skip | Licensing, billing and quotas; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/business/__tests__/integration/workspace-lifecycle-quota-release-deferral.test.ts` | C | tbd | baseline-skip | Licensing, billing and quotas; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/business/__tests__/invitation.service.test.ts` | C | tbd | todo | Workspace members, roles and invitations |
 | `packages/business/__tests__/is-super-admin.test.ts` | C | tbd | todo | Workspace members, roles and invitations |
 | `packages/business/__tests__/javascript-execution-output-value.test.ts` | - | - | dropped | Execute JavaScript flow step; feature dropped (DECISIONS 2026-11-11) |
@@ -2649,8 +2649,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/channel-registry/__tests__/thread-control.test.ts` | C | tbd | todo | Channel SDK and registry |
 | `packages/connections/__tests__/connect-session-start.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/connections/__tests__/connect-targets-tamper.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/connections/__tests__/integration/connect-session-flow.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/connections/__tests__/integration/connection-engine.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
+| `packages/connections/__tests__/integration/connect-session-flow.test.ts` | C | tbd | baseline-skip | Channel connection and OAuth connect flow; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/connections/__tests__/integration/connection-engine.test.ts` | C | tbd | baseline-skip | Channel connection and OAuth connect flow; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/connections/__tests__/internal.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/connections/__tests__/lifecycle.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/connections/__tests__/messenger-teardown.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -2735,54 +2735,54 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/integration-messenger-repository-personas.test.ts` | C | tbd | todo | Messenger channel |
 | `packages/database/__tests__/integration-whatsapp-mark-token-refresh-error.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/database/__tests__/integration-whatsapp-partial.test.ts` | C | tbd | todo | WhatsApp channel |
-| `packages/database/__tests__/integration/ai-file-processing-run.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
-| `packages/database/__tests__/integration/ai-handover-bulk-eligibility.test.ts` | C | tbd | todo | AI handover (human takeover) |
-| `packages/database/__tests__/integration/ai-handover-bulk-run-lifecycle.test.ts` | C | tbd | todo | AI handover (human takeover) |
+| `packages/database/__tests__/integration/ai-file-processing-run.test.ts` | C | tbd | baseline-skip | AI knowledge base (RAG, AI files); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/ai-handover-bulk-eligibility.test.ts` | C | tbd | baseline-skip | AI handover (human takeover); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/ai-handover-bulk-run-lifecycle.test.ts` | C | tbd | baseline-skip | AI handover (human takeover); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/backfill-connections.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/database/__tests__/integration/backfill-email-topic-reference.test.ts` | C | tbd | todo | Email topics and tracking |
-| `packages/database/__tests__/integration/better-auth-1-7-migration.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/database/__tests__/integration/broadcast-purge-draft.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/database/__tests__/integration/broadcast-recurrence-constraints.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/database/__tests__/integration/connect-session-isolation.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/database/__tests__/integration/connection-repository.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/database/__tests__/integration/contact-activity-catalog.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/database/__tests__/integration/contact-activity-filter.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/database/__tests__/integration/contact-activity-repository.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/database/__tests__/integration/contact-custom-field-pair-lock.test.ts` | C | tbd | todo | Custom fields |
-| `packages/database/__tests__/integration/contact-inbox-post.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/database/__tests__/integration/contact-inbox-source-identity-history.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/database/__tests__/integration/conversation-close-human-reply-window.test.ts` | C | tbd | todo | Working hours |
-| `packages/database/__tests__/integration/conversation-insert-dm.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/database/__tests__/integration/count-query-capped.test.ts` | C | tbd | todo | Contact filters and segments |
-| `packages/database/__tests__/integration/flow-current-version-nodes.test.ts` | C | tbd | todo | Flow builder and execution |
-| `packages/database/__tests__/integration/google-ads-conversion-event-fk.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/integration/google-ads-conversion-event-stats.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/integration/google-ads-conversion-event.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/integration/google-click-referral-merge.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/integration/inbox-repository.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/database/__tests__/integration/insert-required-columns.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
-| `packages/database/__tests__/integration/integration-whatsapp-lifecycle-targets.test.ts` | C | tbd | todo | WhatsApp channel |
-| `packages/database/__tests__/integration/meta-catalog-item-search.test.ts` | C | tbd | todo | Meta Catalog |
-| `packages/database/__tests__/integration/mobile-refresh-token-repository.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/database/__tests__/integration/pipeline-activity-filter.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/database/__tests__/integration/pipeline-field-filter.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/database/__tests__/integration/pipeline-item-contact-filter.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/database/__tests__/integration/pipeline-repository.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/database/__tests__/integration/poll-vote-upsert.test.ts` | C | tbd | todo | Polls |
-| `packages/database/__tests__/integration/product-import-identifiers.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
-| `packages/database/__tests__/integration/resource-deletion-log-repository.test.ts` | C | tbd | todo | Workspaces |
-| `packages/database/__tests__/integration/schema-default-parity.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
-| `packages/database/__tests__/integration/shopify-upsert-product-concurrency.test.ts` | C | tbd | todo | Shopify integration |
-| `packages/database/__tests__/integration/statement-timeout.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
-| `packages/database/__tests__/integration/template-installed-resource-kinds.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/database/__tests__/integration/thread-control-guarded-update.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `packages/database/__tests__/integration/whatsapp-call-recording-retention.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/database/__tests__/integration/working-hours-constraints.test.ts` | C | tbd | todo | Working hours |
-| `packages/database/__tests__/integration/working-hours-contact-filter.test.ts` | C | tbd | todo | Contact filters and segments |
-| `packages/database/__tests__/integration/working-hours-date-overrides.test.ts` | C | tbd | todo | Working hours |
-| `packages/database/__tests__/integration/working-hours-members-concurrency.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
-| `packages/database/__tests__/integration/workspace-repository.test.ts` | C | tbd | todo | Workspaces |
-| `packages/database/__tests__/integration/zoned-date-key-timezone.test.ts` | C | tbd | todo | Analytics dashboards |
+| `packages/database/__tests__/integration/backfill-email-topic-reference.test.ts` | C | tbd | baseline-skip | Email topics and tracking; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/better-auth-1-7-migration.test.ts` | C | tbd | baseline-skip | Authentication (sign-in, social, mobile, magic links); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/broadcast-purge-draft.test.ts` | C | tbd | baseline-skip | Broadcasts (incl. recurring); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/broadcast-recurrence-constraints.test.ts` | C | tbd | baseline-skip | Broadcasts (incl. recurring); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/connect-session-isolation.test.ts` | C | tbd | baseline-skip | Channel connection and OAuth connect flow; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/connection-repository.test.ts` | C | tbd | baseline-skip | Channel connection and OAuth connect flow; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/contact-activity-catalog.test.ts` | C | tbd | baseline-skip | Contacts (profiles, notes, activity); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/contact-activity-filter.test.ts` | C | tbd | baseline-skip | Contacts (profiles, notes, activity); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/contact-activity-repository.test.ts` | C | tbd | baseline-skip | Contacts (profiles, notes, activity); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/contact-custom-field-pair-lock.test.ts` | C | tbd | baseline-skip | Custom fields; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/contact-inbox-post.test.ts` | C | tbd | baseline-skip | Contacts (profiles, notes, activity); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/contact-inbox-source-identity-history.test.ts` | C | tbd | baseline-skip | Contacts (profiles, notes, activity); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/conversation-close-human-reply-window.test.ts` | C | tbd | baseline-skip | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/conversation-insert-dm.test.ts` | C | tbd | baseline-skip | Inbox and live chat (conversations, messages); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/count-query-capped.test.ts` | C | tbd | baseline-skip | Contact filters and segments; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/flow-current-version-nodes.test.ts` | C | tbd | baseline-skip | Flow builder and execution; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/google-ads-conversion-event-fk.test.ts` | C | tbd | baseline-skip | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/google-ads-conversion-event-stats.test.ts` | C | tbd | baseline-skip | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/google-ads-conversion-event.test.ts` | C | tbd | baseline-skip | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/google-click-referral-merge.test.ts` | C | tbd | baseline-skip | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/inbox-repository.test.ts` | C | tbd | baseline-skip | Inbox and live chat (conversations, messages); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/insert-required-columns.test.ts` | C | tbd | baseline-skip | Database (Drizzle, schema, repositories, sharding); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/integration-whatsapp-lifecycle-targets.test.ts` | C | tbd | baseline-skip | WhatsApp channel; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/meta-catalog-item-search.test.ts` | C | tbd | baseline-skip | Meta Catalog; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/mobile-refresh-token-repository.test.ts` | C | tbd | baseline-skip | Authentication (sign-in, social, mobile, magic links); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/pipeline-activity-filter.test.ts` | C | tbd | baseline-skip | Pipelines (CRM deals); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/pipeline-field-filter.test.ts` | C | tbd | baseline-skip | Pipelines (CRM deals); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/pipeline-item-contact-filter.test.ts` | C | tbd | baseline-skip | Pipelines (CRM deals); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/pipeline-repository.test.ts` | C | tbd | baseline-skip | Pipelines (CRM deals); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/poll-vote-upsert.test.ts` | C | tbd | baseline-skip | Polls; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/product-import-identifiers.test.ts` | C | tbd | baseline-skip | Imports and exports (contacts, products, flows); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/resource-deletion-log-repository.test.ts` | C | tbd | baseline-skip | Workspaces; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/schema-default-parity.test.ts` | C | tbd | baseline-skip | Database (Drizzle, schema, repositories, sharding); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/shopify-upsert-product-concurrency.test.ts` | C | tbd | baseline-skip | Shopify integration; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/statement-timeout.test.ts` | C | tbd | baseline-skip | Database (Drizzle, schema, repositories, sharding); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/template-installed-resource-kinds.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/thread-control-guarded-update.test.ts` | C | tbd | baseline-skip | Thread control (handover protocol); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/whatsapp-call-recording-retention.test.ts` | C | tbd | baseline-skip | WhatsApp calling (VoIP); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/working-hours-constraints.test.ts` | C | tbd | baseline-skip | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/working-hours-contact-filter.test.ts` | C | tbd | baseline-skip | Contact filters and segments; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/working-hours-date-overrides.test.ts` | C | tbd | baseline-skip | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/working-hours-members-concurrency.test.ts` | C | tbd | baseline-skip | Ecommerce: settings, open hours, analytics; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/workspace-repository.test.ts` | C | tbd | baseline-skip | Workspaces; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/zoned-date-key-timezone.test.ts` | C | tbd | baseline-skip | Analytics dashboards; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/keyword-condition-schema.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/database/__tests__/leaderboard-participant-repository.test.ts` | C | tbd | todo | Leaderboards |
 | `packages/database/__tests__/mac-partitions-repository.test.ts` | C | tbd | todo | Analytics dashboards |
@@ -2977,8 +2977,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/redis/__tests__/cas-store.test.ts` | C | tbd | todo | Redis (cache, locks, queues, stores) |
 | `packages/redis/__tests__/distributed-lock.test.ts` | C | tbd | todo | Redis (cache, locks, queues, stores) |
 | `packages/redis/__tests__/distributed-store.test.ts` | C | tbd | todo | Redis (cache, locks, queues, stores) |
-| `packages/redis/__tests__/integration/leaderboard-store.test.ts` | C | tbd | todo | Redis (cache, locks, queues, stores) |
-| `packages/redis/__tests__/integration/live-counter-scripts.test.ts` | C | tbd | todo | Redis (cache, locks, queues, stores) |
+| `packages/redis/__tests__/integration/leaderboard-store.test.ts` | C | tbd | baseline-skip | Redis (cache, locks, queues, stores); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/redis/__tests__/integration/live-counter-scripts.test.ts` | C | tbd | baseline-skip | Redis (cache, locks, queues, stores); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/redis/__tests__/presence-store.test.ts` | C | tbd | todo | Redis (cache, locks, queues, stores) |
 | `packages/scheduler/__tests__/smoke.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
 | `packages/sdk/__tests__/auth.test.ts` | C | tbd | todo | Channel SDK and registry |

@@ -1,0 +1,198 @@
+@chatbotx.io/encryption:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/vitest-config:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/javascript-sandbox:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/encryption:test:  Test Files  11 passed (11)
+@chatbotx.io/encryption:test:       Tests  69 passed (69)
+@chatbotx.io/vitest-config:test:  Test Files  2 passed (2)
+@chatbotx.io/vitest-config:test:       Tests  7 passed (7)
+@chatbotx.io/logger:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/payments:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/mail:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/logger:test:  Test Files  3 passed (3)
+@chatbotx.io/logger:test:       Tests  33 passed (33)
+@chatbotx.io/mail:test:  Test Files  1 passed (1)
+@chatbotx.io/mail:test:       Tests  1 passed (1)
+@chatbotx.io/payments:test:  Test Files  3 passed (3)
+@chatbotx.io/payments:test:       Tests  66 passed (66)
+@chatbotx.io/decision-config:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/javascript-sandbox:test:  Test Files  2 passed (2)
+@chatbotx.io/javascript-sandbox:test:       Tests  12 passed (12)
+@chatbotx.io/realtime-protocol:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-woocommerce:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-shopify:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/decision-config:test:  Test Files  1 passed (1)
+@chatbotx.io/decision-config:test:       Tests  3 passed (3)
+@chatbotx.io/integration-woocommerce:test:  Test Files  2 passed (2)
+@chatbotx.io/integration-woocommerce:test:       Tests  7 passed (7)
+@chatbotx.io/redis:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/realtime-protocol:test:  Test Files  6 passed (6)
+@chatbotx.io/realtime-protocol:test:       Tests  99 passed (99)
+@chatbotx.io/ui:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-shopify:test:  Test Files  1 passed (1)
+@chatbotx.io/integration-shopify:test:       Tests  7 passed (7)
+@chatbotx.io/utils:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+javascript-executor:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/redis:test:  Test Files  5 passed | 2 skipped (7)
+@chatbotx.io/redis:test:       Tests  41 passed | 25 skipped (66)
+chatbotx:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+javascript-executor:test:  Test Files  3 passed (3)
+javascript-executor:test:       Tests  28 passed (28)
+realtime:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+chatbotx:test:  Test Files  5 passed (5)
+chatbotx:test:       Tests  60 passed (60)
+@chatbotx.io/scheduler:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/scheduler:test:  Test Files  1 passed (1)
+@chatbotx.io/scheduler:test:       Tests  2 passed (2)
+@chatbotx.io/flow-config:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+realtime:test:  Test Files  10 passed (10)
+realtime:test:       Tests  109 passed (109)
+@chatbotx.io/mini-app:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/mini-app:test:  Test Files  10 passed (10)
+@chatbotx.io/mini-app:test:       Tests  162 passed (162)
+@chatbotx.io/integration-meta-conversions:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-meta-conversions:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-meta-conversions:test:       Tests  23 passed (23)
+@chatbotx.io/ui:test:  Test Files  22 passed (22)
+@chatbotx.io/ui:test:       Tests  99 passed (99)
+chatbotx-mcp:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/sdk:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/sdk:test:  Test Files  12 passed (12)
+@chatbotx.io/sdk:test:       Tests  184 passed (184)
+@chatbotx.io/integration-google-calendar:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-google-calendar:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-google-calendar:test:       Tests  6 passed (6)
+@chatbotx.io/integration-active-campaign:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+chatbotx-mcp:test:  Test Files  15 passed (15)
+chatbotx-mcp:test:       Tests  233 passed | 1 todo (234)
+@chatbotx.io/integration-active-campaign:test:  Test Files  2 passed (2)
+@chatbotx.io/integration-active-campaign:test:       Tests  9 passed (9)
+@chatbotx.io/integration-threads:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-google-ads:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-threads:test:  Test Files  8 passed (8)
+@chatbotx.io/integration-threads:test:       Tests  82 passed (82)
+@chatbotx.io/integration-sendgrid:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-google-ads:test:  Test Files  15 passed (15)
+@chatbotx.io/integration-google-ads:test:       Tests  311 passed (311)
+@chatbotx.io/integration-chatbotx:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-sendgrid:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-sendgrid:test:       Tests  13 passed (13)
+@chatbotx.io/integration-chatbotx:test:  Test Files  1 passed (1)
+@chatbotx.io/integration-chatbotx:test:       Tests  1 passed (1)
+@chatbotx.io/integration-google-sheets:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-mailchimp:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-google-sheets:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-google-sheets:test:       Tests  11 passed (11)
+@chatbotx.io/integration-mailchimp:test:  Test Files  1 passed (1)
+@chatbotx.io/integration-mailchimp:test:       Tests  3 passed (3)
+@chatbotx.io/integration-facebook-ads:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-moosend:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-moosend:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-moosend:test:       Tests  10 passed (10)
+@chatbotx.io/integration-drip:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-drip:test:  Test Files  2 passed (2)
+@chatbotx.io/integration-drip:test:       Tests  9 passed (9)
+@chatbotx.io/integration-tiktok:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-facebook-ads:test:  Test Files  23 passed (23)
+@chatbotx.io/integration-facebook-ads:test:       Tests  163 passed (163)
+@chatbotx.io/integration-mailer-lite:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-mailer-lite:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-mailer-lite:test:       Tests  9 passed (9)
+@chatbotx.io/integration-get-response:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-get-response:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-get-response:test:       Tests  12 passed (12)
+@chatbotx.io/integration-klaviyo:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-tiktok:test:  Test Files  16 passed (16)
+@chatbotx.io/integration-tiktok:test:       Tests  145 passed (145)
+@chatbotx.io/integration-klaviyo:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-klaviyo:test:       Tests  11 passed (11)
+@chatbotx.io/integration-smtp:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-telegram:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-smtp:test:  Test Files  1 passed (1)
+@chatbotx.io/integration-smtp:test:       Tests  1 passed (1)
+@chatbotx.io/database:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-telegram:test:  Test Files  10 passed (10)
+@chatbotx.io/integration-telegram:test:       Tests  53 passed (53)
+@chatbotx.io/integration-zalo:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/flow-config:test:  Test Files  75 passed (75)
+@chatbotx.io/flow-config:test:       Tests  1307 passed (1307)
+@chatbotx.io/utils:test:  Test Files  48 passed (48)
+@chatbotx.io/utils:test:       Tests  1058 passed (1058)
+@chatbotx.io/integration-openai:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/analytics:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-openai:test:  Test Files  1 passed (1)
+@chatbotx.io/integration-openai:test:       Tests  1 passed (1)
+@chatbotx.io/sequence-scheduler:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/sequence-scheduler:test:  Test Files  8 passed (8)
+@chatbotx.io/sequence-scheduler:test:       Tests  105 passed (105)
+@chatbotx.io/filesystem:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-zalo:test:  Test Files  15 passed (15)
+@chatbotx.io/integration-zalo:test:       Tests  77 passed (77)
+@chatbotx.io/imports:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/filesystem:test:  Test Files  6 passed (6)
+@chatbotx.io/filesystem:test:       Tests  40 passed (40)
+@chatbotx.io/worker-config:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/analytics:test:  Test Files  26 passed (26)
+@chatbotx.io/analytics:test:       Tests  315 passed (315)
+@chatbotx.io/analytics-nextjs:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/imports:test:  Test Files  9 passed (9)
+@chatbotx.io/imports:test:       Tests  101 passed (101)
+@chatbotx.io/event-bus:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/analytics-nextjs:test:  Test Files  11 passed (11)
+@chatbotx.io/analytics-nextjs:test:       Tests  116 passed (116)
+@chatbotx.io/events:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/event-bus:test:  Test Files  4 passed (4)
+@chatbotx.io/event-bus:test:       Tests  28 passed (28)
+@chatbotx.io/integration-messenger:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/worker-config:test:  Test Files  20 passed (20)
+@chatbotx.io/worker-config:test:       Tests  174 passed (174)
+@chatbotx.io/events:test:  Test Files  6 passed (6)
+@chatbotx.io/events:test:       Tests  49 passed (49)
+@chatbotx.io/integration-meta-catalog:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/business:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-meta-catalog:test:  Test Files  9 passed (9)
+@chatbotx.io/integration-meta-catalog:test:       Tests  83 passed (83)
+@chatbotx.io/integration-instagram:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-instagram:test:  Test Files  29 passed (29)
+@chatbotx.io/integration-instagram:test:       Tests  125 passed (125)
+@chatbotx.io/auth:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/database:test:  Test Files  131 passed | 47 skipped (178)
+@chatbotx.io/database:test:       Tests  1848 passed | 461 skipped (2309)
+@chatbotx.io/ai:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/auth:test:  Test Files  19 passed (19)
+@chatbotx.io/auth:test:       Tests  192 passed (192)
+@chatbotx.io/integration-webchat:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-webchat:test:  Test Files  3 passed (3)
+@chatbotx.io/integration-webchat:test:       Tests  4 passed (4)
+@chatbotx.io/integration-whatsapp:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-messenger:test:  Test Files  59 passed (59)
+@chatbotx.io/integration-messenger:test:       Tests  613 passed (613)
+@chatbotx.io/integration-api:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/ai:test:  Test Files  22 passed (22)
+@chatbotx.io/ai:test:       Tests  249 passed (249)
+@chatbotx.io/integration-instagram-facebook:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-api:test:  Test Files  2 passed (2)
+@chatbotx.io/integration-api:test:       Tests  3 passed (3)
+@chatbotx.io/connections:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-instagram-facebook:test:  Test Files  31 passed (31)
+@chatbotx.io/integration-instagram-facebook:test:       Tests  134 passed (134)
+@chatbotx.io/channel-registry:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/connections:test:  Test Files  9 passed | 2 skipped (11)
+@chatbotx.io/connections:test:       Tests  133 passed | 27 skipped (160)
+@chatbotx.io/variables:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/channel-registry:test:  Test Files  3 passed (3)
+@chatbotx.io/channel-registry:test:       Tests  130 passed (130)
+@chatbotx.io/automated-response:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/automated-response:test:  Test Files  10 passed (10)
+@chatbotx.io/automated-response:test:       Tests  72 passed (72)
+worker:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/integration-whatsapp:test:  Test Files  66 passed (66)
+@chatbotx.io/integration-whatsapp:test:       Tests  829 passed (829)
+builder:test: > vitest run --passWithNoTests --reporter=default --reporter=json --outputFile=.vitest-baseline.json
+@chatbotx.io/variables:test:  Test Files  18 passed (18)
+@chatbotx.io/variables:test:       Tests  291 passed (291)
+@chatbotx.io/business:test:  Test Files  607 passed | 37 skipped (644)
+@chatbotx.io/business:test:       Tests  9923 passed | 449 skipped (10372)
+worker:test:  Test Files  383 passed (383)
+worker:test:       Tests  5061 passed (5061)
+builder:test:  Test Files  1 failed | 1156 passed (1157)
+builder:test:       Tests  10474 passed | 41 skipped (10515)

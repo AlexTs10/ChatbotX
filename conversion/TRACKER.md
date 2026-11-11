@@ -7,7 +7,8 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 |----|-------|------|--------|------------|---------------|-------|--------|
 | P0.1 | 0 | Fork, clone, `conversion` branch, empty tracker files | done | - | - | See "Proof P0.1" | commit `conversion(P0.1)` in git log |
 | P0.2 | 0 | Copy all tests to `frozen-tests/` + `MANIFEST.sha256` | done | P0.1 | - | See "Proof P0.2" | commit `conversion(P0.2)` |
-| P0.3 | 0 | Run original suite (`pnpm install && pnpm test`), record baseline, mark `baseline-fail` | todo | P0.2 | - | | |
+| P0.3 | 0 | Run original suite (`pnpm install && pnpm test`), record baseline, mark `baseline-fail` | done | P0.2 | - | See "Proof P0.3" | commit `conversion(P0.3)` |
+| P0.7 | 0 | Run the 96 `baseline-skip` tests (need Postgres/Redis) + recheck the 1 `baseline-fail` against the P1.1 stack services on the Dell | todo | P0.3, P1.1 | - | | |
 | P0.4 | 0 | Feature inventory in `FEATURES.md` (LOC + test count); keep/drop already decided (see DECISIONS 2026-11-11: drop Execute JavaScript only) | done | P0.1 | - | See "Proof P0.4" | commit `conversion(P0.4+P0.6)` |
 | P0.5 | 0 | Classify every test file A/B/C in `TEST_MAP.md`; mark dropped-feature tests `dropped` | done | P0.2, P0.4 | B:665 C:2426 dropped:13 | See "Proof P0.5" | commit `conversion(P0.5)` |
 | P0.6 | 0 | RSS baseline of original stack into `MEMORY.md` | done | P0.1 | - | User-set baseline 2 GB (no measurement, see DECISIONS) | commit `conversion(P0.4+P0.6)` |
@@ -118,3 +119,18 @@ total 3104
 
 Independent verifier (60-row sample, seed 7), first pass: builder-B 4/25 wrong (server tests without `@vitest-environment node`), builder-C 0/15, other-C 0/10, cli/mcp/ui-B 0/5, dropped 12/12 correct; 1 dropped-feature test not marked (`packages/variables/__tests__/interpolate-into-javascript.test.ts`).
 Fixes applied (DOM check + server-module rule, extra dropped path). Re-check of the 5 wrong rows: all now C; DOM test `use-mark-conversation-read.test.tsx` stays B; `interpolate-into-javascript.test.ts` now dropped.
+
+### Proof P0.3
+
+Run on the Dell (Node 24.22.1, pnpm 10.34.5, `turbo run test --concurrency=4 --continue`, JSON reporter per package), 25 min. No Postgres/Redis running.
+Per-package lines: `conversion/baseline/p0.3-per-package.txt`; per-file status: `conversion/baseline/p0.3-summary.json`.
+
+```
+ Tasks:    66 successful, 67 total
+Failed:    builder#test
+builder:test:  Test Files  1 failed | 1156 passed (1157)
+builder:test:       Tests  10474 passed | 41 skipped (10515)
+FAIL __tests__/public-spec-operations.test.ts  Error: Hook timed out in 120000ms.  (public-spec-operations.test.ts:153 beforeAll)
+all packages: test files 3093, tests 36633, passed 35629, failed 0, skipped 1004
+TEST_MAP: baseline-fail 1, baseline-skip 96 (88 integration files that skip without DATABASE_URL/REDIS_URL + 8 worker integration files outside the default config)
+```
