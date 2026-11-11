@@ -82,3 +82,23 @@ From `conversion/specs/P2.2.md`, adopted:
 
 **Question to the user (P2.3 blocked until answered):** the prompt names Turso/libSQL. The analyst recommends `rusqlite` (bundled SQLite) because it can register custom SQL functions (Unicode lower, ilike, time zone, regexp, cosine distance), and it is the most mature crate. The file stays a plain SQLite file with the libSQL vector byte layout, so a later move to libSQL is small.
 - **User answer 2026-11-11: use `rusqlite` (bundled SQLite).** P2.3 is unblocked.
+
+## 2026-11-11 — P2.3 disputed tests (user decision)
+
+- **User approved** the 12 `disputed` rows of `conversion/specs/P2.3.md` section 5 as proposed: use the SQLite replacement checks where the spec gives one; Postgres-only mechanics (hash partitions, fillfactor, migration-file text, TS type-level checks) are `not-applicable` with the reason in TEST_MAP.
+- **No import of existing Postgres data.** The 4 better-auth 1.6→1.7 data-migration tests (`integration/better-auth-1-7-migration.test.ts:92,101,109,116`) are `not-applicable`.
+- better-auth table contract (`packages/auth/__tests__/schema-parity.test.ts:34`): generate the `getExpectedSchema` output once from the TS repo into `conversion/fixtures/better-auth-expected-schema.json`, add it to `MANIFEST.sha256` (frozen), and assert against it in Rust.
+- P2.3 analyst choices adopted: no DB default `'[]'` for the 10 JSON columns and no extra FK indexes (both pinned by frozen tests); double-quoted string literals OFF on every connection; Rust always supplies ids; one writer thread + 3 readers, cache 8+3×4 MiB, soft heap limit 32 MiB, mmap off.
+
+## 2026-11-11 — P2.9 files crate implementer choices (orchestrator)
+
+- New env names: `FILES_SIGNING_SECRET` (HMAC key; local presign fails without it), `FILES_URL_BASE` (default `/files`), `FILES_LOCAL_ROOT` default `$DATA_DIR/files` (else `./data/files`).
+- The local backend keeps no content-type/cache-control/content-disposition (object_store LocalFileSystem limit). The files route that serves local objects (Phase 3) must derive content-type from the key/MIME helpers.
+- `object_store` `aws` feature pulls ~180 crates. Accepted for now (S3 by config is a requirement). Revisit in Phase 5 if binary size or RSS is too high (option: feature-gate `s3`).
+
+## 2026-11-11 — P1.1 harness findings (orchestrator)
+
+- Original stack idle RSS, measured once by the P1.1 run (not a benchmark): ≈ 1.52 GB (builder 709 MiB, worker 462, postgres 154, realtime 93, others < 50). Recorded in MEMORY.md.
+- Possible SSRF/DNS-rebinding gap in the original: `packages/business/src/decision/transport.ts` "pinned dial" still does a normal DNS lookup after the DoH check. The Rust port must pin the connection to the DoH-resolved IP (no second lookup). Parity tests do not assert the extra lookup, so this is not a parity break.
+- The Rust stack must: accept `MCP_PUBLIC_URL=https://app/mcp` in the parity env; pass a single-value `X-Forwarded-For` through the edge (better-auth rate limits per IP).
+- Snapshots made with `--update-snapshots` on the Dell must be copied back to the Mac before the next `chatbotx-dell` sync (it deletes PC-only files).
