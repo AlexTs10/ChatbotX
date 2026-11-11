@@ -81,3 +81,4 @@ From `conversion/specs/P2.2.md`, adopted:
 - Semantic traps to test for: enum sort order (declaration vs alphabetical), `GREATEST`/`LEAST` NULLs, ASCII-only `LIKE`/`lower()`, 0/1 booleans, aggregate types.
 
 **Question to the user (P2.3 blocked until answered):** the prompt names Turso/libSQL. The analyst recommends `rusqlite` (bundled SQLite) because it can register custom SQL functions (Unicode lower, ilike, time zone, regexp, cosine distance), and it is the most mature crate. The file stays a plain SQLite file with the libSQL vector byte layout, so a later move to libSQL is small.
+- **User answer 2026-11-11: use `rusqlite` (bundled SQLite).** P2.3 is unblocked.
