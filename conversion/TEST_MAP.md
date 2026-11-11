@@ -2681,7 +2681,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/broadcast-repository.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/database/__tests__/channel-partial.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/client-errors.test.ts` | C | `crates/db/tests/client_errors.rs` | passing | Error logs |
-| `packages/database/__tests__/coexist-channel-enum.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `packages/database/__tests__/coexist-channel-enum.test.ts` | C | `crates/db/tests/coexist_channel_enum.rs` | passing | Coexist (existing-app history sync) |
 | `packages/database/__tests__/coexist-run-recovery-repository.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `packages/database/__tests__/coexist-sync-run-repository.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `packages/database/__tests__/coexist-sync-run-type-scoping.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
@@ -2696,12 +2696,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/contact-filter-pipeline-item.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/database/__tests__/contact-filter-reference-coverage.test.ts` | C | tbd | todo | Contact filters and segments |
 | `packages/database/__tests__/contact-filter.test.ts` | C | tbd | todo | Contact filters and segments |
-| `packages/database/__tests__/contact-inbox-fk-indexes.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
+| `packages/database/__tests__/contact-inbox-fk-indexes.test.ts` | C | `crates/db/tests/contact_inbox_fk_indexes.rs` | passing | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-inbox-repository.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-inbox-source-identity-history.test.ts` | C | `crates/db/tests/contact_inbox_source_identity_history.rs` | passing | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-inbox-source-parent-user-id.test.ts` | C | `crates/db/tests/contact_inbox_source_parent_user_id.rs` | passing | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-inbox-thread-owner-app-columns.test.ts` | C | `crates/db/tests/contact_inbox_thread_owner_app_columns.rs` | passing | Contacts (profiles, notes, activity) |
-| `packages/database/__tests__/contact-on-broadcast-index.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
+| `packages/database/__tests__/contact-on-broadcast-index.test.ts` | C | `crates/db/tests/contact_on_broadcast_index.rs` | passing | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-partial.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-referral-event-repository.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking |
 | `packages/database/__tests__/contact-repository-backdate-created-at.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
@@ -2727,7 +2727,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/google-ads-settings-repository.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/database/__tests__/google-click-query.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/database/__tests__/google-click-referral-merge.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/inbound-webhook-partial.test.ts` | C | tbd | todo | Inbound webhooks |
+| `packages/database/__tests__/inbound-webhook-partial.test.ts` | C | `crates/db/tests/inbound_webhook_partial.rs` | passing | Inbound webhooks |
 | `packages/database/__tests__/inbound-webhook-repository.test.ts` | C | tbd | todo | Inbound webhooks |
 | `packages/database/__tests__/inbox-repository.test.ts` | C | `crates/db/tests/inbox_repository.rs` | passing | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/inbox-team-member-repository.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -2742,7 +2742,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/integration/backfill-email-topic-reference.test.ts` | C | tbd | baseline-skip | Email topics and tracking; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/better-auth-1-7-migration.test.ts` | C | - | not-applicable | Authentication (sign-in, social, mobile, magic links); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/broadcast-purge-draft.test.ts` | C | tbd | baseline-skip | Broadcasts (incl. recurring); P0.3: needs Postgres/Redis, not run — run in P0.7 |
-| `packages/database/__tests__/integration/broadcast-recurrence-constraints.test.ts` | C | tbd | baseline-skip | Broadcasts (incl. recurring); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/broadcast-recurrence-constraints.test.ts` | C | `crates/db/tests/integration_broadcast_recurrence_constraints.rs` | passing | Broadcasts (incl. recurring); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/connect-session-isolation.test.ts` | C | tbd | baseline-skip | Channel connection and OAuth connect flow; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/connection-repository.test.ts` | C | tbd | baseline-skip | Channel connection and OAuth connect flow; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/contact-activity-catalog.test.ts` | C | `crates/db/tests/contact_activity_catalog.rs` | passing | Contacts (profiles, notes, activity); P0.3: needs Postgres/Redis, not run — run in P0.7; some cases not-applicable (P2.3 user decision) |
@@ -2777,7 +2777,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/integration/template-installed-resource-kinds.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/thread-control-guarded-update.test.ts` | C | tbd | baseline-skip | Thread control (handover protocol); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/whatsapp-call-recording-retention.test.ts` | C | tbd | baseline-skip | WhatsApp calling (VoIP); P0.3: needs Postgres/Redis, not run — run in P0.7 |
-| `packages/database/__tests__/integration/working-hours-constraints.test.ts` | C | tbd | baseline-skip | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/working-hours-constraints.test.ts` | C | `crates/db/tests/integration_working_hours_constraints.rs` | passing | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/working-hours-contact-filter.test.ts` | C | tbd | baseline-skip | Contact filters and segments; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/working-hours-date-overrides.test.ts` | C | tbd | baseline-skip | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/working-hours-members-concurrency.test.ts` | C | tbd | baseline-skip | Ecommerce: settings, open hours, analytics; P0.3: needs Postgres/Redis, not run — run in P0.7 |
@@ -2798,12 +2798,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/meta-catalog-sendable-products-repository.test.ts` | C | tbd | todo | Meta Catalog |
 | `packages/database/__tests__/money-scale.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/database/__tests__/oauth-consent.repository.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/database/__tests__/partition-migrations.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
+| `packages/database/__tests__/partition-migrations.test.ts` | C | `crates/db/tests/partition_migrations.rs` | passing | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/pipeline-item-filter.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/database/__tests__/pipeline-partial.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/database/__tests__/platform-admin-repository.test.ts` | C | tbd | todo | Platform admin |
 | `packages/database/__tests__/product-repository-list.test.ts` | C | tbd | todo | Ecommerce: products, categories, vendors |
-| `packages/database/__tests__/purge-fk-indexes.test.ts` | C | `crates/db/tests/purge_fk_indexes.rs` | passing | Scheduler and scheduled jobs |
+| `packages/database/__tests__/purge-fk-indexes.test.ts` | C | `crates/db/tests/purge_fk_indexes.rs`, `crates/db/tests/purge_fk_indexes_part2.rs` | passing | Scheduler and scheduled jobs |
 | `packages/database/__tests__/reference-existence-repository.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/reflink-repository.test.ts` | C | tbd | todo | Leaderboards |
 | `packages/database/__tests__/sequence-dispatch-repository.test.ts` | C | tbd | todo | Sequences |
@@ -2824,7 +2824,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/whatsapp-call-list-for-workspace.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-outcome.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-repository.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/database/__tests__/whatsapp-call-workspace-fk-cascade.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
+| `packages/database/__tests__/whatsapp-call-workspace-fk-cascade.test.ts` | C | `crates/db/tests/whatsapp_call_workspace_fk_cascade.rs` | passing | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-credential-schema.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/database/__tests__/whatsapp-signup-session-repository.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/database/__tests__/with-id-tie-break.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
