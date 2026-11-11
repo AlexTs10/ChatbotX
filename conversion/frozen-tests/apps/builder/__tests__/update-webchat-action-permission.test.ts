@@ -1,0 +1,139 @@
+// @vitest-environment node
+
+import { beforeEach, expect, test, vi } from "vitest"
+
+const mockHasWorkspacePermission = vi.fn()
+const mockFindByIdForWorkspace = vi.fn()
+const mockUpdate = vi.fn()
+const mockUpdateMarkReadOnOutbound = vi.fn()
+const mockIsCommunity = vi.fn(() => false)
+const SUPER_ADMIN_ERROR_RE = /super admin/i
+
+vi.mock("@/env", () => ({ isCommunity: mockIsCommunity }))
+
+vi.mock("@/features/tenant/utils", () => ({
+  getTenantSettings: vi.fn(async () => ({
+    appUrl: "https://app.chatbotx.io",
+  })),
+}))
+
+vi.mock("@/lib/safe-action", () => {
+  const chain: Record<string, unknown> = {}
+  chain.bindArgsSchemas = () => chain
+  chain.inputSchema = () => chain
+  chain.action = (fn: unknown) => fn
+  return {
+    workspaceActionClient: chain,
+  }
+})
+
+vi.mock("@/lib/auth/permission-routes", () => ({
+  hasWorkspacePermission: mockHasWorkspacePermission,
+}))
+
+vi.mock("@chatbotx.io/business", () => ({
+  inboxService: {
+    updateMarkReadOnOutbound: mockUpdateMarkReadOnOutbound,
+  },
+  integrationWebchatService: {
+    findByIdForWorkspace: mockFindByIdForWorkspace,
+    update: mockUpdate,
+  },
+}))
+
+vi.mock("@chatbotx.io/business/branding", () => ({
+  ensureBrandingMenuEntry: vi.fn((menus: unknown) => menus),
+}))
+
+const { updateWebchatAction } = await import(
+  "../src/features/integration-webchat/actions/update-webchat.action"
+)
+
+// The action reads the caller's permissions from the middleware ctx
+// (workspaceActionClient already loads the member row), so no user/member
+// fetch happens inside the action itself.
+const makeInput = (
+  permissions: Record<string, unknown>,
+  markReadOnOutbound?: boolean,
+) => ({
+  bindArgsParsedInputs: ["workspace-1", "webchat-1"],
+  parsedInput: {
+    name: "Support",
+    brandColor: "#007bff",
+    hideHeader: false,
+    showLogo: true,
+    hideMessageInput: false,
+    ...(markReadOnOutbound === undefined ? {} : { markReadOnOutbound }),
+  },
+  ctx: { workspaceMemberPermissions: permissions },
+})
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockFindByIdForWorkspace.mockResolvedValue({
+    id: "webchat-1",
+    inboxId: "inbox-1",
+  })
+  mockUpdate.mockResolvedValue(undefined)
+})
+
+test("rejects a workspace member without superAdmin permission", async () => {
+  mockHasWorkspacePermission.mockReturnValue(false)
+
+  await expect(
+    (updateWebchatAction as (props: unknown) => Promise<unknown>)(
+      makeInput({}),
+    ),
+  ).rejects.toThrow(SUPER_ADMIN_ERROR_RE)
+
+  // The permission check must short-circuit before any write is attempted —
+  // this is the guard that closes the bypass of the edit page's
+  // requireWorkspacePermission(workspaceId, "superAdmin") gate.
+  expect(mockFindByIdForWorkspace).not.toHaveBeenCalled()
+  expect(mockUpdate).not.toHaveBeenCalled()
+})
+
+test("gates on the permissions supplied by the middleware ctx", async () => {
+  mockHasWorkspacePermission.mockReturnValue(false)
+
+  await expect(
+    (updateWebchatAction as (props: unknown) => Promise<unknown>)(
+      makeInput({ superAdmin: false }),
+    ),
+  ).rejects.toThrow(SUPER_ADMIN_ERROR_RE)
+
+  expect(mockHasWorkspacePermission).toHaveBeenCalledWith(
+    { superAdmin: false },
+    "superAdmin",
+  )
+  expect(mockUpdate).not.toHaveBeenCalled()
+})
+
+test("proceeds to update when the caller is a superAdmin", async () => {
+  mockHasWorkspacePermission.mockReturnValue(true)
+
+  await (updateWebchatAction as (props: unknown) => Promise<unknown>)(
+    makeInput({ superAdmin: true }),
+  )
+
+  expect(mockFindByIdForWorkspace).toHaveBeenCalledWith({
+    id: "webchat-1",
+    workspaceId: "workspace-1",
+  })
+  expect(mockUpdate).toHaveBeenCalled()
+  expect(mockUpdateMarkReadOnOutbound).not.toHaveBeenCalled()
+})
+
+test("updates the inbox flag when it is included in the form submission", async () => {
+  mockHasWorkspacePermission.mockReturnValue(true)
+
+  await (updateWebchatAction as (props: unknown) => Promise<unknown>)(
+    makeInput({ superAdmin: true }, true),
+  )
+
+  expect(mockUpdateMarkReadOnOutbound).toHaveBeenCalledWith({
+    workspaceId: "workspace-1",
+    id: "inbox-1",
+    enabled: true,
+  })
+})

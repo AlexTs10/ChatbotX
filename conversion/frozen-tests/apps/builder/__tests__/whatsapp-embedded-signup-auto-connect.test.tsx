@@ -1,0 +1,326 @@
+import { act, type ReactNode } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import {
+  FormProvider,
+  useForm,
+  useFormContext,
+  useWatch,
+} from "react-hook-form"
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  type Mock,
+  test,
+  vi,
+} from "vitest"
+import { useEmbeddedSignupAutoConnect } from "@/features/integration-whatsapp/hooks/use-embedded-signup-auto-connect"
+import { WA_OAUTH_RESULT } from "@/features/integration-whatsapp/libs/embedded-signup"
+import type { ConnectWhatsappSchema } from "@/features/integration-whatsapp/schema"
+
+const BROKER_ORIGIN = "https://broker.test"
+const FOREIGN_ORIGIN = "https://evil.test"
+const OAUTH_CODE = "AQD-relayed-code"
+
+type ProbeProps = {
+  hasFailed: boolean
+  onSubmit: () => void
+  onRelayError: () => void
+  callbackOrigin?: string
+}
+
+/** Mirrors the hook's output (and the form fields it resets) into the DOM so assertions read one source. */
+function Probe({
+  hasFailed,
+  onSubmit,
+  onRelayError,
+  callbackOrigin = BROKER_ORIGIN,
+}: ProbeProps) {
+  const { isConnecting } = useEmbeddedSignupAutoConnect({
+    hasFailed,
+    onSubmit,
+    onRelayError,
+    callbackOrigin,
+  })
+  const { control } = useFormContext<ConnectWhatsappSchema>()
+  const wabaId = useWatch({ control, name: "wabaId" })
+  const phoneNumberIds = useWatch({ control, name: "phoneNumberIds" })
+  const signupSessionId = useWatch({ control, name: "signupSessionId" })
+  const code = useWatch({ control, name: "code" })
+
+  return (
+    <>
+      <output data-testid="is-connecting">{String(isConnecting)}</output>
+      <output data-testid="form-snapshot">
+        {JSON.stringify({ wabaId, phoneNumberIds, signupSessionId, code })}
+      </output>
+    </>
+  )
+}
+
+/**
+ * The hook reads and writes the connect form, so it needs the same provider the
+ * component gives it. Only the fields the hook touches need defaults.
+ */
+function Harness({ children }: { children: ReactNode }) {
+  const form = useForm<ConnectWhatsappSchema>({
+    defaultValues: {
+      connectExisting: false,
+      transferPhoneNumber: false,
+      manualConnect: false,
+      marketingMessageLite: true,
+      wabaId: "seed-waba",
+      phoneNumberIds: ["seed-phone-1", "seed-phone-2"],
+      signupSessionId: "seed-session",
+      code: "",
+    },
+  })
+
+  return <FormProvider {...form}>{children}</FormProvider>
+}
+
+describe("useEmbeddedSignupAutoConnect", () => {
+  let container: HTMLDivElement
+  let root: Root
+  let onSubmit: Mock<() => void>
+  let onRelayError: Mock<() => void>
+
+  beforeEach(() => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+    onSubmit = vi.fn<() => void>()
+    onRelayError = vi.fn<() => void>()
+    container = document.createElement("div")
+    document.body.append(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  const render = (hasFailed = false, callbackOrigin = BROKER_ORIGIN) => {
+    act(() => {
+      root.render(
+        <Harness>
+          <Probe
+            callbackOrigin={callbackOrigin}
+            hasFailed={hasFailed}
+            onRelayError={onRelayError}
+            onSubmit={onSubmit}
+          />
+        </Harness>,
+      )
+    })
+  }
+
+  const relay = (data: unknown, origin = BROKER_ORIGIN) => {
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { data, origin }))
+    })
+  }
+
+  const successPayload = (code: string = OAUTH_CODE) => ({
+    type: WA_OAUTH_RESULT,
+    status: "success",
+    code,
+  })
+
+  const isConnecting = () =>
+    container.querySelector<HTMLElement>("[data-testid='is-connecting']")
+      ?.textContent
+  const formSnapshot = () => {
+    const raw = container.querySelector<HTMLElement>(
+      "[data-testid='form-snapshot']",
+    )?.textContent
+    return raw
+      ? (JSON.parse(raw) as {
+          wabaId: string
+          phoneNumberIds: string[]
+          signupSessionId: string
+          code: string
+        })
+      : null
+  }
+
+  test("submits as soon as the callback origin relays a code", () => {
+    render()
+    expect(isConnecting()).toBe("false")
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    relay(successPayload())
+
+    // No delay to advance: the code is everything the exchange needs, so the
+    // submit goes out on the same tick the value lands.
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    // Still connecting afterwards: the button must stay frozen while the action
+    // is in flight rather than flashing back to the launch state.
+    expect(isConnecting()).toBe("true")
+  })
+
+  test("trusts a tenant's own custom-domain callback origin, not just the broker", () => {
+    const tenantOrigin = "https://reseller.example.com"
+    render(false, tenantOrigin)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    // A message from the broker origin is no longer relevant once the
+    // credential is tenant-owned — only the registered custom-domain
+    // callback is trusted.
+    relay(successPayload(), BROKER_ORIGIN)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    relay(successPayload(), tenantOrigin)
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  test("submits once for one code, not on every re-render", () => {
+    render()
+    relay(successPayload())
+
+    render()
+    render()
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  test("ignores a payload from any origin other than the broker", () => {
+    render()
+
+    relay(successPayload(), FOREIGN_ORIGIN)
+
+    expect(isConnecting()).toBe("false")
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onRelayError).not.toHaveBeenCalled()
+  })
+
+  test("ignores an unrelated message from the broker origin", () => {
+    render()
+
+    relay({ type: "some-other-oauth-result", status: "success", code: "x" })
+
+    expect(isConnecting()).toBe("false")
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onRelayError).not.toHaveBeenCalled()
+  })
+
+  test("ignores a payload that is not an object", () => {
+    render()
+
+    relay("ping")
+    relay(null)
+
+    expect(isConnecting()).toBe("false")
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onRelayError).not.toHaveBeenCalled()
+  })
+
+  test("reports a relay failure without submitting", () => {
+    render()
+
+    relay({ type: WA_OAUTH_RESULT, status: "error" })
+
+    expect(onRelayError).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(isConnecting()).toBe("false")
+  })
+
+  test("stays quiet when the user cancelled the Meta dialog", () => {
+    render()
+
+    relay({ type: WA_OAUTH_RESULT, status: "cancelled" })
+
+    expect(onRelayError).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(isConnecting()).toBe("false")
+  })
+
+  test("treats a success payload with no code as a failure", () => {
+    render()
+
+    relay({ type: WA_OAUTH_RESULT, status: "success" })
+
+    expect(onRelayError).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(isConnecting()).toBe("false")
+  })
+
+  test("returns to the launch state when the connect fails", () => {
+    render()
+    relay(successPayload())
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+
+    // A consumed code cannot be exchanged again, so failing must drop it.
+    render(true)
+
+    expect(isConnecting()).toBe("false")
+  })
+
+  test("re-arms for a second signup after a failure", () => {
+    render()
+    relay(successPayload())
+    render(true)
+
+    // `hasErrored` drops back to false while the next submit is executing, which
+    // is what lets a second failure reset the flow again.
+    render(false)
+    relay(successPayload("AQD-second-code"))
+
+    expect(isConnecting()).toBe("true")
+    expect(onSubmit).toHaveBeenCalledTimes(2)
+  })
+
+  test("hasFailed resets code, wabaId, signupSessionId, and unsets phoneNumberIds", () => {
+    render()
+    expect(formSnapshot()).toEqual({
+      wabaId: "seed-waba",
+      phoneNumberIds: ["seed-phone-1", "seed-phone-2"],
+      signupSessionId: "seed-session",
+      code: "",
+    })
+
+    render(true)
+
+    // `undefined`, not `[]`: the picker's field is 1..max when it holds a
+    // value, so an empty array would fail validation and block the retry's
+    // submit — the card would freeze on "connecting".
+    expect(formSnapshot()).toEqual({
+      wabaId: "",
+      phoneNumberIds: undefined,
+      signupSessionId: "",
+      code: "",
+    })
+  })
+
+  test('a non-failure render (e.g. a `kind: "outcome"` per-item failure, which never sets hasFailed) does not reset the form', () => {
+    render(false)
+    relay(successPayload())
+
+    // The card only ever passes `hasFailed: true` for a genuine framework
+    // throw or a typed `kind: "sessionError"` result — a `kind: "outcome"`
+    // per-item failure (notSelectable/duplicated) computes `hasFailed` as
+    // `false`, so re-rendering with it must leave the seeded fields alone.
+    render(false)
+
+    expect(formSnapshot()).toEqual({
+      wabaId: "seed-waba",
+      phoneNumberIds: ["seed-phone-1", "seed-phone-2"],
+      signupSessionId: "seed-session",
+      code: OAUTH_CODE,
+    })
+  })
+
+  test("stops listening to the relay after unmount", () => {
+    render()
+    act(() => {
+      root.unmount()
+    })
+
+    relay(successPayload())
+
+    expect(onRelayError).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})

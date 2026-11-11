@@ -1,0 +1,590 @@
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+// ---------------------------------------------------------------------------
+// Regression coverage for the per-integration inbox attribution fix: the
+// ActionExecutor must resolve the contact inbox via contactInboxRepository
+// (never a raw db.query.contactInboxModel lookup), preferring a threaded
+// contactInboxId over the contact's most-recently-active inbox, and only the
+// 4 inbox-consuming branches (startAnotherFlow, sendMetaCapiEvent,
+// sendGoogleAdsConversion, runGoogleSheet) should ever call the resolver at all — the other 11
+// contact/conversation-scoped actions must run without paying for that
+// query.
+// ---------------------------------------------------------------------------
+
+const mocks = vi.hoisted(() => ({
+  findLatestCreatedByContact: vi.fn(),
+  attachExistingToContactForTrigger: vi.fn(),
+  detachFromContactForTrigger: vi.fn(),
+  findActiveById: vi.fn(),
+  findByIdForContact: vi.fn(),
+  findMostRecentByContact: vi.fn(),
+  findGoogleClickAttribution: vi.fn(),
+  findLatestGoogleClickInboxByContact: vi.fn(),
+  recordGoogleAdsConversion: vi.fn(),
+  enqueueEvent: vi.fn(),
+  buildSourceKey: vi.fn(),
+  setValueByKey: vi.fn(),
+  deleteByCustomFieldId: vi.fn(),
+  updateArchived: vi.fn(),
+  updateAssignment: vi.fn(),
+  assignOneOrSkip: vi.fn(),
+  disableBotState: vi.fn(),
+  enableBotState: vi.fn(),
+  enqueueAttach: vi.fn(),
+  enqueueDetach: vi.fn(),
+  enqueueTagAppliedEvaluations: vi.fn(),
+  integrationQueueAdd: vi.fn(),
+  getSpreadsheetRow: vi.fn(),
+}))
+
+// The trigger action registry imports the sequence actions, which reach
+// `contactSequenceService` through its (non-barrel) subpath.
+vi.mock("@chatbotx.io/business/contact-sequence", () => ({
+  contactSequenceService: {},
+}))
+
+vi.mock("@chatbotx.io/business/pipeline", () => ({
+  runPipelineAction: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/database/schema", () => ({
+  metaCapiEventChannelSchema: {
+    safeParse: (value: unknown) =>
+      value === "messenger" || value === "instagram" || value === "whatsapp"
+        ? { success: true as const, data: value }
+        : { success: false as const },
+  },
+}))
+
+vi.mock("@chatbotx.io/database/repositories", () => ({
+  contactInboxRepository: {
+    findByIdForContact: (...args: unknown[]) =>
+      mocks.findByIdForContact(...args),
+    findMostRecentByContact: (...args: unknown[]) =>
+      mocks.findMostRecentByContact(...args),
+  },
+}))
+
+vi.mock("@chatbotx.io/business", async () => ({
+  // Pure consent mapping stays real; only the settings read is stubbed.
+  ...(await vi.importActual<
+    typeof import("../../../packages/business/src/google-ads/consent")
+  >("../../../packages/business/src/google-ads/consent")),
+  googleAdsSettingsService: {
+    getConsent: async () => ({
+      status: "absent",
+      consent: {
+        adUserData: { type: "notProvided" },
+        adPersonalization: { type: "notProvided" },
+      },
+    }),
+  },
+  contactCustomFieldService: {
+    setValueByKey: (...args: unknown[]) => mocks.setValueByKey(...args),
+    deleteByCustomFieldId: (...args: unknown[]) =>
+      mocks.deleteByCustomFieldId(...args),
+  },
+  conversationService: {
+    findLatestCreatedByContact: (...args: unknown[]) =>
+      mocks.findLatestCreatedByContact(...args),
+    updateArchived: (...args: unknown[]) => mocks.updateArchived(...args),
+    updateAssignment: (...args: unknown[]) => mocks.updateAssignment(...args),
+    assignOneOrSkip: (...args: unknown[]) => mocks.assignOneOrSkip(...args),
+    disableBotState: (...args: unknown[]) => mocks.disableBotState(...args),
+    enableBotState: (...args: unknown[]) => mocks.enableBotState(...args),
+  },
+  tagService: {
+    attachExistingToContactForTrigger: (...args: unknown[]) =>
+      mocks.attachExistingToContactForTrigger(...args),
+    detachFromContactForTrigger: (...args: unknown[]) =>
+      mocks.detachFromContactForTrigger(...args),
+  },
+  flowService: {
+    findActiveById: (...args: unknown[]) => mocks.findActiveById(...args),
+  },
+  tagSyncService: {
+    enqueueAttach: (...args: unknown[]) => mocks.enqueueAttach(...args),
+    enqueueDetach: (...args: unknown[]) => mocks.enqueueDetach(...args),
+  },
+  adsConversionService: {
+    enqueueTagAppliedEvaluations: (...args: unknown[]) =>
+      mocks.enqueueTagAppliedEvaluations(...args),
+  },
+  metaConversionsService: {
+    enqueueEvent: (...args: unknown[]) => mocks.enqueueEvent(...args),
+    buildSourceKey: (...args: unknown[]) => mocks.buildSourceKey(...args),
+  },
+  contactInboxService: {
+    findGoogleClickAttribution: (...args: unknown[]) =>
+      mocks.findGoogleClickAttribution(...args),
+    findLatestGoogleClickInboxByContact: (...args: unknown[]) =>
+      mocks.findLatestGoogleClickInboxByContact(...args),
+  },
+  googleAdsConversionService: {
+    record: (...args: unknown[]) => mocks.recordGoogleAdsConversion(...args),
+  },
+}))
+
+vi.mock("@chatbotx.io/events/context", () => ({
+  webhookChannelOrigin: vi.fn(() => "webhook"),
+}))
+
+// `capi-input-error.ts` (imported transitively for the sendMetaCapiEvent
+// branch) pulls `logProviderError` from this separate package subpath, which
+// is not covered by the `@chatbotx.io/business` mock above (subpath exports
+// are independent module specifiers). Left unmocked, it loads the real
+// `@chatbotx.io/database/client` and relations graph against the partial
+// schema mock below and crashes at import time.
+vi.mock("@chatbotx.io/business/error-log", () => ({
+  logProviderError: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/logger", () => ({
+  default: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+  getChildLogger: () => ({
+    warn: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn(),
+  }),
+}))
+
+// This suite exercises the trigger-action switch with placeholder-free
+// actions only — no template resolution is under test here (see
+// send-meta-capi-event-step-handler.test.ts / trigger-action-executor-send-
+// meta-capi-event.test.ts for that). Mocked as a passthrough so importing
+// action-executor.ts does not pull in `@chatbotx.io/variables`'s real
+// dependency chain (contact/custom-field/business-subpath modules this file
+// does not otherwise mock).
+vi.mock("@chatbotx.io/variables", () => ({
+  resolveContactVariablesDeep: async (_contactId: string, value: unknown) =>
+    value,
+}))
+
+vi.mock("@chatbotx.io/worker-config", () => ({
+  IntegrationJobAction: { sendFlow: "sendFlow" },
+  integrationQueue: {
+    add: (...args: unknown[]) => mocks.integrationQueueAdd(...args),
+  },
+}))
+
+vi.mock("../src/integration/handlers/spreadsheet-handler", () => ({
+  clearSpreadsheetRow: vi.fn(),
+  getSpreadsheetRandomRow: vi.fn(),
+  getSpreadsheetRow: (...args: unknown[]) => mocks.getSpreadsheetRow(...args),
+  sendSpreadsheetData: vi.fn(),
+  updateSpreadsheetRow: vi.fn(),
+}))
+
+const { ActionExecutor } = await import(
+  "../src/trigger/services/action-executor"
+)
+const baseLogger = (await import("@chatbotx.io/logger")).default
+
+const WHATSAPP_INBOX = {
+  id: "ci-whatsapp",
+  inboxId: "inbox-whatsapp",
+  channel: "whatsapp",
+}
+const MESSENGER_INBOX = {
+  id: "ci-messenger",
+  inboxId: "inbox-messenger",
+  channel: "messenger",
+}
+
+describe("ActionExecutor — per-integration contact inbox attribution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.findLatestCreatedByContact.mockResolvedValue({
+      id: "conv-1",
+      contactId: "contact-1",
+      workspaceId: "ws-1",
+    })
+  })
+
+  describe("multi-integration repro — 4 consumers prefer the threaded contactInboxId over most-recent", () => {
+    beforeEach(() => {
+      // The contact's most-recently-active inbox is Messenger (newer), but
+      // the trigger fired from a WhatsApp conversation — the threaded id
+      // must win.
+      mocks.findByIdForContact.mockResolvedValue(WHATSAPP_INBOX)
+      mocks.findMostRecentByContact.mockResolvedValue(MESSENGER_INBOX)
+      mocks.buildSourceKey.mockReturnValue("source-key")
+      mocks.findActiveById.mockResolvedValue({
+        id: "flow-1",
+        currentVersionId: "fv-1",
+      })
+    })
+
+    test("sendMetaCapiEvent records against the WhatsApp inbox, not the newer Messenger one", async () => {
+      const executor = new ActionExecutor()
+      await executor.execute({
+        action: { type: "sendMetaCapiEvent" },
+        contactId: "contact-1",
+        source: { kind: "trigger", triggerId: "trigger-1" },
+        workspaceId: "ws-1",
+        contactInboxId: "ci-whatsapp",
+      })
+
+      expect(mocks.enqueueEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: "whatsapp",
+          contactInboxId: "ci-whatsapp",
+          inboxId: "inbox-whatsapp",
+        }),
+      )
+    })
+
+    test("startAnotherFlow sends the flow to the WhatsApp inbox, not the newer Messenger one", async () => {
+      const executor = new ActionExecutor()
+      await executor.execute({
+        action: { type: "startAnotherFlow", flowId: "flow-1" },
+        contactId: "contact-1",
+        source: { kind: "trigger", triggerId: "trigger-1" },
+        workspaceId: "ws-1",
+        contactInboxId: "ci-whatsapp",
+      })
+
+      expect(mocks.integrationQueueAdd).toHaveBeenCalledWith(
+        "sendFlow",
+        expect.objectContaining({
+          data: expect.objectContaining({ contactInboxId: "ci-whatsapp" }),
+        }),
+      )
+    })
+  })
+
+  describe("fallback — no threaded contactInboxId", () => {
+    test("sendMetaCapiEvent falls back to the most-recently-active inbox", async () => {
+      mocks.findMostRecentByContact.mockResolvedValue(WHATSAPP_INBOX)
+      mocks.buildSourceKey.mockReturnValue("source-key")
+
+      const executor = new ActionExecutor()
+      await executor.execute({
+        action: { type: "sendMetaCapiEvent" },
+        contactId: "contact-1",
+        source: { kind: "trigger", triggerId: "trigger-1" },
+        workspaceId: "ws-1",
+      })
+
+      expect(mocks.findByIdForContact).not.toHaveBeenCalled()
+      expect(mocks.findMostRecentByContact).toHaveBeenCalledWith({
+        contactId: "contact-1",
+        workspaceId: "ws-1",
+      })
+      expect(mocks.enqueueEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ contactInboxId: "ci-whatsapp" }),
+      )
+    })
+  })
+
+  describe("sendGoogleAdsConversion — threaded inbox with a click wins", () => {
+    test("records against the threaded WhatsApp inbox without the latest-click fallback", async () => {
+      mocks.findByIdForContact.mockResolvedValue(WHATSAPP_INBOX)
+      mocks.findGoogleClickAttribution.mockResolvedValue({
+        id: "ci-whatsapp",
+        referral: { gclid: "gclid-1234567890" },
+      })
+      mocks.recordGoogleAdsConversion.mockResolvedValue({ status: "queued" })
+
+      const executor = new ActionExecutor()
+      await executor.execute({
+        action: {
+          type: "sendGoogleAdsConversion",
+          conversionActionId: "123",
+          dedupMode: "click",
+        },
+        contactId: "contact-1",
+        source: { kind: "trigger", triggerId: "trigger-1" },
+        workspaceId: "ws-1",
+        contactInboxId: "ci-whatsapp",
+      })
+
+      expect(mocks.findLatestGoogleClickInboxByContact).not.toHaveBeenCalled()
+      expect(mocks.recordGoogleAdsConversion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contactInboxId: "ci-whatsapp",
+          source: "triggerAction",
+          scopeId: "trigger-1",
+        }),
+      )
+    })
+  })
+
+  describe("stale/foreign threaded id falls back to most-recent", () => {
+    test("sendMetaCapiEvent falls back when the threaded contactInboxId doesn't resolve for this contact/workspace", async () => {
+      mocks.findByIdForContact.mockResolvedValue(null)
+      mocks.findMostRecentByContact.mockResolvedValue(MESSENGER_INBOX)
+      mocks.buildSourceKey.mockReturnValue("source-key")
+
+      const executor = new ActionExecutor()
+      await executor.execute({
+        action: { type: "sendMetaCapiEvent" },
+        contactId: "contact-1",
+        source: { kind: "trigger", triggerId: "trigger-1" },
+        workspaceId: "ws-1",
+        contactInboxId: "ci-stale",
+      })
+
+      expect(mocks.enqueueEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ contactInboxId: "ci-messenger" }),
+      )
+    })
+  })
+
+  describe("no inbox at all — the 4 inbox-consuming branches warn and skip", () => {
+    beforeEach(() => {
+      mocks.findMostRecentByContact.mockResolvedValue(null)
+      mocks.findLatestGoogleClickInboxByContact.mockResolvedValue(null)
+    })
+
+    test.each([
+      ["sendMetaCapiEvent", { type: "sendMetaCapiEvent" }],
+      [
+        "sendGoogleAdsConversion",
+        {
+          type: "sendGoogleAdsConversion",
+          conversionActionId: "123",
+          dedupMode: "click",
+        },
+      ],
+      ["startAnotherFlow", { type: "startAnotherFlow", flowId: "flow-1" }],
+      [
+        "runGoogleSheet",
+        {
+          type: "runGoogleSheet",
+          action: "spreadsheetGetRow",
+          spreadsheetId: "sheet-1",
+          sheetName: "Sheet1",
+        },
+      ],
+    ])("%s warns and skips without throwing", async (_name, action) => {
+      const executor = new ActionExecutor()
+      await expect(
+        executor.execute({
+          action,
+          contactId: "contact-1",
+          source: { kind: "trigger", triggerId: "trigger-1" },
+          workspaceId: "ws-1",
+        }),
+      ).resolves.toMatchObject({ status: "skipped" })
+
+      expect(mocks.enqueueEvent).not.toHaveBeenCalled()
+      expect(mocks.recordGoogleAdsConversion).not.toHaveBeenCalled()
+      expect(mocks.integrationQueueAdd).not.toHaveBeenCalled()
+      expect(mocks.getSpreadsheetRow).not.toHaveBeenCalled()
+      expect(baseLogger.warn).toHaveBeenCalled()
+    })
+  })
+
+  describe("no inbox at all — the 11 non-inbox actions still run, and the resolver is never called", () => {
+    beforeEach(() => {
+      // If any non-consuming branch accidentally called the resolver, this
+      // would blow up the assertions below (resolver never called).
+      mocks.findByIdForContact.mockRejectedValue(
+        new Error("resolver should never be called for this branch"),
+      )
+      mocks.findMostRecentByContact.mockRejectedValue(
+        new Error("resolver should never be called for this branch"),
+      )
+      mocks.attachExistingToContactForTrigger.mockResolvedValue([
+        { tagId: "tag-1" },
+      ])
+      mocks.assignOneOrSkip.mockResolvedValue(undefined)
+    })
+
+    test.each([
+      ["addTag", { type: "addTag", tagIds: ["tag-1"] }],
+      ["removeTag", { type: "removeTag", tagIds: ["tag-1"] }],
+      [
+        "setCustomField",
+        { type: "setCustomField", customFieldId: "cf-1", value: "v" },
+      ],
+      ["clearCustomField", { type: "clearCustomField", customFieldId: "cf-1" }],
+      ["archiveConversation", { type: "archiveConversation" }],
+      ["unarchiveConversation", { type: "unarchiveConversation" }],
+      [
+        "assignConversation",
+        { type: "assignConversation", assignedId: "u_user-1" },
+      ],
+      ["unassignConversation", { type: "unassignConversation" }],
+      ["disableBot", { type: "disableBot" }],
+      ["enableBot", { type: "enableBot" }],
+      ["transferConversationToHuman", { type: "transferConversationToHuman" }],
+    ])("%s runs without an inbox and never calls the resolver", async (_name, action) => {
+      const executor = new ActionExecutor()
+      await expect(
+        executor.execute({
+          action,
+          contactId: "contact-1",
+          source: { kind: "trigger", triggerId: "trigger-1" },
+          workspaceId: "ws-1",
+        }),
+      ).resolves.toEqual({ status: "succeeded" })
+
+      expect(mocks.findByIdForContact).not.toHaveBeenCalled()
+      expect(mocks.findMostRecentByContact).not.toHaveBeenCalled()
+    })
+  })
+})
+
+describe("ActionExecutor — outcomes and non-trigger sources", () => {
+  const inboundWebhook = {
+    kind: "inboundWebhook" as const,
+    inboundWebhookId: "iw-1",
+  }
+  const run = (action: Record<string, unknown>, extra = {}) =>
+    new ActionExecutor().execute({
+      action,
+      contactId: "contact-1",
+      workspaceId: "ws-1",
+      source: inboundWebhook,
+      ...extra,
+    })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.findLatestCreatedByContact.mockResolvedValue({
+      id: "conv-1",
+      contactId: "contact-1",
+      workspaceId: "ws-1",
+    })
+    mocks.findByIdForContact.mockResolvedValue(WHATSAPP_INBOX)
+    // Overrides the throwing implementation a previous describe installed.
+    mocks.findMostRecentByContact.mockResolvedValue(WHATSAPP_INBOX)
+    mocks.attachExistingToContactForTrigger.mockResolvedValue([])
+    mocks.findActiveById.mockResolvedValue({
+      id: "flow-1",
+      currentVersionId: "fv-1",
+    })
+  })
+
+  test("a contact without a conversation is skipped, not reported as done", async () => {
+    mocks.findLatestCreatedByContact.mockResolvedValue(undefined)
+
+    await expect(run({ type: "addTag", tagIds: ["t1"] })).resolves.toEqual({
+      status: "skipped",
+      reason: "noConversation",
+    })
+    expect(mocks.attachExistingToContactForTrigger).not.toHaveBeenCalled()
+  })
+
+  test("startAnotherFlow queues the flow on the threaded contact inbox for an inbound webhook", async () => {
+    await expect(
+      run(
+        { type: "startAnotherFlow", flowId: "flow-1" },
+        { contactInboxId: "ci-whatsapp" },
+      ),
+    ).resolves.toEqual({ status: "succeeded" })
+
+    expect(mocks.findByIdForContact).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "ci-whatsapp", contactId: "contact-1" }),
+    )
+    expect(mocks.integrationQueueAdd).toHaveBeenCalledWith(
+      "sendFlow",
+      expect.objectContaining({
+        data: expect.objectContaining({
+          flowId: "flow-1",
+          contactInboxId: "ci-whatsapp",
+        }),
+      }),
+    )
+  })
+
+  test("an inbound-webhook flow start carries a deterministic job id, so a retried action cannot send it twice", async () => {
+    await run(
+      { type: "startAnotherFlow", flowId: "flow-1" },
+      { contactInboxId: "ci-whatsapp", occurrenceKey: "inboundWebhook:r-1:1" },
+    )
+
+    expect(mocks.integrationQueueAdd).toHaveBeenCalledWith(
+      "sendFlow",
+      expect.anything(),
+      { jobId: "send-flow-inboundWebhook-r-1-1" },
+    )
+  })
+
+  test("a trigger flow start keeps its unkeyed enqueue", async () => {
+    await new ActionExecutor().execute({
+      action: { type: "startAnotherFlow", flowId: "flow-1" },
+      contactId: "contact-1",
+      workspaceId: "ws-1",
+      source: { kind: "trigger", triggerId: "trigger-1" },
+      occurrenceKey: "trigger:occ:trigger-1:0",
+    })
+
+    expect(mocks.integrationQueueAdd).toHaveBeenCalledTimes(1)
+    expect(mocks.integrationQueueAdd.mock.calls[0]).toHaveLength(2)
+  })
+
+  test("an inactive or missing flow is skipped as flowInactive", async () => {
+    mocks.findActiveById.mockResolvedValue(null)
+
+    await expect(
+      run({ type: "startAnotherFlow", flowId: "flow-1" }),
+    ).resolves.toEqual({ status: "skipped", reason: "flowInactive" })
+    expect(mocks.integrationQueueAdd).not.toHaveBeenCalled()
+  })
+
+  test("tag actions run for an inbound webhook", async () => {
+    await expect(run({ type: "addTag", tagIds: ["t1"] })).resolves.toEqual({
+      status: "succeeded",
+    })
+    expect(mocks.attachExistingToContactForTrigger).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      contactId: "contact-1",
+      tagIds: ["t1"],
+    })
+  })
+
+  test.each([
+    ["sendMetaCapiEvent", { type: "sendMetaCapiEvent" }],
+    ["sendGoogleAdsConversion", { type: "sendGoogleAdsConversion" }],
+    ["runGoogleSheet", { type: "runGoogleSheet", action: "spreadsheetGetRow" }],
+  ])("%s is trigger-only: skipped for an inbound webhook without touching its dedup scope", async (_name, action) => {
+    await expect(run(action)).resolves.toEqual({
+      status: "skipped",
+      reason: "unsupportedSource",
+    })
+    expect(mocks.findMostRecentByContact).not.toHaveBeenCalled()
+    expect(mocks.enqueueEvent).not.toHaveBeenCalled()
+    expect(mocks.recordGoogleAdsConversion).not.toHaveBeenCalled()
+    expect(mocks.getSpreadsheetRow).not.toHaveBeenCalled()
+  })
+
+  test("an unknown action type is skipped", async () => {
+    await expect(run({ type: "somethingNew" })).resolves.toEqual({
+      status: "skipped",
+      reason: "unknownAction",
+    })
+  })
+
+  test.each([
+    "constructor",
+    "__proto__",
+    "toString",
+    "hasOwnProperty",
+  ])("the prototype key %s is an unknown action and never reaches a handler", async (type) => {
+    await expect(run({ type })).resolves.toEqual({
+      status: "skipped",
+      reason: "unknownAction",
+    })
+    expect(mocks.integrationQueueAdd).not.toHaveBeenCalled()
+    expect(mocks.updateArchived).not.toHaveBeenCalled()
+    expect(mocks.setValueByKey).not.toHaveBeenCalled()
+    expect(mocks.enqueueEvent).not.toHaveBeenCalled()
+  })
+
+  test("a Google Sheets action with an unknown spreadsheet operation is skipped", async () => {
+    await expect(
+      run(
+        { type: "runGoogleSheet", action: "spreadsheetBogus" },
+        { source: { kind: "trigger", triggerId: "trigger-1" } },
+      ),
+    ).resolves.toEqual({
+      status: "skipped",
+      reason: "unknownSpreadsheetAction",
+    })
+    expect(mocks.getSpreadsheetRow).not.toHaveBeenCalled()
+  })
+})

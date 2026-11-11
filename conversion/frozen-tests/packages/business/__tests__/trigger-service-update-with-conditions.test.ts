@@ -1,0 +1,352 @@
+// @vitest-environment node
+
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+
+vi.mock("../src/template/uninstall-references", () => ({
+  referencedParentsOf: () => [],
+}))
+
+const referenceMocks = vi.hoisted(() => ({
+  findInvalid: vi.fn(),
+  newIndexes: vi.fn(),
+  lockRow: vi.fn(),
+}))
+
+vi.mock("../src/automation-action/references", () => ({
+  findInvalidActionReferences: referenceMocks.findInvalid,
+  indexesOfNewActions: referenceMocks.newIndexes,
+}))
+
+// The template lock guard has its own suite; these tests cover the service.
+vi.mock("../src/template/installed-resource.service", async () => ({
+  ...(await import("./helpers/template-guard-mocks")).templateGuardMocks({
+    assertDeletable: vi.fn(),
+    assertResourceEditable: vi.fn(),
+  }),
+}))
+
+// The broadcast policy import reaches quota/workspace modules these narrow mocks omit.
+vi.mock("../src/broadcast/plan-policy.service", () => ({
+  broadcastPlanPolicyService: {},
+}))
+
+const {
+  mockCreateId,
+  mockDbTransaction,
+  mockTriggerFindFirst,
+  mockConditionFindMany,
+  mockTxUpdate,
+  mockTxUpdateSet,
+  mockTxUpdateReturning,
+  mockTxDelete,
+  mockTxDeleteWhere,
+  mockTxInsert,
+  mockTxInsertValues,
+  mockUpdateTriggerCache,
+  mockDispatchAuditRecord,
+} = vi.hoisted(() => {
+  const mockTxUpdateReturning = vi.fn().mockResolvedValue([])
+  const mockTxUpdateWhere = vi
+    .fn()
+    .mockReturnValue({ returning: mockTxUpdateReturning })
+  const mockTxUpdateSet = vi.fn().mockReturnValue({ where: mockTxUpdateWhere })
+  const mockTxUpdate = vi.fn().mockReturnValue({ set: mockTxUpdateSet })
+  const mockTxDeleteWhere = vi.fn().mockResolvedValue(undefined)
+  const mockTxDelete = vi.fn().mockReturnValue({ where: mockTxDeleteWhere })
+  const mockTxInsertValues = vi.fn().mockResolvedValue(undefined)
+  const mockTxInsert = vi.fn().mockReturnValue({ values: mockTxInsertValues })
+
+  return {
+    mockCreateId: vi.fn(() => "new-condition-id"),
+    mockDbTransaction: vi.fn(),
+    mockTriggerFindFirst: vi.fn(),
+    mockConditionFindMany: vi.fn(),
+    mockTxUpdate,
+    mockTxUpdateSet,
+    mockTxUpdateReturning,
+    mockTxDelete,
+    mockTxDeleteWhere,
+    mockTxInsert,
+    mockTxInsertValues,
+    mockUpdateTriggerCache: vi.fn().mockResolvedValue(undefined),
+    mockDispatchAuditRecord: vi.fn().mockResolvedValue(undefined),
+  }
+})
+
+const tx = {
+  query: {
+    templateInstalledResourceModel: { findMany: async () => [] },
+    triggerModel: { findFirst: mockTriggerFindFirst },
+    conditionModel: { findMany: mockConditionFindMany },
+  },
+  select: () => ({
+    from: () => ({
+      where: () => ({ for: referenceMocks.lockRow }),
+    }),
+  }),
+  update: mockTxUpdate,
+  delete: mockTxDelete,
+  insert: mockTxInsert,
+}
+
+vi.mock("@chatbotx.io/database/client", () => ({
+  db: { transaction: mockDbTransaction },
+  and: (...args: unknown[]) => ({ and: args }),
+  eq: (...args: unknown[]) => ({ eq: args }),
+  inArray: (...args: unknown[]) => ({ inArray: args }),
+}))
+
+vi.mock("@chatbotx.io/database/schema", () => ({
+  conditionModel: { id: "conditionModel.id" },
+  triggerModel: {
+    id: "triggerModel.id",
+    workspaceId: "triggerModel.workspaceId",
+  },
+}))
+
+vi.mock("@chatbotx.io/database/repositories", () => ({
+  triggerRepository: { listPaginatedWithConditions: vi.fn() },
+}))
+
+vi.mock("@chatbotx.io/events", () => ({
+  removeTriggerCache: vi.fn(),
+  updateTriggerCache: mockUpdateTriggerCache,
+}))
+
+vi.mock("@chatbotx.io/utils", () => ({
+  createId: mockCreateId,
+}))
+
+vi.mock("../src/folder/service", () => ({
+  folderService: { ensureExists: vi.fn() },
+}))
+
+vi.mock("../src/audit/dispatcher", () => ({
+  dispatchAuditRecord: mockDispatchAuditRecord,
+}))
+
+const { triggerService } = await import("../src/trigger/service")
+
+const WS = "ws-1"
+const TRIGGER_ID = "trigger-1"
+
+describe("triggerService.updateWithConditions", () => {
+  beforeEach(() => {
+    mockDbTransaction.mockImplementation(
+      async (fn: (tx: unknown) => Promise<unknown>) => fn(tx),
+    )
+    referenceMocks.lockRow.mockResolvedValue([{ id: TRIGGER_ID }])
+    referenceMocks.newIndexes.mockReturnValue(new Set<number>())
+    referenceMocks.findInvalid.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("returns undefined and makes no writes when the trigger does not exist", async () => {
+    mockTriggerFindFirst.mockResolvedValue(undefined)
+    mockConditionFindMany.mockResolvedValue([])
+
+    const result = await triggerService.updateWithConditions({
+      workspaceId: WS,
+      id: TRIGGER_ID,
+      actions: [],
+      conditions: [],
+    })
+
+    expect(result).toBeUndefined()
+    expect(mockUpdateTriggerCache).not.toHaveBeenCalled()
+    expect(mockDispatchAuditRecord).not.toHaveBeenCalled()
+  })
+
+  test("does not audit or refresh cache when nothing actually changed (hasRealChange gate)", async () => {
+    mockTriggerFindFirst
+      .mockResolvedValueOnce({
+        id: TRIGGER_ID,
+        actions: [{ type: "sendMessage" }],
+      })
+      .mockResolvedValueOnce({ id: TRIGGER_ID })
+    mockConditionFindMany.mockResolvedValue([])
+
+    const result = await triggerService.updateWithConditions({
+      workspaceId: WS,
+      id: TRIGGER_ID,
+      actions: [{ type: "sendMessage" }],
+      conditions: [],
+    })
+
+    expect(result).toEqual({ trigger: { id: TRIGGER_ID }, conditions: [] })
+    // Cache updates when the trigger exists, regardless of hasRealChange.
+    expect(mockUpdateTriggerCache).toHaveBeenCalledWith(WS)
+    expect(mockDispatchAuditRecord).not.toHaveBeenCalled()
+  })
+
+  test("audits when actions changed", async () => {
+    mockTriggerFindFirst
+      .mockResolvedValueOnce({
+        id: TRIGGER_ID,
+        actions: [{ type: "sendMessage" }],
+      })
+      .mockResolvedValueOnce({ id: TRIGGER_ID })
+    mockConditionFindMany.mockResolvedValue([])
+    mockTxUpdateReturning.mockResolvedValue([{ id: TRIGGER_ID }])
+
+    await triggerService.updateWithConditions({
+      workspaceId: WS,
+      id: TRIGGER_ID,
+      actions: [{ type: "sendMessageV2" }],
+      conditions: [],
+    })
+
+    expect(mockDispatchAuditRecord).toHaveBeenCalledWith({
+      action: "update",
+      detail: `updated a trigger (#${TRIGGER_ID})`,
+    })
+  })
+
+  test("partitions conditions into delete/update/create and applies each", async () => {
+    mockTriggerFindFirst
+      .mockResolvedValueOnce({ id: TRIGGER_ID, actions: [] })
+      .mockResolvedValueOnce({ id: TRIGGER_ID })
+    mockConditionFindMany.mockResolvedValue([
+      {
+        id: "cond-keep-changed",
+        type: "tagApplied",
+        sourceId: "tag-old",
+        operator: null,
+        value: null,
+      },
+      {
+        id: "cond-delete",
+        type: "tagApplied",
+        sourceId: "tag-2",
+        operator: null,
+        value: null,
+      },
+    ])
+
+    await triggerService.updateWithConditions({
+      workspaceId: WS,
+      id: TRIGGER_ID,
+      actions: [],
+      conditions: [
+        {
+          id: "cond-keep-changed",
+          type: "tagApplied",
+          sourceId: "tag-new",
+        },
+        { type: "newContact" },
+      ],
+    })
+
+    // deletes the condition not resubmitted
+    expect(mockTxDelete).toHaveBeenCalledWith({ id: "conditionModel.id" })
+    expect(mockTxDeleteWhere).toHaveBeenCalledWith({
+      inArray: ["conditionModel.id", ["cond-delete"]],
+    })
+
+    // updates the changed condition
+    expect(mockTxUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "tag-new" }),
+    )
+
+    // creates the new condition
+    expect(mockTxInsertValues).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "new-condition-id",
+        triggerId: TRIGGER_ID,
+        type: "newContact",
+      }),
+    ])
+  })
+
+  describe("action references", () => {
+    const existing = {
+      id: TRIGGER_ID,
+      workspaceId: WS,
+      actions: [{ type: "addTag", tagIds: ["1"] }],
+    }
+
+    beforeEach(() => {
+      mockTriggerFindFirst.mockResolvedValue(existing)
+      mockConditionFindMany.mockResolvedValue([])
+    })
+
+    test("locks the trigger row before reading what is stored", async () => {
+      await triggerService.updateWithConditions({
+        workspaceId: WS,
+        id: TRIGGER_ID,
+        actions: existing.actions,
+        conditions: [],
+      })
+
+      expect(referenceMocks.lockRow).toHaveBeenCalledTimes(1)
+      expect(referenceMocks.lockRow.mock.invocationCallOrder[0]).toBeLessThan(
+        mockTriggerFindFirst.mock.invocationCallOrder[0] ?? 0,
+      )
+    })
+
+    test("checks only the actions that are not already stored", async () => {
+      const next = [
+        { type: "addTag", tagIds: ["1"] },
+        { type: "startExternalStep", flowId: "9", nodeId: "8" },
+      ]
+      referenceMocks.newIndexes.mockReturnValue(new Set([1]))
+
+      await triggerService.updateWithConditions({
+        workspaceId: WS,
+        id: TRIGGER_ID,
+        actions: next,
+        conditions: [],
+      })
+
+      expect(referenceMocks.newIndexes).toHaveBeenCalledWith(
+        next,
+        existing.actions,
+      )
+      expect(referenceMocks.findInvalid).toHaveBeenCalledWith({
+        workspaceId: WS,
+        actions: next,
+        indexes: new Set([1]),
+        // A trigger resolves a custom field by name, and the lookups run on the
+        // transaction that holds the row lock.
+        fieldNames: true,
+        tx,
+      })
+    })
+
+    test("a dangling new reference fails at actions.<index>.<field> and writes nothing", async () => {
+      referenceMocks.newIndexes.mockReturnValue(new Set([0]))
+      referenceMocks.findInvalid.mockResolvedValue([
+        { index: 0, field: "nodeId" },
+      ])
+
+      await expect(
+        triggerService.updateWithConditions({
+          workspaceId: WS,
+          id: TRIGGER_ID,
+          actions: [{ type: "startExternalStep", flowId: "9", nodeId: "8" }],
+          conditions: [],
+        }),
+      ).rejects.toMatchObject({
+        field: "actions.0.nodeId",
+        message: "validation.trigger.actionReferenceNotFound",
+        data: { field: "actions.0.nodeId" },
+      })
+      expect(mockTxUpdate).not.toHaveBeenCalled()
+      expect(mockUpdateTriggerCache).not.toHaveBeenCalled()
+    })
+
+    test("nothing new means no reference lookup at all", async () => {
+      await triggerService.updateWithConditions({
+        workspaceId: WS,
+        id: TRIGGER_ID,
+        actions: existing.actions,
+        conditions: [],
+      })
+
+      expect(referenceMocks.findInvalid).not.toHaveBeenCalled()
+    })
+  })
+})

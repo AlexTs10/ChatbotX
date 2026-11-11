@@ -1,0 +1,343 @@
+import type { AIJobProcessStoryReplyAutomation } from "@chatbotx.io/worker-config"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+// ---------------------------------------------------------------------------
+// Hoist mock references
+// ---------------------------------------------------------------------------
+
+const {
+  mockFindContactInboxBy,
+  mockFindActiveAutomations,
+  mockIsWithinSchedule,
+  mockIncrementRepliesCount,
+  mockWorkspaceFindById,
+  mockAiAgentFindBy,
+  mockChatQueueAdd,
+  mockIntegrationQueueAdd,
+  mockGenerateAIReplyText,
+  mockContactVariableGetAll,
+  mockContactVariableReplaceAll,
+  mockLoggerInfo,
+  mockLoggerWarn,
+} = vi.hoisted(() => ({
+  mockFindContactInboxBy: vi.fn(),
+  mockFindActiveAutomations: vi.fn(),
+  mockIsWithinSchedule: vi.fn(),
+  mockIncrementRepliesCount: vi.fn(),
+  mockWorkspaceFindById: vi.fn(),
+  mockAiAgentFindBy: vi.fn(),
+  mockChatQueueAdd: vi.fn(),
+  mockIntegrationQueueAdd: vi.fn(),
+  mockGenerateAIReplyText: vi.fn(),
+  mockContactVariableGetAll: vi.fn(),
+  mockContactVariableReplaceAll: vi.fn(),
+  mockLoggerInfo: vi.fn(),
+  mockLoggerWarn: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/business", () => ({
+  contactInboxService: { findBy: mockFindContactInboxBy },
+  aiAgentService: { findBy: mockAiAgentFindBy },
+  commentAutomationService: { isWithinSchedule: mockIsWithinSchedule },
+  igStoryAutomationService: {
+    findActiveAutomations: mockFindActiveAutomations,
+    incrementRepliesCount: mockIncrementRepliesCount,
+  },
+  workspaceService: { findById: mockWorkspaceFindById },
+}))
+
+vi.mock("@chatbotx.io/variables", () => ({
+  contactVariableService: {
+    getAll: mockContactVariableGetAll,
+    replaceAll: mockContactVariableReplaceAll,
+  },
+}))
+
+vi.mock("@chatbotx.io/worker-config", () => ({
+  ChatJobAction: { sendChatMessage: "sendChatMessage" },
+  chatQueue: { add: mockChatQueueAdd },
+  IntegrationJobAction: { sendFlow: "sendFlow" },
+  integrationQueue: { add: mockIntegrationQueueAdd },
+}))
+
+vi.mock("@chatbotx.io/events/context", () => ({
+  webhookChannelOrigin: vi.fn().mockReturnValue("webhook"),
+}))
+
+vi.mock("../src/lib/logger", () => ({
+  logger: {
+    error: vi.fn(),
+    warn: mockLoggerWarn,
+    info: mockLoggerInfo,
+    debug: vi.fn(),
+  },
+}))
+
+vi.mock("../src/integration/handlers/automated-response/replies", () => ({
+  generateAIReplyText: mockGenerateAIReplyText,
+}))
+
+// ---------------------------------------------------------------------------
+// Import after mocks
+// ---------------------------------------------------------------------------
+
+const { processStoryMentionAutomation, processStoryReplyAutomation } =
+  await import("../src/integration/handlers/story-reply-automation")
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const STORY_ID = "2357494887629356"
+const MESSAGE_ID = "message-1"
+
+function buildAutomation(reply: { type: string; value: string | null }) {
+  return {
+    id: "automation-1",
+    story: { type: "all", value: [] },
+    includeKeywords: { type: "all", value: [] },
+    reply,
+  }
+}
+
+function buildJobData(
+  overrides: { message?: string } = {},
+): AIJobProcessStoryReplyAutomation["data"] {
+  return {
+    workspaceId: "workspace-1",
+    conversationId: "conversation-1",
+    contactInboxId: "contact-inbox-1",
+    messageId: MESSAGE_ID,
+    storyId: STORY_ID,
+    message: overrides.message ?? "hello",
+    channelType: "instagram",
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockFindContactInboxBy.mockResolvedValue({
+    id: "contact-inbox-1",
+    contactId: "contact-1",
+  })
+  mockWorkspaceFindById.mockResolvedValue({ timezone: "UTC" })
+  mockIsWithinSchedule.mockReturnValue(true)
+  mockIncrementRepliesCount.mockResolvedValue(undefined)
+  mockChatQueueAdd.mockResolvedValue(undefined)
+  mockContactVariableGetAll.mockResolvedValue({})
+  mockContactVariableReplaceAll.mockImplementation(({ text }) => text)
+})
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("processStoryReplyAutomation account scope", () => {
+  test("loads only the automations of the account the story reply arrived on", async () => {
+    mockFindContactInboxBy.mockResolvedValue({
+      id: "contact-inbox-1",
+      contactId: "contact-1",
+      inboxId: "inbox-7",
+    })
+    mockFindActiveAutomations.mockResolvedValue([])
+
+    await processStoryReplyAutomation(buildJobData())
+
+    expect(mockFindActiveAutomations).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      channelType: "instagram",
+      trigger: "storyReply",
+      inboxId: "inbox-7",
+    })
+  })
+})
+
+describe("processStoryReplyAutomation text reply variable resolution", () => {
+  test("resolves {{variable}} tokens through contactVariableService before sending the story reply", async () => {
+    mockFindActiveAutomations.mockResolvedValue([
+      buildAutomation({ type: "text", value: "Hi {{contact.firstName}}" }),
+    ])
+    mockContactVariableReplaceAll.mockResolvedValue("Hi Jane")
+
+    await processStoryReplyAutomation(buildJobData())
+
+    expect(mockContactVariableGetAll).toHaveBeenCalledWith({
+      contactId: "contact-1",
+      contactInbox: { id: "contact-inbox-1", contactId: "contact-1" },
+    })
+    expect(mockContactVariableReplaceAll).toHaveBeenCalledWith({
+      text: "Hi {{contact.firstName}}",
+      variables: {},
+    })
+    expect(mockChatQueueAdd).toHaveBeenCalledWith("sendChatMessage", {
+      type: "sendChatMessage",
+      data: {
+        conversation: { id: "conversation-1", workspaceId: "workspace-1" },
+        contactInbox: { id: "contact-inbox-1", contactId: "contact-1" },
+        text: "Hi Jane",
+      },
+    })
+    expect(mockIncrementRepliesCount).toHaveBeenCalledWith("automation-1")
+  })
+
+  test("sends the raw text unchanged when it contains no variable tokens", async () => {
+    mockFindActiveAutomations.mockResolvedValue([
+      buildAutomation({ type: "text", value: "Thanks for the reply!" }),
+    ])
+
+    await processStoryReplyAutomation(buildJobData())
+
+    expect(mockChatQueueAdd).toHaveBeenCalledWith(
+      "sendChatMessage",
+      expect.objectContaining({
+        data: expect.objectContaining({ text: "Thanks for the reply!" }),
+      }),
+    )
+  })
+
+  test("falls back to the raw text when variable resolution fails", async () => {
+    mockFindActiveAutomations.mockResolvedValue([
+      buildAutomation({ type: "text", value: "Hi {{contact.firstName}}" }),
+    ])
+    mockContactVariableReplaceAll.mockRejectedValue(new Error("db down"))
+
+    await processStoryReplyAutomation(buildJobData())
+
+    expect(mockChatQueueAdd).toHaveBeenCalledWith(
+      "sendChatMessage",
+      expect.objectContaining({
+        data: expect.objectContaining({ text: "Hi {{contact.firstName}}" }),
+      }),
+    )
+    expect(mockIncrementRepliesCount).toHaveBeenCalledWith("automation-1")
+  })
+})
+
+describe("processStoryReplyAutomation keyword matching", () => {
+  test("an include keyword matches a reply regardless of accents", async () => {
+    mockFindActiveAutomations.mockResolvedValue([
+      {
+        ...buildAutomation({ type: "text", value: "Thanks!" }),
+        includeKeywords: { type: "contain", value: ["café"] },
+      },
+    ])
+
+    await processStoryReplyAutomation(
+      buildJobData({ message: "Quiero un CAFE" }),
+    )
+
+    expect(mockChatQueueAdd).toHaveBeenCalledWith(
+      "sendChatMessage",
+      expect.objectContaining({
+        data: expect.objectContaining({ text: "Thanks!" }),
+      }),
+    )
+  })
+})
+
+describe("processStoryMentionAutomation", () => {
+  const mentionJobData = {
+    workspaceId: "workspace-1",
+    conversationId: "conversation-1",
+    contactInboxId: "contact-inbox-1",
+    messageId: MESSAGE_ID,
+    channelType: "instagram" as const,
+  }
+
+  test("loads only story mention automations for the channel", async () => {
+    mockFindActiveAutomations.mockResolvedValue([])
+
+    mockFindContactInboxBy.mockResolvedValueOnce({
+      id: "contact-inbox-1",
+      contactId: "contact-1",
+      inboxId: "inbox-9",
+    })
+
+    await processStoryMentionAutomation(mentionJobData)
+
+    expect(mockFindActiveAutomations).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      channelType: "instagram",
+      trigger: "storyMention",
+      inboxId: "inbox-9",
+    })
+  })
+
+  test("replies without applying story or keyword filters", async () => {
+    mockFindActiveAutomations.mockResolvedValue([
+      {
+        ...buildAutomation({ type: "text", value: "Thanks for the mention!" }),
+        story: { type: "storyIds", value: ["another-story"] },
+        includeKeywords: { type: "equal", value: ["never"] },
+      },
+    ])
+
+    await processStoryMentionAutomation(mentionJobData)
+
+    expect(mockChatQueueAdd).toHaveBeenCalledWith(
+      "sendChatMessage",
+      expect.objectContaining({
+        data: expect.objectContaining({ text: "Thanks for the mention!" }),
+      }),
+    )
+    expect(mockIncrementRepliesCount).toHaveBeenCalledWith("automation-1")
+  })
+
+  test("starts the chosen flow", async () => {
+    mockFindActiveAutomations.mockResolvedValue([
+      buildAutomation({ type: "flow", value: "flow-1" }),
+    ])
+
+    await processStoryMentionAutomation(mentionJobData)
+
+    expect(mockIntegrationQueueAdd).toHaveBeenCalledWith("sendFlow", {
+      type: "sendFlow",
+      data: {
+        conversationId: "conversation-1",
+        contactInboxId: "contact-inbox-1",
+        flowId: "flow-1",
+        origin: "webhook",
+      },
+    })
+  })
+
+  test("tells the AI agent that the contact mentioned the account", async () => {
+    mockFindActiveAutomations.mockResolvedValue([
+      buildAutomation({ type: "AIAgent", value: "agent-1" }),
+    ])
+    mockAiAgentFindBy.mockResolvedValue({ id: "agent-1" })
+    mockGenerateAIReplyText.mockResolvedValue({ text: "Thank you!" })
+
+    await processStoryMentionAutomation(mentionJobData)
+
+    expect(mockGenerateAIReplyText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          {
+            role: "user",
+            content:
+              "The contact mentioned your account in their Instagram story.",
+          },
+        ],
+      }),
+    )
+    expect(mockChatQueueAdd).toHaveBeenCalledWith(
+      "sendChatMessage",
+      expect.objectContaining({
+        data: expect.objectContaining({ text: "Thank you!" }),
+      }),
+    )
+  })
+
+  test("skips automations outside their schedule", async () => {
+    mockFindActiveAutomations.mockResolvedValue([
+      buildAutomation({ type: "text", value: "Thanks!" }),
+    ])
+    mockIsWithinSchedule.mockReturnValue(false)
+
+    await processStoryMentionAutomation(mentionJobData)
+
+    expect(mockChatQueueAdd).not.toHaveBeenCalled()
+    expect(mockIncrementRepliesCount).not.toHaveBeenCalled()
+  })
+})

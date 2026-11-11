@@ -1,0 +1,383 @@
+import type { MessageFailedPayload } from "@chatbotx.io/flow-config"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+const transitionResult: { current: { id: string }[] } = { current: [] }
+
+vi.mock("../src/repositories/postgres", () => ({
+  contactStatsRepository: {
+    insertEvents: vi.fn(async () => undefined),
+    getContactsByDimension: vi.fn(async () => []),
+  },
+}))
+
+vi.mock("@chatbotx.io/database/repositories", () => ({
+  contactRepository: {
+    blockManyIfNotBlocked: vi.fn(async () => transitionResult.current),
+  },
+}))
+
+vi.mock("@chatbotx.io/redis", () => ({
+  invalidateCacheByTags: vi.fn(async () => undefined),
+  withCache: vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn()),
+}))
+
+const { contactStatsRepository } = await import("../src/repositories/postgres")
+const { contactRepository } = await import("@chatbotx.io/database/repositories")
+const { invalidateCacheByTags, withCache } = await import("@chatbotx.io/redis")
+const { contactAnalyticsService } = await import(
+  "../src/services/contact-analytics.service"
+)
+
+const insertEvents = contactStatsRepository.insertEvents as ReturnType<
+  typeof vi.fn
+>
+const blockManyIfNotBlocked =
+  contactRepository.blockManyIfNotBlocked as ReturnType<typeof vi.fn>
+const withCacheMock = withCache as ReturnType<typeof vi.fn>
+const getContactsByDimension =
+  contactStatsRepository.getContactsByDimension as ReturnType<typeof vi.fn>
+const invalidateCacheByTagsMock = invalidateCacheByTags as ReturnType<
+  typeof vi.fn
+>
+
+function makePayload(
+  errorData: unknown,
+  contactId = "c-1",
+  workspaceId = "ws-1",
+): MessageFailedPayload {
+  return {
+    context: {
+      workspaceId,
+      contactId,
+      conversationId: "conv-1",
+      channel: "messenger",
+      inboxId: "inbox-7",
+    },
+    action: {},
+    occurredAt: new Date("2026-05-17T00:00:00Z"),
+    errorData,
+  } as MessageFailedPayload
+}
+
+const USER_BLOCKED_ERROR = {
+  code: 551,
+  statusCode: 400,
+  subcode: 0,
+  message: "blocked",
+  category: "user_blocked",
+}
+
+describe("ContactAnalyticsService.handleBlocked", () => {
+  beforeEach(() => {
+    insertEvents.mockClear()
+    blockManyIfNotBlocked.mockClear()
+    invalidateCacheByTagsMock.mockClear()
+    transitionResult.current = [{ id: "c-1" }, { id: "c-2" }]
+    blockManyIfNotBlocked.mockImplementation(
+      async () => transitionResult.current,
+    )
+  })
+
+  test("inserts contact_blocked event when category is user_blocked", async () => {
+    await contactAnalyticsService.handleBlocked([
+      makePayload({
+        code: 551,
+        statusCode: 400,
+        subcode: 0,
+        message: "blocked",
+        category: "user_blocked",
+        isPermanent: true,
+        isRetryable: false,
+      }),
+    ])
+
+    expect(insertEvents).toHaveBeenCalledTimes(1)
+    const [rows, eventType] = insertEvents.mock.calls[0] ?? []
+    expect(eventType).toBe("contact_blocked")
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      workspaceId: "ws-1",
+      contactId: "c-1",
+      channel: "messenger",
+      inboxId: "inbox-7",
+    })
+    const triggerContext = (rows[0].metadata as Record<string, unknown>)
+      .triggerContext as Record<string, unknown>
+    expect(triggerContext.origin).toBe("auto_detected")
+    expect(triggerContext.errorCategory).toBe("user_blocked")
+    expect(triggerContext.errorCode).toBe(551)
+  })
+
+  test("skips payloads with non-blocked category", async () => {
+    await contactAnalyticsService.handleBlocked([
+      makePayload({
+        code: 429,
+        statusCode: 429,
+        subcode: 0,
+        message: "slow down",
+        category: "rate_limited",
+      }),
+    ])
+
+    expect(insertEvents).not.toHaveBeenCalled()
+  })
+
+  test("skips payloads with unparseable errorData", async () => {
+    await contactAnalyticsService.handleBlocked([
+      makePayload(null),
+      makePayload("string-error"),
+      makePayload({ random: "shape" }),
+    ])
+
+    expect(insertEvents).not.toHaveBeenCalled()
+  })
+
+  test("filters mixed batch and only inserts blocked rows", async () => {
+    await contactAnalyticsService.handleBlocked([
+      makePayload({
+        code: 429,
+        statusCode: 429,
+        subcode: 0,
+        message: "rate",
+        category: "rate_limited",
+      }),
+      makePayload(
+        {
+          code: 551,
+          statusCode: 400,
+          subcode: 0,
+          message: "blocked",
+          category: "user_blocked",
+        },
+        "c-1",
+      ),
+      makePayload(
+        {
+          code: 200,
+          statusCode: 403,
+          subcode: 1_545_041,
+          message: "opted out",
+          category: "user_blocked",
+        },
+        "c-2",
+      ),
+    ])
+
+    expect(insertEvents).toHaveBeenCalledTimes(1)
+    const [rows] = insertEvents.mock.calls[0] ?? []
+    expect(rows).toHaveLength(2)
+  })
+
+  test("dedups duplicate failed payloads for same contact", async () => {
+    transitionResult.current = [{ id: "c-1" }]
+    await contactAnalyticsService.handleBlocked([
+      makePayload({
+        code: 551,
+        statusCode: 400,
+        subcode: 0,
+        message: "blocked",
+        category: "user_blocked",
+      }),
+      makePayload({
+        code: 551,
+        statusCode: 400,
+        subcode: 0,
+        message: "blocked",
+        category: "user_blocked",
+      }),
+      makePayload({
+        code: 551,
+        statusCode: 400,
+        subcode: 0,
+        message: "blocked",
+        category: "user_blocked",
+      }),
+    ])
+
+    expect(insertEvents).toHaveBeenCalledTimes(1)
+    const [rows] = insertEvents.mock.calls[0] ?? []
+    expect(rows).toHaveLength(1)
+  })
+
+  test("skips when contact already blocked (no transition)", async () => {
+    transitionResult.current = []
+    await contactAnalyticsService.handleBlocked([
+      makePayload({
+        code: 551,
+        statusCode: 400,
+        subcode: 0,
+        message: "blocked",
+        category: "user_blocked",
+      }),
+    ])
+
+    expect(insertEvents).not.toHaveBeenCalled()
+  })
+
+  test("no-op on empty array", async () => {
+    await contactAnalyticsService.handleBlocked([])
+    expect(insertEvents).not.toHaveBeenCalled()
+  })
+
+  test("scopes the block write to the payload's workspace", async () => {
+    transitionResult.current = [{ id: "c-1" }]
+    await contactAnalyticsService.handleBlocked([
+      makePayload(USER_BLOCKED_ERROR, "c-1", "ws-1"),
+    ])
+
+    expect(blockManyIfNotBlocked).toHaveBeenCalledTimes(1)
+    expect(blockManyIfNotBlocked).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      ids: ["c-1"],
+    })
+  })
+
+  test("splits a mixed-workspace batch into one scoped call per workspace", async () => {
+    blockManyIfNotBlocked.mockImplementation(
+      async (props: { workspaceId: string; ids: string[] }) =>
+        props.ids.map((id) => ({ id })),
+    )
+
+    await contactAnalyticsService.handleBlocked([
+      makePayload(USER_BLOCKED_ERROR, "c-1", "ws-1"),
+      makePayload(USER_BLOCKED_ERROR, "c-2", "ws-2"),
+    ])
+
+    expect(blockManyIfNotBlocked).toHaveBeenCalledTimes(2)
+    expect(blockManyIfNotBlocked).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      ids: ["c-1"],
+    })
+    expect(blockManyIfNotBlocked).toHaveBeenCalledWith({
+      workspaceId: "ws-2",
+      ids: ["c-2"],
+    })
+
+    expect(insertEvents).toHaveBeenCalledTimes(1)
+    const [rows] = insertEvents.mock.calls[0] ?? []
+    expect(rows).toHaveLength(2)
+  })
+
+  test("invalidates contact cache tags for transitioned contacts only", async () => {
+    transitionResult.current = [{ id: "c-1" }]
+    await contactAnalyticsService.handleBlocked([
+      makePayload(USER_BLOCKED_ERROR, "c-1", "ws-1"),
+    ])
+
+    expect(invalidateCacheByTagsMock).toHaveBeenCalledTimes(1)
+    expect(invalidateCacheByTagsMock).toHaveBeenCalledWith([
+      "contacts",
+      "contacts:ws-1",
+      "contacts:c-1",
+    ])
+  })
+
+  test("does not invalidate cache when nothing transitions", async () => {
+    transitionResult.current = []
+    await contactAnalyticsService.handleBlocked([
+      makePayload(USER_BLOCKED_ERROR, "c-1", "ws-1"),
+    ])
+
+    expect(invalidateCacheByTagsMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("ContactAnalyticsService.getContactsByDimension", () => {
+  const query = {
+    workspaceId: "ws-1",
+    from: new Date("2026-10-01T00:00:00.000Z"),
+    to: new Date("2026-10-07T23:59:59.999Z"),
+    timezone: "UTC",
+    dimension: "channel" as const,
+  }
+
+  beforeEach(() => {
+    withCacheMock.mockClear()
+    getContactsByDimension.mockClear()
+  })
+
+  test("reads new contacts straight from the repository without caching", async () => {
+    await contactAnalyticsService.getContactsByDimension({
+      ...query,
+      metric: "new",
+    })
+
+    expect(getContactsByDimension).toHaveBeenCalledTimes(1)
+    expect(withCacheMock).not.toHaveBeenCalled()
+  })
+
+  test("caches the total briefly, keyed by workspace, dimension and range end only", async () => {
+    await contactAnalyticsService.getContactsByDimension({
+      ...query,
+      metric: "total",
+    })
+    await contactAnalyticsService.getContactsByDimension({
+      ...query,
+      from: new Date("2026-09-01T00:00:00.000Z"),
+      timezone: "Asia/Ho_Chi_Minh",
+      metric: "total",
+    })
+
+    const [firstKey, , firstOptions] = withCacheMock.mock.calls[0] ?? []
+    const [secondKey] = withCacheMock.mock.calls[1] ?? []
+    expect(firstKey).toBe(
+      "analytics:contacts-by-dimension:total:ws-1:channel:2026-10-07T23:59:59.999Z:c=:i=",
+    )
+    expect(secondKey).toBe(firstKey)
+    expect(firstOptions).toEqual({ ttl: 120 })
+  })
+
+  test("never shares a total cache entry across workspaces or dimensions", async () => {
+    await contactAnalyticsService.getContactsByDimension({
+      ...query,
+      metric: "total",
+    })
+    await contactAnalyticsService.getContactsByDimension({
+      ...query,
+      workspaceId: "ws-2",
+      metric: "total",
+    })
+    await contactAnalyticsService.getContactsByDimension({
+      ...query,
+      dimension: "source",
+      metric: "total",
+    })
+
+    const keys = withCacheMock.mock.calls.map(([key]) => key)
+    expect(new Set(keys).size).toBe(3)
+  })
+
+  test("propagates repository failures instead of caching them", async () => {
+    getContactsByDimension.mockRejectedValueOnce(new Error("db down"))
+
+    await expect(
+      contactAnalyticsService.getContactsByDimension({
+        ...query,
+        metric: "total",
+      }),
+    ).rejects.toThrow("db down")
+  })
+
+  test("keys the total by normalized filters so equal filters share and different filters never collide", async () => {
+    const base = { ...query, metric: "total" as const }
+    await contactAnalyticsService.getContactsByDimension({
+      ...base,
+      channels: ["whatsapp", "messenger", "messenger"],
+      inboxIds: ["2", "1"],
+    })
+    await contactAnalyticsService.getContactsByDimension({
+      ...base,
+      channels: ["messenger", "whatsapp"],
+      inboxIds: ["1", "2"],
+    })
+    await contactAnalyticsService.getContactsByDimension({
+      ...base,
+      channels: ["messenger"],
+    })
+
+    const keys = withCacheMock.mock.calls.slice(-3).map(([key]) => key)
+    expect(keys[0]).toBe(keys[1])
+    expect(keys[0]).toContain(":c=messenger,whatsapp:i=1,2")
+    expect(keys[2]).not.toBe(keys[0])
+  })
+})

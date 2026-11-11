@@ -1,0 +1,600 @@
+import { describe, expect, test } from "vitest"
+import { pathAndMethodToCommandName } from "../src/openapi-loader"
+
+// `pathAndMethodToCommandName` had zero test coverage before this file, even
+// though it silently drops one operation's CLI command whenever two distinct
+// {path, method} pairs reduce to the same derived name (`toolsToCommands`
+// keeps the first, skips the rest with a stderr warning — see the CLI
+// README's "Known command-name collisions" section). These tests pin the
+// current, documented behavior — including the still-open collisions — so a
+// future change to the naming algorithm is a deliberate, reviewed diff
+// against a known baseline instead of a silent command-surface change.
+
+describe("pathAndMethodToCommandName — single-segment resource", () => {
+  test("GET on a plain collection resource is list", () => {
+    expect(pathAndMethodToCommandName("/v1/tags", "GET")).toBe("tags:list")
+  })
+
+  test("POST on a plain collection resource is create", () => {
+    expect(pathAndMethodToCommandName("/v1/tags", "POST")).toBe("tags:create")
+  })
+})
+
+describe("pathAndMethodToCommandName — resource/{id}", () => {
+  test("GET on resource/{id} is get", () => {
+    expect(pathAndMethodToCommandName("/v1/tags/{id}", "GET")).toBe("tags:get")
+  })
+
+  test("PATCH on resource/{id} is update", () => {
+    expect(pathAndMethodToCommandName("/v1/tags/{id}", "PATCH")).toBe(
+      "tags:update",
+    )
+  })
+
+  test("DELETE on resource/{id} is delete", () => {
+    expect(pathAndMethodToCommandName("/v1/tags/{id}", "DELETE")).toBe(
+      "tags:delete",
+    )
+  })
+})
+
+describe("pathAndMethodToCommandName — GET distinguishes a sub-resource's own id from its collection", () => {
+  test("GET on a nested collection (no trailing param) is a plural list", () => {
+    expect(
+      pathAndMethodToCommandName(
+        "/v1/contacts/{identifier}/custom-fields",
+        "GET",
+      ),
+    ).toBe("contacts:custom-fields:list")
+  })
+
+  test("GET on a nested resource's own id (trailing param) is a singular get", () => {
+    expect(
+      pathAndMethodToCommandName(
+        "/v1/contacts/{identifier}/custom-fields/{idOrName}",
+        "GET",
+      ),
+    ).toBe("contacts:custom-field:get")
+  })
+})
+
+describe("pathAndMethodToCommandName — operations that used to collide get distinct names", () => {
+  test("clearing ONE custom field and clearing ALL of them are different commands", () => {
+    const clearOne = pathAndMethodToCommandName(
+      "/v1/contacts/{identifier}/custom-fields/{idOrName}",
+      "DELETE",
+    )
+    const clearAll = pathAndMethodToCommandName(
+      "/v1/contacts/{identifier}/custom-fields",
+      "DELETE",
+    )
+
+    expect(clearOne).toBe("contacts:custom-field:delete")
+    expect(clearAll).toBe("contacts:clear-all-custom-fields")
+  })
+
+  test("setting one custom field no longer collides with the batch operations", () => {
+    expect(
+      pathAndMethodToCommandName(
+        "/v1/contacts/{identifier}/custom-fields",
+        "PATCH",
+      ),
+    ).toBe("contacts:custom-fields:update")
+    expect(
+      pathAndMethodToCommandName(
+        "/v1/contacts/{identifier}/custom-fields/{idOrName}",
+        "PUT",
+      ),
+    ).toBe("contacts:set-custom-field")
+  })
+
+  test("bot-fields: the batch keeps `update`, one field is `set`, PATCH is `edit`", () => {
+    expect(pathAndMethodToCommandName("/v1/bot-fields", "PUT")).toBe(
+      "bot-fields:update",
+    )
+    expect(pathAndMethodToCommandName("/v1/bot-fields/{idOrName}", "PUT")).toBe(
+      "bot-fields:set",
+    )
+    expect(
+      pathAndMethodToCommandName("/v1/bot-fields/{idOrName}", "PATCH"),
+    ).toBe("bot-fields:edit")
+  })
+
+  test("partial settings updates do not collide with the full replace", () => {
+    expect(
+      pathAndMethodToCommandName(
+        "/v1/messenger-channels/{id}/settings",
+        "PATCH",
+      ),
+    ).toBe("messenger-channels:settings:edit")
+    expect(
+      pathAndMethodToCommandName(
+        "/v1/instagram-channels/{id}/settings",
+        "PATCH",
+      ),
+    ).toBe("instagram-channels:settings:edit")
+    expect(
+      pathAndMethodToCommandName(
+        "/v1/inboxes/{inboxId}/ai-handover/settings",
+        "PATCH",
+      ),
+    ).toBe("inboxes:settings:edit")
+  })
+
+  test("bulk tag removal has its own command", () => {
+    expect(
+      pathAndMethodToCommandName("/v1/contacts/bulk/tags/remove", "POST"),
+    ).toBe("contacts:bulk-tags-remove")
+  })
+
+  test("ads and flow-stats operations each get their own command", () => {
+    const names = [
+      pathAndMethodToCommandName("/v1/ads/campaigns", "GET"),
+      pathAndMethodToCommandName("/v1/ads/campaigns", "POST"),
+      pathAndMethodToCommandName("/v1/ads/conversion-rules", "GET"),
+      pathAndMethodToCommandName("/v1/ads/conversion-rules", "POST"),
+      pathAndMethodToCommandName("/v1/ads/conversion-rules/{id}", "GET"),
+      pathAndMethodToCommandName("/v1/ads/conversion-rules/{id}", "PATCH"),
+      pathAndMethodToCommandName("/v1/ads/conversion-rules/{id}", "DELETE"),
+      pathAndMethodToCommandName("/v1/analytics/flows/{flowId}/stats", "GET"),
+      pathAndMethodToCommandName(
+        "/v1/analytics/flows/{flowId}/stats",
+        "DELETE",
+      ),
+    ]
+
+    expect(new Set(names).size).toBe(names.length)
+    expect(names).toContain("ads:create-campaign")
+    expect(names).toContain("ads:create-conversion-rule")
+    expect(names).toContain("ads:update-conversion-rule")
+    expect(names).toContain("ads:delete-conversion-rule")
+    expect(names).toContain("analytics:reset-flow-stats")
+  })
+})
+
+describe("pathAndMethodToCommandName — Google Ads reads", () => {
+  test("stats, events and connection get distinct google-ads commands", () => {
+    const names = [
+      pathAndMethodToCommandName("/v1/google-ads/stats", "GET"),
+      pathAndMethodToCommandName("/v1/google-ads/events", "GET"),
+      pathAndMethodToCommandName("/v1/google-ads/connection", "GET"),
+    ]
+
+    expect(names).toEqual([
+      "google-ads:stats",
+      "google-ads:events",
+      "google-ads:connection",
+    ])
+    expect(new Set(names)).toHaveLength(names.length)
+  })
+
+  test("do not collide with the Meta ads commands", () => {
+    expect(
+      pathAndMethodToCommandName("/v1/google-ads/stats", "GET").startsWith(
+        "ads:",
+      ),
+    ).toBe(false)
+  })
+})
+
+describe("pathAndMethodToCommandName — filter/variant on a collection", () => {
+  test("a literal second segment with no trailing param joins as a hyphenated action", () => {
+    expect(
+      pathAndMethodToCommandName("/v1/integrations/status/token-errors", "GET"),
+    ).toBe("integrations:status-token-errors")
+  })
+
+  test("a literal second segment ending in a param becomes find-by-<action>", () => {
+    expect(pathAndMethodToCommandName("/v1/tags/name/{name}", "GET")).toBe(
+      "tags:find-by-name",
+    )
+  })
+})
+
+describe("pathAndMethodToCommandName — coupon import/export operations", () => {
+  test("keeps the new coupon commands distinct", () => {
+    const commandNames = [
+      pathAndMethodToCommandName(
+        "/v1/coupon-topics/{topicId}/coupons/bulk",
+        "POST",
+      ),
+      pathAndMethodToCommandName("/v1/coupon-imports/upload-url", "POST"),
+      pathAndMethodToCommandName("/v1/coupon-imports", "POST"),
+      pathAndMethodToCommandName("/v1/coupon-exports", "POST"),
+      pathAndMethodToCommandName("/v1/coupon-exports/{fileId}", "GET"),
+    ]
+
+    expect(commandNames).toEqual([
+      "coupon-topics:bulk:add",
+      "coupon-imports:upload-url",
+      "coupon-imports:create",
+      "coupon-exports:create",
+      "coupon-exports:get",
+    ])
+    expect(new Set(commandNames)).toHaveLength(commandNames.length)
+  })
+})
+
+describe("pathAndMethodToCommandName — bot field reset", () => {
+  test("POST resource/{id}/reset collapses to group:reset", () => {
+    expect(
+      pathAndMethodToCommandName("/v1/bot-fields/{idOrName}/reset", "POST"),
+    ).toBe("bot-fields:reset")
+  })
+
+  test("the bulk route keeps its own name instead of colliding with the single reset", () => {
+    expect(
+      pathAndMethodToCommandName("/v1/bot-fields/bulk-reset", "POST"),
+    ).toBe("bot-fields:bulk-reset")
+  })
+})
+
+describe("pathAndMethodToCommandName — AI file tools", () => {
+  test("search, chunk listing and reindex get distinct, readable commands", () => {
+    expect(pathAndMethodToCommandName("/v1/ai-files/search", "POST")).toBe(
+      "ai-files:search",
+    )
+    expect(pathAndMethodToCommandName("/v1/ai-files/{id}/chunks", "GET")).toBe(
+      "ai-files:chunks:list",
+    )
+    expect(
+      pathAndMethodToCommandName("/v1/ai-files/{id}/reindex", "POST"),
+    ).toBe("ai-files:reindex")
+  })
+
+  test("do not collide with the existing ai-files commands", () => {
+    const names = [
+      ["/v1/ai-files", "GET"],
+      ["/v1/ai-files", "POST"],
+      ["/v1/ai-files/{id}", "GET"],
+      ["/v1/ai-files/{id}", "DELETE"],
+      ["/v1/ai-files/search", "POST"],
+      ["/v1/ai-files/{id}/chunks", "GET"],
+      ["/v1/ai-files/{id}/reindex", "POST"],
+    ].map(([path, method]) => pathAndMethodToCommandName(path, method))
+
+    expect(new Set(names).size).toBe(names.length)
+  })
+})
+
+describe("pathAndMethodToCommandName — response SLA singleton", () => {
+  test("reads, replaces and deletes the one policy without colliding", () => {
+    expect(pathAndMethodToCommandName("/v1/response-sla", "get")).toBe(
+      "response-sla:get",
+    )
+    expect(pathAndMethodToCommandName("/v1/response-sla", "put")).toBe(
+      "response-sla:update",
+    )
+    expect(pathAndMethodToCommandName("/v1/response-sla", "delete")).toBe(
+      "response-sla:delete",
+    )
+  })
+})
+
+describe("pathAndMethodToCommandName — workspace settings singleton", () => {
+  test("GET and PATCH on the same path get distinct commands", () => {
+    expect(pathAndMethodToCommandName("/v1/workspace/settings", "GET")).toBe(
+      "workspace:settings:get",
+    )
+    expect(pathAndMethodToCommandName("/v1/workspace/settings", "PATCH")).toBe(
+      "workspace:settings:update",
+    )
+  })
+})
+
+describe("pathAndMethodToCommandName — messenger templates by id", () => {
+  test("GET and DELETE on the same path get distinct commands", () => {
+    expect(
+      pathAndMethodToCommandName("/v1/messenger/templates/{id}", "GET"),
+    ).toBe("messenger:templates:get")
+    expect(
+      pathAndMethodToCommandName("/v1/messenger/templates/{id}", "DELETE"),
+    ).toBe("messenger:templates:delete")
+  })
+})
+
+describe("pathAndMethodToCommandName — products imports collection", () => {
+  test("list (GET) and start (POST) on the same path get distinct commands", () => {
+    expect(pathAndMethodToCommandName("/v1/products/imports", "GET")).toBe(
+      "products:imports:list",
+    )
+    expect(pathAndMethodToCommandName("/v1/products/imports", "POST")).toBe(
+      "products:imports:create",
+    )
+  })
+
+  test("one job is still found by id", () => {
+    expect(pathAndMethodToCommandName("/v1/products/imports/{id}", "GET")).toBe(
+      "products:find-by-imports",
+    )
+  })
+})
+
+describe("pathAndMethodToCommandName — AI Router", () => {
+  test("each connection and profile operation keeps a distinct CLI command", () => {
+    const names = [
+      pathAndMethodToCommandName("/v1/decision-connections", "GET"),
+      pathAndMethodToCommandName("/v1/decision-connections", "POST"),
+      pathAndMethodToCommandName("/v1/decision-connections/{id}", "PUT"),
+      pathAndMethodToCommandName(
+        "/v1/decision-connections/{id}/status",
+        "PATCH",
+      ),
+      pathAndMethodToCommandName("/v1/decision-connections/{id}/test", "POST"),
+      pathAndMethodToCommandName("/v1/decision-profiles", "GET"),
+      pathAndMethodToCommandName("/v1/decision-profiles", "POST"),
+      pathAndMethodToCommandName("/v1/decision-profiles", "DELETE"),
+      pathAndMethodToCommandName("/v1/decision-profiles/{id}", "GET"),
+      pathAndMethodToCommandName("/v1/decision-profiles/{id}", "PUT"),
+      pathAndMethodToCommandName("/v1/decision-profiles/{id}/status", "PATCH"),
+      pathAndMethodToCommandName(
+        "/v1/decision-profiles/global-router-destinations",
+        "GET",
+      ),
+    ]
+
+    expect(names).toEqual([
+      "decision-connections:list",
+      "decision-connections:create",
+      "decision-connections:update",
+      "decision-connections:status:update",
+      "decision-connections:test",
+      "decision-profiles:list",
+      "decision-profiles:create",
+      "decision-profiles:delete",
+      "decision-profiles:get",
+      "decision-profiles:update",
+      "decision-profiles:status:update",
+      "decision-profiles:global-router-destinations",
+    ])
+    expect(new Set(names)).toHaveLength(names.length)
+  })
+})
+
+describe("pathAndMethodToCommandName — meta catalog singleton", () => {
+  test("GET (state) and POST (create) get distinct commands", () => {
+    expect(pathAndMethodToCommandName("/v1/products/meta-catalog", "GET")).toBe(
+      "products:meta-catalog:get",
+    )
+    expect(
+      pathAndMethodToCommandName("/v1/products/meta-catalog", "POST"),
+    ).toBe("products:meta-catalog:create")
+  })
+})
+
+describe("pathAndMethodToCommandName — repeating broadcasts", () => {
+  // A command whose derived name collides is silently dropped by the CLI, so
+  // the three new operations are pinned here.
+  test("each new broadcast operation gets its own command name", () => {
+    const names = [
+      pathAndMethodToCommandName("/v1/broadcasts/preview-recurrence", "POST"),
+      pathAndMethodToCommandName("/v1/broadcasts/{idOrName}/run-groups", "GET"),
+      pathAndMethodToCommandName(
+        "/v1/broadcasts/{idOrName}/occurrences",
+        "GET",
+      ),
+    ]
+    expect(names).toEqual([
+      "broadcasts:preview-recurrence",
+      "broadcasts:run-groups:list",
+      "broadcasts:occurrences:list",
+    ])
+    expect(new Set(names).size).toBe(names.length)
+  })
+
+  test("they do not collide with the existing broadcast commands", () => {
+    const existing = [
+      pathAndMethodToCommandName("/v1/broadcasts", "GET"),
+      pathAndMethodToCommandName("/v1/broadcasts/{idOrName}", "GET"),
+      pathAndMethodToCommandName("/v1/broadcasts/{idOrName}/audience", "GET"),
+      pathAndMethodToCommandName("/v1/broadcasts/{id}/contacts", "GET"),
+      pathAndMethodToCommandName("/v1/broadcasts/audience/preview", "POST"),
+    ]
+    expect(existing).not.toContain("broadcasts:preview-recurrence")
+    expect(existing).not.toContain("broadcasts:run-groups:list")
+    expect(existing).not.toContain("broadcasts:occurrences:list")
+  })
+})
+
+describe("pathAndMethodToCommandName — ecommerce", () => {
+  // A command whose derived name collides is silently dropped by the CLI, so
+  // every ecommerce operation is pinned here.
+  test("orders, vendors and store settings each get their own command", () => {
+    const names = [
+      pathAndMethodToCommandName("/v1/orders", "GET"),
+      pathAndMethodToCommandName("/v1/orders/{id}", "GET"),
+      pathAndMethodToCommandName("/v1/orders", "POST"),
+      pathAndMethodToCommandName("/v1/orders/{id}/accept", "POST"),
+      pathAndMethodToCommandName("/v1/orders/{id}/ship", "POST"),
+      pathAndMethodToCommandName("/v1/orders/{id}/conclude", "POST"),
+      pathAndMethodToCommandName("/v1/orders/{id}/cancel", "POST"),
+      pathAndMethodToCommandName("/v1/orders/{id}", "DELETE"),
+      pathAndMethodToCommandName("/v1/open-hours", "GET"),
+      pathAndMethodToCommandName("/v1/open-hours", "POST"),
+      pathAndMethodToCommandName("/v1/open-hours/{id}", "PATCH"),
+      pathAndMethodToCommandName("/v1/open-hours/{id}", "DELETE"),
+      pathAndMethodToCommandName(
+        "/v1/product-categories/{id}/visible",
+        "PATCH",
+      ),
+      pathAndMethodToCommandName("/v1/product-vendors", "GET"),
+      pathAndMethodToCommandName("/v1/product-vendors", "POST"),
+      pathAndMethodToCommandName("/v1/product-vendors/{id}", "PATCH"),
+      pathAndMethodToCommandName("/v1/product-vendors/{id}", "DELETE"),
+      pathAndMethodToCommandName("/v1/ecommerce/settings", "GET"),
+      pathAndMethodToCommandName("/v1/ecommerce/settings", "PATCH"),
+      pathAndMethodToCommandName("/v1/webshop/link", "GET"),
+      pathAndMethodToCommandName("/v1/carts/{identifier}", "GET"),
+      pathAndMethodToCommandName("/v1/discount-codes", "GET"),
+      pathAndMethodToCommandName("/v1/discount-codes/{id}", "GET"),
+      pathAndMethodToCommandName("/v1/discount-codes/generate-code", "GET"),
+      pathAndMethodToCommandName("/v1/discount-codes", "POST"),
+      pathAndMethodToCommandName("/v1/discount-codes/{id}", "PATCH"),
+      pathAndMethodToCommandName("/v1/discount-codes/{id}/active", "PATCH"),
+      pathAndMethodToCommandName("/v1/discount-codes/{id}", "DELETE"),
+      pathAndMethodToCommandName("/v1/discount-codes/validate", "POST"),
+      pathAndMethodToCommandName("/v1/ecommerce/analytics", "GET"),
+    ]
+    expect(names).toEqual([
+      "orders:list",
+      "orders:get",
+      "orders:create",
+      "orders:accept",
+      "orders:ship",
+      "orders:conclude",
+      "orders:cancel",
+      "orders:delete",
+      "open-hours:list",
+      "open-hours:create",
+      "open-hours:update",
+      "open-hours:delete",
+      "product-categories:visible:update",
+      "product-vendors:list",
+      "product-vendors:create",
+      "product-vendors:update",
+      "product-vendors:delete",
+      "ecommerce:settings:get",
+      "ecommerce:settings:update",
+      "webshop:link",
+      "carts:get",
+      "discount-codes:list",
+      "discount-codes:get",
+      "discount-codes:generate-code",
+      "discount-codes:create",
+      "discount-codes:update",
+      "discount-codes:active:update",
+      "discount-codes:delete",
+      "discount-codes:validate",
+      "ecommerce:analytics",
+    ])
+    expect(new Set(names)).toHaveLength(names.length)
+  })
+})
+
+describe("pathAndMethodToCommandName — pipeline actions", () => {
+  test.each([
+    ["POST", "/v1/pipelines/{id}/duplicate", "pipelines:duplicate"],
+    ["POST", "/v1/pipelines/{id}/stages/reorder", "pipelines:stages:reorder"],
+    ["POST", "/v1/pipelines/{id}/items/{itemId}/move", "pipelines:item:move"],
+    [
+      "POST",
+      "/v1/pipelines/{id}/items/{itemId}/transfer",
+      "pipelines:item:transfer",
+    ],
+    ["GET", "/v1/pipelines/{id}/stats", "pipelines:stats"],
+  ])("%s %s is %s", (method, path, expected) => {
+    expect(pathAndMethodToCommandName(path, method)).toBe(expected)
+  })
+
+  test("creating an item and a stage keep their own commands", () => {
+    expect(pathAndMethodToCommandName("/v1/pipelines/{id}/items", "POST")).toBe(
+      "pipelines:item:add",
+    )
+    expect(
+      pathAndMethodToCommandName("/v1/pipelines/{id}/stages", "POST"),
+    ).toBe("pipelines:stage:add")
+  })
+})
+
+describe("pathAndMethodToCommandName — every pipelines operation", () => {
+  // Mirrors each `.route()` in apps/builder/src/features/pipelines/api/public*.ts.
+  // A derived name shared by two operations silently drops one CLI command.
+  const pipelineRoutes: [string, string][] = [
+    ["GET", "/v1/pipelines"],
+    ["GET", "/v1/pipelines/{id}"],
+    ["POST", "/v1/pipelines"],
+    ["PATCH", "/v1/pipelines/{id}"],
+    ["DELETE", "/v1/pipelines/{id}"],
+    ["POST", "/v1/pipelines/{id}/duplicate"],
+    ["POST", "/v1/pipelines/{id}/stages"],
+    ["PATCH", "/v1/pipelines/{id}/stages/{stageId}"],
+    ["DELETE", "/v1/pipelines/{id}/stages/{stageId}"],
+    ["POST", "/v1/pipelines/{id}/stages/reorder"],
+    ["GET", "/v1/pipelines/{id}/fields"],
+    ["POST", "/v1/pipelines/{id}/fields"],
+    ["PATCH", "/v1/pipelines/{id}/fields/{fieldId}"],
+    ["DELETE", "/v1/pipelines/{id}/fields/{fieldId}"],
+    ["GET", "/v1/pipelines/{id}/members"],
+    ["PUT", "/v1/pipelines/{id}/members/{workspaceMemberId}"],
+    ["DELETE", "/v1/pipelines/{id}/members/{workspaceMemberId}"],
+    ["GET", "/v1/pipelines/{id}/stats"],
+    ["GET", "/v1/contacts/{identifier}/pipeline-items"],
+    ["GET", "/v1/pipelines/{id}/items"],
+    ["GET", "/v1/pipelines/{id}/items/{itemId}"],
+    ["POST", "/v1/pipelines/{id}/items"],
+    ["PATCH", "/v1/pipelines/{id}/items/{itemId}"],
+    ["POST", "/v1/pipelines/{id}/items/{itemId}/move"],
+    ["POST", "/v1/pipelines/{id}/items/{itemId}/transfer"],
+    ["DELETE", "/v1/pipelines/{id}/items/{itemId}"],
+    ["GET", "/v1/pipelines/{id}/items/{itemId}/comments"],
+    ["POST", "/v1/pipelines/{id}/items/{itemId}/comments"],
+    ["DELETE", "/v1/pipelines/{id}/items/{itemId}/comments/{commentId}"],
+    ["POST", "/v1/pipelines/{id}/items/{itemId}/attachments"],
+    [
+      "DELETE",
+      "/v1/pipelines/{id}/items/{itemId}/attachments/{mediaLibraryFileId}",
+    ],
+    ["GET", "/v1/pipelines/{id}/items/{itemId}/activity"],
+  ]
+
+  test("no two pipelines operations derive the same command name", () => {
+    const names = pipelineRoutes.map(([method, path]) =>
+      pathAndMethodToCommandName(path, method),
+    )
+
+    expect(new Set(names)).toHaveLength(names.length)
+    for (const name of names) {
+      expect(name).not.toBe("")
+    }
+  })
+
+  test("pipelines names do not collide with the contacts commands", () => {
+    const contactNames = [
+      pathAndMethodToCommandName("/v1/contacts", "GET"),
+      pathAndMethodToCommandName("/v1/contacts/{identifier}", "GET"),
+    ]
+    const pipelineNames = pipelineRoutes.map(([method, path]) =>
+      pathAndMethodToCommandName(path, method),
+    )
+
+    for (const name of contactNames) {
+      expect(pipelineNames).not.toContain(name)
+    }
+  })
+})
+
+describe("pathAndMethodToCommandName — AI provider integration", () => {
+  test("PATCH (AI Reply switch) does not collide with the GET `find-by-ai` command", () => {
+    expect(
+      pathAndMethodToCommandName("/v1/integrations/ai/{provider}", "GET"),
+    ).toBe("integrations:find-by-ai")
+    expect(
+      pathAndMethodToCommandName("/v1/integrations/ai/{provider}", "PATCH"),
+    ).toBe("integrations:update-ai")
+  })
+})
+
+describe("pathAndMethodToCommandName — WhatsApp routing roles", () => {
+  test("syncing routing roles does not collide with the template sync", () => {
+    const names = [
+      pathAndMethodToCommandName(
+        "/v1/whatsapp-channels/{id}/routing-roles",
+        "GET",
+      ),
+      pathAndMethodToCommandName(
+        "/v1/whatsapp-channels/{id}/routing-roles/sync",
+        "POST",
+      ),
+      pathAndMethodToCommandName(
+        "/v1/whatsapp-channels/{id}/templates/sync",
+        "POST",
+      ),
+    ]
+    expect(names).toEqual([
+      "whatsapp-channels:routing-roles:list",
+      "whatsapp-channels:routing-roles:sync",
+      "whatsapp-channels:sync:add",
+    ])
+    expect(new Set(names)).toHaveLength(names.length)
+  })
+})

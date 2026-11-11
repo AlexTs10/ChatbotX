@@ -1,0 +1,477 @@
+import { triggerEventTypes } from "@chatbotx.io/database/partials"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+const {
+  actionExecute,
+  listActiveWithConditionsPage,
+  listContactCustomFieldsForDateTimeSweep,
+  listContactCustomFieldsForDateTimeSweepContacts,
+  listExecutedPairs,
+  recordExecution,
+} = vi.hoisted(() => ({
+  actionExecute: vi.fn(),
+  listActiveWithConditionsPage: vi.fn(),
+  listContactCustomFieldsForDateTimeSweep: vi.fn(),
+  listContactCustomFieldsForDateTimeSweepContacts: vi.fn(),
+  listExecutedPairs: vi.fn(),
+  recordExecution: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/business", () => ({
+  triggerService: {
+    listActiveWithConditionsPage,
+    listExecutedPairs,
+    recordExecution,
+  },
+}))
+
+vi.mock("@chatbotx.io/database/repositories", () => ({
+  listContactCustomFieldsForDateTimeSweep,
+  listContactCustomFieldsForDateTimeSweepContacts,
+}))
+
+const redis = {
+  get: vi.fn(),
+  set: vi.fn(),
+  setex: vi.fn(),
+  del: vi.fn(),
+}
+
+vi.mock("@chatbotx.io/worker-config", () => ({
+  getRedisConnection: () => redis,
+}))
+
+vi.mock("../src/lib/logger", () => ({
+  logger: {
+    error: vi.fn(),
+    warn: vi.fn(),
+  },
+}))
+
+vi.mock("../src/trigger/services/action-executor", () => ({
+  ActionExecutor: class {
+    execute = actionExecute
+  },
+}))
+
+const { evaluateDateTimeTriggers } = await import(
+  "../src/trigger/services/datetime-trigger-evaluator"
+)
+
+const dateTimeCondition = (
+  customFieldId: string,
+  overrides: { at?: string; timezone?: string } = {},
+) => ({
+  id: `condition-${customFieldId}`,
+  type: triggerEventTypes.enum.dateTimeBasedTrigger,
+  sourceId: customFieldId,
+  value: {
+    triggerType: "atTheDayOf",
+    at: overrides.at ?? "14",
+    timeValue: 0,
+    timeType: "minutes",
+    // Only stamp the key when a zone is provided so `dateTimeCondition(id)`
+    // still reproduces a legacy condition saved before timezone capture.
+    ...(overrides.timezone ? { timezone: overrides.timezone } : {}),
+  },
+})
+
+const triggerRow = (params: {
+  actions?: unknown[]
+  conditions: ReturnType<typeof dateTimeCondition>[]
+  id: string
+  timezone?: string
+}) => ({
+  id: params.id,
+  workspaceId: "workspace-1",
+  actions: params.actions ?? [{ type: "sendMessage" }],
+  conditions: params.conditions,
+  workspace: { timezone: params.timezone ?? "UTC" },
+})
+
+const contactCustomFieldRow = (params: {
+  contactId: string
+  customFieldId: string
+  value?: string
+}) => ({
+  contactId: params.contactId,
+  customFieldId: params.customFieldId,
+  value: params.value ?? "2026-07-11T14:00:00.000Z",
+  contact: { workspaceId: "workspace-1" },
+})
+
+describe("evaluateDateTimeTriggers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    actionExecute.mockResolvedValue(undefined)
+    listExecutedPairs.mockResolvedValue([])
+    recordExecution.mockResolvedValue(undefined)
+    redis.get.mockResolvedValue(null)
+    redis.set.mockResolvedValue("OK")
+    redis.setex.mockResolvedValue("OK")
+    redis.del.mockResolvedValue(1)
+  })
+
+  test("scans contact custom fields once across multiple trigger chunks", async () => {
+    const firstTriggerChunk = [
+      triggerRow({
+        id: "trigger-001",
+        conditions: [dateTimeCondition("field-1")],
+      }),
+      ...Array.from({ length: 99 }, (_, index) =>
+        triggerRow({
+          id: `trigger-${String(index + 2).padStart(3, "0")}`,
+          conditions: [],
+        }),
+      ),
+    ]
+    listActiveWithConditionsPage
+      .mockResolvedValueOnce({
+        triggers: firstTriggerChunk,
+        nextCursor: "trigger-100",
+      })
+      .mockResolvedValueOnce({
+        triggers: [
+          triggerRow({
+            id: "trigger-101",
+            conditions: [dateTimeCondition("field-2")],
+          }),
+        ],
+        nextCursor: undefined,
+      })
+    listContactCustomFieldsForDateTimeSweep
+      .mockResolvedValueOnce({
+        rows: [
+          contactCustomFieldRow({
+            contactId: "contact-1",
+            customFieldId: "field-1",
+          }),
+        ],
+        nextCursor: { customFieldId: "field-1", id: "ccf-1" },
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          contactCustomFieldRow({
+            contactId: "contact-2",
+            customFieldId: "field-2",
+          }),
+        ],
+        nextCursor: undefined,
+      })
+    listContactCustomFieldsForDateTimeSweepContacts
+      .mockResolvedValueOnce([
+        contactCustomFieldRow({
+          contactId: "contact-1",
+          customFieldId: "field-1",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        contactCustomFieldRow({
+          contactId: "contact-2",
+          customFieldId: "field-2",
+        }),
+      ])
+
+    const results = await evaluateDateTimeTriggers({
+      startOfMinute: Date.parse("2026-07-11T14:05:00.000Z"),
+    })
+
+    expect(results).toEqual([
+      { triggerId: "trigger-001", contactId: "contact-1", matched: true },
+      { triggerId: "trigger-101", contactId: "contact-2", matched: true },
+    ])
+    expect(listContactCustomFieldsForDateTimeSweep).toHaveBeenCalledTimes(2)
+    expect(listContactCustomFieldsForDateTimeSweep).toHaveBeenNthCalledWith(1, {
+      customFieldIds: ["field-1", "field-2"],
+      cursor: undefined,
+      limit: 1000,
+    })
+    expect(listContactCustomFieldsForDateTimeSweep).toHaveBeenNthCalledWith(2, {
+      customFieldIds: ["field-1", "field-2"],
+      cursor: { customFieldId: "field-1", id: "ccf-1" },
+      limit: 1000,
+    })
+    expect(
+      listContactCustomFieldsForDateTimeSweepContacts,
+    ).toHaveBeenNthCalledWith(1, {
+      contactIds: ["contact-1"],
+      customFieldIds: ["field-1"],
+    })
+    expect(
+      listContactCustomFieldsForDateTimeSweepContacts,
+    ).toHaveBeenNthCalledWith(2, {
+      contactIds: ["contact-2"],
+      customFieldIds: ["field-2"],
+    })
+    expect(actionExecute).toHaveBeenCalledTimes(2)
+    // datetimeBasedTrigger never threads a contactInboxId (schema precludes
+    // attribution — Conversation has no inbox column) — ActionExecutor must
+    // fall back to the contact's most-recently-active inbox via
+    // resolveActionContactInbox's findMostRecentByContact path.
+    for (const call of actionExecute.mock.calls) {
+      expect(call[0]).not.toHaveProperty("contactInboxId")
+    }
+    // One scope per contact run, never shared across contacts.
+    expect(actionExecute.mock.calls[0]?.[1]).toBeDefined()
+    expect(actionExecute.mock.calls[0]?.[1]).not.toBe(
+      actionExecute.mock.calls[1]?.[1],
+    )
+  })
+
+  describe("occurrence key", () => {
+    const sweep = async (value: string, sweptAt: string) => {
+      actionExecute.mockClear()
+      listActiveWithConditionsPage.mockResolvedValueOnce({
+        triggers: [
+          triggerRow({
+            id: "trigger-1",
+            conditions: [dateTimeCondition("field-1")],
+          }),
+        ],
+        nextCursor: undefined,
+      })
+      const row = contactCustomFieldRow({
+        contactId: "contact-1",
+        customFieldId: "field-1",
+        value,
+      })
+      listContactCustomFieldsForDateTimeSweep.mockResolvedValueOnce({
+        rows: [row],
+        nextCursor: undefined,
+      })
+      listContactCustomFieldsForDateTimeSweepContacts.mockResolvedValueOnce([
+        row,
+      ])
+      await evaluateDateTimeTriggers({ startOfMinute: Date.parse(sweptAt) })
+      return actionExecute.mock.calls[0]?.[0].occurrenceKey
+    }
+
+    test("changes when the contact's date is edited", async () => {
+      const first = await sweep(
+        "2026-07-11T14:00:00.000Z",
+        "2026-07-11T14:05:00.000Z",
+      )
+      const edited = await sweep(
+        "2026-07-12T14:00:00.000Z",
+        "2026-07-12T14:05:00.000Z",
+      )
+
+      expect(edited).not.toBe(first)
+    })
+
+    test("is the same when a crash re-sweeps the same scheduled date after UTC midnight", async () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(new Date("2026-07-11T23:58:00.000Z"))
+        const before = await sweep(
+          "2026-07-11T14:00:00.000Z",
+          "2026-07-11T14:05:00.000Z",
+        )
+        vi.setSystemTime(new Date("2026-07-12T00:02:00.000Z"))
+        const after = await sweep(
+          "2026-07-11T14:00:00.000Z",
+          "2026-07-11T14:05:00.000Z",
+        )
+
+        expect(after).toBe(before)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
+  test("waits for all datetime conditions before executing a trigger across cursor pages", async () => {
+    listActiveWithConditionsPage.mockResolvedValueOnce({
+      triggers: [
+        triggerRow({
+          id: "trigger-001",
+          conditions: [
+            dateTimeCondition("field-1"),
+            dateTimeCondition("field-2"),
+          ],
+        }),
+      ],
+      nextCursor: undefined,
+    })
+    listContactCustomFieldsForDateTimeSweep
+      .mockResolvedValueOnce({
+        rows: [
+          contactCustomFieldRow({
+            contactId: "contact-1",
+            customFieldId: "field-1",
+          }),
+        ],
+        nextCursor: { customFieldId: "field-1", id: "ccf-1" },
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          contactCustomFieldRow({
+            contactId: "contact-1",
+            customFieldId: "field-2",
+          }),
+        ],
+        nextCursor: undefined,
+      })
+    listContactCustomFieldsForDateTimeSweepContacts
+      .mockResolvedValueOnce([
+        contactCustomFieldRow({
+          contactId: "contact-1",
+          customFieldId: "field-1",
+        }),
+        contactCustomFieldRow({
+          contactId: "contact-1",
+          customFieldId: "field-2",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        contactCustomFieldRow({
+          contactId: "contact-1",
+          customFieldId: "field-1",
+        }),
+        contactCustomFieldRow({
+          contactId: "contact-1",
+          customFieldId: "field-2",
+        }),
+      ])
+
+    const results = await evaluateDateTimeTriggers({
+      startOfMinute: Date.parse("2026-07-11T14:05:00.000Z"),
+    })
+
+    expect(results).toEqual([
+      { triggerId: "trigger-001", contactId: "contact-1", matched: true },
+    ])
+    expect(actionExecute).toHaveBeenCalledTimes(1)
+    expect(
+      listContactCustomFieldsForDateTimeSweepContacts,
+    ).toHaveBeenCalledWith({
+      contactIds: ["contact-1"],
+      customFieldIds: ["field-1", "field-2"],
+    })
+  })
+
+  test("does not execute a multi-condition trigger when only one datetime condition is present", async () => {
+    listActiveWithConditionsPage.mockResolvedValueOnce({
+      triggers: [
+        triggerRow({
+          id: "trigger-001",
+          conditions: [
+            dateTimeCondition("field-1"),
+            dateTimeCondition("field-2"),
+          ],
+        }),
+      ],
+      nextCursor: undefined,
+    })
+    listContactCustomFieldsForDateTimeSweep.mockResolvedValueOnce({
+      rows: [
+        contactCustomFieldRow({
+          contactId: "contact-1",
+          customFieldId: "field-1",
+        }),
+      ],
+      nextCursor: undefined,
+    })
+    listContactCustomFieldsForDateTimeSweepContacts.mockResolvedValueOnce([
+      contactCustomFieldRow({
+        contactId: "contact-1",
+        customFieldId: "field-1",
+      }),
+    ])
+
+    const results = await evaluateDateTimeTriggers({
+      startOfMinute: Date.parse("2026-07-11T14:05:00.000Z"),
+    })
+
+    expect(results).toEqual([])
+    expect(actionExecute).not.toHaveBeenCalled()
+  })
+
+  test("resolves the target field in the condition's captured timezone over the workspace zone", async () => {
+    // Workspace is UTC, but the condition was saved in Asia/Ho_Chi_Minh (+7).
+    // 14:00 UTC is 21:00 in +7, so `at: "21"` only fires when the condition's
+    // own zone is honored — a UTC resolution would land on hour 14 and miss.
+    listActiveWithConditionsPage.mockResolvedValueOnce({
+      triggers: [
+        triggerRow({
+          id: "trigger-001",
+          timezone: "UTC",
+          conditions: [
+            dateTimeCondition("field-1", {
+              at: "21",
+              timezone: "Asia/Ho_Chi_Minh",
+            }),
+          ],
+        }),
+      ],
+      nextCursor: undefined,
+    })
+    listContactCustomFieldsForDateTimeSweep.mockResolvedValueOnce({
+      rows: [
+        contactCustomFieldRow({
+          contactId: "contact-1",
+          customFieldId: "field-1",
+          value: "2026-07-11T02:00:00.000Z",
+        }),
+      ],
+      nextCursor: undefined,
+    })
+    listContactCustomFieldsForDateTimeSweepContacts.mockResolvedValueOnce([
+      contactCustomFieldRow({
+        contactId: "contact-1",
+        customFieldId: "field-1",
+        value: "2026-07-11T02:00:00.000Z",
+      }),
+    ])
+
+    const results = await evaluateDateTimeTriggers({
+      startOfMinute: Date.parse("2026-07-11T14:00:00.000Z"),
+    })
+
+    expect(results).toEqual([
+      { triggerId: "trigger-001", contactId: "contact-1", matched: true },
+    ])
+    expect(actionExecute).toHaveBeenCalledTimes(1)
+  })
+
+  test("falls back to the workspace timezone for legacy conditions with no captured zone", async () => {
+    // The condition predates timezone capture (no zone stored), so day
+    // boundaries and hour-of-day must resolve in the workspace zone (+7).
+    listActiveWithConditionsPage.mockResolvedValueOnce({
+      triggers: [
+        triggerRow({
+          id: "trigger-001",
+          timezone: "Asia/Ho_Chi_Minh",
+          conditions: [dateTimeCondition("field-1", { at: "21" })],
+        }),
+      ],
+      nextCursor: undefined,
+    })
+    listContactCustomFieldsForDateTimeSweep.mockResolvedValueOnce({
+      rows: [
+        contactCustomFieldRow({
+          contactId: "contact-1",
+          customFieldId: "field-1",
+          value: "2026-07-11T02:00:00.000Z",
+        }),
+      ],
+      nextCursor: undefined,
+    })
+    listContactCustomFieldsForDateTimeSweepContacts.mockResolvedValueOnce([
+      contactCustomFieldRow({
+        contactId: "contact-1",
+        customFieldId: "field-1",
+        value: "2026-07-11T02:00:00.000Z",
+      }),
+    ])
+
+    const results = await evaluateDateTimeTriggers({
+      startOfMinute: Date.parse("2026-07-11T14:00:00.000Z"),
+    })
+
+    expect(results).toEqual([
+      { triggerId: "trigger-001", contactId: "contact-1", matched: true },
+    ])
+    expect(actionExecute).toHaveBeenCalledTimes(1)
+  })
+})

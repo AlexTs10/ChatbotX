@@ -1,0 +1,634 @@
+// @vitest-environment node
+
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+const {
+  mockAuditRecord,
+  mockBuildInviteUrl,
+  mockFindOrFail,
+  mockFindByIdOrFail,
+  mockFindNameAndEmail,
+  mockGetCurrentUserAndTargetWorkspace,
+  mockInvitationCreate,
+  mockInvalidateCacheByTags,
+  mockIsCommunity,
+  mockQuotaHasReachedLimit,
+  mockRevokeWorkspaceMemberConnections,
+  mockUpdateMember,
+  mockWorkspaceFindById,
+  mockWorkspaceMemberServiceDelete,
+  mockInvalidateMembershipCache,
+  mockDbInsert,
+} = vi.hoisted(() => {
+  const mockInsertReturning = vi.fn()
+  const mockInsertValues = vi.fn(() => ({ returning: mockInsertReturning }))
+  const mockDbInsert = vi.fn(() => ({ values: mockInsertValues }))
+
+  return {
+    mockAuditRecord: vi.fn(),
+    mockBuildInviteUrl: vi.fn(),
+    mockDbInsert,
+    mockFindOrFail: vi.fn(),
+    mockFindByIdOrFail: vi.fn(),
+    mockFindNameAndEmail: vi.fn(),
+    mockGetCurrentUserAndTargetWorkspace: vi.fn(),
+    mockInsertReturning,
+    mockInvitationCreate: vi.fn(),
+    mockWorkspaceMemberServiceDelete: vi.fn(),
+    mockInsertValues,
+    mockInvalidateCacheByTags: vi.fn(),
+    mockIsCommunity: vi.fn(),
+    mockQuotaHasReachedLimit: vi.fn(),
+    mockRevokeWorkspaceMemberConnections: vi.fn().mockResolvedValue(true),
+    mockUpdateMember: vi.fn(),
+    mockWorkspaceFindById: vi.fn(),
+    mockInvalidateMembershipCache: vi.fn(),
+  }
+})
+
+vi.mock("@/lib/safe-action", () => {
+  const chain: Record<string, unknown> = {}
+  chain.bindArgsSchemas = () => chain
+  chain.inputSchema = () => chain
+  chain.action = (fn: unknown) => fn
+  return {
+    workspaceActionClient: chain,
+    workspaceActionClientAllowExpired: chain,
+  }
+})
+
+vi.mock("@/env", () => ({
+  isCommunity: mockIsCommunity,
+}))
+
+vi.mock("@/lib/auth/utils", () => ({
+  getCurrentUserAndTargetWorkspace: mockGetCurrentUserAndTargetWorkspace,
+}))
+
+vi.mock("@chatbotx.io/business", () => ({
+  workspaceMemberCacheTag: (userId: string) =>
+    `users:${userId}:workspace-members`,
+  invitationService: {
+    buildInviteUrl: mockBuildInviteUrl,
+    create: mockInvitationCreate,
+  },
+  quotaEnforcementService: {
+    hasReachedLimit: mockQuotaHasReachedLimit,
+  },
+  tryRevokeWorkspaceMemberRealtimeConnections:
+    mockRevokeWorkspaceMemberConnections,
+  userService: {
+    findNameAndEmail: mockFindNameAndEmail,
+  },
+  workspaceMemberService: {
+    delete: mockWorkspaceMemberServiceDelete,
+    findByIdOrFail: mockFindByIdOrFail,
+    invalidateMembershipCache: mockInvalidateMembershipCache,
+    update: mockUpdateMember,
+  },
+  workspaceService: {
+    findById: mockWorkspaceFindById,
+  },
+}))
+
+vi.mock("@chatbotx.io/database/client", () => ({
+  db: {
+    insert: mockDbInsert,
+  },
+  eq: (col: unknown, val: unknown) => ({ eq: [col, val] }),
+  findOrFail: mockFindOrFail,
+}))
+
+vi.mock("@chatbotx.io/redis", () => ({
+  invalidateCacheByTags: mockInvalidateCacheByTags,
+}))
+
+vi.mock("@chatbotx.io/business/audit", () => ({
+  auditService: { record: mockAuditRecord },
+}))
+
+vi.mock("@chatbotx.io/database/schema", () => ({
+  invitationModel: { _: "invitationModel" },
+  workspaceMemberModel: {
+    id: "workspaceMember.id",
+  },
+}))
+
+vi.mock("@chatbotx.io/utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@chatbotx.io/utils")>()
+  return {
+    ...actual,
+    createId: () => "invitation-id",
+    SymbolicSnowflakeIDs: {
+      generate: () => "invite-code",
+    },
+  }
+})
+
+const { inviteWorkspaceMemberAction } = await import(
+  "../src/features/workspace-members/actions/invite-workspace-member.action"
+)
+const { updateWorkspaceMemberAction } = await import(
+  "../src/features/workspace-members/actions/update-workspace-member.action"
+)
+const { deleteWorkspaceMemberAction } = await import(
+  "../src/features/workspace-members/actions/delete-workspace-member.action"
+)
+const { getSuperAdminPermissions, normalizeContactsPermissions } = await import(
+  "../src/features/workspace-members/helpers"
+)
+
+const WORKSPACE_ID = "ws-1"
+const MEMBER_ID = "member-1"
+const MEMBER_USER_ID = "member-user-1"
+
+const granularPermissions = {
+  superAdmin: false,
+  analytics: true,
+  flows: false,
+  contacts: true,
+  onlyAssignedContacts: true,
+  emailAndPhone: false,
+  broadcast: false,
+  ecommerce: false,
+}
+
+const assignedOnlyPermissions = {
+  ...granularPermissions,
+  contacts: false,
+  onlyAssignedContacts: true,
+}
+
+const fullPermissions = getSuperAdminPermissions()
+const normalizedGranularPermissions =
+  normalizeContactsPermissions(granularPermissions)
+
+const updateInput = {
+  permissions: granularPermissions,
+  notificationTypes: {
+    notifyAdmin: true,
+    newMessageToHuman: false,
+    newOrder: false,
+  },
+  notificationChannels: {
+    messenger: false,
+    email: true,
+    telegram: false,
+    browser: true,
+  },
+}
+
+function actionCtx(permissions = granularPermissions) {
+  return {
+    ctx: { user: { id: "user-1" } },
+    bindArgsParsedInputs: [WORKSPACE_ID],
+    parsedInput: { permissions },
+  }
+}
+
+function updateActionCtx(permissions = granularPermissions) {
+  return {
+    bindArgsParsedInputs: [WORKSPACE_ID, MEMBER_ID],
+    parsedInput: { ...updateInput, permissions },
+  }
+}
+
+function getInsertedValues() {
+  return (
+    mockInvitationCreate.mock.calls as unknown as [[{ permissions: unknown }]]
+  )[0][0]
+}
+
+function mockCurrentMember(permissions = fullPermissions) {
+  mockGetCurrentUserAndTargetWorkspace.mockResolvedValue({
+    user: { id: "user-1" },
+    targetWorkspace: { id: WORKSPACE_ID, ownerId: "owner-1" },
+    targetWorkspaceMember: { permissions },
+  })
+}
+
+describe("workspace member permission helpers", () => {
+  test("normalizes mutually exclusive contact access without mutating input", () => {
+    expect(normalizeContactsPermissions(granularPermissions)).toEqual({
+      ...granularPermissions,
+      onlyAssignedContacts: false,
+    })
+    expect(granularPermissions.onlyAssignedContacts).toBe(true)
+    expect(normalizeContactsPermissions(assignedOnlyPermissions)).toEqual(
+      assignedOnlyPermissions,
+    )
+  })
+})
+
+describe("inviteWorkspaceMemberAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockWorkspaceFindById.mockResolvedValue({
+      id: WORKSPACE_ID,
+      ownerId: "owner-1",
+      tenantId: "tenant-1",
+    })
+    mockQuotaHasReachedLimit.mockResolvedValue(false)
+    mockInvitationCreate.mockResolvedValue({
+      id: "invitation-id",
+      code: "invite-code",
+    })
+    mockBuildInviteUrl.mockResolvedValue(
+      "https://app.chatbotx.test/invitations/invite-code",
+    )
+    mockIsCommunity.mockReturnValue(false)
+  })
+
+  test("rejects non-super-admin members before creating invitations", async () => {
+    mockCurrentMember(granularPermissions)
+
+    await expect(
+      (inviteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+        actionCtx(),
+      ),
+    ).rejects.toThrow(
+      "You are not authorized to invite a workspace member. You need to be a super admin to do this.",
+    )
+
+    expect(mockQuotaHasReachedLimit).not.toHaveBeenCalled()
+    expect(mockInvitationCreate).not.toHaveBeenCalled()
+  })
+
+  test("forces full super-admin permissions for community invitations", async () => {
+    mockCurrentMember()
+    mockIsCommunity.mockReturnValue(true)
+
+    await (inviteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      actionCtx(),
+    )
+
+    const insertedValues = getInsertedValues()
+    expect(insertedValues.permissions).toEqual(fullPermissions)
+  })
+
+  test("normalizes full contacts permissions outside community edition", async () => {
+    mockCurrentMember()
+
+    await (inviteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      actionCtx(),
+    )
+
+    const insertedValues = getInsertedValues()
+    expect(insertedValues.permissions).toEqual(normalizedGranularPermissions)
+  })
+
+  test("preserves assigned-only contacts permissions outside community edition", async () => {
+    mockCurrentMember()
+
+    await (inviteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      actionCtx(assignedOnlyPermissions),
+    )
+
+    const insertedValues = getInsertedValues()
+    expect(insertedValues.permissions).toEqual(assignedOnlyPermissions)
+  })
+
+  test("returns the invitation URL resolved by the invitation service", async () => {
+    mockCurrentMember()
+
+    await expect(
+      (inviteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+        actionCtx(),
+      ),
+    ).resolves.toEqual({
+      code: "invite-code",
+      id: "invitation-id",
+      inviteUrl: "https://app.chatbotx.test/invitations/invite-code",
+    })
+    expect(mockBuildInviteUrl).toHaveBeenCalledWith({
+      code: "invite-code",
+      workspace: {
+        id: WORKSPACE_ID,
+        ownerId: "owner-1",
+        tenantId: "tenant-1",
+      },
+    })
+  })
+
+  test("records an invite audit event labeled with the granted role", async () => {
+    mockCurrentMember()
+
+    await (inviteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      actionCtx(),
+    )
+
+    expect(mockAuditRecord).toHaveBeenCalledWith({
+      action: "invite",
+      detail: "invited a new member",
+    })
+  })
+})
+
+describe("updateWorkspaceMemberAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockFindByIdOrFail.mockResolvedValue({
+      id: MEMBER_ID,
+      userId: MEMBER_USER_ID,
+      workspaceId: WORKSPACE_ID,
+      permissions: fullPermissions,
+    })
+    mockCurrentMember()
+    mockWorkspaceFindById.mockResolvedValue({
+      id: WORKSPACE_ID,
+      ownerId: "owner-1",
+    })
+    mockIsCommunity.mockReturnValue(false)
+    mockFindNameAndEmail.mockResolvedValue({
+      name: "Target User",
+      email: "target@example.com",
+    })
+    mockUpdateMember.mockResolvedValue({
+      id: MEMBER_ID,
+      revokeWarning: false,
+    })
+  })
+
+  test("records a role_change audit event with the target member's name", async () => {
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(),
+    )
+
+    expect(mockAuditRecord).toHaveBeenCalledWith({
+      action: "role_change",
+      detail: "changed role of Target User to member",
+    })
+  })
+
+  test("forces full super-admin permissions for community updates", async () => {
+    mockIsCommunity.mockReturnValue(true)
+    mockFindByIdOrFail.mockResolvedValue({
+      id: MEMBER_ID,
+      userId: MEMBER_USER_ID,
+      workspaceId: WORKSPACE_ID,
+      permissions: normalizedGranularPermissions,
+    })
+
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(),
+    )
+
+    expect(mockUpdateMember).toHaveBeenCalledWith({
+      id: MEMBER_ID,
+      workspaceId: WORKSPACE_ID,
+      data: { ...updateInput, permissions: fullPermissions },
+      revokeRealtime: true,
+    })
+  })
+
+  test("normalizes full contacts permissions outside community edition", async () => {
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(),
+    )
+
+    expect(mockUpdateMember).toHaveBeenCalledWith({
+      id: MEMBER_ID,
+      workspaceId: WORKSPACE_ID,
+      data: { ...updateInput, permissions: normalizedGranularPermissions },
+      revokeRealtime: true,
+    })
+  })
+
+  test("preserves assigned-only contacts permissions outside community edition", async () => {
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(assignedOnlyPermissions),
+    )
+
+    expect(mockUpdateMember).toHaveBeenCalledWith({
+      id: MEMBER_ID,
+      workspaceId: WORKSPACE_ID,
+      data: { ...updateInput, permissions: assignedOnlyPermissions },
+      revokeRealtime: true,
+    })
+  })
+
+  // Cache invalidation on a successful update now lives inside
+  // `workspaceMemberService.update` itself (see
+  // packages/business/__tests__/workspace-member.update.test.ts) — this
+  // action only has to call the service with the right id/workspaceId.
+  test("calls workspaceMemberService.update, which owns cache invalidation on success", async () => {
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(),
+    )
+
+    expect(mockUpdateMember).toHaveBeenCalledWith({
+      id: MEMBER_ID,
+      workspaceId: WORKSPACE_ID,
+      data: { ...updateInput, permissions: normalizedGranularPermissions },
+      revokeRealtime: true,
+    })
+  })
+
+  test("skips DB update, cache invalidation, and audit when nothing changed", async () => {
+    mockFindByIdOrFail.mockResolvedValue({
+      id: MEMBER_ID,
+      userId: MEMBER_USER_ID,
+      workspaceId: WORKSPACE_ID,
+      permissions: normalizedGranularPermissions,
+      notificationTypes: updateInput.notificationTypes,
+      notificationChannels: updateInput.notificationChannels,
+    })
+
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(),
+    )
+
+    expect(mockUpdateMember).not.toHaveBeenCalled()
+    expect(mockInvalidateCacheByTags).not.toHaveBeenCalled()
+    expect(mockFindNameAndEmail).not.toHaveBeenCalled()
+    expect(mockAuditRecord).not.toHaveBeenCalled()
+  })
+
+  test("still writes the update when only notification settings change, without auditing a role change", async () => {
+    mockFindByIdOrFail.mockResolvedValue({
+      id: MEMBER_ID,
+      userId: MEMBER_USER_ID,
+      workspaceId: WORKSPACE_ID,
+      // Same permissions as the submitted payload — only notification
+      // fields differ from what's stored.
+      permissions: normalizedGranularPermissions,
+      notificationTypes: {
+        notifyAdmin: false,
+        newMessageToHuman: false,
+        newOrder: false,
+      },
+      notificationChannels: {
+        messenger: false,
+        email: false,
+        telegram: false,
+        browser: false,
+      },
+    })
+
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(),
+    )
+
+    expect(mockUpdateMember).toHaveBeenCalledWith({
+      id: MEMBER_ID,
+      workspaceId: WORKSPACE_ID,
+      data: { ...updateInput, permissions: normalizedGranularPermissions },
+      revokeRealtime: false,
+    })
+    // Permissions didn't actually change, so this must not be recorded as
+    // a "changed role" audit event.
+    expect(mockFindNameAndEmail).not.toHaveBeenCalled()
+    expect(mockAuditRecord).not.toHaveBeenCalled()
+  })
+
+  test("records role change for a real permission change", async () => {
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(),
+    )
+
+    expect(mockUpdateMember).toHaveBeenCalledWith({
+      id: MEMBER_ID,
+      workspaceId: WORKSPACE_ID,
+      data: { ...updateInput, permissions: normalizedGranularPermissions },
+      revokeRealtime: true,
+    })
+    expect(mockAuditRecord).toHaveBeenCalledWith({
+      action: "role_change",
+      detail: "changed role of Target User to member",
+    })
+  })
+
+  test("skips cache invalidation and audit when update races a concurrent delete", async () => {
+    mockUpdateMember.mockResolvedValue(undefined)
+
+    await (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      updateActionCtx(),
+    )
+
+    expect(mockUpdateMember).toHaveBeenCalled()
+    expect(mockInvalidateCacheByTags).not.toHaveBeenCalled()
+    expect(mockFindNameAndEmail).not.toHaveBeenCalled()
+    expect(mockAuditRecord).not.toHaveBeenCalled()
+  })
+
+  test("returns revokeWarning when permission reauthentication cannot close sockets", async () => {
+    mockUpdateMember.mockResolvedValueOnce({
+      id: MEMBER_ID,
+      revokeWarning: true,
+    })
+
+    await expect(
+      (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+        updateActionCtx(),
+      ),
+    ).resolves.toEqual({ revokeWarning: true })
+  })
+
+  test("returns no revokeWarning when permission reauthentication closes sockets", async () => {
+    await expect(
+      (updateWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+        updateActionCtx(),
+      ),
+    ).resolves.toEqual({ revokeWarning: false })
+  })
+})
+
+function deleteActionCtx() {
+  return {
+    bindArgsParsedInputs: [WORKSPACE_ID, MEMBER_ID],
+  }
+}
+
+describe("deleteWorkspaceMemberAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockFindByIdOrFail.mockResolvedValue({
+      id: MEMBER_ID,
+      userId: MEMBER_USER_ID,
+      workspaceId: WORKSPACE_ID,
+      role: "agent",
+    })
+    mockCurrentMember()
+    mockWorkspaceMemberServiceDelete.mockResolvedValue({ revokeWarning: false })
+  })
+
+  test("rejects deleting the workspace owner", async () => {
+    mockFindByIdOrFail.mockResolvedValue({
+      id: MEMBER_ID,
+      userId: MEMBER_USER_ID,
+      workspaceId: WORKSPACE_ID,
+      role: "owner",
+    })
+
+    await expect(
+      (deleteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+        deleteActionCtx(),
+      ),
+    ).rejects.toThrow("You cannot delete the owner of the workspace")
+
+    expect(mockWorkspaceMemberServiceDelete).not.toHaveBeenCalled()
+  })
+
+  test("rejects non-super-admin members before deleting", async () => {
+    mockCurrentMember(granularPermissions)
+
+    await expect(
+      (deleteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+        deleteActionCtx(),
+      ),
+    ).rejects.toThrow(
+      "You are not authorized to delete this workspace member. You need to be a super admin to do this.",
+    )
+
+    expect(mockWorkspaceMemberServiceDelete).not.toHaveBeenCalled()
+  })
+
+  test("leaves cache invalidation of the removed member to the service", async () => {
+    await (deleteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      deleteActionCtx(),
+    )
+
+    expect(mockWorkspaceMemberServiceDelete).toHaveBeenCalledWith({
+      id: MEMBER_ID,
+      workspaceId: WORKSPACE_ID,
+    })
+    // Cache invalidation (user, roster and schedule tags) is the service's job.
+    expect(mockInvalidateCacheByTags).not.toHaveBeenCalled()
+    expect(mockInvalidateMembershipCache).not.toHaveBeenCalled()
+  })
+
+  test("deletes the member without mutating team-member quota", async () => {
+    await (deleteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+      deleteActionCtx(),
+    )
+
+    expect(mockWorkspaceMemberServiceDelete).toHaveBeenCalledOnce()
+    // Cache invalidation (user, roster and schedule tags) is the service's job.
+    expect(mockInvalidateCacheByTags).not.toHaveBeenCalled()
+    expect(mockInvalidateMembershipCache).not.toHaveBeenCalled()
+  })
+
+  test("returns revokeWarning when a deleted member's socket revoke is deferred", async () => {
+    mockWorkspaceMemberServiceDelete.mockResolvedValueOnce({
+      revokeWarning: true,
+    })
+
+    await expect(
+      (deleteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+        deleteActionCtx(),
+      ),
+    ).resolves.toEqual({ revokeWarning: true })
+  })
+
+  test("returns no revokeWarning when a deleted member's sockets are closed", async () => {
+    mockWorkspaceMemberServiceDelete.mockResolvedValueOnce({
+      revokeWarning: false,
+    })
+
+    await expect(
+      (deleteWorkspaceMemberAction as (props: unknown) => Promise<unknown>)(
+        deleteActionCtx(),
+      ),
+    ).resolves.toEqual({ revokeWarning: false })
+  })
+})

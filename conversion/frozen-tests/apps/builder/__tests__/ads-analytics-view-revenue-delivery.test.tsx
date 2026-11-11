@@ -1,0 +1,304 @@
+// @vitest-environment jsdom
+
+import type {
+  AdsAnalyticsData,
+  AdsAnalyticsTimeseriesRow,
+  CapiDeliverySummary,
+} from "@chatbotx.io/business"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, type ReactNode } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { AdsAnalyticsView } from "@/features/ads/components/ads-analytics-view"
+import type { AdsAnalyticsSearchParams } from "@/features/ads/schema/analytics"
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/space/ws-1/dashboard/ads",
+  useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+vi.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
+}))
+
+vi.mock("next-safe-action/hooks", () => ({
+  useAction: () => ({ execute: vi.fn(), isPending: false }),
+}))
+
+vi.mock("@/lib/orpc/orpc", () => ({
+  client: {
+    integrationFacebookAdsAPI: {
+      listAdAccounts: vi.fn().mockResolvedValue({ data: [] }),
+      listCustomAudiences: vi.fn().mockResolvedValue({ data: [] }),
+    },
+    adsAPI: {
+      listChannelAdAccounts: vi.fn().mockResolvedValue({ data: [] }),
+    },
+  },
+}))
+
+vi.mock("@/features/ads/actions/retarget", () => ({
+  retargetAdAction: vi.fn(),
+}))
+
+vi.mock("@/features/ads/components/ads-account-control", () => ({
+  AdsAccountControl: () => null,
+}))
+
+vi.mock("@/features/ads/components/ads-performance-chart", () => ({
+  AdsPerformanceChart: () => null,
+}))
+
+vi.mock("@chatbotx.io/ui/components/ui/dialog", () => ({
+  Dialog: ({
+    children,
+    open,
+  }: {
+    children: ReactNode
+    onOpenChange: (open: boolean) => void
+    open: boolean
+  }) => (open ? children : null),
+  DialogContent: ({ children }: { children: ReactNode }) => children,
+  DialogDescription: ({ children }: { children: ReactNode }) => children,
+  DialogFooter: ({ children }: { children: ReactNode }) => children,
+  DialogHeader: ({ children }: { children: ReactNode }) => children,
+  DialogTitle: ({ children }: { children: ReactNode }) => children,
+}))
+
+vi.mock("@chatbotx.io/ui/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => children,
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => children,
+  DropdownMenuGroup: ({ children }: { children: ReactNode }) => children,
+  DropdownMenuItem: ({ children }: { children: ReactNode }) => children,
+  DropdownMenuPortal: ({ children }: { children: ReactNode }) => children,
+  DropdownMenuSub: ({ children }: { children: ReactNode }) => children,
+  DropdownMenuSubContent: ({ children }: { children: ReactNode }) => children,
+  DropdownMenuSubTrigger: ({ children }: { children: ReactNode }) => children,
+  DropdownMenuTrigger: ({
+    children,
+    render,
+  }: {
+    children?: ReactNode
+    render?: ReactNode
+  }) => render ?? children,
+}))
+
+vi.mock("@chatbotx.io/ui/components/ui/select", () => ({
+  Select: ({ children }: { children: ReactNode }) => children,
+  SelectContent: ({ children }: { children: ReactNode }) => children,
+  SelectItem: ({ children }: { children: ReactNode }) => children,
+  SelectTrigger: ({ children }: { children: ReactNode }) => children,
+  SelectValue: () => null,
+}))
+
+vi.mock("@chatbotx.io/ui/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => children,
+  TooltipContent: ({ children }: { children: ReactNode }) => children,
+  TooltipTrigger: ({
+    children,
+    render,
+  }: {
+    children?: ReactNode
+    render?: ReactNode
+  }) => render ?? children,
+}))
+
+const analyticsData = {
+  totals: {
+    conversations: 10,
+    leads: 4,
+    purchases: 2,
+    revenue: 250,
+    spend: 100,
+    costPerLead: 25,
+    costPerPurchase: 50,
+    roas: 2.5,
+    impressions: 5000,
+    clicks: 200,
+    cpc: 0.5,
+    ctr: 0.04,
+    cpm: 20,
+    costPerConversation: 10,
+  },
+  perAd: [
+    {
+      adId: "ad-1",
+      adName: "Ad One",
+      conversations: 10,
+      leads: 4,
+      purchases: 2,
+      revenue: 250,
+      spend: 100,
+      costPerLead: 25,
+      costPerPurchase: 50,
+      roas: 2.5,
+      impressions: 5000,
+      clicks: 200,
+      cpc: 0.5,
+      ctr: 0.04,
+      cpm: 20,
+      costPerConversation: 10,
+    },
+  ],
+  spendCurrency: "USD",
+} satisfies AdsAnalyticsData
+
+const deliverySummary = {
+  sent: 5,
+  pending: 1,
+  failed: 2,
+  skippedNoScope: 3,
+  skippedRegion: 0,
+} satisfies CapiDeliverySummary
+
+const timeseries = [
+  { date: "2026-08-01", conversations: 10, leads: 4, purchases: 2, spend: 100 },
+] satisfies AdsAnalyticsTimeseriesRow[]
+
+const range = {
+  from: "2026-08-01",
+  to: "2026-08-10",
+  tz: "",
+  account: "",
+  channel: "whatsapp",
+  channelAccount: "",
+  adAccount: "",
+} as AdsAnalyticsSearchParams
+
+describe("AdsAnalyticsView revenue and delivery", () => {
+  let container: HTMLDivElement
+  let root: Root
+  let queryClient: QueryClient
+
+  beforeEach(() => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    container = document.createElement("div")
+    document.body.append(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  // Renamed and narrowed: revenue/ROAS/delivery are
+  // TEMPORARILY HIDDEN (conversion tracking unfinished). When they come back,
+  // restore the name and these assertions:
+  //   expect(container.textContent).toContain("ads.analytics.revenue")
+  //   expect(container.textContent).toContain("ads.analytics.roas")
+  //   expect(container.textContent).toContain("2.50x")
+  //   expect(container.textContent).toContain("ads.analytics.delivery.title")
+  //   expect(container.textContent).toContain("ads.analytics.delivery.sent")
+  //   expect(container.textContent).toContain("ads.analytics.delivery.skippedNoScope")
+  //   expect(container.textContent).toContain("ads.analytics.delivery.noScopeWarning")
+  //   expect(container.textContent).toContain("ads.analytics.delivery.reconnectCta")
+  //   expect(Array.from(container.querySelectorAll("a")).some((anchor) =>
+  //     anchor.href.includes("/whatsapps/iw-1/ads"))).toBe(true)
+  //   expect(container.textContent).not.toContain("ads.analytics.delivery.skippedRegion")
+  test("renders the Insights-sourced spend metrics", async () => {
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <AdsAnalyticsView
+            channel="whatsapp"
+            channelIntegrations={[]}
+            promises={Promise.resolve([
+              analyticsData,
+              deliverySummary,
+              timeseries,
+            ])}
+            range={range}
+            selectedChannelIntegrationId="iw-1"
+            workspaceCreatedAt={new Date("2024-01-01T00:00:00.000Z")}
+            workspaceId="ws-1"
+          />
+        </QueryClientProvider>,
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain("ads.analytics.impressions")
+    expect(container.textContent).toContain("5,000")
+    expect(container.textContent).toContain("ads.analytics.clicks")
+    expect(container.textContent).toContain("200")
+    expect(container.textContent).toContain("ads.analytics.cpc")
+    expect(container.textContent).toContain("ads.analytics.ctr")
+    expect(container.textContent).toContain("4.00%")
+    expect(container.textContent).toContain("ads.analytics.cpm")
+    expect(container.textContent).toContain("ads.analytics.costPerConversation")
+    // Guards the hidden state itself: the delivery card must not render while
+    // the conversion-rule engine is unfinished. Delete this when restoring.
+    expect(container.textContent).not.toContain("ads.analytics.delivery.title")
+  })
+
+  // TEMPORARILY HIDDEN (conversion tracking unfinished): the delivery card this
+  // exercises is commented out in AdsAnalyticsView. Un-skip when it returns.
+  test.skip("omits the reconnect CTA link in the aggregate (no account) view", async () => {
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <AdsAnalyticsView
+            channel="whatsapp"
+            channelIntegrations={[]}
+            promises={Promise.resolve([
+              analyticsData,
+              deliverySummary,
+              timeseries,
+            ])}
+            range={range}
+            selectedChannelIntegrationId={null}
+            workspaceCreatedAt={new Date("2024-01-01T00:00:00.000Z")}
+            workspaceId="ws-1"
+          />
+        </QueryClientProvider>,
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain(
+      "ads.analytics.delivery.noScopeWarning",
+    )
+    expect(container.textContent).not.toContain(
+      "ads.analytics.delivery.reconnectCta",
+    )
+  })
+
+  // TEMPORARILY HIDDEN (conversion tracking unfinished): the delivery card this
+  // exercises is commented out in AdsAnalyticsView. Un-skip when it returns.
+  test.skip("shows a messenger-channel reconnect CTA linked to the messenger ads settings page", async () => {
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <AdsAnalyticsView
+            channel="messenger"
+            channelIntegrations={[{ id: "msg-1", name: "My Page" }]}
+            promises={Promise.resolve([
+              analyticsData,
+              deliverySummary,
+              timeseries,
+            ])}
+            range={{ ...range, channelAccount: "msg-1" }}
+            selectedChannelIntegrationId="msg-1"
+            workspaceCreatedAt={new Date("2024-01-01T00:00:00.000Z")}
+            workspaceId="ws-1"
+          />
+        </QueryClientProvider>,
+      )
+      await Promise.resolve()
+    })
+
+    expect(
+      Array.from(container.querySelectorAll("a")).some((anchor) =>
+        anchor.href.includes("/messengers/msg-1/ads"),
+      ),
+    ).toBe(true)
+  })
+})

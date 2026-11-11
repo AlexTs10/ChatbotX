@@ -1,0 +1,162 @@
+// @vitest-environment node
+
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+const { mockGetCurrentUserAndTargetWorkspace, mockNotFound } = vi.hoisted(
+  () => ({
+    mockGetCurrentUserAndTargetWorkspace: vi.fn(),
+    mockNotFound: vi.fn(() => {
+      throw new Error("not found")
+    }),
+  }),
+)
+
+vi.mock("@/lib/auth/utils", () => ({
+  getCurrentUserAndTargetWorkspace: mockGetCurrentUserAndTargetWorkspace,
+}))
+
+vi.mock("next/navigation", () => ({
+  notFound: mockNotFound,
+}))
+
+vi.mock("@/lib/workspace/require-not-scheduled-for-deletion", () => ({
+  enforceWorkspaceNotScheduledForDeletionFromRequest: vi.fn(
+    async () => undefined,
+  ),
+}))
+
+const { requireContactsAccess, resolveGuardedWorkspaceId } = await import(
+  "../src/lib/auth/require-workspace-permission"
+)
+
+const basePermissions = {
+  superAdmin: false,
+  analytics: false,
+  flows: false,
+  contacts: false,
+  onlyAssignedContacts: false,
+  emailAndPhone: false,
+  broadcast: false,
+  ecommerce: false,
+}
+
+describe("requireContactsAccess", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("allows members with assigned-only contact access", async () => {
+    mockGetCurrentUserAndTargetWorkspace.mockResolvedValue({
+      user: { id: "user-1" },
+      targetWorkspace: { id: "ws-1" },
+      targetWorkspaceMember: {
+        permissions: {
+          ...basePermissions,
+          onlyAssignedContacts: true,
+        },
+      },
+    })
+
+    await expect(requireContactsAccess("ws-1")).resolves.toEqual({
+      canViewEmailAndPhone: false,
+      restrictToAssignedUserId: "user-1",
+    })
+
+    expect(mockNotFound).not.toHaveBeenCalled()
+  })
+
+  test("rejects members without full or assigned-only contact access", async () => {
+    mockGetCurrentUserAndTargetWorkspace.mockResolvedValue({
+      user: { id: "user-1" },
+      targetWorkspace: { id: "ws-1" },
+      targetWorkspaceMember: {
+        permissions: basePermissions,
+      },
+    })
+
+    await expect(requireContactsAccess("ws-1")).rejects.toThrow("not found")
+
+    expect(mockNotFound).toHaveBeenCalled()
+  })
+})
+
+describe("resolveGuardedWorkspaceId", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("returns the workspace id when the requested permission is granted", async () => {
+    mockGetCurrentUserAndTargetWorkspace.mockResolvedValue({
+      targetWorkspaceMember: {
+        permissions: {
+          ...basePermissions,
+          broadcast: true,
+        },
+      },
+    })
+
+    await expect(
+      resolveGuardedWorkspaceId(
+        Promise.resolve({ workspaceId: "ws-1" }),
+        "broadcast",
+      ),
+    ).resolves.toBe("ws-1")
+  })
+
+  test("rejects when the requested permission is denied", async () => {
+    mockGetCurrentUserAndTargetWorkspace.mockResolvedValue({
+      targetWorkspaceMember: {
+        permissions: basePermissions,
+      },
+    })
+
+    await expect(
+      resolveGuardedWorkspaceId(
+        Promise.resolve({ workspaceId: "ws-1" }),
+        "broadcast",
+      ),
+    ).rejects.toThrow("not found")
+  })
+
+  test("returns the workspace id for super admins on superAdmin-gated routes", async () => {
+    mockGetCurrentUserAndTargetWorkspace.mockResolvedValue({
+      targetWorkspaceMember: {
+        permissions: {
+          ...basePermissions,
+          superAdmin: true,
+        },
+      },
+    })
+
+    await expect(
+      resolveGuardedWorkspaceId(
+        Promise.resolve({ workspaceId: "ws-1" }),
+        "superAdmin",
+      ),
+    ).resolves.toBe("ws-1")
+  })
+
+  test("rejects fully-permissioned non-super-admins on superAdmin-gated routes", async () => {
+    mockGetCurrentUserAndTargetWorkspace.mockResolvedValue({
+      targetWorkspaceMember: {
+        permissions: {
+          ...basePermissions,
+          analytics: true,
+          flows: true,
+          contacts: true,
+          onlyAssignedContacts: true,
+          emailAndPhone: true,
+          broadcast: true,
+          ecommerce: true,
+        },
+      },
+    })
+
+    await expect(
+      resolveGuardedWorkspaceId(
+        Promise.resolve({ workspaceId: "ws-1" }),
+        "superAdmin",
+      ),
+    ).rejects.toThrow("not found")
+  })
+})

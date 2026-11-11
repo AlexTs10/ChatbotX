@@ -1,0 +1,552 @@
+// @vitest-environment node
+
+import { afterEach, describe, expect, test, vi } from "vitest"
+
+const {
+  mockCreateId,
+  mockDb,
+  mockFindMany,
+  mockInsert,
+  mockInsertValues,
+  mockReturning,
+  mockInvalidateCacheTags,
+} = vi.hoisted(() => {
+  const mockReturning = vi.fn()
+  const mockOnConflictDoNothing = vi.fn(() => ({ returning: mockReturning }))
+  const mockInsertValues = vi.fn(() => ({
+    onConflictDoNothing: mockOnConflictDoNothing,
+  }))
+  const mockInsert = vi.fn(() => ({ values: mockInsertValues }))
+  const mockFindMany = vi.fn()
+
+  const mockDb: Record<string, unknown> = {}
+  const mockDbStub = {
+    query: { customFieldModel: { findMany: mockFindMany } },
+    insert: mockInsert,
+    execute: vi.fn(),
+    transaction: (callback: (tx: unknown) => unknown) => callback(mockDb),
+  }
+  Object.assign(mockDb, mockDbStub)
+
+  return {
+    mockCreateId: vi.fn(),
+    mockDb,
+    mockFindMany,
+    mockInsert,
+    mockInsertValues,
+    mockReturning,
+    mockInvalidateCacheTags: vi.fn(),
+  }
+})
+
+const customFieldModel = { table: "CustomField" }
+const NUMERIC_ID_PATTERN = /^\d+$/
+
+vi.mock("@chatbotx.io/database/client", () => ({
+  db: mockDb,
+  and: vi.fn(),
+  eq: vi.fn(),
+  inArray: vi.fn(),
+  relationsFilterToSQL: vi.fn(),
+  sql: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/database/partials", () => ({
+  rootFolderId: "root",
+}))
+
+vi.mock("@chatbotx.io/database/schema", () => ({
+  customFieldModel,
+}))
+
+vi.mock("@chatbotx.io/database/utils", () => ({
+  isBigintId: (value: string) =>
+    value.length <= 19 && NUMERIC_ID_PATTERN.test(value),
+  likeContains: vi.fn(),
+  parseOrderByAsObject: vi.fn(),
+  parsePagination: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/redis", () => ({
+  withCache: (_key: string, fn: () => unknown) => fn(),
+}))
+
+vi.mock("@chatbotx.io/utils", () => ({
+  createId: mockCreateId,
+  isNumericId: (value: string) => NUMERIC_ID_PATTERN.test(value),
+}))
+
+vi.mock("@chatbotx.io/utils/custom-field", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@chatbotx.io/utils/custom-field")>()),
+}))
+
+vi.mock("../src/base.service", () => ({
+  BaseService: class BaseService {
+    invalidateCacheTags(...args: unknown[]) {
+      return mockInvalidateCacheTags(...args)
+    }
+  },
+}))
+
+vi.mock("../src/errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/errors")>()),
+  notFoundException: (message: string) => new Error(message),
+}))
+
+vi.mock("../src/folder/service", () => ({
+  folderService: { ensureExists: vi.fn() },
+}))
+
+const { customFieldService } = await import("../src/custom-field/service")
+
+describe("customFieldService.resolveByNameAndType", () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("disambiguates the same name across different types", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "1", workspaceId: "ws-1", name: "Birthday", type: "date" },
+      { id: "2", workspaceId: "ws-1", name: "Birthday", type: "shortText" },
+    ])
+
+    const { idMap, createdIds } = await customFieldService.resolveByNameAndType(
+      {
+        workspaceId: "ws-1",
+        fields: [
+          { name: "Birthday", type: "date" },
+          { name: "Birthday", type: "shortText" },
+        ],
+      },
+    )
+
+    expect(idMap.get("date:birthday")).toBe("1")
+    expect(idMap.get("shortText:birthday")).toBe("2")
+    expect(createdIds).toEqual([])
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  test("matches case-insensitively without creating a duplicate", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "1", workspaceId: "ws-1", name: "Birthday", type: "date" },
+    ])
+
+    const { idMap, createdIds } = await customFieldService.resolveByNameAndType(
+      {
+        workspaceId: "ws-1",
+        fields: [{ name: "birthday", type: "date" }],
+      },
+    )
+
+    expect(idMap.get("date:birthday")).toBe("1")
+    expect(createdIds).toEqual([])
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  test("creates a field with the manifest's type when no match exists", async () => {
+    mockFindMany.mockResolvedValue([])
+    mockCreateId.mockReturnValue("new-id-1")
+    mockReturning.mockResolvedValue([
+      {
+        id: "new-id-1",
+        workspaceId: "ws-1",
+        name: "Favorite Color",
+        type: "shortText",
+      },
+    ])
+
+    const { idMap, createdIds } = await customFieldService.resolveByNameAndType(
+      {
+        workspaceId: "ws-1",
+        fields: [{ name: "Favorite Color", type: "shortText" }],
+      },
+    )
+
+    expect(idMap.get("shortText:favorite color")).toBe("new-id-1")
+    expect(createdIds).toEqual(["new-id-1"])
+    expect(mockInsert).toHaveBeenCalledTimes(1)
+    expect(mockInsertValues).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "new-id-1",
+        workspaceId: "ws-1",
+        name: "Favorite Color",
+        type: "shortText",
+      }),
+    ])
+  })
+
+  test("creates a renamed field when the name is held by another type", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "1", workspaceId: "ws-1", name: "Birthday", type: "date" },
+    ])
+    mockCreateId.mockReturnValue("new-id-2")
+    mockReturning.mockResolvedValue([
+      {
+        id: "new-id-2",
+        workspaceId: "ws-1",
+        name: "Birthday_1",
+        type: "shortText",
+      },
+    ])
+
+    const { idMap, createdIds, resolved } =
+      await customFieldService.resolveByNameAndType({
+        workspaceId: "ws-1",
+        fields: [{ name: "Birthday", type: "shortText" }],
+      })
+
+    expect(mockInsertValues).toHaveBeenCalledWith([
+      expect.objectContaining({ name: "Birthday_1", type: "shortText" }),
+    ])
+    expect(idMap.get("shortText:birthday")).toBe("new-id-2")
+    expect(createdIds).toEqual(["new-id-2"])
+    expect(resolved.get("shortText:birthday")).toEqual({
+      id: "new-id-2",
+      name: "Birthday_1",
+      renamed: true,
+    })
+  })
+
+  test("skips a suffix another type already uses, case-insensitively", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "1", workspaceId: "ws-1", name: "Size", type: "number" },
+      { id: "2", workspaceId: "ws-1", name: "SIZE_1", type: "date" },
+    ])
+    mockCreateId.mockReturnValue("new-id-3")
+    mockReturning.mockResolvedValue([
+      {
+        id: "new-id-3",
+        workspaceId: "ws-1",
+        name: "Size_2",
+        type: "shortText",
+      },
+    ])
+
+    await customFieldService.resolveByNameAndType({
+      workspaceId: "ws-1",
+      fields: [{ name: "Size", type: "shortText" }],
+    })
+
+    expect(mockInsertValues).toHaveBeenCalledWith([
+      expect.objectContaining({ name: "Size_2" }),
+    ])
+  })
+
+  test("two requested fields sharing a name get distinct names in one batch", async () => {
+    mockFindMany.mockResolvedValue([])
+    mockCreateId.mockReturnValueOnce("n-1").mockReturnValueOnce("n-2")
+    mockReturning.mockResolvedValue([
+      { id: "n-1", workspaceId: "ws-1", name: "Tag", type: "shortText" },
+      { id: "n-2", workspaceId: "ws-1", name: "Tag_1", type: "number" },
+    ])
+
+    const { resolved } = await customFieldService.resolveByNameAndType({
+      workspaceId: "ws-1",
+      fields: [
+        { name: "Tag", type: "shortText" },
+        { name: "Tag", type: "number" },
+      ],
+    })
+
+    expect(mockInsertValues).toHaveBeenCalledWith([
+      expect.objectContaining({ name: "Tag", type: "shortText" }),
+      expect.objectContaining({ name: "Tag_1", type: "number" }),
+    ])
+    expect(resolved.get("number:tag")?.renamed).toBe(true)
+    expect(resolved.get("shortText:tag")?.renamed).toBe(false)
+  })
+
+  test("a same-type match under another spelling reports the target's exact name", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "1", workspaceId: "ws-1", name: "foo", type: "shortText" },
+    ])
+
+    const { resolved } = await customFieldService.resolveByNameAndType({
+      workspaceId: "ws-1",
+      fields: [{ name: "Foo", type: "shortText" }],
+    })
+
+    expect(resolved.get("shortText:foo")).toEqual({
+      id: "1",
+      name: "foo",
+      renamed: false,
+    })
+  })
+
+  test("takes the per-workspace name lock before reading names", async () => {
+    mockFindMany.mockResolvedValue([])
+    mockReturning.mockResolvedValue([])
+
+    await customFieldService.resolveByNameAndType({
+      workspaceId: "ws-1",
+      fields: [{ name: "Alpha", type: "shortText" }],
+    })
+
+    expect(mockDb.execute).toHaveBeenCalledTimes(1)
+  })
+
+  test("batches all missing fields into a single insert call", async () => {
+    mockFindMany.mockResolvedValue([])
+    mockCreateId
+      .mockReturnValueOnce("new-1")
+      .mockReturnValueOnce("new-2")
+      .mockReturnValueOnce("new-3")
+    mockReturning.mockResolvedValue([
+      { id: "new-1", workspaceId: "ws-1", name: "Alpha", type: "shortText" },
+      { id: "new-2", workspaceId: "ws-1", name: "Beta", type: "shortText" },
+      { id: "new-3", workspaceId: "ws-1", name: "Gamma", type: "shortText" },
+    ])
+
+    const { idMap, createdIds } = await customFieldService.resolveByNameAndType(
+      {
+        workspaceId: "ws-1",
+        fields: [
+          { name: "Alpha", type: "shortText" },
+          { name: "Beta", type: "shortText" },
+          { name: "Gamma", type: "shortText" },
+        ],
+      },
+    )
+
+    expect(mockInsert).toHaveBeenCalledTimes(1)
+    expect(mockInsertValues).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "new-1", name: "Alpha" }),
+      expect.objectContaining({ id: "new-2", name: "Beta" }),
+      expect.objectContaining({ id: "new-3", name: "Gamma" }),
+    ])
+    expect(createdIds.sort()).toEqual(["new-1", "new-2", "new-3"])
+    expect(idMap.get("shortText:alpha")).toBe("new-1")
+    expect(idMap.get("shortText:beta")).toBe("new-2")
+    expect(idMap.get("shortText:gamma")).toBe("new-3")
+    expect(mockFindMany).toHaveBeenCalledTimes(1)
+  })
+
+  test("partial conflict within a batch: landed rows resolve directly, the lost one re-selects", async () => {
+    mockFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "winner-id",
+        workspaceId: "ws-1",
+        name: "Beta",
+        type: "shortText",
+      },
+    ])
+    mockCreateId
+      .mockReturnValueOnce("new-1")
+      .mockReturnValueOnce("loser-id")
+      .mockReturnValueOnce("new-3")
+    // Beta's insert lost the onConflictDoNothing race, so only 2 of the 3
+    // attempted rows come back from returning().
+    mockReturning.mockResolvedValue([
+      { id: "new-1", workspaceId: "ws-1", name: "Alpha", type: "shortText" },
+      { id: "new-3", workspaceId: "ws-1", name: "Gamma", type: "shortText" },
+    ])
+
+    const { idMap, createdIds } = await customFieldService.resolveByNameAndType(
+      {
+        workspaceId: "ws-1",
+        fields: [
+          { name: "Alpha", type: "shortText" },
+          { name: "Beta", type: "shortText" },
+          { name: "Gamma", type: "shortText" },
+        ],
+      },
+    )
+
+    expect(mockInsert).toHaveBeenCalledTimes(1)
+    expect(createdIds.sort()).toEqual(["new-1", "new-3"])
+    expect(createdIds).not.toContain("winner-id")
+    expect(idMap.get("shortText:alpha")).toBe("new-1")
+    expect(idMap.get("shortText:beta")).toBe("winner-id")
+    expect(idMap.get("shortText:gamma")).toBe("new-3")
+    expect(mockFindMany).toHaveBeenCalledTimes(2)
+  })
+
+  test("concurrent resolve: a lost onConflictDoNothing race re-selects the winner's row", async () => {
+    mockFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "winner-id",
+        workspaceId: "ws-1",
+        name: "Birthday",
+        type: "date",
+      },
+    ])
+    mockCreateId.mockReturnValue("loser-id")
+    // onConflictDoNothing + returning() resolves to an empty array when a
+    // concurrent insert won the race first.
+    mockReturning.mockResolvedValue([])
+
+    const { idMap, createdIds } = await customFieldService.resolveByNameAndType(
+      {
+        workspaceId: "ws-1",
+        fields: [{ name: "Birthday", type: "date" }],
+      },
+    )
+
+    expect(idMap.get("date:birthday")).toBe("winner-id")
+    expect(createdIds).toEqual([])
+    expect(mockFindMany).toHaveBeenCalledTimes(2)
+  })
+
+  test("returns an empty result for an empty fields list without querying", async () => {
+    const { idMap, createdIds } = await customFieldService.resolveByNameAndType(
+      {
+        workspaceId: "ws-1",
+        fields: [],
+      },
+    )
+
+    expect(idMap.size).toBe(0)
+    expect(createdIds).toEqual([])
+    expect(mockFindMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("customFieldService.findManyByIds", () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("scopes the lookup by workspaceId alongside the id list", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "1", workspaceId: "ws-1", name: "Birthday", type: "date" },
+    ])
+
+    const rows = await customFieldService.findManyByIds({
+      workspaceId: "ws-1",
+      ids: ["1", "2"],
+    })
+
+    expect(rows).toEqual([
+      { id: "1", workspaceId: "ws-1", name: "Birthday", type: "date" },
+    ])
+    expect(mockFindMany).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1", id: { in: ["1", "2"] } },
+    })
+  })
+
+  test("returns an empty array for an empty id list without querying", async () => {
+    const rows = await customFieldService.findManyByIds({
+      workspaceId: "ws-1",
+      ids: [],
+    })
+
+    expect(rows).toEqual([])
+    expect(mockFindMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("customFieldService.resolveByNameAndType case collisions", () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  // `CustomField_workspaceId_type_name_key` is a plain case-sensitive btree
+  // index, so "Email" and "email" can both exist in one workspace and fold to
+  // the same resolution key. `findMany` has no ORDER BY, so resolution must
+  // not depend on which row comes back last.
+  const collidingRows = [
+    { id: "20", workspaceId: "ws-1", name: "Email", type: "shortText" },
+    { id: "10", workspaceId: "ws-1", name: "email", type: "shortText" },
+  ]
+
+  test("prefers the exact-case row over a case-only match", async () => {
+    mockFindMany.mockResolvedValue(collidingRows)
+
+    const { idMap, createdIds } = await customFieldService.resolveByNameAndType(
+      {
+        workspaceId: "ws-1",
+        fields: [{ name: "Email", type: "shortText" }],
+      },
+    )
+
+    expect(idMap.get("shortText:email")).toBe("20")
+    expect(createdIds).toEqual([])
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  test("resolves the same regardless of row order", async () => {
+    mockFindMany.mockResolvedValue([...collidingRows].reverse())
+
+    const { idMap } = await customFieldService.resolveByNameAndType({
+      workspaceId: "ws-1",
+      fields: [{ name: "Email", type: "shortText" }],
+    })
+
+    expect(idMap.get("shortText:email")).toBe("20")
+  })
+
+  test("falls back to the oldest row when no casing matches exactly", async () => {
+    mockFindMany.mockResolvedValue(collidingRows)
+
+    const { idMap } = await customFieldService.resolveByNameAndType({
+      workspaceId: "ws-1",
+      fields: [{ name: "EMAIL", type: "shortText" }],
+    })
+
+    expect(idMap.get("shortText:email")).toBe("10")
+  })
+})
+
+describe("customFieldService.findManyByKeys", () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("resolves ids and names in one query, an id winning over a name", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "7", workspaceId: "ws-1", name: "Plan" },
+      { id: "9", workspaceId: "ws-1", name: "7" },
+    ])
+
+    const resolved = await customFieldService.findManyByKeys({
+      workspaceId: "ws-1",
+      keys: ["7", "Plan", "missing"],
+    })
+
+    expect(mockFindMany).toHaveBeenCalledTimes(1)
+    expect(resolved.get("7")?.id).toBe("7")
+    expect(resolved.get("Plan")?.id).toBe("7")
+    expect(resolved.has("missing")).toBe(false)
+  })
+
+  test("an id with leading zeros resolves to the same field, like the database reads it", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "123", workspaceId: "ws-1", name: "Plan" },
+    ])
+
+    const resolved = await customFieldService.findManyByKeys({
+      workspaceId: "ws-1",
+      keys: ["00123"],
+    })
+
+    expect(resolved.get("00123")?.id).toBe("123")
+  })
+
+  test("a numeric key too long for a bigint is only matched by name, never sent as an id", async () => {
+    mockFindMany.mockResolvedValue([
+      { id: "5", workspaceId: "ws-1", name: "12345678901234567890123" },
+    ])
+
+    const resolved = await customFieldService.findManyByKeys({
+      workspaceId: "ws-1",
+      keys: ["12345678901234567890123"],
+    })
+
+    expect(resolved.get("12345678901234567890123")?.id).toBe("5")
+    expect(JSON.stringify(mockFindMany.mock.calls[0]?.[0])).not.toContain(
+      '"id":{"in":["12345678901234567890123"]}',
+    )
+  })
+
+  test("asks for nothing when there is no key", async () => {
+    expect(
+      (
+        await customFieldService.findManyByKeys({
+          workspaceId: "ws-1",
+          keys: [],
+        })
+      ).size,
+    ).toBe(0)
+    expect(mockFindMany).not.toHaveBeenCalled()
+  })
+})

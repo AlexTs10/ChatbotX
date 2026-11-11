@@ -1,0 +1,74 @@
+import {
+  generateApiChannelToken,
+  hashToken,
+} from "@chatbotx.io/business/workspace-api-token/credentials"
+import { describe, expect, test } from "vitest"
+
+const TOKEN_PREFIX = "cbx_api_"
+const SHA256_HEX_LENGTH = 64
+// 8-char prefix + 43 chars of unpadded base64url for 32 random bytes.
+const TOKEN_LENGTH = 51
+const LOWERCASE_HEX_PATTERN = /^[0-9a-f]+$/
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/
+
+describe("integration-api token hashing", () => {
+  test("pins the digest algorithm to plain SHA-256 hex", async () => {
+    // Known-answer fixture: sha256("ws-1.fixture"). Anchors hashToken() to
+    // the exact algorithm the create_workspace_api_token migration uses in
+    // SQL (encode(sha256(convert_to(token, 'UTF8')), 'hex')) — if either
+    // side ever drifts (salt, different digest, different encoding), every
+    // backfilled workspace token stops authenticating and this catches it.
+    await expect(hashToken("ws-1.fixture")).resolves.toBe(
+      "c398e4c2a5927596abf8442ec42853ef435b49bc5ce25aab22dcd7f8e1447ea9",
+    )
+  })
+
+  test("stored tokenHash matches what the auth middleware computes for the token", async () => {
+    // Arrange
+    const { token, tokenHash } = await generateApiChannelToken()
+
+    // Act
+    const verificationHash = await hashToken(token)
+
+    // Assert
+    expect(verificationHash).toBe(tokenHash)
+  })
+
+  test("tokenHash is lowercase sha-256 hex", async () => {
+    // Arrange
+    const { tokenHash } = await generateApiChannelToken()
+
+    // Assert
+    expect(tokenHash).toMatch(LOWERCASE_HEX_PATTERN)
+    expect(tokenHash).toHaveLength(SHA256_HEX_LENGTH)
+  })
+
+  test("token starts with the display prefix and stays in the base64url alphabet", async () => {
+    // Arrange
+    const { token } = await generateApiChannelToken()
+
+    // Assert
+    expect(token.startsWith(TOKEN_PREFIX)).toBe(true)
+    expect(token.slice(TOKEN_PREFIX.length)).toMatch(BASE64URL_PATTERN)
+    expect(token).toHaveLength(TOKEN_LENGTH)
+  })
+
+  test("tokenPrefix carries distinguishing characters beyond the static literal", async () => {
+    // Arrange
+    const { token, tokenPrefix } = await generateApiChannelToken()
+
+    // Assert
+    expect(tokenPrefix.length).toBeGreaterThan(TOKEN_PREFIX.length)
+    expect(token.startsWith(tokenPrefix)).toBe(true)
+  })
+
+  test("generates a unique token and hash per call", async () => {
+    // Arrange
+    const first = await generateApiChannelToken()
+    const second = await generateApiChannelToken()
+
+    // Assert
+    expect(first.token).not.toBe(second.token)
+    expect(first.tokenHash).not.toBe(second.tokenHash)
+  })
+})

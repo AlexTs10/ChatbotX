@@ -1,0 +1,567 @@
+import { beforeEach, describe, expect, test, vi } from "vitest"
+import { couponService } from "../src/coupon/service"
+import { assertResourceEditable } from "../src/template/installed-resource.service"
+
+const mocks = vi.hoisted(() => ({
+  transaction: vi.fn(),
+  lockTopic: vi.fn(),
+  countTopicCoupons: vi.fn(),
+  findExistingCodes: vi.fn(),
+  insertCoupons: vi.fn(),
+  markTopicHasCoupons: vi.fn(),
+  findIssuedCoupon: vi.fn(),
+  claimCoupon: vi.fn(),
+  markUsed: vi.fn(),
+  isTopicIssueable: vi.fn(),
+  findTopic: vi.fn(),
+  findTopicByName: vi.fn(),
+  createTopic: vi.fn(),
+  updateTopic: vi.fn(),
+  getExportFile: vi.fn(),
+  getImportFile: vi.fn(),
+  markImportFileUploaded: vi.fn(),
+  createImport: vi.fn(),
+  headObject: vi.fn(),
+  isUniqueViolationError: vi.fn(),
+  listIssuedCouponsForContact: vi.fn(),
+  contactFindByIdOrFail: vi.fn(),
+  selectWorkspace: vi.fn(),
+}))
+vi.mock("../src/template/installed-resource.service", async () => ({
+  ...(await import("./helpers/template-guard-mocks")).templateGuardMocks({
+    assertDeletable: vi.fn(),
+    assertResourceEditable: vi.fn(),
+  }),
+
+  changedKeysOf: () => [],
+}))
+const lockedTx = { marker: "locked-tx" }
+const mockLockOptions = vi.hoisted(() => vi.fn())
+vi.mock("../src/template/template-resource-locks", () => ({
+  withTemplateLockedTransaction: (
+    run: (tx: unknown) => unknown,
+    options?: unknown,
+  ) => {
+    mockLockOptions(options)
+    return run(lockedTx)
+  },
+}))
+vi.mock("@chatbotx.io/database/client", () => ({
+  db: {
+    transaction: mocks.transaction,
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => mocks.selectWorkspace(),
+        }),
+      }),
+    }),
+  },
+  eq: vi.fn(),
+  isUniqueViolationError: (...args: unknown[]) =>
+    mocks.isUniqueViolationError(...args),
+}))
+
+vi.mock("@chatbotx.io/database/partials", () => ({
+  couponTopicStatuses: { enum: { active: "active", archived: "archived" } },
+  fileStatuses: {
+    enum: { uploaded: "uploaded" },
+    parse: (value: unknown) => value,
+  },
+}))
+
+vi.mock("@chatbotx.io/database/repositories", () => ({
+  couponRepository: {
+    lockTopic: (...args: unknown[]) => mocks.lockTopic(...args),
+    countTopicCoupons: (...args: unknown[]) => mocks.countTopicCoupons(...args),
+    findExistingCodes: (...args: unknown[]) => mocks.findExistingCodes(...args),
+    insertCoupons: (...args: unknown[]) => mocks.insertCoupons(...args),
+    markTopicHasCoupons: (...args: unknown[]) =>
+      mocks.markTopicHasCoupons(...args),
+    findIssuedCoupon: (...args: unknown[]) => mocks.findIssuedCoupon(...args),
+    claimCoupon: (...args: unknown[]) => mocks.claimCoupon(...args),
+    markUsed: (...args: unknown[]) => mocks.markUsed(...args),
+    isTopicIssueable: (...args: unknown[]) => mocks.isTopicIssueable(...args),
+    findTopic: (...args: unknown[]) => mocks.findTopic(...args),
+    findTopicByName: (...args: unknown[]) => mocks.findTopicByName(...args),
+    updateTopic: (...args: unknown[]) => mocks.updateTopic(...args),
+    getExportFile: (...args: unknown[]) => mocks.getExportFile(...args),
+    getImportFile: (...args: unknown[]) => mocks.getImportFile(...args),
+    markImportFileUploaded: (...args: unknown[]) =>
+      mocks.markImportFileUploaded(...args),
+    createImport: (...args: unknown[]) => mocks.createImport(...args),
+    listIssuedCouponsForContact: (...args: unknown[]) =>
+      mocks.listIssuedCouponsForContact(...args),
+  },
+}))
+
+vi.mock("@chatbotx.io/database/schema", () => ({
+  workspaceModel: {},
+}))
+
+vi.mock("@chatbotx.io/redis", () => ({
+  invalidateCacheByTags: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/filesystem", () => ({
+  uploader: { headObject: (...args: unknown[]) => mocks.headObject(...args) },
+}))
+
+vi.mock("../src/contact/service", () => ({
+  contactService: {
+    findByIdOrFail: (...args: unknown[]) =>
+      mocks.contactFindByIdOrFail(...args),
+  },
+}))
+
+describe("couponService.importBatch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.transaction.mockImplementation(
+      async (fn: (tx: unknown) => unknown) => await fn("tx"),
+    )
+    mocks.lockTopic.mockResolvedValue({ id: "topic-2", status: "active" })
+    mocks.countTopicCoupons.mockResolvedValue(0)
+    mocks.findExistingCodes.mockResolvedValue(new Set(["SHARED"]))
+    mocks.insertCoupons.mockResolvedValue([{ id: "coupon-1", code: "NEW" }])
+    mocks.markTopicHasCoupons.mockResolvedValue(undefined)
+  })
+
+  test("dedupes imported coupon codes across the workspace", async () => {
+    await expect(
+      couponService.importBatch({
+        workspaceId: "workspace-1",
+        topicId: "topic-2",
+        codes: [" SHARED ", "NEW", "SHARED"],
+      }),
+    ).resolves.toEqual({
+      processed: 2,
+      created: 1,
+      existing: 1,
+      allowedRemaining: 10_000,
+      currentCount: 0,
+    })
+
+    expect(mocks.findExistingCodes).toHaveBeenCalledWith(
+      { workspaceId: "workspace-1", codes: ["SHARED", "NEW"] },
+      "tx",
+    )
+    expect(mocks.insertCoupons).toHaveBeenCalledWith(
+      { workspaceId: "workspace-1", topicId: "topic-2", codes: ["NEW"] },
+      "tx",
+    )
+  })
+})
+
+describe("couponService.startImport", () => {
+  const input = {
+    workspaceId: "workspace-1",
+    userId: "owner-1",
+    fileId: "file-1",
+    topicId: "topic-1",
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.transaction.mockImplementation(
+      async (fn: (tx: unknown) => unknown) => await fn("tx"),
+    )
+    mocks.getImportFile.mockResolvedValue({
+      id: "file-1",
+      path: "workspaces/workspace-1/imports/coupons/import-1.csv",
+      fileName: "coupons.csv",
+      mimeType: "text/csv",
+    })
+    mocks.findTopic.mockResolvedValue({ id: "topic-1", status: "active" })
+    mocks.headObject.mockResolvedValue({ ContentLength: 1024 })
+    mocks.createImport.mockResolvedValue({ id: "import-1" })
+  })
+
+  test("verifies the uploaded object size before creating an import", async () => {
+    await expect(couponService.startImport(input)).resolves.toEqual({
+      id: "import-1",
+    })
+
+    expect(mocks.headObject).toHaveBeenCalledWith(
+      "workspaces/workspace-1/imports/coupons/import-1.csv",
+    )
+    expect(mocks.markImportFileUploaded).toHaveBeenCalledWith(
+      { workspaceId: "workspace-1", fileId: "file-1" },
+      "tx",
+    )
+  })
+
+  test("rejects an object exceeding the coupon import size limit", async () => {
+    mocks.headObject.mockResolvedValue({ ContentLength: 10 * 1024 * 1024 + 1 })
+
+    await expect(couponService.startImport(input)).rejects.toMatchObject({
+      code: "couponImportFileTooLarge",
+    })
+
+    expect(mocks.createImport).not.toHaveBeenCalled()
+  })
+})
+
+describe("couponService.issueCoupon", () => {
+  const input = {
+    workspaceId: "workspace-1",
+    topicId: "topic-1",
+    contactId: "contact-1",
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.transaction.mockImplementation(
+      async (fn: (tx: unknown) => unknown) => await fn("tx"),
+    )
+  })
+
+  test("returns topicUnavailable without opening a transaction when the topic isn't issueable", async () => {
+    mocks.isTopicIssueable.mockResolvedValue(undefined)
+
+    await expect(couponService.issueCoupon(input)).resolves.toEqual({
+      ok: false,
+      reason: "topicUnavailable",
+      coupon: null,
+    })
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  test("returns the existing coupon without claiming a new one", async () => {
+    mocks.isTopicIssueable.mockResolvedValue({ id: "topic-1" })
+    mocks.findIssuedCoupon.mockResolvedValue({ id: "coupon-1", code: "AAA" })
+
+    await expect(couponService.issueCoupon(input)).resolves.toEqual({
+      ok: true,
+      reason: "existing",
+      coupon: { id: "coupon-1", code: "AAA" },
+    })
+    expect(mocks.claimCoupon).not.toHaveBeenCalled()
+  })
+
+  test("claims a new coupon when the contact has none yet", async () => {
+    mocks.isTopicIssueable.mockResolvedValue({ id: "topic-1" })
+    mocks.findIssuedCoupon.mockResolvedValue(undefined)
+    mocks.claimCoupon.mockResolvedValue({ id: "coupon-2", code: "BBB" })
+
+    await expect(couponService.issueCoupon(input)).resolves.toEqual({
+      ok: true,
+      reason: "issued",
+      coupon: { id: "coupon-2", code: "BBB" },
+    })
+  })
+
+  test("returns noAvailableCoupon when the topic has no unclaimed coupon left", async () => {
+    mocks.isTopicIssueable.mockResolvedValue({ id: "topic-1" })
+    mocks.findIssuedCoupon.mockResolvedValue(undefined)
+    mocks.claimCoupon.mockResolvedValue(undefined)
+
+    await expect(couponService.issueCoupon(input)).resolves.toEqual({
+      ok: false,
+      reason: "noAvailableCoupon",
+      coupon: null,
+    })
+  })
+
+  test("falls back to the winning coupon when two concurrent claims race on the unique index", async () => {
+    mocks.isTopicIssueable.mockResolvedValue({ id: "topic-1" })
+    mocks.transaction.mockImplementation(() => {
+      throw new Error("duplicate key value violates unique constraint")
+    })
+    mocks.isUniqueViolationError.mockReturnValue(true)
+    mocks.findIssuedCoupon.mockResolvedValue({ id: "coupon-3", code: "CCC" })
+
+    await expect(couponService.issueCoupon(input)).resolves.toEqual({
+      ok: true,
+      reason: "existing",
+      coupon: { id: "coupon-3", code: "CCC" },
+    })
+  })
+})
+
+describe("couponService.markCouponUsed", () => {
+  const input = {
+    workspaceId: "workspace-1",
+    topicId: "topic-1",
+    contactId: "contact-1",
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("returns noIssuedCoupon when the contact has no coupon for this topic", async () => {
+    mocks.findIssuedCoupon.mockResolvedValue(undefined)
+
+    await expect(couponService.markCouponUsed(input)).resolves.toEqual({
+      ok: false,
+      reason: "noIssuedCoupon",
+      coupon: null,
+    })
+    expect(mocks.markUsed).not.toHaveBeenCalled()
+  })
+
+  test("returns alreadyUsed without writing when the coupon was already marked used", async () => {
+    const existing = { id: "coupon-1", usedAt: new Date("2024-01-01") }
+    mocks.findIssuedCoupon.mockResolvedValue(existing)
+
+    await expect(couponService.markCouponUsed(input)).resolves.toEqual({
+      ok: true,
+      reason: "alreadyUsed",
+      coupon: existing,
+    })
+    expect(mocks.markUsed).not.toHaveBeenCalled()
+  })
+
+  test("marks the coupon used on the happy path", async () => {
+    mocks.findIssuedCoupon.mockResolvedValue({ id: "coupon-1", usedAt: null })
+    const marked = { id: "coupon-1", usedAt: new Date("2024-02-02") }
+    mocks.markUsed.mockResolvedValue(marked)
+
+    await expect(couponService.markCouponUsed(input)).resolves.toEqual({
+      ok: true,
+      reason: "markedUsed",
+      coupon: marked,
+    })
+  })
+
+  test("re-fetches and returns alreadyUsed when a concurrent request wins the mark-used race", async () => {
+    const staleExisting = { id: "coupon-1", usedAt: null }
+    const winnerCoupon = { id: "coupon-1", usedAt: new Date("2024-03-03") }
+    mocks.findIssuedCoupon
+      .mockResolvedValueOnce(staleExisting)
+      .mockResolvedValueOnce(winnerCoupon)
+    mocks.markUsed.mockResolvedValue(undefined)
+
+    await expect(couponService.markCouponUsed(input)).resolves.toEqual({
+      ok: true,
+      reason: "alreadyUsed",
+      coupon: winnerCoupon,
+    })
+    expect(mocks.findIssuedCoupon).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("couponService topic validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.selectWorkspace.mockResolvedValue([{ timezone: "UTC" }])
+  })
+
+  test("createTopic rejects an empty name", async () => {
+    await expect(
+      couponService.createTopic({ workspaceId: "workspace-1", name: "   " }),
+    ).rejects.toMatchObject({ code: "couponTopicNameRequired" })
+  })
+
+  test("createTopic rejects a name over 255 characters", async () => {
+    await expect(
+      couponService.createTopic({
+        workspaceId: "workspace-1",
+        name: "a".repeat(256),
+      }),
+    ).rejects.toMatchObject({ code: "couponTopicNameTooLong" })
+  })
+
+  test("createTopic rejects a description over 1000 characters", async () => {
+    await expect(
+      couponService.createTopic({
+        workspaceId: "workspace-1",
+        name: "Valid name",
+        description: "a".repeat(1001),
+      }),
+    ).rejects.toMatchObject({ code: "couponTopicDescriptionTooLong" })
+  })
+
+  test("createTopic rejects a duplicate name in the same workspace regardless of case", async () => {
+    mocks.findTopicByName.mockResolvedValue({ id: "existing-topic" })
+
+    await expect(
+      couponService.createTopic({
+        workspaceId: "workspace-1",
+        name: "DuPlIcAtE",
+      }),
+    ).rejects.toMatchObject({ code: "couponTopicNameDuplicated" })
+  })
+
+  test("createTopic rejects an expiresAt date in the past", async () => {
+    mocks.findTopicByName.mockResolvedValue(undefined)
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+
+    await expect(
+      couponService.createTopic({
+        workspaceId: "workspace-1",
+        name: "Valid name",
+        expiresAt: yesterday,
+      }),
+    ).rejects.toMatchObject({ code: "couponTopicValidityInPast" })
+  })
+
+  test("updateTopic ignores name/description changes once the topic has ever had a coupon, but still updates expiresAt", async () => {
+    mocks.findTopic.mockResolvedValue({
+      id: "topic-1",
+      hasEverHadCoupon: true,
+      name: "Old name",
+      description: "Old description",
+    })
+    mocks.updateTopic.mockResolvedValue({ id: "topic-1", name: "Old name" })
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+    await couponService.updateTopic({
+      workspaceId: "workspace-1",
+      topicId: "topic-1",
+      name: "New name",
+      description: "New description",
+      expiresAt: future,
+    })
+
+    expect(mocks.findTopicByName).not.toHaveBeenCalled()
+    expect(mocks.updateTopic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        topicId: "topic-1",
+        name: undefined,
+        description: undefined,
+        expiresAt: expect.any(Date),
+      }),
+      lockedTx,
+    )
+  })
+
+  test("updateTopic asks the template lock guard for the keys that really changed", async () => {
+    mocks.findTopic.mockResolvedValue({
+      id: "topic-1",
+      hasEverHadCoupon: false,
+      name: "Old name",
+      description: null,
+    })
+    mocks.updateTopic.mockResolvedValue({ id: "topic-1" })
+
+    await couponService.updateTopic({
+      workspaceId: "workspace-1",
+      topicId: "topic-1",
+      name: "New name",
+    })
+
+    expect(assertResourceEditable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceKind: "couponTopic",
+        resourceIds: ["topic-1"],
+        tx: lockedTx,
+      }),
+    )
+    expect(
+      vi.mocked(assertResourceEditable).mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.updateTopic.mock.invocationCallOrder[0] as number)
+  })
+
+  test("updateTopic locks the topic, then reads the stored row on the locked transaction", async () => {
+    mocks.findTopic.mockResolvedValue({
+      id: "topic-1",
+      hasEverHadCoupon: false,
+      name: "Old name",
+      description: null,
+    })
+    mocks.updateTopic.mockResolvedValue({ id: "topic-1" })
+    mocks.findTopic.mockClear()
+    mockLockOptions.mockClear()
+
+    await couponService.updateTopic({
+      workspaceId: "workspace-1",
+      topicId: "topic-1",
+      name: "New name",
+    })
+
+    expect(mockLockOptions).toHaveBeenCalledWith({
+      workspaceId: expect.any(String),
+      initialKeys: [{ kind: "couponTopic", resourceId: "topic-1" }],
+    })
+    // The second findTopic is the in-transaction read, on the locked client.
+    expect(mocks.findTopic).toHaveBeenLastCalledWith(
+      { workspaceId: "workspace-1", topicId: "topic-1" },
+      lockedTx,
+    )
+    expect(mockLockOptions.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.findTopic.mock.invocationCallOrder[1] as number,
+    )
+  })
+
+  test("updateTopic blocked by the guard writes nothing", async () => {
+    mocks.findTopic.mockResolvedValue({
+      id: "topic-1",
+      hasEverHadCoupon: false,
+      name: "Old name",
+      description: null,
+    })
+    vi.mocked(assertResourceEditable).mockRejectedValueOnce(new Error("locked"))
+
+    await expect(
+      couponService.updateTopic({
+        workspaceId: "workspace-1",
+        topicId: "topic-1",
+        name: "New name",
+      }),
+    ).rejects.toThrow("locked")
+    expect(mocks.updateTopic).not.toHaveBeenCalled()
+  })
+})
+
+describe("couponService.listIssuedCouponsForContact", () => {
+  const input = { workspaceId: "workspace-1", contactId: "contact-1" }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("checks restricted contact access before reading issued coupons", async () => {
+    const denied = new Error("Contact not found")
+    mocks.contactFindByIdOrFail.mockRejectedValue(denied)
+
+    await expect(
+      couponService.listIssuedCouponsForContact({
+        ...input,
+        accessScope: { restrictToAssignedUserId: "user-1" },
+      }),
+    ).rejects.toThrow(denied)
+
+    expect(mocks.contactFindByIdOrFail).toHaveBeenCalledWith({
+      workspaceId: input.workspaceId,
+      id: input.contactId,
+      accessScope: { restrictToAssignedUserId: "user-1" },
+    })
+    expect(mocks.listIssuedCouponsForContact).not.toHaveBeenCalled()
+  })
+
+  test("skips the contact lookup for unrestricted requests", async () => {
+    mocks.listIssuedCouponsForContact.mockResolvedValue([])
+
+    await couponService.listIssuedCouponsForContact(input)
+
+    expect(mocks.contactFindByIdOrFail).not.toHaveBeenCalled()
+    expect(mocks.listIssuedCouponsForContact).toHaveBeenCalledWith(input)
+  })
+})
+
+describe("couponService.getExportFile", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("requires the export file to belong to the requesting user", async () => {
+    mocks.getExportFile.mockResolvedValue(undefined)
+
+    await expect(
+      couponService.getExportFile({
+        workspaceId: "workspace-1",
+        fileId: "file-1",
+        userId: "user-2",
+      }),
+    ).rejects.toMatchObject({ code: "notFound" })
+
+    expect(mocks.getExportFile).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      fileId: "file-1",
+      userId: "user-2",
+    })
+  })
+})

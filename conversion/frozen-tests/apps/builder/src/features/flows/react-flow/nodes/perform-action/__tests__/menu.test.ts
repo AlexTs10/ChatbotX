@@ -1,0 +1,109 @@
+import { stepTypes } from "@chatbotx.io/flow-config"
+import { describe, expect, test } from "vitest"
+import type { TranslationFn } from "../../types"
+import { performActionMenus } from "../menu"
+
+const t = ((key: string) => key) as TranslationFn
+
+describe("perform action SendGrid registration", () => {
+  test("exposes Add Contact to SendGrid in email actions", () => {
+    const emailActions = performActionMenus(t).find(
+      (item) => item.label === "flows.actions.emailActions",
+    )
+    expect(emailActions?.children).toContainEqual(
+      expect.objectContaining({
+        label: "flows.actions.sendGridAddContact",
+        stepType: stepTypes.enum.sendGridAddContact,
+      }),
+    )
+  })
+})
+
+describe("perform action Meta CAPI menu", () => {
+  test("exposes sendMetaCapiEvent as a top-level entry, not inside a group", () => {
+    const menus = performActionMenus(t)
+
+    expect(menus).toContainEqual(
+      expect.objectContaining({
+        label: "flows.actions.sendMetaCapiEvent",
+        stepType: stepTypes.enum.sendMetaCapiEvent,
+      }),
+    )
+    expect(
+      menus.some((item) =>
+        [
+          "flows.actions.adsConversions",
+          "flows.actions.metaConversions",
+        ].includes(item.label),
+      ),
+    ).toBe(false)
+  })
+})
+
+describe("perform action Google Ads conversion menu", () => {
+  test("exposes sendGoogleAdsConversion as a top-level entry", () => {
+    expect(performActionMenus(t)).toContainEqual(
+      expect.objectContaining({
+        label: "flows.actions.sendGoogleAdsConversion",
+        stepType: stepTypes.enum.sendGoogleAdsConversion,
+      }),
+    )
+  })
+})
+
+describe("perform action coupon menu", () => {
+  test("exposes topic coupon under tools as the create path", () => {
+    const tools = performActionMenus(t).find(
+      (item) => item.label === "flows.actions.tools",
+    )
+
+    expect(tools?.children).toContainEqual(
+      expect.objectContaining({
+        label: "coupons.tabs.topicCoupon",
+        stepType: stepTypes.enum.setUpCoupon,
+      }),
+    )
+    expect(
+      performActionMenus(t).some(
+        (item) => item.stepType === stepTypes.enum.setUpCoupon,
+      ),
+    ).toBe(false)
+  })
+})
+
+describe("perform action email integrations", () => {
+  test("keeps MailerLite and Moosend in the email actions group", () => {
+    const emailActions = performActionMenus(t).find(
+      (item) => item.label === "flows.actions.emailActions",
+    )
+
+    expect(emailActions?.children).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "flows.actions.mailerLiteAddSubscriber",
+          stepType: stepTypes.enum.mailerLiteAddSubscriber,
+        }),
+        expect.objectContaining({
+          label: "flows.actions.moosendCreateContact",
+          stepType: stepTypes.enum.moosendCreateContact,
+        }),
+      ]),
+    )
+  })
+})
+
+describe("perform action More options menu", () => {
+  test("exposes Find places near me under More options", () => {
+    const moreOptions = performActionMenus(t).find(
+      (item) => item.label === "flows.actions.moreOptions",
+    )
+
+    expect(moreOptions?.stepType).toBeNull()
+    expect(moreOptions?.children).toContainEqual(
+      expect.objectContaining({
+        label: "flows.actions.findPlacesNearMe",
+        stepType: stepTypes.enum.findPlacesNearMe,
+      }),
+    )
+  })
+})

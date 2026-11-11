@@ -1,0 +1,401 @@
+import { describe, expect, test } from "vitest"
+import { receiveMessage } from "../src/handlers/message/incoming-message"
+
+describe("Instagram-via-Facebook receiveMessage", () => {
+  test("forwards referral source for contact source taxonomy mapping", async () => {
+    const result = await receiveMessage({
+      ctx: {
+        auth: {
+          metadata: { igId: "ig-1" },
+        },
+      } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  message: { mid: "mid-1", text: "hello" },
+                  referral: {
+                    ref: "ad-ref",
+                    source: "ADS",
+                    type: "OPEN_THREAD",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.ref).toBe("ad-ref")
+    expect(result.referralSource).toBe("ADS")
+    // The provider time keys a referral-only delivery when its webhook is retried.
+    expect(result.occurredAt).toEqual(new Date(1))
+  })
+
+  test("derives the ad platform from source_url when source_platform is absent", async () => {
+    const result = await receiveMessage({
+      ctx: {
+        auth: {
+          metadata: { igId: "ig-1" },
+        },
+      } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  message: { mid: "mid-1", text: "hello" },
+                  referral: {
+                    ref: "ad-ref",
+                    source: "ADS",
+                    type: "OPEN_THREAD",
+                    ad_id: "ad-9",
+                    source_url: "https://www.instagram.com/p/Cxyz/",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.referral?.sourcePlatform).toBe("instagram")
+    expect(result.referral?.adId).toBe("ad-9")
+  })
+
+  test("captures a standalone referral-only event (no message/postback)", async () => {
+    const result = await receiveMessage({
+      ctx: {
+        auth: {
+          metadata: { igId: "ig-1" },
+        },
+      } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  referral: {
+                    ref: "ad-ref",
+                    source: "ADS",
+                    type: "OPEN_THREAD",
+                    ad_id: "ad-9",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.message).toBeNull()
+    expect(result.ref).toBe("ad-ref")
+    expect(result.referralSource).toBe("ADS")
+    expect(result.referral?.adId).toBe("ad-9")
+  })
+
+  test("captures referral carried on a postback (icebreaker tap)", async () => {
+    const result = await receiveMessage({
+      ctx: {
+        auth: {
+          metadata: { igId: "ig-1" },
+        },
+      } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  postback: {
+                    mid: "mid-1",
+                    title: "Get Started",
+                    payload: "GET_STARTED",
+                    referral: {
+                      ref: "ad-ref",
+                      source: "ADS",
+                      type: "OPEN_THREAD",
+                      ad_id: "ad-9",
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.postbackAction).toBe("GET_STARTED")
+    expect(result.ref).toBe("ad-ref")
+    expect(result.referralSource).toBe("ADS")
+    expect(result.referral?.adId).toBe("ad-9")
+  })
+
+  test("parses SHORTLINK referral source without treating it as an ad", async () => {
+    const result = await receiveMessage({
+      ctx: {
+        auth: {
+          metadata: { igId: "ig-1" },
+        },
+      } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  message: { mid: "mid-1", text: "hello" },
+                  referral: {
+                    ref: "bot-link",
+                    source: "SHORTLINK",
+                    type: "OPEN_THREAD",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    // SHORTLINK is parsed like any other referral — no ad_id, and the raw
+    // `source` value is preserved as-is. Ad-only filtering is the caller's
+    // responsibility (metaReferralToContactSource / ads-conversion service).
+    expect(result.referralSource).toBe("SHORTLINK")
+    expect(result.referral?.source).toBe("SHORTLINK")
+    expect(result.referral?.adId).toBeNull()
+  })
+
+  test("parses an ad referral without ref (Meta omits ref when the ad sets none)", async () => {
+    const result = await receiveMessage({
+      ctx: {
+        auth: {
+          metadata: { igId: "ig-1" },
+        },
+      } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  message: { mid: "mid-1", text: "hello" },
+                  referral: {
+                    source: "ADS",
+                    type: "OPEN_THREAD",
+                    ad_id: "ad-42",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.ref).toBeNull()
+    expect(result.referralSource).toBe("ADS")
+    expect(result.referral?.adId).toBe("ad-42")
+  })
+  // Meta's Instagram messaging webhook reference: a CTD ad that opens a NEW
+  // thread delivers its referral INSIDE `message.referral` — there is no
+  // standalone `messaging_referral` event and no postback to carry it.
+  test("captures an ad referral carried inside message.referral (new CTD thread)", async () => {
+    const result = await receiveMessage({
+      ctx: {
+        auth: {
+          metadata: { igId: "ig-1" },
+        },
+      } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  message: {
+                    mid: "mid-1",
+                    text: "hello",
+                    referral: {
+                      ref: "ad-ref",
+                      ad_id: "120249578414030286",
+                      source: "ADS",
+                      type: "OPEN_THREAD",
+                      ads_context_data: {
+                        ad_title: "Summer succulents are here!",
+                        photo_url: "https://scontent.xx.fbcdn.net/photo.jpg",
+                        video_url: "https://scontent.xx.fbcdn.net/thumb.jpg",
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.ref).toBe("ad-ref")
+    expect(result.referralSource).toBe("ADS")
+    expect(result.referral?.adId).toBe("120249578414030286")
+    expect(result.referral?.adTitle).toBe("Summer succulents are here!")
+    expect(result.message?.text).toBe("hello")
+  })
+
+  test("derives the ad platform from referer_uri", async () => {
+    const result = await receiveMessage({
+      ctx: {
+        auth: {
+          metadata: { igId: "ig-1" },
+        },
+      } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  message: { mid: "mid-1", text: "hello" },
+                  referral: {
+                    source: "ADS",
+                    type: "OPEN_THREAD",
+                    ad_id: "ad-1",
+                    referer_uri: "https://www.instagram.com/ads/123",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.referral?.sourceUrl).toBe("https://www.instagram.com/ads/123")
+    expect(result.referral?.sourcePlatform).toBe("instagram")
+  })
+})
+
+describe("Instagram-via-Facebook receiveMessage - step input skip payload", () => {
+  const receive = (messaging: Record<string, unknown>) =>
+    receiveMessage({
+      ctx: { auth: { metadata: { igId: "ig-1" } } } as never,
+      data: {
+        integrationType: "instagram",
+        integrationIdentifier: "inbox-1",
+        payload: {
+          object: "instagram",
+          entry: [
+            {
+              id: "ig-1",
+              time: 1,
+              messaging: [
+                {
+                  sender: { id: "ig-user-1" },
+                  recipient: { id: "ig-1" },
+                  timestamp: 1,
+                  ...messaging,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+  test("hands the skip quick_reply payload to the worker unchanged as quickReplyAction", async () => {
+    const result = await receive({
+      message: {
+        mid: "mid-skip-qr",
+        text: "Skip",
+        quick_reply: { payload: "STEP_INPUT_SKIP|11612473309626368" },
+      },
+    })
+
+    expect(result.quickReplyAction).toBe("STEP_INPUT_SKIP|11612473309626368")
+  })
+
+  test("hands the skip postback payload to the worker unchanged as postbackAction", async () => {
+    const result = await receive({
+      postback: {
+        mid: "mid-skip-pb",
+        title: "Skip",
+        payload: "STEP_INPUT_SKIP|11612473309626368",
+      },
+    })
+
+    expect(result.postbackAction).toBe("STEP_INPUT_SKIP|11612473309626368")
+  })
+})

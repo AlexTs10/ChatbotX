@@ -1,0 +1,303 @@
+import { getAuditActor } from "@chatbotx.io/business/audit"
+import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest"
+
+const mocks = vi.hoisted(() => ({
+  ensureBootstrapped: vi.fn(async () => undefined),
+  deferSend: vi.fn(),
+  isBlockedWorkspace: vi.fn(),
+  isBotMessageQuotaReached: vi.fn(),
+  processJob: undefined as undefined | ((job: unknown) => Promise<void>),
+  resolveWorkspaceId: vi.fn(),
+  sendFlowStep: vi.fn(),
+  sendMessageToChannel: vi.fn(),
+  sendTypingToChannel: vi.fn(),
+  sendWhatsappTemplateToConversation: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/automated-response", () => ({
+  replyByOutboundAutomatedResponse: vi.fn(),
+}))
+vi.mock("@chatbotx.io/business", () => ({
+  flushAllPendingWorkspaceRealtimeEvents: vi.fn(),
+}))
+vi.mock("@chatbotx.io/sdk", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@chatbotx.io/sdk")>()
+  return {
+    ...actual,
+    SdkException: class SdkException extends Error {},
+  }
+})
+vi.mock("@chatbotx.io/worker-config", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@chatbotx.io/worker-config")>()
+  return {
+    ...actual,
+    ChatJobAction: {
+      sendChannelMessage: "sendChannelMessage",
+      sendFlowMessage: "sendFlowMessage",
+      sendChatMessage: "sendChatMessage",
+      sendWhatsappTemplateMessage: "sendWhatsappTemplateMessage",
+      sendWhatsappTemplateToConversation: "sendWhatsappTemplateToConversation",
+      sendMessengerTemplateMessage: "sendMessengerTemplateMessage",
+      sendTyping: "sendTyping",
+      notifyExportResult: "notifyExportResult",
+      deleteChannelMessage: "deleteChannelMessage",
+      editChannelMessage: "editChannelMessage",
+      changeChannelMessageState: "changeChannelMessageState",
+      checkOutboundAutomatedResponse: "checkOutboundAutomatedResponse",
+    },
+    defaultWorkerOptions: {},
+    getRedisConnection: vi.fn(),
+    getQueueConnection: vi.fn(),
+    queueNames: { enum: { chat: "chat" } },
+  }
+})
+vi.mock("bullmq", () => ({
+  Worker: class Worker {
+    constructor(_queue: string, processJob: (job: unknown) => Promise<void>) {
+      mocks.processJob = processJob
+    }
+
+    on() {
+      // Worker event registration is not exercised by this unit test.
+    }
+
+    close() {
+      return Promise.resolve()
+    }
+  },
+  // Instantiated at module scope by worker-config's queue setup; not
+  // exercised by this unit test beyond needing to construct successfully.
+  Queue: class Queue {
+    add() {
+      return Promise.resolve()
+    }
+  },
+}))
+vi.mock("../src/chat/utils/connection-send-gate", () => ({
+  deferSendWhileAccountReconnecting: mocks.deferSend,
+}))
+vi.mock("../src/lib/bootstrap", () => ({
+  ensureBootstrapped: mocks.ensureBootstrapped,
+}))
+vi.mock("../src/lib/is-blocked-workspace", () => ({
+  isBlockedWorkspace: mocks.isBlockedWorkspace,
+}))
+vi.mock("../src/lib/is-bot-message-quota-reached", () => ({
+  isBotMessageQuotaReached: mocks.isBotMessageQuotaReached,
+}))
+vi.mock("../src/lib/logger", () => ({
+  logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+}))
+vi.mock("../src/lib/resolve-workspace-id", () => ({
+  resolveWorkspaceId: mocks.resolveWorkspaceId,
+}))
+vi.mock("../src/chat/handlers/send-flow-step", () => ({
+  sendChatMessage: vi.fn(),
+  sendFlowStep: mocks.sendFlowStep,
+}))
+vi.mock("../src/chat/handlers/send-message", () => ({
+  changeMessageStateOnChannel: vi.fn(),
+  deleteMessageFromChannel: vi.fn(),
+  editMessageFromChannel: vi.fn(),
+  sendMessageToChannel: mocks.sendMessageToChannel,
+  sendTypingToChannel: mocks.sendTypingToChannel,
+}))
+vi.mock("../src/chat/handlers/send-messenger-template", () => ({
+  sendMessengerTemplateMessage: vi.fn(),
+}))
+vi.mock("../src/chat/handlers/send-whatsapp-template", () => ({
+  sendWhatsappTemplateMessage: vi.fn(),
+  sendWhatsappTemplateToConversation: mocks.sendWhatsappTemplateToConversation,
+}))
+
+beforeAll(async () => {
+  mocks.ensureBootstrapped.mockResolvedValue(undefined)
+  await import("../src/chat/worker")
+  await vi.waitFor(() => expect(mocks.processJob).toBeTypeOf("function"))
+  // `src/chat/worker` pulls in many largely-unmocked handler modules; the
+  // one-time esbuild transform on this first import can exceed the default
+  // 10s hook timeout under CPU contention (e.g. `turbo run test` fanning out
+  // across the whole monorepo).
+}, 60_000)
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.deferSend.mockResolvedValue(undefined)
+  mocks.isBlockedWorkspace.mockResolvedValue(false)
+  mocks.isBotMessageQuotaReached.mockResolvedValue(false)
+  mocks.resolveWorkspaceId.mockResolvedValue("workspace-1")
+})
+
+describe("chat worker reconnecting-account gate", () => {
+  test("runs after the quota gate and before the handler, with the lock token", async () => {
+    const order: string[] = []
+    mocks.isBotMessageQuotaReached.mockImplementation(() => {
+      order.push("quota")
+      return Promise.resolve(false)
+    })
+    mocks.deferSend.mockImplementation(() => {
+      order.push("defer")
+      return Promise.resolve()
+    })
+    mocks.sendFlowStep.mockImplementation(() => {
+      order.push("handler")
+    })
+    const job = { id: "job-1", data: { type: "sendFlowMessage", data: {} } }
+
+    await (
+      mocks.processJob as unknown as (j: unknown, t?: string) => Promise<void>
+    )?.(job, "lock-token")
+
+    expect(order).toEqual(["quota", "defer", "handler"])
+    expect(mocks.deferSend).toHaveBeenCalledWith(job, "lock-token")
+  })
+
+  test("a deferred send never reaches the handler", async () => {
+    mocks.deferSend.mockRejectedValue(new Error("DelayedError"))
+
+    await expect(
+      mocks.processJob?.({
+        id: "job-1",
+        data: { type: "sendFlowMessage", data: {} },
+      }),
+    ).rejects.toThrow("DelayedError")
+    expect(mocks.sendFlowStep).not.toHaveBeenCalled()
+  })
+
+  test("a quota-blocked send is dropped before the gate runs", async () => {
+    mocks.isBotMessageQuotaReached.mockResolvedValue(true)
+
+    await mocks.processJob?.({
+      id: "job-1",
+      data: { type: "sendFlowMessage", data: {} },
+    })
+
+    expect(mocks.deferSend).not.toHaveBeenCalled()
+  })
+})
+
+describe("chat worker bot message quota gate", () => {
+  test("does not invoke a bot-send handler when the quota is reached", async () => {
+    mocks.isBotMessageQuotaReached.mockResolvedValue(true)
+
+    await mocks.processJob?.({
+      id: "job-1",
+      data: { type: "sendFlowMessage", data: {} },
+    })
+
+    expect(mocks.sendFlowStep).not.toHaveBeenCalled()
+  })
+
+  test("invokes a bot-send handler below the quota", async () => {
+    await mocks.processJob?.({
+      id: "job-1",
+      data: { type: "sendFlowMessage", data: {} },
+    })
+
+    expect(mocks.sendFlowStep).toHaveBeenCalledOnce()
+  })
+
+  test("leaves non-bot-send actions unaffected", async () => {
+    await mocks.processJob?.({
+      id: "job-1",
+      data: { type: "sendTyping", data: {} },
+    })
+
+    expect(mocks.isBotMessageQuotaReached).not.toHaveBeenCalled()
+    expect(mocks.sendTypingToChannel).toHaveBeenCalledOnce()
+  })
+
+  test("does not invoke a bot channel-message handler when the quota is reached", async () => {
+    mocks.isBotMessageQuotaReached.mockResolvedValue(true)
+
+    await mocks.processJob?.({
+      id: "job-1",
+      data: {
+        type: "sendChannelMessage",
+        data: { message: { senderType: "bot" } },
+      },
+    })
+
+    expect(mocks.sendMessageToChannel).not.toHaveBeenCalled()
+  })
+
+  test("invokes a user channel-message handler even when the quota is reached", async () => {
+    mocks.isBotMessageQuotaReached.mockResolvedValue(true)
+
+    await mocks.processJob?.({
+      id: "job-1",
+      // `attemptsMade`/`opts` are what `isFinalAttempt` reads to tell the send
+      // whether a retry is still coming — a real BullMQ job always carries both.
+      attemptsMade: 0,
+      opts: { attempts: 2 },
+      data: {
+        type: "sendChannelMessage",
+        data: { message: { senderType: "user" } },
+      },
+    })
+
+    expect(mocks.isBotMessageQuotaReached).not.toHaveBeenCalled()
+    // `attemptsMade: 0` of `attempts: 2` leaves a retry in hand, so this
+    // emission is not the send's last word.
+    expect(mocks.sendMessageToChannel).toHaveBeenCalledWith(
+      { message: { senderType: "user" } },
+      0,
+      true,
+    )
+  })
+
+  test("populates the audit actor with the resolved workspace and job source before invoking the handler", async () => {
+    let capturedActor: ReturnType<typeof getAuditActor>
+    mocks.sendFlowStep.mockImplementationOnce(() => {
+      capturedActor = getAuditActor()
+    })
+
+    await mocks.processJob?.({
+      id: "job-1",
+      data: { type: "sendFlowMessage", data: {} },
+    })
+
+    expect(capturedActor).toEqual(
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        source: "chat:sendFlowMessage",
+      }),
+    )
+  })
+
+  describe("single-conversation WhatsApp template", () => {
+    const templateJob = (extra: Record<string, unknown>) => ({
+      id: "job-1",
+      attemptsMade: 0,
+      opts: { attempts: 1 },
+      data: {
+        type: "sendWhatsappTemplateToConversation",
+        data: { conversation: {}, contactInbox: {}, templateId: "t", ...extra },
+      },
+    })
+
+    test("a member-initiated send is a human message: not gated by the bot quota", async () => {
+      mocks.isBotMessageQuotaReached.mockResolvedValue(true)
+
+      await mocks.processJob?.(
+        templateJob({ initiatedBy: "user", adminId: "admin-1" }),
+      )
+
+      expect(mocks.isBotMessageQuotaReached).not.toHaveBeenCalled()
+      expect(mocks.sendWhatsappTemplateToConversation).toHaveBeenCalledOnce()
+    })
+
+    test.each([
+      ["a public API send", { initiatedBy: "api" }],
+      ["a job queued before the origin existed", {}],
+      ["a user origin without a member", { initiatedBy: "user" }],
+    ])("%s is still gated by the bot quota", async (_name, extra) => {
+      mocks.isBotMessageQuotaReached.mockResolvedValue(true)
+
+      await mocks.processJob?.(templateJob(extra))
+
+      expect(mocks.sendWhatsappTemplateToConversation).not.toHaveBeenCalled()
+    })
+  })
+})

@@ -1,0 +1,109 @@
+import { describe, expect, test } from "vitest"
+import {
+  createAIAgentRequest,
+  updateAIAgentRequest,
+} from "@/features/ai-agents/schema/action"
+
+describe("AI agent action schemas", () => {
+  test("defaults rich response on create", () => {
+    const result = createAIAgentRequest.safeParse({
+      name: "Support",
+      prompt: "Answer customer questions.",
+      messages: [],
+      models: [],
+      temperature: 0.4,
+      maxOutputTokens: 2048,
+      tools: [],
+      isDefault: false,
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.data).toMatchObject({ isRichResponse: false })
+  })
+
+  test("does not default rich response on partial update", () => {
+    const result = updateAIAgentRequest.safeParse({ isDefault: true })
+
+    expect(result.success).toBe(true)
+    expect(result.data).toEqual({ isDefault: true })
+  })
+
+  test("accepts legacy native and dynamic OpenAI-compatible model rows", () => {
+    const result = createAIAgentRequest.safeParse({
+      name: "Support",
+      prompt: "Answer customer questions.",
+      messages: [],
+      models: [
+        { provider: "openai", model: "gpt-5.4-mini" },
+        {
+          kind: "openaiCompatible",
+          integrationId: "123",
+          model: "local-model",
+        },
+      ],
+      temperature: 0.4,
+      maxOutputTokens: 2048,
+      tools: [],
+      isDefault: false,
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  test("rejects OpenAI-compatible model rows without integration id", () => {
+    const result = createAIAgentRequest.safeParse({
+      name: "Support",
+      prompt: "Answer customer questions.",
+      messages: [],
+      models: [{ kind: "openaiCompatible", model: "local-model" }],
+      temperature: 0.4,
+      maxOutputTokens: 2048,
+      tools: [],
+      isDefault: false,
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  test("accepts Muse model rows and rejects ids outside the Muse catalog", () => {
+    const parse = (model: string) =>
+      createAIAgentRequest.safeParse({
+        name: "Support",
+        prompt: "Answer customer questions.",
+        messages: [],
+        models: [{ provider: "muse", model }],
+        temperature: 0.4,
+        maxOutputTokens: 2048,
+        tools: [],
+        isDefault: false,
+      })
+
+    expect(parse("muse-spark-1.3").success).toBe(true)
+    expect(parse("muse-wonder-1.0").success).toBe(true)
+    expect(parse("gpt-5.4-mini").success).toBe(false)
+  })
+
+  test("rejects retired model ids from new or edited AI agent settings", () => {
+    const oldModels = [
+      { provider: "gemini", model: "gemini-2.5-pro" },
+      { provider: "openai", model: "gpt-5.2-chat-latest" },
+      { provider: "claude", model: "claude-3-5-haiku-20241022" },
+      { provider: "deepseek", model: "deepseek-chat" },
+    ]
+
+    for (const model of oldModels) {
+      const result = createAIAgentRequest.safeParse({
+        name: "Support",
+        prompt: "Answer customer questions.",
+        messages: [],
+        models: [model],
+        temperature: 0.4,
+        maxOutputTokens: 2048,
+        tools: [],
+        isDefault: false,
+      })
+
+      expect(result.success).toBe(false)
+    }
+  })
+})

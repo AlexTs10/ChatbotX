@@ -1,0 +1,964 @@
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+const mockFindByPhone = vi.fn()
+const mockContactInboxFindLatestBySource = vi.fn()
+const mockContactInsert = vi.fn()
+const mockCreateContactWithoutMac = vi.fn()
+const mockWorkspaceFind = vi.fn()
+const mockFindOrFail = vi.fn()
+const mockEmit = vi.fn()
+const mockEmitContactCreated = vi.fn()
+const mockRecordAuditLog = vi.fn()
+const mockCancelByInboxSource = vi.fn()
+const mockFindExistingSourceIdentities = vi.fn()
+
+vi.mock("../src/audit/dispatcher", () => ({
+  dispatchAuditRecord: (...args: unknown[]) => mockRecordAuditLog(...args),
+}))
+
+vi.mock("../src/contact-inbox/service", () => ({
+  contactInboxService: {
+    findLatestBySource: (...args: unknown[]) =>
+      mockContactInboxFindLatestBySource(...args),
+    findExistingSourceIdentities: (...args: unknown[]) =>
+      mockFindExistingSourceIdentities(...args),
+  },
+}))
+
+vi.mock("../src/message-cleanup/service", () => ({
+  messageCleanupService: {
+    cancelByInboxSource: (...args: unknown[]) =>
+      mockCancelByInboxSource(...args),
+  },
+}))
+
+vi.mock("../src/quota-enforcement/service", () => ({
+  quotaEnforcementService: {
+    createContactWithoutMac: (...args: unknown[]) =>
+      mockCreateContactWithoutMac(...args),
+  },
+}))
+
+vi.mock("../src/workspace/service", () => ({
+  workspaceService: {
+    find: (...args: unknown[]) => mockWorkspaceFind(...args),
+  },
+}))
+
+vi.mock("../src/contact/service", () => ({
+  contactService: {
+    findByPhone: (...args: unknown[]) => mockFindByPhone(...args),
+    insert: (...args: unknown[]) => mockContactInsert(...args),
+  },
+}))
+
+vi.mock("@chatbotx.io/database/client", () => ({
+  findOrFail: (...args: unknown[]) => mockFindOrFail(...args),
+}))
+
+vi.mock("@chatbotx.io/database/schema", () => ({
+  contactInboxModel: {},
+  conversationModel: {},
+  inboxModel: {},
+}))
+
+vi.mock("@chatbotx.io/event-bus", () => ({
+  emit: (...args: unknown[]) => mockEmit(...args),
+}))
+
+vi.mock("@chatbotx.io/events", () => ({
+  emitContactCreated: (...args: unknown[]) => mockEmitContactCreated(...args),
+}))
+
+vi.mock("@chatbotx.io/utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@chatbotx.io/utils")>()
+  return {
+    ...actual,
+    createId: () => "generated-id",
+  }
+})
+
+vi.mock("remeda", () => ({
+  randomString: () => "random",
+}))
+
+const { createContactWithInbox } = await import(
+  "../src/contact/create-with-inbox"
+)
+
+const contact = {
+  id: "contact-1",
+  firstName: "Ada",
+  phoneNumber: "+15551234567",
+  email: "ada@example.com",
+  createdAt: new Date("2026-06-01T00:00:00Z"),
+}
+
+const contactInbox = {
+  id: "contact-inbox-1",
+  source: "direct",
+  sourceId: "source-1",
+}
+
+type InsertedContactInboxRow = Record<string, unknown> & {
+  channel?: string
+  inboxId?: string
+  sourceId?: string
+}
+
+type CreateContactTestTx = {
+  insert: () => {
+    values: (row: InsertedContactInboxRow) => {
+      returning: () => [typeof contactInbox]
+    }
+  }
+}
+
+type CreateContactQuotaArgs = {
+  create: (tx: CreateContactTestTx) => Promise<unknown>
+}
+
+const mockCreateWithInsertedRows = () => {
+  const insertedRows: InsertedContactInboxRow[] = []
+  mockCreateContactWithoutMac.mockImplementation(
+    (args: CreateContactQuotaArgs) => {
+      const tx: CreateContactTestTx = {
+        insert: () => ({
+          values: (row) => {
+            insertedRows.push(row)
+            return {
+              returning: () => [contactInbox],
+            }
+          },
+        }),
+      }
+      return args.create(tx)
+    },
+  )
+  return insertedRows
+}
+
+const baseInput = {
+  email: "ada@example.com",
+  firstName: "Ada",
+  gender: "unknown" as const,
+  inboxId: "inbox-1",
+  phoneNumber: "+15551234567",
+  channel: "webchat" as const,
+  contactId: "",
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockFindByPhone.mockResolvedValue(undefined)
+  mockContactInboxFindLatestBySource.mockResolvedValue(undefined)
+  mockFindOrFail.mockResolvedValue({ id: "inbox-1", channel: "webchat" })
+  mockWorkspaceFind.mockResolvedValue({ id: "ws-1", ownerId: "owner-1" })
+  mockContactInsert.mockResolvedValue(contact)
+  mockEmitContactCreated.mockResolvedValue(undefined)
+  mockCancelByInboxSource.mockResolvedValue(undefined)
+  mockFindExistingSourceIdentities.mockResolvedValue({
+    sourceIds: new Set(),
+    sourceUserIds: new Set(),
+  })
+  mockCreateContactWithoutMac.mockImplementation(
+    (args: CreateContactQuotaArgs) => {
+      const tx: CreateContactTestTx = {
+        insert: () => ({
+          values: () => ({
+            returning: () => [contactInbox],
+          }),
+        }),
+      }
+      return args.create(tx)
+    },
+  )
+})
+
+describe("contactService.createWithInbox", () => {
+  test("creates manual contacts through the no-MAC quota helper", async () => {
+    const result = await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: baseInput,
+    })
+
+    expect(result.contact).toEqual(contact)
+    expect(mockCreateContactWithoutMac).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: "owner-1",
+        workspaceId: "ws-1",
+      }),
+    )
+    expect(mockRecordAuditLog).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      action: "create",
+      detail: "created a new contact (#contact-1)",
+    })
+  })
+
+  test("attaches manual contacts to the selected workspace inbox", async () => {
+    const selectedInbox = { id: "messenger-inbox-1", channel: "messenger" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        inboxId: selectedInbox.id,
+        channel: "messenger",
+        contactId: "psid-123",
+      },
+    })
+
+    expect(mockFindOrFail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { workspaceId: "ws-1", id: selectedInbox.id },
+      }),
+    )
+    expect(mockContactInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          email: "ada@example.com",
+          firstName: "Ada",
+          gender: "unknown",
+          phoneNumber: "+15551234567",
+        },
+      }),
+    )
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        channel: selectedInbox.channel,
+        inboxId: selectedInbox.id,
+        source: "direct",
+        sourceId: "psid-123",
+      }),
+    )
+  })
+
+  test("uses WhatsApp phone digits as the source id", async () => {
+    const selectedInbox = { id: "whatsapp-inbox-1", channel: "whatsapp" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        email: "",
+        inboxId: selectedInbox.id,
+        channel: "whatsapp",
+        contactId: "",
+      },
+    })
+
+    expect(mockContactInboxFindLatestBySource).toHaveBeenCalledWith({
+      inboxId: selectedInbox.id,
+      sourceId: "15551234567",
+      workspaceId: "ws-1",
+    })
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        inboxId: selectedInbox.id,
+        sourceId: "15551234567",
+      }),
+    )
+  })
+
+  test("normalizes local WhatsApp phone numbers with the workspace target country", async () => {
+    const selectedInbox = { id: "whatsapp-inbox-1", channel: "whatsapp" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    mockWorkspaceFind.mockResolvedValue({
+      id: "ws-1",
+      ownerId: "owner-1",
+      targetCountry: "VN",
+    })
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        email: "",
+        inboxId: selectedInbox.id,
+        phoneNumber: "0901234567",
+        channel: "whatsapp",
+        contactId: "",
+      },
+    })
+
+    expect(mockFindByPhone).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      phoneNumber: "+84901234567",
+    })
+    expect(mockContactInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phoneNumber: "+84901234567",
+        }),
+      }),
+    )
+    expect(mockContactInboxFindLatestBySource).toHaveBeenCalledWith({
+      inboxId: selectedInbox.id,
+      sourceId: "84901234567",
+      workspaceId: "ws-1",
+    })
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        inboxId: selectedInbox.id,
+        sourceId: "84901234567",
+      }),
+    )
+  })
+
+  test("an explicit country code in the phone beats the workspace's target/default country", async () => {
+    const selectedInbox = { id: "whatsapp-inbox-1", channel: "whatsapp" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    // Workspace default is VN, but the phone number itself carries a US "+1".
+    mockWorkspaceFind.mockResolvedValue({
+      id: "ws-1",
+      ownerId: "owner-1",
+      targetCountry: "VN",
+    })
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        email: "",
+        inboxId: selectedInbox.id,
+        phoneNumber: "+15551234567",
+        channel: "whatsapp",
+        contactId: "",
+      },
+    })
+
+    expect(mockFindByPhone).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      phoneNumber: "+15551234567",
+    })
+    expect(mockContactInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phoneNumber: "+15551234567",
+        }),
+      }),
+    )
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        inboxId: selectedInbox.id,
+        sourceId: "15551234567",
+      }),
+    )
+  })
+
+  test("strips separators (spaces, dashes, parens) before normalization", async () => {
+    const selectedInbox = { id: "whatsapp-inbox-1", channel: "whatsapp" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    mockWorkspaceFind.mockResolvedValue({
+      id: "ws-1",
+      ownerId: "owner-1",
+      targetCountry: "US",
+    })
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        email: "",
+        inboxId: selectedInbox.id,
+        phoneNumber: "(555) 123-4567",
+        channel: "whatsapp",
+        contactId: "",
+      },
+    })
+
+    expect(mockFindByPhone).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      phoneNumber: "+15551234567",
+    })
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        inboxId: selectedInbox.id,
+        sourceId: "15551234567",
+      }),
+    )
+  })
+
+  test("keeps an already-international-format number as-is", async () => {
+    const selectedInbox = { id: "whatsapp-inbox-1", channel: "whatsapp" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    mockWorkspaceFind.mockResolvedValue({
+      id: "ws-1",
+      ownerId: "owner-1",
+      targetCountry: "VN",
+    })
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        email: "",
+        inboxId: selectedInbox.id,
+        phoneNumber: "+84901234567",
+        channel: "whatsapp",
+        contactId: "",
+      },
+    })
+
+    expect(mockFindByPhone).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      phoneNumber: "+84901234567",
+    })
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        inboxId: selectedInbox.id,
+        sourceId: "84901234567",
+      }),
+    )
+  })
+
+  test("normalizes a non-WhatsApp-channel phone number against the resolved country", async () => {
+    const selectedInbox = { id: "messenger-inbox-1", channel: "messenger" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    mockWorkspaceFind.mockResolvedValue({
+      id: "ws-1",
+      ownerId: "owner-1",
+      targetCountry: "VN",
+    })
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        email: "",
+        inboxId: selectedInbox.id,
+        phoneNumber: "0901234567",
+        channel: "messenger",
+        contactId: "psid-123",
+      },
+    })
+
+    expect(mockFindByPhone).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      phoneNumber: "+84901234567",
+    })
+    expect(mockContactInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phoneNumber: "+84901234567",
+        }),
+      }),
+    )
+    // Non-WhatsApp channels key their source id on the channel-specific
+    // identifier (contactId), not the phone number.
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        inboxId: selectedInbox.id,
+        sourceId: "psid-123",
+      }),
+    )
+  })
+
+  test("an unresolvable non-WhatsApp phone number produces a validation error", async () => {
+    const selectedInbox = { id: "messenger-inbox-1", channel: "messenger" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    mockWorkspaceFind.mockResolvedValue({
+      id: "ws-1",
+      ownerId: "owner-1",
+    })
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: {
+          ...baseInput,
+          email: "",
+          inboxId: selectedInbox.id,
+          phoneNumber: "0901234567",
+          channel: "messenger",
+          contactId: "psid-123",
+        },
+      }),
+    ).rejects.toMatchObject({
+      field: "phoneNumber",
+      message: "Please include the country code (e.g. +84)",
+    })
+
+    expect(mockContactInsert).not.toHaveBeenCalled()
+    expect(mockCreateContactWithoutMac).not.toHaveBeenCalled()
+  })
+
+  test.each([
+    {
+      name: "unset",
+      workspace: { id: "ws-1", ownerId: "owner-1" },
+    },
+    {
+      name: "unknown",
+      workspace: { id: "ws-1", ownerId: "owner-1", targetCountry: "unknown" },
+    },
+  ])("requires a country code for local WhatsApp phone numbers when target country is $name", async ({
+    workspace,
+  }) => {
+    const selectedInbox = { id: "whatsapp-inbox-1", channel: "whatsapp" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    mockWorkspaceFind.mockResolvedValue(workspace)
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: {
+          ...baseInput,
+          email: "",
+          inboxId: selectedInbox.id,
+          phoneNumber: "0901234567",
+          channel: "whatsapp",
+          contactId: "",
+        },
+      }),
+    ).rejects.toMatchObject({
+      field: "phoneNumber",
+      message: "Please include the country code (e.g. +84)",
+    })
+
+    expect(mockContactInsert).not.toHaveBeenCalled()
+    expect(mockCreateContactWithoutMac).not.toHaveBeenCalled()
+  })
+
+  test("uses email as the source id for SMTP contacts", async () => {
+    const selectedInbox = { id: "smtp-inbox-1", channel: "smtp" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        inboxId: selectedInbox.id,
+        phoneNumber: "",
+        channel: "smtp",
+        contactId: "",
+      },
+    })
+
+    expect(mockContactInboxFindLatestBySource).toHaveBeenCalledWith({
+      inboxId: selectedInbox.id,
+      sourceId: "ada@example.com",
+      workspaceId: "ws-1",
+    })
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        inboxId: selectedInbox.id,
+        sourceId: "ada@example.com",
+      }),
+    )
+  })
+
+  test("uses a synthetic source id for webchat contacts", async () => {
+    const selectedInbox = { id: "webchat-inbox-1", channel: "webchat" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        email: "",
+        inboxId: selectedInbox.id,
+        phoneNumber: "",
+        channel: "webchat",
+        contactId: "",
+      },
+    })
+
+    expect(mockContactInboxFindLatestBySource).not.toHaveBeenCalled()
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({
+        inboxId: selectedInbox.id,
+        sourceId: "randomgenerated-id",
+      }),
+    )
+  })
+
+  test("rejects when the selected inbox channel does not match the requested source", async () => {
+    const selectedInbox = { id: "messenger-inbox-1", channel: "messenger" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: {
+          ...baseInput,
+          email: "",
+          inboxId: selectedInbox.id,
+          channel: "whatsapp",
+          contactId: "",
+        },
+      }),
+    ).rejects.toMatchObject({
+      field: "inboxId",
+      message: "Selected inbox does not match the selected source",
+    })
+
+    expect(mockContactInboxFindLatestBySource).not.toHaveBeenCalled()
+    expect(mockCreateContactWithoutMac).not.toHaveBeenCalled()
+  })
+
+  test("returns a field validation error when the selected inbox identity already exists", async () => {
+    const selectedInbox = { id: "messenger-inbox-1", channel: "messenger" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    mockContactInboxFindLatestBySource.mockResolvedValue({
+      id: "existing-contact-inbox-1",
+    })
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: {
+          ...baseInput,
+          email: "",
+          inboxId: selectedInbox.id,
+          phoneNumber: "",
+          channel: "messenger",
+          contactId: "psid-123",
+        },
+      }),
+    ).rejects.toMatchObject({
+      field: "contactId",
+      message: "This contact already exists on the selected inbox",
+    })
+
+    expect(mockCreateContactWithoutMac).not.toHaveBeenCalled()
+  })
+
+  test("dedups WhatsApp by the normalized phone number", async () => {
+    mockFindOrFail.mockResolvedValue({
+      id: "whatsapp-inbox-1",
+      channel: "whatsapp",
+    })
+    mockWorkspaceFind.mockResolvedValue({
+      id: "ws-1",
+      ownerId: "owner-1",
+      targetCountry: "VN",
+    })
+    mockFindByPhone.mockResolvedValue({ id: "existing-contact" })
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: {
+          ...baseInput,
+          email: "",
+          inboxId: "whatsapp-inbox-1",
+          phoneNumber: "0901234567",
+          channel: "whatsapp",
+          contactId: "",
+        },
+      }),
+    ).rejects.toMatchObject({
+      field: "phoneNumber",
+      message: "Phone number is exists",
+    })
+
+    expect(mockCreateContactWithoutMac).not.toHaveBeenCalled()
+  })
+
+  test("maps a duplicate WhatsApp wa_id to the phoneNumber field", async () => {
+    mockFindOrFail.mockResolvedValue({
+      id: "whatsapp-inbox-1",
+      channel: "whatsapp",
+    })
+    mockWorkspaceFind.mockResolvedValue({
+      id: "ws-1",
+      ownerId: "owner-1",
+      targetCountry: "VN",
+    })
+    mockContactInboxFindLatestBySource.mockResolvedValue({ id: "existing-ci" })
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: {
+          ...baseInput,
+          email: "",
+          inboxId: "whatsapp-inbox-1",
+          phoneNumber: "0901234567",
+          channel: "whatsapp",
+          contactId: "",
+        },
+      }),
+    ).rejects.toMatchObject({
+      field: "phoneNumber",
+      message: "This contact already exists on the selected inbox",
+    })
+
+    expect(mockCreateContactWithoutMac).not.toHaveBeenCalled()
+  })
+
+  test("maps a duplicate SMTP identity to the email field", async () => {
+    mockFindOrFail.mockResolvedValue({ id: "smtp-inbox-1", channel: "smtp" })
+    mockContactInboxFindLatestBySource.mockResolvedValue({ id: "existing-ci" })
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: {
+          ...baseInput,
+          inboxId: "smtp-inbox-1",
+          phoneNumber: "",
+          channel: "smtp",
+          contactId: "",
+        },
+      }),
+    ).rejects.toMatchObject({
+      field: "email",
+      message: "This contact already exists on the selected inbox",
+    })
+
+    expect(mockCreateContactWithoutMac).not.toHaveBeenCalled()
+  })
+
+  test("skips the phone dedup when no phone is provided", async () => {
+    mockFindOrFail.mockResolvedValue({ id: "smtp-inbox-1", channel: "smtp" })
+    mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        inboxId: "smtp-inbox-1",
+        phoneNumber: "",
+        channel: "smtp",
+        contactId: "",
+      },
+    })
+
+    expect(mockFindByPhone).not.toHaveBeenCalled()
+  })
+
+  test("records the direct source unless the caller names another", async () => {
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({ workspaceId: "ws-1", input: baseInput })
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({ source: "direct" }),
+    )
+
+    insertedRows.length = 0
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: baseInput,
+      source: "inboundWebhook",
+    })
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({ source: "inboundWebhook" }),
+    )
+    expect(insertedRows).not.toContainEqual(
+      expect.objectContaining({ source: "direct" }),
+    )
+  })
+
+  test("keeps the workspace-wide phone check by default", async () => {
+    mockCreateWithInsertedRows()
+
+    await createContactWithInbox({ workspaceId: "ws-1", input: baseInput })
+
+    expect(mockFindByPhone).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      phoneNumber: "+15551234567",
+    })
+  })
+
+  test("scopes phone identity to the inbox when asked, so another channel's contact does not block it", async () => {
+    const selectedInbox = { id: "whatsapp-inbox-1", channel: "whatsapp" }
+    mockFindOrFail.mockResolvedValue(selectedInbox)
+    mockFindByPhone.mockResolvedValue({ id: "contact-on-webchat" })
+    mockCreateWithInsertedRows()
+
+    const result = await createContactWithInbox({
+      workspaceId: "ws-1",
+      phoneUniqueness: "inbox",
+      input: {
+        ...baseInput,
+        email: "",
+        inboxId: selectedInbox.id,
+        channel: "whatsapp",
+        contactId: "",
+      },
+    })
+
+    expect(mockFindByPhone).not.toHaveBeenCalled()
+    expect(result.contact).toEqual(contact)
+  })
+
+  test("still rejects a contact already on the same inbox when phone identity is inbox-scoped", async () => {
+    mockFindOrFail.mockResolvedValue({ id: "wa-1", channel: "whatsapp" })
+    mockContactInboxFindLatestBySource.mockResolvedValue({ id: "existing" })
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        phoneUniqueness: "inbox",
+        input: {
+          ...baseInput,
+          email: "",
+          inboxId: "wa-1",
+          channel: "whatsapp",
+          contactId: "",
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: "This contact already exists on the selected inbox",
+    })
+  })
+
+  test("emits contact-created and analytics events on success", async () => {
+    mockFindOrFail.mockResolvedValue({
+      id: "webchat-inbox-1",
+      channel: "webchat",
+    })
+    mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        inboxId: "webchat-inbox-1",
+        phoneNumber: "",
+        channel: "webchat",
+        contactId: "",
+      },
+    })
+
+    expect(mockEmitContactCreated).toHaveBeenCalledWith(
+      "ws-1",
+      "contact-1",
+      "Ada",
+      "+15551234567",
+      "ada@example.com",
+      "contact-inbox-1",
+    )
+    expect(mockEmit).toHaveBeenCalledWith(
+      "analytics:dashboard",
+      expect.objectContaining({
+        eventType: "contact:created",
+        workspaceId: "ws-1",
+        channel: "webchat",
+        inboxId: "webchat-inbox-1",
+      }),
+    )
+  })
+})
+
+describe("contactService.createWithInbox — WhatsApp BSUID", () => {
+  const whatsappInbox = { id: "whatsapp-inbox-1", channel: "whatsapp" }
+  const bsuid = "US.13491208655302741918"
+  const whatsappInput = {
+    ...baseInput,
+    email: "",
+    inboxId: whatsappInbox.id,
+    channel: "whatsapp" as const,
+    contactId: "",
+  }
+
+  beforeEach(() => {
+    mockFindOrFail.mockResolvedValue(whatsappInbox)
+  })
+
+  test("keys a BSUID-only contact by the BSUID so sends route via `recipient`", async () => {
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: { ...whatsappInput, phoneNumber: "", sourceUserId: bsuid },
+    })
+
+    expect(mockFindByPhone).not.toHaveBeenCalled()
+    expect(mockContactInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({ sourceUserId: expect.anything() }),
+      }),
+    )
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({ sourceId: bsuid, sourceUserId: bsuid }),
+    )
+  })
+
+  test("keys by phone digits and stores the BSUID alongside when both are given", async () => {
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: { ...whatsappInput, sourceUserId: bsuid },
+    })
+
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({ sourceId: "15551234567", sourceUserId: bsuid }),
+    )
+    expect(mockFindExistingSourceIdentities).toHaveBeenCalledWith({
+      inboxId: whatsappInbox.id,
+      sourceIds: [],
+      sourceUserIds: [bsuid],
+    })
+  })
+
+  test("rejects a BSUID already on the inbox on the sourceUserId field", async () => {
+    mockFindExistingSourceIdentities.mockResolvedValue({
+      sourceIds: new Set(),
+      sourceUserIds: new Set([bsuid]),
+    })
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: { ...whatsappInput, sourceUserId: bsuid },
+      }),
+    ).rejects.toMatchObject({ field: "sourceUserId" })
+    expect(mockCreateContactWithoutMac).not.toHaveBeenCalled()
+  })
+
+  test("reports a BSUID-keyed duplicate source id on the sourceUserId field", async () => {
+    mockContactInboxFindLatestBySource.mockResolvedValue({ id: "existing" })
+
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: { ...whatsappInput, phoneNumber: "", sourceUserId: bsuid },
+      }),
+    ).rejects.toMatchObject({ field: "sourceUserId" })
+  })
+
+  test("still requires a phone when no BSUID is given", async () => {
+    await expect(
+      createContactWithInbox({
+        workspaceId: "ws-1",
+        input: { ...whatsappInput, phoneNumber: "" },
+      }),
+    ).rejects.toMatchObject({ field: "phoneNumber" })
+  })
+
+  test("ignores a BSUID on a non-WhatsApp channel", async () => {
+    mockFindOrFail.mockResolvedValue({ id: "inbox-1", channel: "messenger" })
+    const insertedRows = mockCreateWithInsertedRows()
+
+    await createContactWithInbox({
+      workspaceId: "ws-1",
+      input: {
+        ...baseInput,
+        channel: "messenger",
+        contactId: "psid-1",
+        sourceUserId: bsuid,
+      },
+    })
+
+    expect(mockFindExistingSourceIdentities).not.toHaveBeenCalled()
+    expect(insertedRows).toContainEqual(
+      expect.objectContaining({ sourceId: "psid-1", sourceUserId: null }),
+    )
+  })
+})

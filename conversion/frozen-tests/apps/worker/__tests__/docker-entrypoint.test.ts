@@ -1,0 +1,215 @@
+import { execFileSync } from "node:child_process"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join, sep } from "node:path"
+import { fileURLToPath } from "node:url"
+import { afterEach, beforeEach, describe, expect, test } from "vitest"
+
+const SCRIPT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../docker/rootfs/usr/local/bin/docker-entrypoint.sh",
+)
+
+// Mirrors the real dist/ layout: one worker*.mjs per tsdown entry, plus a
+// `foo` worker that exists in no hardcoded list — proving auto-discovery.
+const STANDARD_WORKERS = [
+  "chat",
+  "events",
+  "integration",
+  "ai-agent",
+  "heavy",
+  "default",
+  "trigger",
+  "webhook",
+  "schedule",
+  "sequence-scheduler",
+  "foo",
+]
+
+let distDir: string
+
+// The shell script joins with "/" even on Windows, while `join` uses "\\":
+// compare both sides with the same separator, never a different expectation.
+function posix(path: string): string {
+  return path.split(sep).join("/")
+}
+
+function touch(path: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, "")
+}
+
+function run(
+  args: string[],
+  env: Record<string, string> = {},
+): { stdout: string; status: number } {
+  try {
+    const stdout = execFileSync("sh", [SCRIPT, ...args], {
+      // /bin/echo stub avoids launching node: a resolved `worker <name>` exec
+      // simply echoes the script path instead of running it.
+      env: {
+        ...process.env,
+        NODE_OPTIONS: "",
+        WORKER_DIST_DIR: distDir,
+        NODE_BIN: "/bin/echo",
+        ...env,
+      },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    return { stdout, status: 0 }
+  } catch (error) {
+    const err = error as { status?: number; stdout?: string; stderr?: string }
+    return {
+      stdout: `${err.stdout ?? ""}${err.stderr ?? ""}`,
+      status: err.status ?? 1,
+    }
+  }
+}
+
+beforeEach(() => {
+  distDir = mkdtempSync(join(tmpdir(), "worker-dist-"))
+  for (const w of STANDARD_WORKERS) {
+    touch(join(distDir, w, "worker.mjs"))
+  }
+  touch(join(distDir, "sequence-scheduler", "worker-producer.mjs"))
+  touch(join(distDir, "sequence-scheduler", "worker-consumer.mjs"))
+  touch(join(distDir, "core.mjs"))
+  touch(join(distDir, "standalone.mjs"))
+})
+afterEach(() => {
+  rmSync(distDir, { recursive: true, force: true })
+})
+
+describe("docker-entrypoint worker discovery", () => {
+  test("resolves a standard worker to its dist bundle", () => {
+    const { stdout, status } = run(["worker", "chat"])
+    expect(status).toBe(0)
+    expect(posix(stdout.trim())).toBe(
+      posix(join(distDir, "chat", "worker.mjs")),
+    )
+  })
+
+  test("aliases sequence variants to their historical CLI names", () => {
+    expect(posix(run(["worker", "sequence-producer"]).stdout.trim())).toBe(
+      posix(join(distDir, "sequence-scheduler", "worker-producer.mjs")),
+    )
+    expect(posix(run(["worker", "sequence-consumer"]).stdout.trim())).toBe(
+      posix(join(distDir, "sequence-scheduler", "worker-consumer.mjs")),
+    )
+  })
+
+  test("auto-discovers a new worker with no script edit", () => {
+    const { stdout, status } = run(["worker", "foo"])
+    expect(status).toBe(0)
+    expect(posix(stdout.trim())).toBe(posix(join(distDir, "foo", "worker.mjs")))
+  })
+
+  test("rejects a worker that was not built (e.g. removed analytics)", () => {
+    const { stdout, status } = run(["worker", "analytics"])
+    expect(status).toBe(3)
+    expect(stdout).toContain("Usage:")
+  })
+
+  test("usage lists discovered workers including events and sequence variants", () => {
+    const { stdout } = run(["worker", "badname"])
+    expect(stdout).toContain("events")
+    expect(stdout).toContain("sequence-producer")
+    expect(stdout).toContain("sequence-consumer")
+    // The stale analytics worker must never appear.
+    expect(stdout).not.toContain("analytics")
+  })
+
+  test("errors when no worker bundles are present", () => {
+    rmSync(distDir, { recursive: true, force: true })
+    mkdirSync(distDir, { recursive: true })
+    const { stdout, status } = run(["worker", "all"])
+    expect(status).toBe(4)
+    expect(stdout).toContain("No worker bundles found")
+  })
+
+  test("runs standalone and core bundles outside the all-mode roster", () => {
+    expect(posix(run(["worker", "core"]).stdout.trim())).toBe(
+      posix(join(distDir, "core.mjs")),
+    )
+    expect(posix(run(["worker", "standalone"]).stdout.trim())).toBe(
+      posix(join(distDir, "standalone.mjs")),
+    )
+    expect(run(["worker", "badname"]).stdout).not.toContain(
+      `${sep}core${sep}worker`,
+    )
+  })
+
+  test("caps all-mode worker heaps only when configured", () => {
+    const fakeNode = join(distDir, "fake-node.sh")
+    writeFileSync(fakeNode, '#!/bin/sh\nprintf "%s\\n" "$NODE_OPTIONS"\n')
+    chmodSync(fakeNode, 0o755)
+
+    expect(run(["worker", "all"], { NODE_BIN: fakeNode }).stdout).not.toContain(
+      "--max-old-space-size",
+    )
+    expect(
+      run(["worker", "all"], {
+        NODE_BIN: fakeNode,
+        WORKER_MAX_OLD_SPACE_MB: "384",
+      }).stdout,
+    ).toContain("--max-old-space-size=384")
+    expect(
+      run(["worker", "standalone"], { NODE_BIN: fakeNode }).stdout,
+    ).not.toContain("--max-old-space-size")
+  })
+
+  test("sets shared pool and shutdown defaults for consolidated worker modes", () => {
+    const fakeNode = join(distDir, "fake-node.sh")
+    writeFileSync(
+      fakeNode,
+      '#!/bin/sh\nprintf "%s|%s|%s\\n" "$DATABASE_POOL_MAX" "$SHARD_POOL_MAX" "$WORKER_SHUTDOWN_TIMEOUT_MS"\n',
+    )
+    chmodSync(fakeNode, 0o755)
+
+    const emptyLimits = {
+      DATABASE_POOL_MAX: "",
+      SHARD_POOL_MAX: "",
+      WORKER_SHUTDOWN_TIMEOUT_MS: "",
+      NODE_BIN: fakeNode,
+    }
+
+    expect(run(["worker", "standalone"], emptyLimits).stdout.trim()).toBe(
+      "80|40|8000",
+    )
+    expect(run(["worker", "core"], emptyLimits).stdout.trim()).toBe(
+      "80|40|8000",
+    )
+    expect(run(["worker", "chat"], emptyLimits).stdout.trim()).toBe("||")
+    expect(
+      run(["worker", "standalone"], {
+        ...emptyLimits,
+        DATABASE_POOL_MAX: "72",
+        SHARD_POOL_MAX: "80",
+        WORKER_SHUTDOWN_TIMEOUT_MS: "12000",
+      }).stdout.trim(),
+    ).toBe("72|80|12000")
+  })
+
+  test("keeps only core workers out of development cron startup", () => {
+    expect(
+      readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "../src/core.ts"),
+        "utf8",
+      ),
+    ).not.toContain('import "./schedule/worker"')
+    expect(
+      readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "../src/standalone.ts"),
+        "utf8",
+      ),
+    ).toContain('import "./schedule/worker"')
+  })
+})

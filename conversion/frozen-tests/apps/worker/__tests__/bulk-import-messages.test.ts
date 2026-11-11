@@ -1,0 +1,932 @@
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+// ---------------------------------------------------------------------------
+// Hoist mocks
+// ---------------------------------------------------------------------------
+
+const {
+  mockBulkCreate,
+  mockBulkCreateAttachments,
+  mockCreateMessageRepository,
+  mockDbInsert,
+  mockTxInsert,
+  mockTxExecute,
+  mockDbUpdate,
+  mockDbExecute,
+  mockDbTransaction,
+  mockBackdateCreatedAt,
+} = vi.hoisted(() => {
+  const txChain = {
+    values: vi.fn(),
+    onConflictDoNothing: vi.fn(),
+    returning: vi.fn().mockResolvedValue([]),
+  }
+  txChain.values.mockReturnValue(txChain)
+  txChain.onConflictDoNothing.mockReturnValue(txChain)
+
+  const mockTxInsert = vi.fn().mockReturnValue(txChain)
+  const mockTxExecute = vi.fn().mockResolvedValue(undefined)
+
+  const mockDbTransaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) =>
+    fn({ insert: mockTxInsert, execute: mockTxExecute, update: vi.fn() }),
+  )
+
+  const dbInsertChain = {
+    values: vi.fn(),
+    onConflictDoNothing: vi.fn(),
+    returning: vi.fn().mockResolvedValue([]),
+  }
+  dbInsertChain.values.mockReturnValue(dbInsertChain)
+  dbInsertChain.onConflictDoNothing.mockReturnValue(dbInsertChain)
+
+  const mockDbInsert = vi.fn().mockReturnValue(dbInsertChain)
+
+  const mockBulkCreate = vi.fn().mockResolvedValue([])
+  const mockBulkCreateAttachments = vi.fn().mockResolvedValue([])
+  const mockCreateMessageRepository = vi.fn().mockResolvedValue({
+    bulkCreate: mockBulkCreate,
+    bulkCreateAttachments: mockBulkCreateAttachments,
+  })
+
+  const updateChain = { set: vi.fn(), where: vi.fn() }
+  updateChain.set.mockReturnValue(updateChain)
+  updateChain.where.mockResolvedValue(undefined)
+  const mockDbUpdate = vi.fn().mockReturnValue(updateChain)
+
+  return {
+    mockBulkCreate,
+    mockBulkCreateAttachments,
+    mockCreateMessageRepository,
+    mockDbInsert,
+    mockTxInsert,
+    mockTxExecute,
+    mockDbUpdate,
+    mockDbExecute: vi.fn().mockResolvedValue(undefined),
+    mockDbTransaction,
+    mockBackdateCreatedAt: vi.fn().mockResolvedValue([]),
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Module mocks
+// ---------------------------------------------------------------------------
+
+vi.mock("@chatbotx.io/database/repositories", () => ({
+  createMessageRepository: mockCreateMessageRepository,
+  contactRepository: {
+    backdateCreatedAt: mockBackdateCreatedAt,
+  },
+}))
+
+vi.mock("@chatbotx.io/database/client", () => ({
+  db: {
+    insert: mockDbInsert,
+    update: mockDbUpdate,
+    transaction: mockDbTransaction,
+    execute: mockDbExecute,
+    query: {},
+  },
+  describeDatabaseError: vi.fn((error: unknown) => {
+    const cause = error instanceof Error ? error.cause : undefined
+    if (typeof cause === "object" && cause !== null && "code" in cause) {
+      const dbCause = cause as {
+        code?: string
+        constraint?: string
+        detail?: string
+        message?: string
+      }
+      return {
+        code: dbCause.code,
+        constraint: dbCause.constraint,
+        detail: dbCause.detail,
+        message: dbCause.message,
+      }
+    }
+    return { message: error instanceof Error ? error.message : String(error) }
+  }),
+  eq: vi.fn((col: unknown, val: unknown) => ({ __eq: [col, val] })),
+  inArray: vi.fn(),
+  sql: Object.assign(
+    (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
+    {
+      raw: (s: string) => s,
+      join: (chunks: unknown[], _sep?: unknown) => ({ __join: chunks }),
+    },
+  ),
+}))
+
+// Partial: `@chatbotx.io/database/queries` builds filter maps from schema
+// tables at module scope, so replacing the whole module breaks the import
+// chain (e.g. `contactsToTagsModel`).
+vi.mock("@chatbotx.io/database/schema", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@chatbotx.io/database/schema")>()
+  return {
+    ...actual,
+    messageModel: {
+      id: "id",
+      sourceId: "sourceId",
+      contactInboxId: "contactInboxId",
+    },
+    attachmentModel: { id: "id", messageId: "messageId" },
+    contactModel: { id: "id" },
+    contactInboxModel: {},
+    conversationModel: {},
+    workspaceModel: {},
+    userQuotaModel: {},
+  }
+})
+
+vi.mock("@chatbotx.io/redis", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@chatbotx.io/redis")>()
+  return {
+    ...actual,
+    invalidateCacheByTags: vi.fn().mockResolvedValue(undefined),
+    withCache: vi.fn((_key: string, fn: () => unknown) => fn()),
+    // Referenced at module scope by transitive imports (analytics mac-tracking).
+    bloomFilter: {},
+    cacheConnections: { useExisting: vi.fn(), create: vi.fn() },
+    distributedStore: {},
+    distributedLock: {
+      runExclusive: vi.fn(async (_k: string, fn: () => unknown) => fn()),
+    },
+  }
+})
+
+vi.mock("@chatbotx.io/event-bus", () => ({
+  emit: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock("@chatbotx.io/events", () => ({
+  emitContactCreated: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock("p-limit", () => ({ default: () => (fn: () => unknown) => fn() }))
+vi.mock("../src/lib/logger", () => ({
+  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}))
+
+// ---------------------------------------------------------------------------
+// Import after mocks
+// ---------------------------------------------------------------------------
+
+const { bulkImportMessages, applyCoexistActivityUpdates } = await import(
+  "../src/integration/handlers/coexist/bulk-historical-import"
+)
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const BASE_PROPS = {
+  workspaceId: "ws-1",
+  runId: "99999999999",
+  contactInboxId: "ci-1",
+  contactId: "contact-1",
+  conversationId: "conv-1",
+}
+
+function makeMessage(sourceId: string) {
+  return {
+    sourceId,
+    text: "hello",
+    messageType: "incoming" as const,
+    contentType: "text" as const,
+    createdAt: new Date("2026-06-18T08:00:00.000Z"),
+    attachments: [],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("bulkImportMessages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockBulkCreate.mockResolvedValue([])
+    mockBulkCreateAttachments.mockResolvedValue([])
+    mockCreateMessageRepository.mockResolvedValue({
+      bulkCreate: mockBulkCreate,
+      bulkCreateAttachments: mockBulkCreateAttachments,
+    })
+    mockDbTransaction.mockImplementation(
+      (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({ insert: mockTxInsert, execute: mockTxExecute, update: vi.fn() }),
+    )
+  })
+
+  test("returns empty result when messages array is empty", async () => {
+    const result = await bulkImportMessages({ ...BASE_PROPS, messages: [] })
+
+    expect(result.importedMessages).toBe(0)
+    expect(result.skippedMessages).toBe(0)
+    expect(mockBulkCreate).not.toHaveBeenCalled()
+  })
+
+  test("calls repository.bulkCreate() for message rows", async () => {
+    mockBulkCreate.mockResolvedValue([{ id: "msg-1", sourceId: "src-1" }])
+
+    await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [makeMessage("src-1")],
+    })
+
+    expect(mockCreateMessageRepository).toHaveBeenCalled()
+    expect(mockBulkCreate).toHaveBeenCalledTimes(1)
+  })
+
+  test("does NOT call db.insert(messageModel) directly for message rows", async () => {
+    mockBulkCreate.mockResolvedValue([{ id: "msg-1", sourceId: "src-1" }])
+
+    await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [makeMessage("src-1")],
+    })
+
+    // db.insert may be called for attachments, but never with messageModel
+    const messageModelMock = (await import("@chatbotx.io/database/schema"))
+      .messageModel
+    for (const call of mockDbInsert.mock.calls) {
+      expect(call[0]).not.toBe(messageModelMock)
+    }
+    for (const call of mockTxInsert.mock.calls) {
+      expect(call[0]).not.toBe(messageModelMock)
+    }
+  })
+
+  test("returns correct importedMessages count from bulkCreate result", async () => {
+    mockBulkCreate.mockResolvedValue([
+      { id: "100000000000001", sourceId: "src-1" },
+      { id: "100000000000002", sourceId: "src-2" },
+    ])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [makeMessage("src-1"), makeMessage("src-2")],
+    })
+
+    expect(result.importedMessages).toBe(2)
+  })
+
+  test("returns correct skippedMessages = total messages - inserted", async () => {
+    mockBulkCreate.mockResolvedValue([{ id: "msg-1", sourceId: "src-1" }])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [makeMessage("src-1"), makeMessage("src-2")],
+    })
+
+    expect(result.skippedMessages).toBe(1)
+  })
+
+  test("inserts attachments via repository.bulkCreateAttachments (shard-aware, not tx.insert)", async () => {
+    mockBulkCreate.mockResolvedValue([{ id: "msg-1", sourceId: "src-1" }])
+
+    await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [
+        {
+          sourceId: "src-1",
+          text: "with attachment",
+          messageType: "incoming",
+          contentType: "text",
+          createdAt: new Date("2026-06-18T08:00:00.000Z"),
+          attachments: [
+            {
+              sourceId: "att-1",
+              fileType: "image",
+              mimeType: "image/jpeg",
+              originPath: "/path/to/img.jpg",
+              size: 1024,
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(mockBulkCreateAttachments).toHaveBeenCalledTimes(1)
+    const [rows] = mockBulkCreateAttachments.mock.calls[0]
+    expect(rows).toHaveLength(1)
+    expect(rows[0].messageId).toBe("msg-1")
+    expect(rows[0].workspaceId).toBe("ws-1")
+    // messageCreatedAt must be set so shard repository can partition by it
+    expect(rows[0].messageCreatedAt).toBeInstanceOf(Date)
+    // attachments must NOT go through main-DB tx.insert (causes FK violation when sharding)
+    expect(mockTxInsert).not.toHaveBeenCalled()
+  })
+
+  test("retries with regenerated IDs on a Message PK collision (TimescaleDB chunk constraint via drizzle .cause)", async () => {
+    // Real shape: drizzle wraps the pg error; code/constraint live on `.cause`,
+    // and TimescaleDB reports the chunk-prefixed constraint name.
+    const pkError = Object.assign(new Error("duplicate key value"), {
+      cause: { code: "23505", constraint: "17_17_Message_pkey" },
+    })
+    mockBulkCreate
+      .mockRejectedValueOnce(pkError)
+      .mockResolvedValueOnce([{ id: "msg-retry", sourceId: "src-1" }])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [makeMessage("src-1")],
+    })
+
+    expect(mockBulkCreate).toHaveBeenCalledTimes(2)
+    const firstRows = mockBulkCreate.mock.calls[0][0] as { id: string }[]
+    const secondRows = mockBulkCreate.mock.calls[1][0] as {
+      id: string
+      sourceId: string
+    }[]
+    // Same message (sourceId), but a fresh ID on retry to dodge the collision.
+    expect(secondRows[0].sourceId).toBe("src-1")
+    expect(secondRows[0].id).not.toBe(firstRows[0].id)
+    expect(result.importedMessages).toBe(1)
+  })
+
+  test("converges a multi-row PK collision by splitting and re-minting only the colliding row", async () => {
+    // Batch of two distinct messages; only src-2 collides with an existing DB
+    // row on (id, createdAt). The bulk insert fails, the batch is split, the
+    // src-1 half inserts cleanly, and only src-2 is re-minted to a free slot.
+    const pkError = Object.assign(new Error("duplicate key value"), {
+      cause: { code: "23505", constraint: "173_Message_pkey" },
+    })
+
+    let call = 0
+    mockBulkCreate.mockImplementation(
+      (rows: { id: string; sourceId: string | null }[]) => {
+        call++
+        // call 1: the full batch [src-1, src-2] — collides.
+        // call 3: the isolated original src-2 — still collides.
+        if (call === 1 || call === 3) {
+          throw pkError
+        }
+        // call 2: [src-1] inserts; call 4: [re-minted src-2] inserts.
+        return rows.map((r) => ({ id: r.id, sourceId: r.sourceId }))
+      },
+    )
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [makeMessage("src-1"), makeMessage("src-2")],
+    })
+
+    expect(mockBulkCreate).toHaveBeenCalledTimes(4)
+    // Both messages land — no data loss from the collision.
+    expect(result.importedMessages).toBe(2)
+
+    const originalSrc2Id = (
+      mockBulkCreate.mock.calls[2][0] as { id: string; sourceId: string }[]
+    )[0].id
+    const remintedSrc2Id = (
+      mockBulkCreate.mock.calls[3][0] as { id: string; sourceId: string }[]
+    )[0].id
+    // The isolated collider is re-minted to a different id; src-1 is untouched.
+    expect(remintedSrc2Id).not.toBe(originalSrc2Id)
+    const src1Call = mockBulkCreate.mock.calls[1][0] as {
+      id: string
+      sourceId: string
+    }[]
+    expect(src1Call[0].sourceId).toBe("src-1")
+  })
+
+  test("does not bump activity itself — returns message timestamps for the caller to batch", async () => {
+    // Activity bumps (lastMessageAt / lastActivityAt) are the caller's job now;
+    // bulkImportMessages only inserts and reports the newest message time.
+    const newest = new Date("2026-06-20T10:00:00.000Z")
+    const older = new Date("2026-06-19T08:00:00.000Z")
+    mockBulkCreate.mockResolvedValue([
+      { id: "100000000000001", sourceId: "src-1" },
+      { id: "100000000000002", sourceId: "src-2" },
+    ])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [
+        { ...makeMessage("src-1"), createdAt: older },
+        { ...makeMessage("src-2"), createdAt: newest },
+      ],
+    })
+
+    expect(result.newestMessageAt).toEqual(newest)
+    expect(result.oldestMessageAt).toEqual(older)
+    // No per-contact activity UPDATE — leaves that to applyCoexistActivityUpdates.
+    expect(mockDbUpdate).not.toHaveBeenCalled()
+  })
+
+  test("reports newest and oldest message timestamps only from API message timestamps", async () => {
+    const apiTimestamp = new Date("2026-06-19T08:00:00.000Z")
+    mockBulkCreate.mockResolvedValue([
+      { id: "100000000000001", sourceId: "src-with-api-time" },
+      { id: "100000000000002", sourceId: "src-without-api-time" },
+    ])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [
+        { ...makeMessage("src-with-api-time"), createdAt: apiTimestamp },
+        { ...makeMessage("src-without-api-time"), createdAt: undefined },
+      ],
+    })
+
+    expect(result.newestMessageAt).toEqual(apiTimestamp)
+    expect(result.oldestMessageAt).toEqual(apiTimestamp)
+    expect(result.skippedMessages).toBe(0)
+    const rows = mockBulkCreate.mock.calls[0][0] as Array<{
+      sourceId: string
+      createdAt: Date
+    }>
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.sourceId).toBe("src-with-api-time")
+    expect(rows[1]?.sourceId).toBe("src-without-api-time")
+    expect(rows[1]?.createdAt).toBeInstanceOf(Date)
+  })
+
+  test("reports newestIncomingMessageAt only from incoming API message timestamps", async () => {
+    const incomingTimestamp = new Date("2026-06-19T08:00:00.000Z")
+    const newerOutgoingTimestamp = new Date("2026-06-20T10:00:00.000Z")
+    mockBulkCreate.mockResolvedValue([
+      { id: "100000000000001", sourceId: "src-incoming" },
+      { id: "100000000000002", sourceId: "src-outgoing" },
+    ])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [
+        {
+          ...makeMessage("src-incoming"),
+          messageType: "incoming",
+          createdAt: incomingTimestamp,
+        },
+        {
+          ...makeMessage("src-outgoing"),
+          messageType: "outgoing",
+          createdAt: newerOutgoingTimestamp,
+        },
+      ],
+    })
+
+    expect(result.newestMessageAt).toEqual(newerOutgoingTimestamp)
+    expect(result.oldestMessageAt).toEqual(incomingTimestamp)
+    expect(result.newestIncomingMessageAt).toEqual(incomingTimestamp)
+  })
+
+  test("fails loudly when a single row cannot find a free slot after the re-mint cap", async () => {
+    // A row that keeps colliding on every re-mint must eventually give up with a
+    // clear error rather than looping forever.
+    const pkError = Object.assign(new Error("duplicate key value"), {
+      cause: { code: "23505", constraint: "173_Message_pkey" },
+    })
+    mockBulkCreate.mockRejectedValue(pkError)
+
+    await expect(
+      bulkImportMessages({ ...BASE_PROPS, messages: [makeMessage("src-1")] }),
+    ).rejects.toThrow("unresolved after")
+    // Initial bulk insert plus the bounded re-mint attempts — proves it looped
+    // and gave up, not that it tried once.
+    expect(mockBulkCreate.mock.calls.length).toBeGreaterThan(2)
+  })
+
+  test("does NOT retry on non-PK errors — they propagate", async () => {
+    const fkError = Object.assign(new Error("fk violation"), {
+      cause: { code: "23503", constraint: "Message_conversationId_fkey" },
+    })
+    mockBulkCreate.mockRejectedValueOnce(fkError)
+
+    await expect(
+      bulkImportMessages({ ...BASE_PROPS, messages: [makeMessage("src-1")] }),
+    ).rejects.toThrow("fk violation")
+    expect(mockBulkCreate).toHaveBeenCalledTimes(1)
+  })
+
+  test("newestMessageId returns null when nothing is inserted", async () => {
+    mockBulkCreate.mockResolvedValue([])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [makeMessage("src-1")],
+    })
+
+    expect(result.newestMessageId).toBeNull()
+  })
+
+  test("newestMessageId is the OUTGOING message's id when the newest inserted message is outgoing", async () => {
+    // Direction-agnostic: id 200000000000002 (outgoing) is newer than
+    // 100000000000001 (incoming) purely by numeric id, independent of
+    // messageType.
+    mockBulkCreate.mockResolvedValue([
+      { id: "100000000000001", sourceId: "src-incoming" },
+      { id: "200000000000002", sourceId: "src-outgoing" },
+    ])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [
+        { ...makeMessage("src-incoming"), messageType: "incoming" },
+        { ...makeMessage("src-outgoing"), messageType: "outgoing" },
+      ],
+    })
+
+    expect(result.newestMessageId).toBe("200000000000002")
+  })
+
+  test("newestMessageId is the INCOMING message's id when the newest inserted message is incoming (mirror case)", async () => {
+    mockBulkCreate.mockResolvedValue([
+      { id: "200000000000002", sourceId: "src-outgoing" },
+      { id: "300000000000003", sourceId: "src-incoming" },
+    ])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [
+        { ...makeMessage("src-outgoing"), messageType: "outgoing" },
+        { ...makeMessage("src-incoming"), messageType: "incoming" },
+      ],
+    })
+
+    expect(result.newestMessageId).toBe("300000000000003")
+  })
+
+  test("newestMessageId is non-null even when every message used fallbackCreatedAt (invalid API timestamps)", async () => {
+    // HIGH fix from review: newestMessageId is computed from ALL insertedRows,
+    // independent of newestMessageAt (which only counts valid API timestamps).
+    mockBulkCreate.mockResolvedValue([
+      { id: "400000000000004", sourceId: "src-1" },
+    ])
+
+    const result = await bulkImportMessages({
+      ...BASE_PROPS,
+      messages: [{ ...makeMessage("src-1"), createdAt: undefined }],
+    })
+
+    expect(result.newestMessageAt).toBeNull()
+    expect(result.newestMessageId).toBe("400000000000004")
+  })
+})
+
+describe("applyCoexistActivityUpdates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test("issues exactly ONE UPDATE per table for the whole bulk (not per contact)", async () => {
+    await applyCoexistActivityUpdates(
+      [
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: new Date("2026-06-20T10:00:00.000Z"),
+          oldestMessageAt: new Date("2026-06-20T09:00:00.000Z"),
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: "100000000000001",
+        },
+        {
+          contactInboxId: "ci-2",
+          contactId: "contact-2",
+          conversationId: "conv-2",
+          newestMessageAt: new Date("2026-06-21T10:00:00.000Z"),
+          oldestMessageAt: new Date("2026-06-21T09:00:00.000Z"),
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: "200000000000002",
+        },
+        {
+          contactInboxId: "ci-3",
+          contactId: "contact-3",
+          conversationId: "conv-3",
+          newestMessageAt: new Date("2026-06-22T10:00:00.000Z"),
+          oldestMessageAt: new Date("2026-06-22T09:00:00.000Z"),
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: "300000000000003",
+        },
+      ],
+      { workspaceId: "ws-1" },
+    )
+
+    // 3 contacts → still 2 statements total (ContactInbox + Conversation),
+    // not 6. This is the "limit queries in the loop" guarantee.
+    expect(mockDbExecute).toHaveBeenCalledTimes(2)
+  })
+
+  test("updates ContactInbox first and last message timestamps from API message time", async () => {
+    const incomingAt = new Date("2026-06-19T08:00:00.000Z")
+    const firstAt = new Date("2026-06-18T08:00:00.000Z")
+    const latestAt = new Date("2026-06-20T10:00:00.000Z")
+    await applyCoexistActivityUpdates(
+      [
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: latestAt,
+          oldestMessageAt: firstAt,
+          newestIncomingMessageAt: incomingAt,
+          aiMarkerMessageId: "100000000000001",
+        },
+      ],
+      { workspaceId: "ws-1" },
+    )
+
+    const contactInboxSql = mockDbExecute.mock.calls[0]?.[0] as
+      | { strings?: TemplateStringsArray; values?: unknown[] }
+      | undefined
+
+    expect(contactInboxSql?.strings?.join("")).toContain('"lastMessageAt"')
+    expect(contactInboxSql?.strings?.join("")).toContain('"firstInteractionAt"')
+    expect(contactInboxSql?.strings?.join("")).toContain(
+      '"lastIncomingMessageAt"',
+    )
+    // A synced contact inbox is dated from the first message, never from the
+    // sync's wall clock — and only ever moved back.
+    expect(contactInboxSql?.strings?.join("")).toContain(
+      '"createdAt" = LEAST(t."createdAt", u.created_ts)',
+    )
+    expect(contactInboxSql?.strings?.join("")).toContain("VALUES")
+    expect(contactInboxSql?.strings?.join("")).not.toContain("unnest")
+
+    const contactRows = contactInboxSql?.values?.[0] as
+      | { __join?: Array<{ values?: unknown[] }> }
+      | undefined
+    expect(contactRows?.__join?.[0]?.values).toEqual([
+      "ci-1",
+      "contact-1",
+      "ws-1",
+      latestAt,
+      firstAt,
+      incomingAt,
+      firstAt,
+    ])
+
+    // The owning Contact is dated from the same first message.
+    expect(mockBackdateCreatedAt).toHaveBeenCalledTimes(1)
+    expect(mockBackdateCreatedAt).toHaveBeenCalledWith([
+      { contactId: "contact-1", workspaceId: "ws-1", createdAt: firstAt },
+    ])
+
+    const conversationSql = mockDbExecute.mock.calls[1]?.[0] as
+      | { strings?: TemplateStringsArray }
+      | undefined
+    expect(conversationSql?.strings?.join("")).not.toContain('"createdAt"')
+    expect(conversationSql?.strings?.join("")).toContain("VALUES")
+    expect(conversationSql?.strings?.join("")).not.toContain("unnest")
+    expect(conversationSql?.strings?.join("")).toContain(
+      '"aiContextLastMessageId"',
+    )
+  })
+
+  test("does not derive ContactInbox.lastIncomingMessageAt from an outgoing-only latest message", async () => {
+    const outgoingAt = new Date("2026-06-20T10:00:00.000Z")
+    await applyCoexistActivityUpdates(
+      [
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: outgoingAt,
+          oldestMessageAt: outgoingAt,
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: "100000000000001",
+        },
+      ],
+      { workspaceId: "ws-1" },
+    )
+
+    const contactInboxSql = mockDbExecute.mock.calls[0]?.[0] as
+      | { values?: unknown[] }
+      | undefined
+
+    const contactRows = contactInboxSql?.values?.[0] as
+      | { __join?: Array<{ values?: unknown[] }> }
+      | undefined
+    expect(contactRows?.__join?.[0]?.values).toEqual([
+      "ci-1",
+      "contact-1",
+      "ws-1",
+      outgoingAt,
+      outgoingAt,
+      null,
+      outgoingAt,
+    ])
+  })
+
+  test("deduplicates repeated activity updates to the newest and oldest API message times", async () => {
+    const oldestMessage = new Date("2026-06-18T08:00:00.000Z")
+    const olderMessage = new Date("2026-06-19T08:00:00.000Z")
+    const newerMessage = new Date("2026-06-20T10:00:00.000Z")
+    const olderIncoming = new Date("2026-06-19T07:00:00.000Z")
+    const newerIncoming = new Date("2026-06-20T09:00:00.000Z")
+
+    await applyCoexistActivityUpdates(
+      [
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: newerMessage,
+          oldestMessageAt: olderMessage,
+          newestIncomingMessageAt: olderIncoming,
+          aiMarkerMessageId: "100000000000001",
+        },
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: olderMessage,
+          oldestMessageAt: oldestMessage,
+          newestIncomingMessageAt: newerIncoming,
+          aiMarkerMessageId: "200000000000002",
+        },
+      ],
+      { workspaceId: "ws-1" },
+    )
+
+    const contactInboxSql = mockDbExecute.mock.calls[0]?.[0] as
+      | { values?: unknown[] }
+      | undefined
+    const contactRows = contactInboxSql?.values?.[0] as
+      | { __join?: Array<{ values?: unknown[] }> }
+      | undefined
+    expect(contactRows?.__join).toHaveLength(1)
+    expect(contactRows?.__join?.[0]?.values).toEqual([
+      "ci-1",
+      "contact-1",
+      "ws-1",
+      newerMessage,
+      oldestMessage,
+      newerIncoming,
+      oldestMessage,
+    ])
+    expect(mockBackdateCreatedAt).toHaveBeenCalledWith([
+      { contactId: "contact-1", workspaceId: "ws-1", createdAt: oldestMessage },
+    ])
+
+    const conversationSql = mockDbExecute.mock.calls[1]?.[0] as
+      | { values?: unknown[] }
+      | undefined
+    const conversationRows = conversationSql?.values?.[0] as
+      | { __join?: Array<{ values?: unknown[] }> }
+      | undefined
+    expect(conversationRows?.__join).toHaveLength(1)
+    // Newest message TIME comes from the first update (newerMessage), but the
+    // newest message ID is independently deduped (max BigInt) — the second
+    // update's id (200000000000002) is numerically larger.
+    expect(conversationRows?.__join?.[0]?.values).toEqual([
+      "conv-1",
+      newerMessage,
+      "200000000000002",
+    ])
+  })
+
+  test("dates a contact from the oldest message across all of its contact inboxes in the batch", async () => {
+    const olderThread = new Date("2026-06-10T08:00:00.000Z")
+    const newerThread = new Date("2026-06-15T08:00:00.000Z")
+    await applyCoexistActivityUpdates(
+      [
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: new Date("2026-06-16T08:00:00.000Z"),
+          oldestMessageAt: newerThread,
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: null,
+        },
+        {
+          contactInboxId: "ci-2",
+          contactId: "contact-1",
+          conversationId: "conv-2",
+          newestMessageAt: new Date("2026-06-11T08:00:00.000Z"),
+          oldestMessageAt: olderThread,
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: null,
+        },
+      ],
+      { workspaceId: "ws-1" },
+    )
+
+    // One row per contact, carrying the minimum across both threads.
+    expect(mockBackdateCreatedAt).toHaveBeenCalledTimes(1)
+    expect(mockBackdateCreatedAt).toHaveBeenCalledWith([
+      { contactId: "contact-1", workspaceId: "ws-1", createdAt: olderThread },
+    ])
+  })
+
+  test("is a no-op (no query) when there are no updates", async () => {
+    await applyCoexistActivityUpdates([], { workspaceId: "ws-1" })
+    expect(mockDbExecute).not.toHaveBeenCalled()
+  })
+
+  test("propagates activity update failures instead of marking coexist success with stale timestamps", async () => {
+    mockDbExecute.mockRejectedValueOnce(new Error("bad activity update"))
+
+    await expect(
+      applyCoexistActivityUpdates(
+        [
+          {
+            contactInboxId: "ci-1",
+            contactId: "contact-1",
+            conversationId: "conv-1",
+            newestMessageAt: new Date("2026-06-20T10:00:00.000Z"),
+            oldestMessageAt: new Date("2026-06-20T09:00:00.000Z"),
+            newestIncomingMessageAt: null,
+            aiMarkerMessageId: "100000000000001",
+          },
+        ],
+        { workspaceId: "ws-1" },
+      ),
+    ).rejects.toThrow("bad activity update")
+  })
+
+  test("passes a non-null aiMarkerMessageId through to the Conversation update unchanged (pure passthrough)", async () => {
+    await applyCoexistActivityUpdates(
+      [
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: new Date("2026-06-20T10:00:00.000Z"),
+          oldestMessageAt: new Date("2026-06-20T09:00:00.000Z"),
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: "100000000000001",
+        },
+      ],
+      { workspaceId: "ws-1" },
+    )
+
+    const conversationSql = mockDbExecute.mock.calls[1]?.[0] as
+      | { values?: unknown[] }
+      | undefined
+    const conversationRows = conversationSql?.values?.[0] as
+      | { __join?: Array<{ values?: unknown[] }> }
+      | undefined
+    expect(conversationRows?.__join?.[0]?.values?.[2]).toBe("100000000000001")
+  })
+
+  test("passes a null aiMarkerMessageId through to the Conversation update for EVERY row whose marker is null (pure passthrough)", async () => {
+    await applyCoexistActivityUpdates(
+      [
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: new Date("2026-06-20T10:00:00.000Z"),
+          oldestMessageAt: new Date("2026-06-20T09:00:00.000Z"),
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: null,
+        },
+        {
+          contactInboxId: "ci-2",
+          contactId: "contact-2",
+          conversationId: "conv-2",
+          newestMessageAt: new Date("2026-06-21T10:00:00.000Z"),
+          oldestMessageAt: new Date("2026-06-21T09:00:00.000Z"),
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: null,
+        },
+      ],
+      { workspaceId: "ws-1" },
+    )
+
+    const conversationSql = mockDbExecute.mock.calls[1]?.[0] as
+      | { values?: unknown[] }
+      | undefined
+    const conversationRows = conversationSql?.values?.[0] as
+      | { __join?: Array<{ values?: unknown[] }> }
+      | undefined
+    for (const row of conversationRows?.__join ?? []) {
+      expect(row.values?.[2]).toBeNull()
+    }
+  })
+
+  test("still reaches the Conversation update (and skips the ContactInbox bump) when dates are null but a marker id is present", async () => {
+    await applyCoexistActivityUpdates(
+      [
+        {
+          contactInboxId: "ci-1",
+          contactId: "contact-1",
+          conversationId: "conv-1",
+          newestMessageAt: null,
+          oldestMessageAt: null,
+          newestIncomingMessageAt: null,
+          aiMarkerMessageId: "100000000000001",
+        },
+      ],
+      { workspaceId: "ws-1" },
+    )
+
+    // Only the Conversation statement fires — no ContactInbox bump for a
+    // row whose messages all used fallbackCreatedAt.
+    expect(mockDbExecute).toHaveBeenCalledTimes(1)
+    const conversationSql = mockDbExecute.mock.calls[0]?.[0] as
+      | { values?: unknown[] }
+      | undefined
+    const conversationRows = conversationSql?.values?.[0] as
+      | { __join?: Array<{ values?: unknown[] }> }
+      | undefined
+    expect(conversationRows?.__join?.[0]?.values).toEqual([
+      "conv-1",
+      null,
+      "100000000000001",
+    ])
+  })
+})

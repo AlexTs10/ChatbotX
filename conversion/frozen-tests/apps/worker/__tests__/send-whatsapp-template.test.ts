@@ -1,0 +1,1278 @@
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+// ---------------------------------------------------------------------------
+// Hoist mock references
+// ---------------------------------------------------------------------------
+
+const {
+  mockRepositoryCreate,
+  mockRepositoryUpdateSourceId,
+  mockCreateMessageRepository,
+  mockBroadcast,
+  mockEmit,
+  mockValidateTemplate,
+  mockReplaceVariables,
+  mockContactVariables,
+  mockSendFlowStep,
+  mockConvertButtons,
+  mockParseSdkError,
+  mockRecordSendFailure,
+  mockRecordOutboundMessageActivity,
+  mockInvalidateTracking,
+  mockEnqueueIntegrationJob,
+  mockFindSendableBroadcast,
+  mockResetContactForResume,
+  mockMarkReadByOutbound,
+  mockMarkStatusBranch,
+} = vi.hoisted(() => {
+  const mockRepositoryCreate = vi.fn().mockResolvedValue({
+    id: "msg-created",
+    contactInboxId: "ci-1",
+    workspaceId: "ws-1",
+    conversationId: "conv-1",
+    messageType: "outgoing",
+    contentType: "text",
+    senderType: "bot",
+    sourceId: null,
+    text: "Template: wa-template",
+    contentAttributes: {},
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    updatedAt: new Date("2026-01-01T00:00:00Z"),
+  })
+
+  const mockRepositoryUpdateSourceId = vi.fn().mockResolvedValue(undefined)
+
+  const mockCreateMessageRepository = vi.fn().mockResolvedValue({
+    create: mockRepositoryCreate,
+    updateSourceId: mockRepositoryUpdateSourceId,
+  })
+
+  return {
+    mockRepositoryCreate,
+    mockRepositoryUpdateSourceId,
+    mockCreateMessageRepository,
+    mockBroadcast: vi.fn(),
+    mockEmit: vi.fn().mockResolvedValue(undefined),
+    mockValidateTemplate: vi.fn().mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-wa-1",
+        name: "wa-template",
+        language: "en",
+        components: [],
+      },
+    }),
+    mockReplaceVariables: vi.fn().mockResolvedValue([]),
+    mockContactVariables: vi.fn().mockResolvedValue([]),
+    mockSendFlowStep: vi
+      .fn()
+      .mockResolvedValue({ messageIds: ["provider-wa-1"], sentCount: 1 }),
+    mockConvertButtons: vi.fn().mockReturnValue([]),
+    mockParseSdkError: vi.fn().mockResolvedValue({ message: "sdk error" }),
+    mockRecordSendFailure: vi.fn().mockResolvedValue(undefined),
+    mockRecordOutboundMessageActivity: vi
+      .fn()
+      .mockResolvedValue({ cacheTags: ["contacts:contact-1:contact-inboxes"] }),
+    mockInvalidateTracking: vi.fn().mockResolvedValue(undefined),
+    mockEnqueueIntegrationJob: vi.fn().mockResolvedValue(undefined),
+    mockFindSendableBroadcast: vi.fn().mockResolvedValue({ id: "broadcast-1" }),
+    mockResetContactForResume: vi.fn().mockResolvedValue(undefined),
+    mockMarkReadByOutbound: vi.fn().mockResolvedValue(true),
+    mockMarkStatusBranch: vi.fn().mockResolvedValue(undefined),
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Module mocks
+// ---------------------------------------------------------------------------
+
+vi.mock("@chatbotx.io/database/repositories", () => ({
+  createMessageRepository: mockCreateMessageRepository,
+}))
+
+vi.mock("@chatbotx.io/database/schema", () => ({
+  messageModel: { id: "id", sourceId: "sourceId" },
+  contactInboxModel: { id: "id" },
+  conversationModel: { id: "id", lastActivityAt: "lastActivityAt" },
+}))
+
+vi.mock("@chatbotx.io/worker-config", () => ({
+  IntegrationJobAction: {
+    evaluateTemplateSent: "evaluateTemplateSent",
+  },
+  enqueueIntegrationJob: mockEnqueueIntegrationJob,
+}))
+
+vi.mock("@chatbotx.io/business", () => ({
+  publishWorkspaceRealtimeEvent: mockBroadcast,
+  queueWorkspaceRealtimeEvent: mockBroadcast,
+  queueMessageCreatedEvent: (
+    workspaceId: string,
+    data: unknown,
+    conversation: {
+      assignedInboxTeamId?: string | null
+      assignedUserId?: string | null
+      inboxId?: string | null
+    },
+  ) =>
+    mockBroadcast(workspaceId, {
+      eventType: "messageCreated",
+      data,
+      route: {
+        assignedTeamIds: conversation.assignedInboxTeamId
+          ? [conversation.assignedInboxTeamId]
+          : [],
+        assignedUserIds: conversation.assignedUserId
+          ? [conversation.assignedUserId]
+          : [],
+        ...(conversation.inboxId ? { inboxId: conversation.inboxId } : {}),
+      },
+    }),
+  messageStatusBranchService: { mark: mockMarkStatusBranch },
+  contactInboxService: {
+    recordSendFailure: mockRecordSendFailure,
+    invalidateTracking: mockInvalidateTracking,
+  },
+  conversationService: {
+    markReadByOutbound: mockMarkReadByOutbound,
+    recordOutboundMessageActivity: mockRecordOutboundMessageActivity,
+  },
+  broadcastService: {
+    findSendableBroadcast: mockFindSendableBroadcast,
+    resetContactForResume: mockResetContactForResume,
+  },
+  messageService: {
+    create: async (...args: unknown[]) =>
+      (await mockCreateMessageRepository()).create(...args),
+    updateSourceId: async (input: {
+      createdAt: Date
+      id: string
+      sourceId: string
+      workspaceId: string
+    }) =>
+      (await mockCreateMessageRepository()).updateSourceId(
+        input.id,
+        input.sourceId,
+        input.workspaceId,
+        input.createdAt,
+      ),
+  },
+}))
+
+vi.mock("@chatbotx.io/event-bus", () => ({
+  emit: mockEmit,
+}))
+
+vi.mock("@chatbotx.io/realtime-protocol", () => ({
+  RealtimeEventType: { messageCreated: "messageCreated" },
+  routeForConversation: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/sdk", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@chatbotx.io/sdk")>()
+  return {
+    ...actual,
+    parseSdkError: mockParseSdkError,
+  }
+})
+
+vi.mock("@chatbotx.io/utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@chatbotx.io/utils")>()
+  return { ...actual, createId: vi.fn(() => "test-id") }
+})
+
+vi.mock("@chatbotx.io/variables", () => ({
+  contactVariableService: { getAll: mockContactVariables },
+}))
+
+vi.mock("@chatbotx.io/flow-config", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@chatbotx.io/flow-config")>()
+  return {
+    ...actual,
+    messageEventTypeSchema: {
+      enum: {
+        "message:sent": "message:sent",
+        "message:failed": "message:failed",
+      },
+    },
+  }
+})
+
+vi.mock("../src/integration/handlers/wa-template-handler", () => ({
+  validateWhatsappTemplate: mockValidateTemplate,
+  replaceWhatsappTemplateVariables: mockReplaceVariables,
+}))
+
+vi.mock("../src/lib/logger", () => ({
+  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}))
+
+// The delivery helpers are stubbed with the real contract (sentCount > 0 →
+// delivered; mark-read forwards to conversationService.markReadByOutbound) so
+// this file checks the handler's wiring; the helpers themselves are covered by
+// send-message-handler.test.ts.
+vi.mock("../src/chat/handlers/send-message", () => ({
+  isDeliveredDirectMessage: ({ result }: { result: { sentCount: number } }) =>
+    result.sentCount > 0,
+  markConversationReadAfterDelivery: (props: unknown) =>
+    mockMarkReadByOutbound(props),
+  sendFlowStepToChannel: mockSendFlowStep,
+}))
+
+vi.mock("../src/chat/handlers/send-flow-step", () => ({
+  convertButtonsToTemplate: mockConvertButtons,
+}))
+
+// ---------------------------------------------------------------------------
+// Import after mocks
+// ---------------------------------------------------------------------------
+
+import type { ProcessWhatsappTemplateParams } from "../src/chat/handlers/send-whatsapp-template"
+
+const {
+  processWhatsappTemplate,
+  sendWhatsappTemplateMessage,
+  sendWhatsappTemplateToConversation,
+} = await import("../src/chat/handlers/send-whatsapp-template")
+const { ChannelError, ChannelErrorCategory } = await import("@chatbotx.io/sdk")
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const fakeConversation = {
+  id: "conv-1",
+  workspaceId: "ws-1",
+  contactId: "contact-1",
+} as unknown as ProcessWhatsappTemplateParams["conversation"]
+
+const fakeContactInbox = {
+  id: "ci-1",
+  inboxId: "inbox-1",
+  channel: "whatsapp",
+} as unknown as ProcessWhatsappTemplateParams["contactInbox"]
+
+const fakeTemplate: ProcessWhatsappTemplateParams["template"] = {
+  id: "tmpl-wa-1",
+  name: "wa-template",
+  language: "en",
+  params: {},
+}
+
+const broadcastTemplateJobData: Parameters<
+  typeof sendWhatsappTemplateMessage
+>[0] = {
+  conversation: fakeConversation,
+  contactInbox: {
+    ...fakeContactInbox,
+    contactId: "contact-1",
+  },
+  templateId: "tmpl-wa-1",
+  broadcastId: "broadcast-1",
+  templateData: {},
+  metadata: { type: "broadcast", broadcastId: "broadcast-1" },
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("processWhatsappTemplate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockRepositoryCreate.mockResolvedValue({
+      id: "msg-created",
+      contactInboxId: "ci-1",
+      workspaceId: "ws-1",
+      conversationId: "conv-1",
+      messageType: "outgoing",
+      contentType: "text",
+      senderType: "bot",
+      sourceId: null,
+      text: "Template: wa-template",
+      contentAttributes: {},
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      updatedAt: new Date("2026-01-01T00:00:00Z"),
+    })
+    mockCreateMessageRepository.mockResolvedValue({
+      create: mockRepositoryCreate,
+      updateSourceId: mockRepositoryUpdateSourceId,
+    })
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-wa-1",
+        name: "wa-template",
+        language: "en",
+        components: [],
+      },
+    })
+    mockReplaceVariables.mockResolvedValue([])
+    mockContactVariables.mockResolvedValue([])
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["provider-wa-1"],
+      sentCount: 1,
+    })
+    mockEmit.mockResolvedValue(undefined)
+  })
+
+  test("calls repository.create() to insert outbound message", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockCreateMessageRepository).toHaveBeenCalled()
+    expect(mockRepositoryCreate).toHaveBeenCalledTimes(1)
+    expect(mockRepositoryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageType: "outgoing",
+        senderType: "bot",
+        workspaceId: "ws-1",
+        conversationId: "conv-1",
+      }),
+    )
+    // Template sends honour the inbox option like any other bot message.
+    expect(mockMarkReadByOutbound).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      conversationId: "conv-1",
+      inboxId: "inbox-1",
+      readAt: new Date("2026-01-01T00:00:00Z"),
+      silent: false,
+    })
+  })
+
+  test("does not mark the conversation read when the provider accepted nothing", async () => {
+    mockSendFlowStep.mockResolvedValueOnce({ messageIds: [], sentCount: 0 })
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockMarkReadByOutbound).not.toHaveBeenCalled()
+  })
+
+  test("does NOT call db.insert directly for message creation — goes through the message repository", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockRepositoryCreate).toHaveBeenCalledTimes(1)
+  })
+
+  test("broadcasts realtime event after message created", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockBroadcast).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({ eventType: "messageCreated" }),
+    )
+  })
+
+  test("keeps bulk template persistence and delivery silent", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      metadata: {
+        type: "sequenceSchedule",
+        sequenceStepId: "sequence-step-1",
+        sequenceId: "sequence-1",
+        dispatchId: "dispatch-1",
+        contactInboxId: "ci-1",
+      },
+    })
+
+    expect(mockBroadcast).not.toHaveBeenCalled()
+    expect(mockRecordOutboundMessageActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ bumpActivity: false }),
+    )
+    expect(mockMarkReadByOutbound).toHaveBeenCalledWith(
+      expect.objectContaining({ silent: true }),
+    )
+  })
+
+  test("builds the variable context with the inbox sender of the running flow", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: {
+        id: "tmpl-wa-1",
+        name: "wa-template",
+        language: "en",
+        params: { body: [{ type: "text", text: "{{admin_name}}" }] },
+      } as unknown as ProcessWhatsappTemplateParams["template"],
+      sentByUserId: "user-1",
+    })
+
+    expect(mockContactVariables).toHaveBeenCalledWith(
+      expect.objectContaining({ sentByUserId: "user-1" }),
+    )
+  })
+
+  test("sends the variable-resolved params to the channel, not the raw template params", async () => {
+    // Regression: replaceWhatsappTemplateVariables resolved the params but the
+    // channel send received the raw `template`, so WhatsApp received literal
+    // tokens like {{first_name}} instead of the contact's attribute values.
+    const resolvedParams = { body: [{ type: "text", text: "John Doe" }] }
+    mockReplaceVariables.mockResolvedValue(resolvedParams)
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: {
+        id: "tmpl-wa-1",
+        name: "wa-template",
+        language: "en",
+        params: { body: [{ type: "text", text: "{{first_name}}" }] },
+      } as unknown as ProcessWhatsappTemplateParams["template"],
+    })
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+    const sentStep = mockSendFlowStep.mock.calls[0][0].step
+    expect(sentStep.template.params).toEqual(resolvedParams)
+    expect(mockSendFlowStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        botSentAnalytics: {
+          triggerHandler: "processWhatsappTemplate",
+          triggerType: "message_bot_sent_whatsapp_template",
+        },
+      }),
+    )
+    expect(mockEmit).not.toHaveBeenCalledWith(
+      "analytics:dashboard",
+      expect.objectContaining({ eventType: "message:bot_sent" }),
+    )
+  })
+
+  test("throws when validateWhatsappTemplate returns null — repository.create not called", async () => {
+    mockValidateTemplate.mockResolvedValue(null)
+
+    await expect(
+      processWhatsappTemplate({
+        conversation: fakeConversation,
+        contactInbox: fakeContactInbox,
+        template: fakeTemplate,
+      }),
+    ).rejects.toThrow()
+
+    expect(mockRepositoryCreate).not.toHaveBeenCalled()
+  })
+
+  test("throws 'Failed to insert message record' when repository.create returns null", async () => {
+    mockRepositoryCreate.mockResolvedValue(null)
+
+    await expect(
+      processWhatsappTemplate({
+        conversation: fakeConversation,
+        contactInbox: fakeContactInbox,
+        template: fakeTemplate,
+      }),
+    ).rejects.toThrow("Failed to insert message record")
+  })
+
+  test("calls repository.updateSourceId when provider returns providerMessageId", async () => {
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["prov-123"],
+      sentCount: 1,
+    })
+    const createdAt = new Date("2026-01-01T00:00:00Z")
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockRepositoryUpdateSourceId).toHaveBeenCalledWith(
+      "msg-created",
+      "prov-123",
+      "ws-1",
+      createdAt,
+    )
+    expect(mockRecordOutboundMessageActivity).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      conversationId: "conv-1",
+      contactInboxId: "ci-1",
+      contactId: undefined,
+      at: createdAt,
+      bumpActivity: true,
+      closeHumanReplyWindow: false,
+    })
+    expect(mockInvalidateTracking).toHaveBeenCalledWith({
+      cacheTags: ["contacts:contact-1:contact-inboxes"],
+    })
+  })
+
+  test("records the wired statuses as a status-branch marker", async () => {
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["prov-123"],
+      sentCount: 1,
+    })
+    mockRepositoryUpdateSourceId.mockResolvedValueOnce({ id: "msg-created" })
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      statusBranches: ["delivered"],
+    })
+
+    expect(mockMarkStatusBranch).toHaveBeenCalledWith({
+      channel: fakeContactInbox.channel,
+      providerMessageId: "prov-123",
+      statuses: ["delivered"],
+    })
+    // The marker comes after the sourceId, so a status kept on `integration`
+    // by it always finds its message.
+    expect(mockMarkStatusBranch.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockRepositoryUpdateSourceId.mock.invocationCallOrder[0],
+    )
+  })
+
+  test("records no marker when no status button leads anywhere", async () => {
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["prov-123"],
+      sentCount: 1,
+    })
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockMarkStatusBranch).not.toHaveBeenCalled()
+  })
+
+  test.each([
+    [
+      "was not found",
+      () => mockRepositoryUpdateSourceId.mockResolvedValueOnce(null),
+    ],
+    [
+      "failed",
+      () =>
+        mockRepositoryUpdateSourceId.mockRejectedValueOnce(
+          new Error("db down"),
+        ),
+    ],
+  ])("records no marker when saving the sourceId %s, so the status is routed to low", async (_label, arrange) => {
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["prov-123"],
+      sentCount: 1,
+    })
+    arrange()
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      statusBranches: ["delivered"],
+    })
+
+    expect(mockMarkStatusBranch).not.toHaveBeenCalled()
+  })
+
+  test("records no marker when the provider returned no message id", async () => {
+    mockSendFlowStep.mockResolvedValue({ messageIds: [], sentCount: 0 })
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      statusBranches: ["delivered"],
+    })
+
+    expect(mockMarkStatusBranch).not.toHaveBeenCalled()
+  })
+
+  test("does not rethrow when persisting sourceId fails after a successful send", async () => {
+    // Regression: the template was already sent (billable, non-idempotent) —
+    // a thrown error here must not propagate, or BullMQ redelivers the job
+    // and sends the same template a second time.
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["prov-123"],
+      sentCount: 1,
+    })
+    mockRepositoryUpdateSourceId.mockRejectedValueOnce(
+      new Error("shard write failed"),
+    )
+
+    await expect(
+      processWhatsappTemplate({
+        conversation: fakeConversation,
+        contactInbox: fakeContactInbox,
+        template: fakeTemplate,
+      }),
+    ).resolves.toBeDefined()
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+  })
+
+  // The ads-conversion rule engine is hidden and unused; the follow-up
+  // evaluation job used to be enqueued after every template send and only
+  // added load to the integration queue. It is disabled (commented out) in
+  // the handler — see enqueue-template-sent-evaluation.ts.
+  test("does not enqueue an ads conversion evaluation job after a template send", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    const enqueuedTypes = mockEnqueueIntegrationJob.mock.calls.map(
+      ([job]: [{ type: string }]) => job.type,
+    )
+    expect(enqueuedTypes).not.toContain("evaluateTemplateSent")
+  })
+
+  test("emits message:failed on error and rethrows", async () => {
+    mockRepositoryCreate.mockRejectedValue(new Error("db fail"))
+
+    await expect(
+      processWhatsappTemplate({
+        conversation: fakeConversation,
+        contactInbox: fakeContactInbox,
+        template: fakeTemplate,
+      }),
+    ).rejects.toThrow("db fail")
+
+    expect(mockEmit).toHaveBeenCalledWith(
+      "message:failed",
+      expect.objectContaining({ occurredAt: expect.any(Date) }),
+    )
+  })
+
+  test("does not throw permanent ChannelError from broadcast template send", async () => {
+    const error = new ChannelError(
+      "integration auth failed",
+      ChannelErrorCategory.AUTH_FAILED,
+      { code: "auth_failed" },
+    )
+    mockSendFlowStep.mockRejectedValueOnce(error)
+
+    await expect(
+      sendWhatsappTemplateMessage(broadcastTemplateJobData),
+    ).resolves.toBeUndefined()
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+    expect(mockEmit).toHaveBeenCalledWith(
+      "message:failed",
+      expect.objectContaining({ occurredAt: expect.any(Date) }),
+    )
+  })
+
+  test("rethrows retryable ChannelError from WhatsApp broadcast template send", async () => {
+    const error = new ChannelError(
+      "rate limited",
+      ChannelErrorCategory.RATE_LIMITED,
+      { code: "rate_limited" },
+    )
+    mockSendFlowStep.mockRejectedValueOnce(error)
+
+    await expect(
+      sendWhatsappTemplateMessage(broadcastTemplateJobData),
+    ).rejects.toBe(error)
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+  })
+
+  test("rethrows non-ChannelError from WhatsApp broadcast template send", async () => {
+    const error = new Error("unexpected provider failure")
+    mockSendFlowStep.mockRejectedValueOnce(error)
+
+    await expect(
+      sendWhatsappTemplateMessage(broadcastTemplateJobData),
+    ).rejects.toBe(error)
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+  })
+
+  test("template-not-found failure emits message:failed with inboxId in context", async () => {
+    mockValidateTemplate.mockResolvedValueOnce(null)
+
+    await expect(
+      sendWhatsappTemplateMessage(broadcastTemplateJobData),
+    ).rejects.toThrow("WhatsApp template not found")
+
+    expect(mockEmit).toHaveBeenCalledWith(
+      "message:failed",
+      expect.objectContaining({
+        context: expect.objectContaining({
+          contactInboxId: "ci-1",
+          inboxId: "inbox-1",
+        }),
+      }),
+    )
+  })
+})
+
+describe("sendWhatsappTemplateMessage — stop/resume guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockFindSendableBroadcast.mockResolvedValue({ id: "broadcast-1" })
+    mockResetContactForResume.mockResolvedValue(undefined)
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-wa-1",
+        name: "wa-template",
+        language: "en",
+        components: [],
+      },
+    })
+    mockReplaceVariables.mockResolvedValue([])
+    mockContactVariables.mockResolvedValue([])
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["provider-wa-1"],
+      sentCount: 1,
+    })
+    mockEmit.mockResolvedValue(undefined)
+  })
+
+  test("checks findSendableBroadcast before doing anything else", async () => {
+    await sendWhatsappTemplateMessage(broadcastTemplateJobData)
+
+    expect(mockFindSendableBroadcast).toHaveBeenCalledWith("broadcast-1")
+  })
+
+  test("skips the send and resets the recipient when the broadcast is no longer sendable", async () => {
+    mockFindSendableBroadcast.mockResolvedValue(null)
+
+    const result = await sendWhatsappTemplateMessage(broadcastTemplateJobData)
+
+    expect(result).toBeUndefined()
+    expect(mockValidateTemplate).not.toHaveBeenCalled()
+    expect(mockSendFlowStep).not.toHaveBeenCalled()
+    expect(mockResetContactForResume).toHaveBeenCalledWith({
+      broadcastId: "broadcast-1",
+      contactKey: { contactId: "contact-1" },
+    })
+  })
+
+  test("proceeds with the send when the broadcast is still sendable", async () => {
+    mockFindSendableBroadcast.mockResolvedValue({ id: "broadcast-1" })
+
+    await sendWhatsappTemplateMessage(broadcastTemplateJobData)
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+    expect(mockResetContactForResume).not.toHaveBeenCalled()
+    // A broadcast template is a bot DM like any other: one mark-read per recipient.
+    expect(mockMarkReadByOutbound).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("processWhatsappTemplate — template quick-reply flow routing", () => {
+  const quickReplyTemplateComponents = [
+    {
+      type: "BUTTONS",
+      buttons: [
+        { type: "URL", text: "Open", url: "https://example.com" },
+        { type: "QUICK_REPLY", text: "Stop" },
+      ],
+    },
+  ]
+
+  const statusButtons = [
+    { id: "btn-delivered", label: "Delivered" },
+    { id: "btn-failed", label: "Failed" },
+  ]
+  const quickReplyButton = { id: "btn-qr", label: "Stop" }
+
+  const flowWithQuickReply = {
+    id: "flow-1",
+    versionId: "fv-1",
+    buttons: [...statusButtons, quickReplyButton] as unknown as NonNullable<
+      ProcessWhatsappTemplateParams["flow"]
+    >["buttons"],
+  }
+
+  const encodedFlowButtons = [
+    {
+      id: "btn-delivered",
+      label: "Delivered",
+      buttonType: "postback",
+      postback: "flow-1:fv-1:btn-delivered",
+    },
+    {
+      id: "btn-failed",
+      label: "Failed",
+      buttonType: "postback",
+      postback: "flow-1:fv-1:btn-failed",
+    },
+    {
+      id: "btn-qr",
+      label: "Stop",
+      buttonType: "postback",
+      postback: "flow-1:fv-1:btn-qr",
+    },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockCreateMessageRepository.mockResolvedValue({
+      create: mockRepositoryCreate,
+      updateSourceId: mockRepositoryUpdateSourceId,
+    })
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-wa-1",
+        name: "wa-template",
+        language: "en",
+        components: quickReplyTemplateComponents,
+      },
+    })
+    mockReplaceVariables.mockResolvedValue({})
+    mockContactVariables.mockResolvedValue([])
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["provider-wa-1"],
+      sentCount: 1,
+    })
+    mockConvertButtons.mockReturnValue(encodedFlowButtons)
+    mockEmit.mockResolvedValue(undefined)
+  })
+
+  test("injects a quick_reply param whose payload is the seeded button's encoded postback", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      flow: flowWithQuickReply,
+    })
+
+    const sentStep = mockSendFlowStep.mock.calls[0][0].step
+    expect(sentStep.template.params.button).toEqual([
+      { sub_type: "quick_reply", index: 1, payload: "flow-1:fv-1:btn-qr" },
+    ])
+  })
+
+  test("passes metadata into button conversion so postbacks carry broadcast/sequence context", async () => {
+    const metadata = { broadcastId: "broadcast-9" } as never
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      flow: flowWithQuickReply,
+      metadata,
+    })
+
+    expect(mockConvertButtons).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flowId: "flow-1",
+        flowVersionId: "fv-1",
+        contactInboxId: "ci-1",
+        metadata,
+      }),
+    )
+  })
+
+  test("stores the flow buttons on the message payload for status routing and inbox rendering", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      flow: flowWithQuickReply,
+    })
+
+    expect(mockRepositoryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentAttributes: expect.objectContaining({
+          payload: { templateType: "button", buttons: encodedFlowButtons },
+        }),
+      }),
+    )
+  })
+
+  test("a legacy manually-typed payload at the same index is replaced by the generated postback", async () => {
+    // Old form let users type a payload; once the button is connected to a
+    // flow branch, the generated postback must win or the branch never routes
+    // (send-layer dedupe keeps the first content-bearing entry).
+    mockReplaceVariables.mockResolvedValue({
+      button: [{ sub_type: "quick_reply", index: 1, payload: "OLD_MANUAL" }],
+    })
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      flow: flowWithQuickReply,
+    })
+
+    const sentStep = mockSendFlowStep.mock.calls[0][0].step
+    expect(sentStep.template.params.button).toEqual([
+      { sub_type: "quick_reply", index: 1, payload: "flow-1:fv-1:btn-qr" },
+    ])
+  })
+
+  test("legacy steps with only status buttons inject nothing (Meta default applies)", async () => {
+    mockConvertButtons.mockReturnValue(encodedFlowButtons.slice(0, 2))
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+      flow: {
+        ...flowWithQuickReply,
+        buttons: statusButtons as unknown as NonNullable<
+          ProcessWhatsappTemplateParams["flow"]
+        >["buttons"],
+      },
+    })
+
+    const sentStep = mockSendFlowStep.mock.calls[0][0].step
+    expect(sentStep.template.params.button).toBeUndefined()
+  })
+
+  test("broadcast sends (no flow) inject nothing and skip button conversion", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockConvertButtons).not.toHaveBeenCalled()
+    const sentStep = mockSendFlowStep.mock.calls[0][0].step
+    expect(sentStep.template.params.button).toBeUndefined()
+  })
+
+  test("marks the send as a template so the conversation-routing gate lets it through", async () => {
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockSendFlowStep.mock.calls[0][0].isTemplateMessage).toBe(true)
+  })
+})
+
+describe("processWhatsappTemplate — payment request guard", () => {
+  const pixComponents = [
+    {
+      type: "BUTTONS",
+      buttons: [
+        {
+          type: "PAYMENT_REQUEST",
+          text: "Copy Pix code",
+          payment_setting: { type: "pix_dynamic_code" },
+        },
+      ],
+    },
+  ]
+  const pixParams = (code: string) => ({
+    button: [
+      {
+        sub_type: "payment_request",
+        index: 0,
+        payment_request: { method: "pix", code },
+      },
+    ],
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockCreateMessageRepository.mockResolvedValue({
+      create: mockRepositoryCreate,
+      updateSourceId: mockRepositoryUpdateSourceId,
+    })
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-wa-1",
+        name: "wa-template",
+        language: "pt_BR",
+        category: "UTILITY",
+        components: pixComponents,
+      },
+    })
+    mockContactVariables.mockResolvedValue([])
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["provider-wa-1"],
+      sentCount: 1,
+    })
+    mockEmit.mockResolvedValue(undefined)
+  })
+
+  test("a resolved payment request is sent", async () => {
+    mockReplaceVariables.mockResolvedValue(pixParams("000201"))
+
+    await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    })
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+  })
+
+  test("an unresolved variable never reaches the channel and fails permanently", async () => {
+    mockReplaceVariables.mockResolvedValue(pixParams("{{pix_code}}"))
+
+    const error = await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: fakeContactInbox,
+      template: fakeTemplate,
+    }).catch((e) => e as InstanceType<typeof ChannelError>)
+
+    expect(error).toBeInstanceOf(ChannelError)
+    expect(error.category).toBe(ChannelErrorCategory.PAYLOAD_INVALID)
+    expect(mockSendFlowStep).not.toHaveBeenCalled()
+    expect(mockRepositoryCreate).not.toHaveBeenCalled()
+    expect(mockEmit).toHaveBeenCalledWith(
+      "message:failed",
+      expect.objectContaining({ willRetry: false }),
+    )
+  })
+
+  test("a payment request that does not match the template button is refused", async () => {
+    mockReplaceVariables.mockResolvedValue({
+      button: [
+        {
+          sub_type: "payment_request",
+          index: 0,
+          payment_request: { method: "boleto", digitableLine: "0339" },
+        },
+      ],
+    })
+
+    await expect(
+      processWhatsappTemplate({
+        conversation: fakeConversation,
+        contactInbox: fakeContactInbox,
+        template: fakeTemplate,
+      }),
+    ).rejects.toBeInstanceOf(ChannelError)
+    expect(mockSendFlowStep).not.toHaveBeenCalled()
+  })
+})
+
+describe("processWhatsappTemplate — BSUID auth-template guard (D5)", () => {
+  const bsuidKeyedContactInbox = {
+    ...fakeContactInbox,
+    sourceId: "user.9373001",
+    sourceUserId: "user.9373001",
+  } as unknown as ProcessWhatsappTemplateParams["contactInbox"]
+
+  const emptySourceIdContactInbox = {
+    ...fakeContactInbox,
+    sourceId: "",
+    sourceUserId: "VN.4416742385309647",
+  } as unknown as ProcessWhatsappTemplateParams["contactInbox"]
+
+  const phoneKeyedContactInbox = {
+    ...fakeContactInbox,
+    sourceId: "84900000001",
+    sourceUserId: null,
+  } as unknown as ProcessWhatsappTemplateParams["contactInbox"]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockCreateMessageRepository.mockResolvedValue({
+      create: mockRepositoryCreate,
+      updateSourceId: mockRepositoryUpdateSourceId,
+    })
+    mockReplaceVariables.mockResolvedValue([])
+    mockContactVariables.mockResolvedValue([])
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["provider-wa-1"],
+      sentCount: 1,
+    })
+    mockEmit.mockResolvedValue(undefined)
+  })
+
+  test("rejects with a typed 131062 error BEFORE any send when an AUTHENTICATION template targets a BSUID-keyed contact", async () => {
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-auth-1",
+        name: "auth-template",
+        language: "en",
+        category: "AUTHENTICATION",
+        components: [],
+      },
+    })
+
+    const error = await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: bsuidKeyedContactInbox,
+      template: fakeTemplate,
+    }).catch((e) => e as InstanceType<typeof ChannelError>)
+
+    expect(error).toBeInstanceOf(ChannelError)
+    expect(error.code).toBe(131_062)
+    expect(error.category).toBe(ChannelErrorCategory.PAYLOAD_INVALID)
+    // Fails fast — no API call, no message row, no variable resolution.
+    expect(mockSendFlowStep).not.toHaveBeenCalled()
+    expect(mockRepositoryCreate).not.toHaveBeenCalled()
+    expect(mockContactVariables).not.toHaveBeenCalled()
+  })
+
+  test("also rejects an AUTHENTICATION template when sourceId is empty but a BSUID exists (send would route via `recipient`)", async () => {
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-auth-1",
+        name: "auth-template",
+        language: "en",
+        category: "AUTHENTICATION",
+        components: [],
+      },
+    })
+
+    const error = await processWhatsappTemplate({
+      conversation: fakeConversation,
+      contactInbox: emptySourceIdContactInbox,
+      template: fakeTemplate,
+    }).catch((e) => e as InstanceType<typeof ChannelError>)
+
+    expect(error).toBeInstanceOf(ChannelError)
+    expect(error.code).toBe(131_062)
+    expect(mockSendFlowStep).not.toHaveBeenCalled()
+  })
+
+  test("allows a MARKETING template to a BSUID-keyed contact (only AUTHENTICATION is restricted)", async () => {
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-marketing-1",
+        name: "marketing-template",
+        language: "en",
+        category: "MARKETING",
+        components: [],
+      },
+    })
+
+    await expect(
+      processWhatsappTemplate({
+        conversation: fakeConversation,
+        contactInbox: bsuidKeyedContactInbox,
+        template: fakeTemplate,
+      }),
+    ).resolves.toBeDefined()
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+  })
+
+  test("allows an AUTHENTICATION template to a phone-keyed contact (regression — guard is BSUID-specific)", async () => {
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-auth-2",
+        name: "auth-template",
+        language: "en",
+        category: "AUTHENTICATION",
+        components: [],
+      },
+    })
+
+    await expect(
+      processWhatsappTemplate({
+        conversation: fakeConversation,
+        contactInbox: phoneKeyedContactInbox,
+        template: fakeTemplate,
+      }),
+    ).resolves.toBeDefined()
+
+    expect(mockSendFlowStep).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("sendWhatsappTemplateToConversation — who sent it", () => {
+  const sentAt = new Date("2026-01-01T00:00:00Z")
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockRepositoryCreate.mockResolvedValue({
+      id: "msg-created",
+      contactInboxId: "ci-1",
+      workspaceId: "ws-1",
+      conversationId: "conv-1",
+      messageType: "outgoing",
+      contentType: "text",
+      senderType: "bot",
+      sourceId: null,
+      text: "Template: wa-template",
+      contentAttributes: {},
+      createdAt: sentAt,
+      updatedAt: sentAt,
+    })
+    mockCreateMessageRepository.mockResolvedValue({
+      create: mockRepositoryCreate,
+      updateSourceId: mockRepositoryUpdateSourceId,
+    })
+    mockValidateTemplate.mockResolvedValue({
+      inbox: { integrationWhatsapp: { id: "iw-1" } },
+      template: {
+        id: "tmpl-wa-1",
+        name: "wa-template",
+        language: "en",
+        components: [],
+      },
+    })
+    mockReplaceVariables.mockResolvedValue([])
+    mockContactVariables.mockResolvedValue([])
+    mockSendFlowStep.mockResolvedValue({
+      messageIds: ["provider-wa-1"],
+      sentCount: 1,
+    })
+    mockEmit.mockResolvedValue(undefined)
+  })
+
+  const job = (
+    extra: Partial<
+      Parameters<typeof sendWhatsappTemplateToConversation>[0]
+    > = {},
+  ): Parameters<typeof sendWhatsappTemplateToConversation>[0] => ({
+    conversation: fakeConversation,
+    contactInbox: { ...fakeContactInbox, contactId: "contact-1" },
+    templateId: "tmpl-wa-1",
+    ...extra,
+  })
+
+  test("a member-initiated template is recorded as a human message", async () => {
+    await sendWhatsappTemplateToConversation(
+      job({ initiatedBy: "user", adminId: "admin-1" }),
+    )
+
+    expect(mockSendFlowStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        humanSender: { adminId: "admin-1", occurredAt: sentAt },
+      }),
+    )
+  })
+
+  test.each([
+    ["a public API call", { initiatedBy: "api" as const }],
+    ["a job queued before the origin existed", {}],
+    ["a user origin without an admin id", { initiatedBy: "user" as const }],
+  ])("%s stays a bot message", async (_name, extra) => {
+    await sendWhatsappTemplateToConversation(job(extra))
+
+    expect(mockSendFlowStep).toHaveBeenCalledWith(
+      expect.objectContaining({ humanSender: undefined }),
+    )
+  })
+
+  test("a broadcast template never carries a human sender", async () => {
+    mockFindSendableBroadcast.mockResolvedValue({ id: "broadcast-1" })
+
+    await sendWhatsappTemplateMessage(broadcastTemplateJobData)
+
+    expect(mockSendFlowStep).toHaveBeenCalledWith(
+      expect.objectContaining({ humanSender: undefined }),
+    )
+  })
+})

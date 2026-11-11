@@ -1,0 +1,2370 @@
+import { createHmac } from "node:crypto"
+import { systemFieldTypes } from "@chatbotx.io/database/partials"
+import type {
+  ContactInboxModel,
+  ContactModel,
+  ConversationModel,
+  WorkspaceModel,
+} from "@chatbotx.io/database/types"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+
+const {
+  mockConversationFindBy,
+  mockFindDMByContact,
+  mockFindMemberWithUserByWorkspaceIdAndUserId,
+  mockFindRecentByContactId,
+  mockFindWithIntegrationsById,
+  mockGetProfileSnapshot,
+  mockMessageFindById,
+  mockRefreshProfileSnapshot,
+  mockResolveIntegrationContext,
+  mockResolveWorkspaceAppUrl,
+  mockResolveTenantSettings,
+  mockSystemFieldCreate,
+  mockResolveGenderLabel,
+  mockSignMeLink,
+  mockMessengerGetUserInboxLink,
+  mockMessengerGetPostDetails,
+  mockAppointmentFindBy,
+  mockAppointmentFindLatestForContact,
+  mockQuestionnaireFindLatestCompleted,
+  mockLeadAdsFindLatestByContact,
+  mockListTeamNamesByUserId,
+  mockResolveDefaultTokenPlaintext,
+  mockResolveContactAvatarUrl,
+  mockEnsureContactAvatarMirrored,
+  testEncryptionKey,
+} = vi.hoisted(() => ({
+  mockConversationFindBy: vi.fn().mockResolvedValue({
+    assignedUserId: "user-1",
+  }),
+  mockFindDMByContact: vi.fn(),
+  mockFindMemberWithUserByWorkspaceIdAndUserId: vi.fn().mockResolvedValue({
+    userId: "user-1",
+    user: { id: "user-1", name: "Admin", email: "admin@example.com" },
+  }),
+  mockFindRecentByContactId: vi.fn(),
+  mockFindWithIntegrationsById: vi.fn(),
+  mockGetProfileSnapshot: vi.fn(),
+  mockMessageFindById: vi.fn(),
+  mockRefreshProfileSnapshot: vi.fn(),
+  mockResolveIntegrationContext: vi.fn(),
+  mockResolveWorkspaceAppUrl: vi.fn(),
+  mockResolveTenantSettings: vi.fn(),
+  mockSystemFieldCreate: vi.fn(),
+  mockResolveGenderLabel: vi.fn(),
+  mockSignMeLink: vi.fn(),
+  mockMessengerGetUserInboxLink: vi.fn(),
+  mockMessengerGetPostDetails: vi.fn(),
+  mockAppointmentFindBy: vi.fn(),
+  mockAppointmentFindLatestForContact: vi.fn(),
+  mockQuestionnaireFindLatestCompleted: vi.fn(),
+  mockLeadAdsFindLatestByContact: vi.fn(),
+  mockListTeamNamesByUserId: vi.fn(),
+  mockResolveDefaultTokenPlaintext: vi.fn(),
+  mockEnsureContactAvatarMirrored: vi.fn(),
+  mockResolveContactAvatarUrl: vi.fn(
+    async (
+      input: {
+        contact: { avatar: string | null }
+        contactInbox: { channel: string; id: string } | null
+        workspaceId: string
+      },
+      finalize: (key: string) => string | Promise<string>,
+      ensureMirrored?: (input: {
+        contactInboxId: string
+        workspaceId: string
+      }) => Promise<{ avatar: string } | null>,
+    ) => {
+      if (input.contact.avatar) {
+        return await finalize(input.contact.avatar)
+      }
+      if (
+        !(
+          input.contactInbox &&
+          ["messenger", "instagram"].includes(input.contactInbox.channel)
+        )
+      ) {
+        return null
+      }
+      if (ensureMirrored) {
+        const mirrored = await ensureMirrored({
+          contactInboxId: input.contactInbox.id,
+          workspaceId: input.workspaceId,
+        })
+        return mirrored ? await finalize(mirrored.avatar) : null
+      }
+      return `https://app.example.com/media/avatar/${input.contactInbox.id}`
+    },
+  ),
+  testEncryptionKey:
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+}))
+
+vi.mock("../src/helpers/leaderboard", () => ({
+  getLeaderboardReferrerName: vi.fn().mockResolvedValue(null),
+}))
+
+vi.mock("@chatbotx.io/business", () => ({
+  appointmentService: {
+    findBy: mockAppointmentFindBy,
+    findLatestForContact: mockAppointmentFindLatestForContact,
+  },
+  buildAppointmentUrl: (appUrl: string, pathname: string, token: string) => {
+    const url = new URL(pathname, appUrl)
+    url.searchParams.set("token", token)
+    return url.toString()
+  },
+  contactInboxService: {
+    findRecentByContactId: mockFindRecentByContactId,
+    refreshProfileSnapshot: mockRefreshProfileSnapshot,
+  },
+  conversationService: {
+    findBy: mockConversationFindBy,
+    findDMByContact: mockFindDMByContact,
+  },
+  facebookLeadAdsLeadService: {
+    findLatestByContact: mockLeadAdsFindLatestByContact,
+  },
+  inboxService: {
+    findWithIntegrationsById: mockFindWithIntegrationsById,
+  },
+  inboxTeamService: {
+    listTeamNamesByUserId: mockListTeamNamesByUserId,
+  },
+  messageService: {
+    findById: mockMessageFindById,
+  },
+  questionnaireSubmissionService: {
+    findLatestCompletedForContact: mockQuestionnaireFindLatestCompleted,
+  },
+  resolveWorkspaceAppUrl: mockResolveWorkspaceAppUrl,
+  resolveTenantSettings: mockResolveTenantSettings,
+  resolveContactAvatarUrl: mockResolveContactAvatarUrl,
+  workspaceMemberService: {
+    findWithUserByWorkspaceIdAndUserId:
+      mockFindMemberWithUserByWorkspaceIdAndUserId,
+  },
+  workspaceApiTokenService: {
+    resolveDefaultTokenPlaintext: mockResolveDefaultTokenPlaintext,
+  },
+}))
+
+vi.mock("@chatbotx.io/encryption/keys", () => ({
+  env: {
+    ENCRYPTION_KEY: testEncryptionKey,
+  },
+}))
+
+vi.mock("@chatbotx.io/business/system-field", () => ({
+  systemFieldService: {
+    create: mockSystemFieldCreate,
+  },
+  resolveGenderLabel: mockResolveGenderLabel,
+}))
+
+vi.mock("@chatbotx.io/channel-registry/registry", () => ({
+  resolveIntegrationContextFromContactInbox: mockResolveIntegrationContext,
+}))
+
+vi.mock("@chatbotx.io/channel-registry/media-hydration", () => ({
+  ensureContactAvatarMirrored: mockEnsureContactAvatarMirrored,
+}))
+
+vi.mock("@chatbotx.io/encryption/link-signature", () => ({
+  signMeLink: mockSignMeLink,
+}))
+
+const BOOKING_SCHEDULE_URL_RE =
+  /^https:\/\/app\.example\.test\/booking\/schedule\?token=.+/
+
+const cache = new Map<string, unknown>()
+vi.mock("@chatbotx.io/redis", () => ({
+  withCache: vi.fn(async (key: string, resolve: () => Promise<unknown>) => {
+    if (cache.has(key)) {
+      return cache.get(key)
+    }
+    const value = await resolve()
+    cache.set(key, value)
+    return value
+  }),
+}))
+
+vi.mock("@chatbotx.io/integration-instagram", () => ({
+  getPostDetails: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/integration-messenger", () => ({
+  getUserInboxLink: mockMessengerGetUserInboxLink,
+  getPostDetails: mockMessengerGetPostDetails,
+}))
+
+vi.mock("@chatbotx.io/business/utils", () => ({
+  getPublicFileUrl: (path: string, baseUrl: string) =>
+    new URL(path, baseUrl).toString(),
+  toPublicStorageUrl: (path: string | null | undefined, baseUrl: string) => {
+    if (!path) {
+      return null
+    }
+    if (path.startsWith("http://") || path.startsWith("https://")) {
+      return path
+    }
+    return new URL(path, baseUrl).toString()
+  },
+}))
+
+const { getSystemFieldValue } = await import("../src/utils")
+
+const contact = {
+  id: "contact-1",
+  workspaceId: "workspace-1",
+  timezone: "UTC",
+} as ContactModel
+
+const contactInbox = {
+  id: "contact-inbox-1",
+  createdAt: new Date("2026-01-02T03:04:05.000Z"),
+  contactLastReadAt: new Date("2026-01-02T03:04:05.000Z"),
+  lastIncomingMessageAt: new Date("2026-01-02T03:04:05.000Z"),
+  channel: "messenger",
+  inboxId: "inbox-1",
+  source: "ads",
+  sourceId: "source-1",
+} as ContactInboxModel
+
+const workspace = {
+  id: "workspace-1",
+  name: "Workspace One",
+  logo: null,
+  timezone: "UTC",
+} as WorkspaceModel
+
+const conversation = {
+  id: "conversation-1",
+  contactId: "contact-1",
+  workspaceId: "workspace-1",
+} as ConversationModel
+
+const createContext = (overrides?: {
+  contact?: ContactModel
+  contactInbox?: ContactInboxModel | null
+  conversation?: ConversationModel | null
+  appointmentId?: string
+  sentByUserId?: string
+  workspace?: WorkspaceModel | null
+}) => ({
+  contact: overrides?.contact ?? contact,
+  contactInbox:
+    overrides && "contactInbox" in overrides
+      ? overrides.contactInbox
+      : contactInbox,
+  conversation:
+    overrides && "conversation" in overrides
+      ? overrides.conversation
+      : conversation,
+  appointmentId: overrides?.appointmentId,
+  sentByUserId: overrides?.sentByUserId,
+  workspace:
+    overrides && "workspace" in overrides ? overrides.workspace : workspace,
+})
+
+describe("getSystemFieldValue", () => {
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+    mockEnsureContactAvatarMirrored.mockResolvedValue(null)
+    mockResolveIntegrationContext.mockResolvedValue({
+      ctx: { workspaceId: "workspace-1" },
+      integration: { runChannelHandler: mockGetProfileSnapshot },
+    })
+    mockRefreshProfileSnapshot.mockResolvedValue(undefined)
+    mockFindWithIntegrationsById.mockResolvedValue({
+      id: "inbox-1",
+      workspaceId: "workspace-1",
+      integrationInstagram: { id: "instagram-integration-1" },
+    })
+  })
+
+  test("user_hash uses ENCRYPTION_KEY with the contact inbox source id and id", async () => {
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.user_hash),
+    ).resolves.toBe(
+      createHmac("sha256", Buffer.from(testEncryptionKey, "hex"))
+        .update("source-1:contact-inbox-1")
+        .digest("hex"),
+    )
+  })
+
+  test("user_hash returns null without a contact inbox context", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: null }),
+        systemFieldTypes.enum.user_hash,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("user_channel capitalizes the first letter", async () => {
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.user_channel),
+    ).resolves.toBe("Messenger")
+  })
+
+  test("user_channel capitalizes the fallback primary channel", async () => {
+    mockFindRecentByContactId.mockResolvedValue({
+      ...contactInbox,
+      channel: "webchat",
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: null }),
+        systemFieldTypes.enum.user_channel,
+      ),
+    ).resolves.toBe("Webchat")
+    expect(mockFindRecentByContactId).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+    })
+  })
+
+  const instagramContactInbox = (
+    overrides: Partial<ContactInboxModel> = {},
+  ): ContactInboxModel =>
+    ({
+      ...contactInbox,
+      channel: "instagram",
+      sourceId: "igsid-1",
+      sourceUsername: null,
+      followsBusiness: null,
+      businessFollowsContact: null,
+      accountVerified: null,
+      followerCount: null,
+      ...overrides,
+    }) as ContactInboxModel
+
+  const liveSnapshot = {
+    username: "contact_username",
+    followerCount: 123,
+    followsBusiness: true,
+    businessFollowsContact: false,
+    accountVerified: true,
+  }
+
+  test("ig_user_name prefers the stored handle and makes no provider call", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: instagramContactInbox({
+            sourceUsername: "stored_handle",
+          }),
+        }),
+        systemFieldTypes.enum.ig_user_name,
+      ),
+    ).resolves.toBe("stored_handle")
+    expect(mockResolveIntegrationContext).not.toHaveBeenCalled()
+  })
+
+  test("ig_user_name falls back to the live handle when none is stored", async () => {
+    mockGetProfileSnapshot.mockResolvedValue(liveSnapshot)
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: instagramContactInbox() }),
+        systemFieldTypes.enum.ig_user_name,
+      ),
+    ).resolves.toBe("contact_username")
+    expect(mockResolveIntegrationContext).toHaveBeenCalledWith({
+      contactInbox: expect.objectContaining({
+        channel: "instagram",
+        sourceId: "igsid-1",
+      }),
+      workspaceId: "workspace-1",
+    })
+    expect(mockGetProfileSnapshot).toHaveBeenCalledWith(
+      "contact",
+      "getProfileSnapshot",
+      { ctx: { workspaceId: "workspace-1" }, data: { sourceId: "igsid-1" } },
+    )
+  })
+
+  // The four metric fields share one cached provider call and are mapped via a
+  // table, so each must be asserted against a distinct value or a swapped
+  // mapping would go unnoticed.
+  test("profile fields each map to their own attribute with one provider call", async () => {
+    mockGetProfileSnapshot.mockResolvedValue(liveSnapshot)
+    const context = createContext({ contactInbox: instagramContactInbox() })
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.ig_followers),
+    ).resolves.toBe("123")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.ig_verified),
+    ).resolves.toBe("true")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.ig_follow_business),
+    ).resolves.toBe("true")
+    await expect(
+      getSystemFieldValue(
+        context,
+        systemFieldTypes.enum.ig_business_follow_user,
+      ),
+    ).resolves.toBe("false")
+
+    expect(mockGetProfileSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  test("renders genuine false and 0 values instead of dropping them", async () => {
+    mockGetProfileSnapshot.mockResolvedValue({
+      username: null,
+      followerCount: 0,
+      followsBusiness: false,
+      businessFollowsContact: false,
+      accountVerified: false,
+    })
+    const context = createContext({ contactInbox: instagramContactInbox() })
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.ig_followers),
+    ).resolves.toBe("0")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.ig_verified),
+    ).resolves.toBe("false")
+  })
+
+  test("writes a successful fetch through to the contact-inbox columns", async () => {
+    mockGetProfileSnapshot.mockResolvedValue(liveSnapshot)
+
+    await getSystemFieldValue(
+      createContext({ contactInbox: instagramContactInbox() }),
+      systemFieldTypes.enum.ig_followers,
+    )
+
+    expect(mockRefreshProfileSnapshot).toHaveBeenCalledWith({
+      contactInboxId: "contact-inbox-1",
+      inboxId: "inbox-1",
+      snapshot: liveSnapshot,
+    })
+  })
+
+  test("a failed persist does not fail the rendered value", async () => {
+    mockGetProfileSnapshot.mockResolvedValue(liveSnapshot)
+    mockRefreshProfileSnapshot.mockRejectedValue(new Error("db down"))
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: instagramContactInbox() }),
+        systemFieldTypes.enum.ig_followers,
+      ),
+    ).resolves.toBe("123")
+  })
+
+  test("profile fields return null when the provider returns nothing and nothing is stored", async () => {
+    mockGetProfileSnapshot.mockResolvedValue({
+      username: null,
+      followerCount: null,
+      followsBusiness: null,
+      businessFollowsContact: null,
+      accountVerified: null,
+    })
+    const context = createContext({ contactInbox: instagramContactInbox() })
+
+    for (const key of [
+      systemFieldTypes.enum.ig_user_name,
+      systemFieldTypes.enum.ig_followers,
+      systemFieldTypes.enum.ig_verified,
+      systemFieldTypes.enum.ig_follow_business,
+      systemFieldTypes.enum.ig_business_follow_user,
+    ]) {
+      await expect(getSystemFieldValue(context, key)).resolves.toBeNull()
+    }
+  })
+
+  test("falls back to the stored columns when the provider call fails, without persisting", async () => {
+    mockGetProfileSnapshot.mockRejectedValue(new Error("(#230) consent"))
+    const context = createContext({
+      contactInbox: instagramContactInbox({
+        followerCount: 0,
+        accountVerified: false,
+        followsBusiness: true,
+        businessFollowsContact: false,
+      }),
+    })
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.ig_followers),
+    ).resolves.toBe("0")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.ig_verified),
+    ).resolves.toBe("false")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.ig_follow_business),
+    ).resolves.toBe("true")
+    expect(mockRefreshProfileSnapshot).not.toHaveBeenCalled()
+  })
+
+  test("falls back to the stored columns when the integration cannot be resolved", async () => {
+    mockResolveIntegrationContext.mockRejectedValue(
+      new Error("integration_auth_missing"),
+    )
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: instagramContactInbox({ followerCount: 42 }),
+        }),
+        systemFieldTypes.enum.ig_followers,
+      ),
+    ).resolves.toBe("42")
+    expect(mockGetProfileSnapshot).not.toHaveBeenCalled()
+  })
+
+  test("returns null on a failed fetch when nothing is stored", async () => {
+    mockGetProfileSnapshot.mockRejectedValue(new Error("boom"))
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: instagramContactInbox() }),
+        systemFieldTypes.enum.ig_followers,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("returns null for a channel without profile snapshot support", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            channel: "messenger",
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.ig_verified,
+      ),
+    ).resolves.toBeNull()
+    expect(mockResolveIntegrationContext).not.toHaveBeenCalled()
+  })
+
+  // wa_user_id / wa_user_name (D9, the BSUID plan): unlike ig_*, these read the
+  // STORED ContactInbox columns directly — Meta offers no BSUID→profile
+  // endpoint, so there is no API call and no cache to exercise here.
+  test("wa_user_id / wa_user_name resolve from the stored ContactInbox columns", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({
+      integrationWhatsapp: { id: "whatsapp-integration-1" },
+    })
+    const whatsappInbox = {
+      ...contactInbox,
+      channel: "whatsapp",
+      sourceId: "user.9373001",
+      sourceUserId: "user.9373001",
+      sourceUsername: "@handle",
+    } as ContactInboxModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: whatsappInbox }),
+        systemFieldTypes.enum.wa_user_id,
+      ),
+    ).resolves.toBe("user.9373001")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: whatsappInbox }),
+        systemFieldTypes.enum.wa_user_name,
+      ),
+    ).resolves.toBe("@handle")
+  })
+
+  test("wa_user_id / wa_user_name resolve to null when absent (phone-keyed contact, no adopted username)", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({
+      integrationWhatsapp: { id: "whatsapp-integration-1" },
+    })
+    const whatsappInbox = {
+      ...contactInbox,
+      channel: "whatsapp",
+      sourceId: "84901234567",
+      sourceUserId: null,
+      sourceUsername: null,
+    } as ContactInboxModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: whatsappInbox }),
+        systemFieldTypes.enum.wa_user_id,
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: whatsappInbox }),
+        systemFieldTypes.enum.wa_user_name,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("wa_user_id / wa_user_name resolve to null on a non-WhatsApp inbox (channel guard)", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({
+      integrationInstagram: { id: "instagram-integration-1" },
+    })
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.wa_user_id),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.wa_user_name),
+    ).resolves.toBeNull()
+  })
+
+  test("fb_chat_link resolves the Business Suite conversation link", async () => {
+    mockMessengerGetUserInboxLink.mockResolvedValue(
+      "https://business.facebook.com/1453585961452628/inbox/1453594044785153",
+    )
+    mockFindWithIntegrationsById.mockResolvedValue({
+      integrationMessenger: {
+        id: "messenger-integration-1",
+        pageId: "12345",
+        auth: { tokens: { accessToken: "token" }, version: "v23.0" },
+      },
+    })
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.fb_chat_link),
+    ).resolves.toBe(
+      "https://business.facebook.com/1453585961452628/inbox/1453594044785153",
+    )
+    expect(mockMessengerGetUserInboxLink).toHaveBeenCalledWith({
+      ctx: {
+        auth: { tokens: { accessToken: "token" }, version: "v23.0" },
+      },
+      input: { userId: "source-1" },
+    })
+  })
+
+  test("fb_chat_link returns null when the inbox has no messenger integration", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({})
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.fb_chat_link),
+    ).resolves.toBeNull()
+  })
+
+  test("timezone_name maps a stored utc offset to an IANA zone", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({})
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "7" } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone_name,
+      ),
+    ).resolves.toBe("Asia/Bangkok")
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "-5" } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone_name,
+      ),
+    ).resolves.toBe("America/New_York")
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "+07:00" } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone_name,
+      ),
+    ).resolves.toBe("Asia/Bangkok")
+  })
+
+  test("timezone_name falls back to the raw value for an unmapped offset", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({})
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "Asia/Ho_Chi_Minh" } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone_name,
+      ),
+    ).resolves.toBe("Asia/Ho_Chi_Minh")
+  })
+
+  test("timezone_name returns null when the contact has no timezone", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({})
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: null } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone_name,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("inbox_link opens the active conversation when available", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({})
+    mockResolveTenantSettings.mockResolvedValue({
+      appUrl: "https://builder.example",
+    })
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.inbox_link),
+    ).resolves.toBe(
+      "https://builder.example/space/workspace-1/inbox?conversationId=conversation-1",
+    )
+  })
+
+  test("inbox_link falls back to the inbox root without conversation context", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({})
+    mockResolveTenantSettings.mockResolvedValue({
+      appUrl: "https://builder.example/",
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ conversation: null }),
+        systemFieldTypes.enum.inbox_link,
+      ),
+    ).resolves.toBe("https://builder.example/space/workspace-1/inbox")
+  })
+
+  test("contact inbox tracking fields resolve from context", async () => {
+    const trackingInbox = {
+      ...contactInbox,
+      lastBtnTitle: "Choose plan",
+      lastStoryId: "story-42",
+      consecutiveFailedReply: 2,
+      lastOutboundMessageAt: new Date("2026-01-04T03:04:05.000Z"),
+      lastInputFailure: "Invalid email",
+      referral: {
+        ref: "launch",
+        adId: "ad-123",
+        adTitle: "Launch ad",
+        adBody: "Launch offer",
+        ctwaClid: "ctwa-1",
+        sourceUrl: "https://example.com/ad",
+        sourcePlatform: "facebook",
+      },
+    } as ContactInboxModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_btn_title,
+      ),
+    ).resolves.toBe("Choose plan")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_story_id,
+      ),
+    ).resolves.toBe("story-42")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: null }),
+        systemFieldTypes.enum.last_story_id,
+      ),
+    ).resolves.toBeNull()
+    // Legacy spelling of last_btn_title, kept so imported flows resolve.
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_btt_title,
+      ),
+    ).resolves.toBe("Choose plan")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.consecutive_failed_reply,
+      ),
+    ).resolves.toBe("2")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_outbound_message_at,
+      ),
+    ).resolves.toBe("2026-01-04 03:04:05")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_ad,
+      ),
+    ).resolves.toBe("ad-123")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_ad_headline,
+      ),
+    ).resolves.toBe("Launch ad")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_ad_body,
+      ),
+    ).resolves.toBe("Launch offer")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_ctwa,
+      ),
+    ).resolves.toBe("ctwa-1")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_ad_source_url,
+      ),
+    ).resolves.toBe("https://example.com/ad")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_ad_source_platform,
+      ),
+    ).resolves.toBe("facebook")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_input_failure,
+      ),
+    ).resolves.toBe("Invalid email")
+  })
+
+  test("referral fields return null when the key is absent or blank", async () => {
+    const blankReferralInbox = {
+      ...contactInbox,
+      referral: { adTitle: "", sourceUrl: "https://example.com/ad" },
+    } as ContactInboxModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: blankReferralInbox }),
+        systemFieldTypes.enum.last_ad,
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: blankReferralInbox }),
+        systemFieldTypes.enum.last_ad_headline,
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: blankReferralInbox }),
+        systemFieldTypes.enum.last_ad_body,
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: blankReferralInbox }),
+        systemFieldTypes.enum.last_ctwa,
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: blankReferralInbox }),
+        systemFieldTypes.enum.last_ad_source_platform,
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: blankReferralInbox }),
+        systemFieldTypes.enum.last_ad_source_url,
+      ),
+    ).resolves.toBe("https://example.com/ad")
+  })
+
+  // Lifetime totals accumulated on the contact by the comment-automation
+  // worker when an automation has `trackUserTags` on.
+  describe("tag counters", () => {
+    test("resolve the contact's accumulated totals", async () => {
+      const tracked = { ...contact, totalTagged: 7, totalNewTagged: 3 }
+
+      await expect(
+        getSystemFieldValue(
+          createContext({ contact: tracked }),
+          systemFieldTypes.enum.total_tagged,
+        ),
+      ).resolves.toBe("7")
+      await expect(
+        getSystemFieldValue(
+          createContext({ contact: tracked }),
+          systemFieldTypes.enum.total_new_tagged,
+        ),
+      ).resolves.toBe("3")
+    })
+
+    // Zero is a real answer ("nobody was tagged yet") and must survive as "0"
+    // — returning null here would render an empty string in the reply.
+    test("keep a zero count as '0'", async () => {
+      await expect(
+        getSystemFieldValue(
+          createContext({
+            contact: { ...contact, totalTagged: 0, totalNewTagged: 0 },
+          }),
+          systemFieldTypes.enum.total_tagged,
+        ),
+      ).resolves.toBe("0")
+    })
+
+    // A contact serialized into a job payload before the columns existed.
+    test("stay null when the contact carries no counters", async () => {
+      const legacy = { ...contact } as Record<string, unknown>
+      legacy.totalTagged = undefined
+      legacy.totalNewTagged = undefined
+
+      await expect(
+        getSystemFieldValue(
+          createContext({ contact: legacy as ContactModel }),
+          systemFieldTypes.enum.total_tagged,
+        ),
+      ).resolves.toBeNull()
+    })
+  })
+
+  test("user_id resolves to the contact id even without a contact inbox", async () => {
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.user_id),
+    ).resolves.toBe("contact-1")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: null }),
+        systemFieldTypes.enum.user_id,
+      ),
+    ).resolves.toBe("contact-1")
+  })
+
+  test("contact inbox passthrough fields resolve from context", async () => {
+    const passthroughInbox = {
+      ...contactInbox,
+      webchatParentUrl: "https://shop.example/checkout",
+      lastErrorLog: "(#551) This person isn't available right now.",
+    } as ContactInboxModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: passthroughInbox }),
+        systemFieldTypes.enum.user_external_id,
+      ),
+    ).resolves.toBe("source-1")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: passthroughInbox }),
+        systemFieldTypes.enum.webchat_parent_url,
+      ),
+    ).resolves.toBe("https://shop.example/checkout")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: passthroughInbox }),
+        systemFieldTypes.enum.last_error_log,
+      ),
+    ).resolves.toBe("(#551) This person isn't available right now.")
+  })
+
+  test("contact inbox passthrough fields return null without a contact inbox", async () => {
+    for (const key of [
+      systemFieldTypes.enum.user_external_id,
+      systemFieldTypes.enum.webchat_parent_url,
+      systemFieldTypes.enum.last_error_log,
+    ]) {
+      await expect(
+        getSystemFieldValue(createContext({ contactInbox: null }), key),
+      ).resolves.toBeNull()
+    }
+  })
+
+  test("timezone renders signed offsets from legacy and IANA storage", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "7" } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone,
+      ),
+    ).resolves.toBe("+7")
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "-5" } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone,
+      ),
+    ).resolves.toBe("-5")
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: {
+            ...contact,
+            timezone: "Asia/Ho_Chi_Minh",
+          } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone,
+      ),
+    ).resolves.toBe("+7")
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: null } as ContactModel,
+        }),
+        systemFieldTypes.enum.timezone,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("language reads ContactInbox.language before falling back to contact locale", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, locale: "vi_VN" } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            language: "en",
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.language,
+      ),
+    ).resolves.toBe("en")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, locale: "vi-VN" } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            language: null,
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.language,
+      ),
+    ).resolves.toBe("vi")
+  })
+
+  test("user_source maps the stored source to a human label", async () => {
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.user_source),
+    ).resolves.toBe("Ads")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            source: "comments",
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.user_source,
+      ),
+    ).resolves.toBe("Facebook/IG Comment")
+  })
+
+  test("user_source labels a livestream comment source", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            channel: "messenger",
+            source: "liveComments",
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.user_source,
+      ),
+    ).resolves.toBe("Facebook/IG Livestream")
+  })
+
+  test.each([
+    ["tiktok", "TikTok Comment"],
+    ["threads", "Threads Comment"],
+    ["instagram", "Facebook/IG Comment"],
+  ])("user_source names the %s comment channel", async (channel, label) => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            channel,
+            source: "comments",
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.user_source,
+      ),
+    ).resolves.toBe(label)
+  })
+
+  test("user_source falls back to the raw value for an unmapped source", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            source: "some_future_source",
+          } as unknown as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.user_source,
+      ),
+    ).resolves.toBe("some_future_source")
+  })
+
+  test("user_source returns Unknown without a contact inbox source", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: null }),
+        systemFieldTypes.enum.user_source,
+      ),
+    ).resolves.toBe("Unknown")
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: { ...contactInbox, source: null } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.user_source,
+      ),
+    ).resolves.toBe("Unknown")
+  })
+
+  test("comment fields resolve from the stored message pointer", async () => {
+    const messageCreatedAt = new Date("2026-01-04T03:04:05.000Z")
+    mockMessageFindById.mockResolvedValue({
+      id: "message-1",
+      createdAt: messageCreatedAt,
+      sourceId: "user-comment-1",
+      text: "Nice post",
+      contentAttributes: { postId: "post-1" },
+      type: "comment",
+      messageType: "incoming",
+    })
+
+    const trackingInbox = {
+      ...contactInbox,
+      lastCommentMessageId: "message-1",
+      lastCommentMessageAt: messageCreatedAt,
+    } as ContactInboxModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_comment_id,
+      ),
+    ).resolves.toBe("user-comment-1")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_fb_comment,
+      ),
+    ).resolves.toBe("Nice post")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_post_id,
+      ),
+    ).resolves.toBe("post-1")
+
+    expect(mockMessageFindById).toHaveBeenCalledWith({
+      id: "message-1",
+      createdAt: messageCreatedAt,
+      workspaceId: "workspace-1",
+    })
+  })
+
+  test("comment fields ignore a deleted pointed message", async () => {
+    const messageCreatedAt = new Date("2026-01-04T03:04:05.000Z")
+    mockMessageFindById.mockResolvedValue({
+      id: "message-1",
+      createdAt: messageCreatedAt,
+      sourceId: "user-comment-1",
+      text: "Deleted comment",
+      contentAttributes: { postId: "post-1" },
+      deletedAt: new Date("2026-01-05T00:00:00.000Z"),
+    })
+
+    const trackingInbox = {
+      ...contactInbox,
+      lastCommentMessageId: "message-1",
+      lastCommentMessageAt: messageCreatedAt,
+    } as ContactInboxModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: trackingInbox }),
+        systemFieldTypes.enum.last_comment_id,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("last_commented_post_text is lazily fetched and cached", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({
+      integrationMessenger: {
+        id: "messenger-1",
+        auth: { tokens: { accessToken: "token" }, version: "v23.0" },
+      },
+    })
+    mockMessengerGetPostDetails.mockResolvedValue({
+      message: "Post text",
+      created_time: "2026-01-01T00:00:00Z",
+    })
+
+    const context = createContext({
+      contactInbox: {
+        ...contactInbox,
+        lastCommentMessageId: "message-1",
+        lastCommentMessageAt: new Date("2026-01-04T03:04:05.000Z"),
+      } as ContactInboxModel,
+    })
+    mockMessageFindById.mockResolvedValue({
+      id: "message-1",
+      sourceId: "user-comment-1",
+      text: "Nice post",
+      contentAttributes: { postId: "post-1" },
+      createdAt: new Date("2026-01-04T03:04:05.000Z"),
+    })
+
+    await expect(
+      getSystemFieldValue(
+        context,
+        systemFieldTypes.enum.last_commented_post_text,
+      ),
+    ).resolves.toBe("Post text")
+    await expect(
+      getSystemFieldValue(
+        context,
+        systemFieldTypes.enum.last_commented_post_text,
+      ),
+    ).resolves.toBe("Post text")
+
+    expect(mockMessengerGetPostDetails).toHaveBeenCalledTimes(1)
+    expect(mockMessengerGetPostDetails).toHaveBeenCalledWith({
+      ctx: {
+        auth: { tokens: { accessToken: "token" }, version: "v23.0" },
+      },
+      input: { postId: "post-1" },
+    })
+  })
+
+  test("me creates a signed privacy link", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({
+      integrationMessenger: {
+        id: "messenger-integration-1",
+        name: "Messenger Page",
+      },
+    })
+    mockResolveWorkspaceAppUrl.mockResolvedValue("https://brand.example")
+    mockSystemFieldCreate.mockResolvedValue({ id: "system-field-1" })
+    mockSignMeLink.mockReturnValue("signed-hash")
+
+    const value = await getSystemFieldValue(
+      createContext(),
+      systemFieldTypes.enum.me,
+    )
+
+    expect(value).toBe(
+      "https://brand.example/extensions/me/?w=workspace-1&u=source-1&ib=messenger-integration-1&id=system-field-1&hash=signed-hash",
+    )
+    expect(mockSystemFieldCreate).toHaveBeenCalledWith({
+      type: "me",
+      payload: {
+        workspaceId: "workspace-1",
+        channel: "messenger",
+        integrationId: "messenger-integration-1",
+        sourceId: "source-1",
+        contactInboxId: "contact-inbox-1",
+        conversationId: "conversation-1",
+        contactId: "contact-1",
+      },
+    })
+    expect(mockSignMeLink).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      sourceId: "source-1",
+      integrationId: "messenger-integration-1",
+      formId: "system-field-1",
+    })
+  })
+
+  test("me returns null without creating a link when workspace is scheduled for deletion", async () => {
+    const scheduledWorkspace = {
+      ...workspace,
+      scheduledDeletionAt: new Date("2026-07-23T00:00:00.000Z"),
+    } as WorkspaceModel
+
+    const value = await getSystemFieldValue(
+      createContext({ workspace: scheduledWorkspace }),
+      systemFieldTypes.enum.me,
+    )
+
+    expect(value).toBeNull()
+    expect(mockFindWithIntegrationsById).not.toHaveBeenCalled()
+    expect(mockResolveWorkspaceAppUrl).not.toHaveBeenCalled()
+    expect(mockSystemFieldCreate).not.toHaveBeenCalled()
+    expect(mockSignMeLink).not.toHaveBeenCalled()
+  })
+
+  test("location and flow step fields resolve from persisted contact state", async () => {
+    mockFindDMByContact.mockResolvedValue({
+      lastStep: "step-1",
+      currentStep: "step-2",
+    })
+
+    const locatedContact = {
+      ...contact,
+      location: { latitude: 10.75, longitude: 106.66 },
+    } as ContactModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contact: locatedContact }),
+        systemFieldTypes.enum.last_latitude,
+      ),
+    ).resolves.toBe("10.75")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contact: locatedContact }),
+        systemFieldTypes.enum.last_longitude,
+      ),
+    ).resolves.toBe("106.66")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contact: locatedContact }),
+        systemFieldTypes.enum.last_step,
+      ),
+    ).resolves.toBe("step-1")
+    await expect(
+      getSystemFieldValue(
+        createContext({ contact: locatedContact }),
+        systemFieldTypes.enum.current_step,
+      ),
+    ).resolves.toBe("step-2")
+  })
+
+  test("profile_pic resolves storage paths to public URLs", async () => {
+    mockResolveTenantSettings.mockResolvedValue({
+      storageUrl: "http://localhost:3123/storage/",
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: {
+            ...contact,
+            avatar: "public/space/workspace-1/avatars/a.png",
+          } as ContactModel,
+        }),
+        systemFieldTypes.enum.profile_pic,
+      ),
+    ).resolves.toBe(
+      "http://localhost:3123/storage/public/space/workspace-1/avatars/a.png",
+    )
+    expect(mockEnsureContactAvatarMirrored).not.toHaveBeenCalled()
+  })
+
+  test("avatar keeps an absolute mirrored URL unchanged", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: {
+            ...contact,
+            avatar: "https://cdn.example.com/a.png",
+          } as ContactModel,
+        }),
+        systemFieldTypes.enum.avatar,
+      ),
+    ).resolves.toBe("https://cdn.example.com/a.png")
+  })
+
+  test("avatar resolves a mirrored storage key to its public URL", async () => {
+    mockResolveTenantSettings.mockResolvedValue({
+      storageUrl: "http://localhost:3123/storage/",
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: {
+            ...contact,
+            avatar: "public/space/workspace-1/avatars/avatar-field.png",
+          } as ContactModel,
+        }),
+        systemFieldTypes.enum.avatar,
+      ),
+    ).resolves.toBe(
+      "http://localhost:3123/storage/public/space/workspace-1/avatars/avatar-field.png",
+    )
+    expect(mockEnsureContactAvatarMirrored).not.toHaveBeenCalled()
+  })
+
+  test.each([
+    [systemFieldTypes.enum.profile_pic, "messenger"],
+    [systemFieldTypes.enum.avatar, "instagram"],
+  ])("%s returns a durable URL for a pending %s avatar", async (field, channel) => {
+    mockResolveTenantSettings.mockResolvedValue({
+      storageUrl: "http://localhost:3123/storage/",
+    })
+    mockEnsureContactAvatarMirrored.mockResolvedValue({
+      avatar: "public/space/workspace-1/avatars/mirrored.png",
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, avatar: null } as ContactModel,
+          contactInbox: { ...contactInbox, channel } as ContactInboxModel,
+        }),
+        field,
+      ),
+    ).resolves.toBe(
+      "http://localhost:3123/storage/public/space/workspace-1/avatars/mirrored.png",
+    )
+    expect(mockEnsureContactAvatarMirrored).toHaveBeenCalledWith({
+      contactInboxId: "contact-inbox-1",
+      workspaceId: "workspace-1",
+    })
+  })
+
+  test.each([
+    systemFieldTypes.enum.profile_pic,
+    systemFieldTypes.enum.avatar,
+  ])("%s resolves a no-avatar sentinel to its public URL", async (field) => {
+    mockResolveTenantSettings.mockResolvedValue({
+      storageUrl: "http://localhost:3123/storage/",
+    })
+    mockEnsureContactAvatarMirrored.mockResolvedValue({
+      avatar: "public/img/no_avatar.jpg?time=1234",
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, avatar: null } as ContactModel,
+        }),
+        field,
+      ),
+    ).resolves.toBe(
+      "http://localhost:3123/storage/public/img/no_avatar.jpg?time=1234",
+    )
+  })
+
+  test.each([
+    systemFieldTypes.enum.profile_pic,
+    systemFieldTypes.enum.avatar,
+  ])("%s remains null when the mirror reports a missing contact", async (field) => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, avatar: null } as ContactModel,
+        }),
+        field,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test.each([
+    systemFieldTypes.enum.profile_pic,
+    systemFieldTypes.enum.avatar,
+  ])("%s returns null for a WhatsApp contact without an avatar", async (field) => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, avatar: null } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            channel: "whatsapp",
+          } as ContactInboxModel,
+        }),
+        field,
+      ),
+    ).resolves.toBeNull()
+    expect(mockEnsureContactAvatarMirrored).not.toHaveBeenCalled()
+  })
+
+  test("account_image resolves workspace logo storage paths", async () => {
+    mockResolveTenantSettings.mockResolvedValue({
+      storageUrl: "http://localhost:3123/storage/",
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          workspace: {
+            ...workspace,
+            logo: "public/space/workspace-1/logo.png",
+          } as WorkspaceModel,
+        }),
+        systemFieldTypes.enum.account_image,
+      ),
+    ).resolves.toBe(
+      "http://localhost:3123/storage/public/space/workspace-1/logo.png",
+    )
+  })
+
+  test("locale2 returns the language from underscore and hyphen locales", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, locale: "en_US" } as ContactModel,
+        }),
+        systemFieldTypes.enum.locale2,
+      ),
+    ).resolves.toBe("en")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, locale: "en-US" } as ContactModel,
+        }),
+        systemFieldTypes.enum.locale2,
+      ),
+    ).resolves.toBe("en")
+  })
+
+  test("last_seen uses the context contact inbox read timestamp", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            contactLastReadAt: new Date("2026-01-03T03:04:05.000Z"),
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.last_seen,
+      ),
+    ).resolves.toBe("2026-01-03 03:04:05")
+  })
+
+  test("last_interaction uses the context contact inbox inbound timestamp", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            lastIncomingMessageAt: new Date("2026-01-03T03:04:05.000Z"),
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.last_interaction,
+      ),
+    ).resolves.toBe("2026-01-03 03:04:05")
+  })
+
+  test("last_seen and last_interaction return null when no inbox timestamp exists", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            contactLastReadAt: null,
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.last_seen,
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contactInbox: {
+            ...contactInbox,
+            lastIncomingMessageAt: null,
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.last_interaction,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("subscribed_date formats the context contact inbox createdAt in the contact timezone", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "Asia/Ho_Chi_Minh" } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            createdAt: new Date("2026-01-01T23:30:00.000Z"),
+          } as ContactInboxModel,
+          // Contact timezone wins over the workspace timezone, rolling the
+          // calendar date forward to the next day.
+          workspace: { ...workspace, timezone: "UTC" },
+        }),
+        systemFieldTypes.enum.subscribed_date,
+      ),
+    ).resolves.toBe("2026-01-02")
+  })
+
+  test("subscribed_date returns null without a context contact inbox", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: null }),
+        systemFieldTypes.enum.subscribed_date,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("last_seen formats using the contact timezone before the workspace timezone", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: {
+            ...contact,
+            timezone: "Asia/Ho_Chi_Minh",
+          } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            contactLastReadAt: new Date("2026-01-01T23:30:00.000Z"),
+          } as ContactInboxModel,
+          workspace: { ...workspace, timezone: "UTC" },
+        }),
+        systemFieldTypes.enum.last_seen,
+      ),
+    ).resolves.toBe("2026-01-02 06:30:00")
+  })
+
+  test("last_interaction falls back to the contact timezone when workspace is missing", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "Asia/Ho_Chi_Minh" } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            lastIncomingMessageAt: new Date("2026-01-01T23:30:00.000Z"),
+          } as ContactInboxModel,
+          workspace: null,
+        }),
+        systemFieldTypes.enum.last_interaction,
+      ),
+    ).resolves.toBe("2026-01-02 06:30:00")
+  })
+
+  test("last_seen and last_interaction fall back to UTC when timezone is null", async () => {
+    const utcContact = { ...contact, timezone: null } as ContactModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: utcContact,
+          contactInbox: {
+            ...contactInbox,
+            contactLastReadAt: new Date("2026-01-01T23:30:00.000Z"),
+          } as ContactInboxModel,
+          workspace: null,
+        }),
+        systemFieldTypes.enum.last_seen,
+      ),
+    ).resolves.toBe("2026-01-01 23:30:00")
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: utcContact,
+          contactInbox: {
+            ...contactInbox,
+            lastIncomingMessageAt: new Date("2026-01-01T23:30:00.000Z"),
+          } as ContactInboxModel,
+          workspace: null,
+        }),
+        systemFieldTypes.enum.last_interaction,
+      ),
+    ).resolves.toBe("2026-01-01 23:30:00")
+  })
+
+  test("last_seen normalizes legacy numeric contact timezone values", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "7" } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            contactLastReadAt: new Date("2026-01-01T23:30:00.000Z"),
+          } as ContactInboxModel,
+          workspace: null,
+        }),
+        systemFieldTypes.enum.last_seen,
+      ),
+    ).resolves.toBe("2026-01-02 06:30:00")
+  })
+})
+
+const profileContact = {
+  ...contact,
+  firstName: "Ada",
+  lastName: "Lovelace",
+  email: "ada@example.com",
+  phoneNumber: "+84900000000",
+  country: "VN",
+  state: "Ho Chi Minh",
+  city: "Thu Duc",
+  gender: "female",
+  timezone: "7",
+} as ContactModel
+
+describe("getSystemFieldValue — contact profile columns", () => {
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+  })
+
+  test("reads plain contact columns straight through", async () => {
+    const context = createContext({ contact: profileContact })
+    const expected: [string, string][] = [
+      [systemFieldTypes.enum.first_name, "Ada"],
+      [systemFieldTypes.enum.last_name, "Lovelace"],
+      [systemFieldTypes.enum.email, "ada@example.com"],
+      [systemFieldTypes.enum.phone, "+84900000000"],
+      [systemFieldTypes.enum.user_country, "VN"],
+      [systemFieldTypes.enum.user_state, "Ho Chi Minh"],
+      [systemFieldTypes.enum.user_city, "Thu Duc"],
+      // timezone follows the signed-offset shape; timezone_name maps to IANA.
+      [systemFieldTypes.enum.timezone, "+7"],
+    ]
+
+    for (const [key, value] of expected) {
+      await expect(getSystemFieldValue(context, key)).resolves.toBe(value)
+    }
+  })
+
+  test("full_name joins the parts and drops the missing half", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({ contact: profileContact }),
+        systemFieldTypes.enum.full_name,
+      ),
+    ).resolves.toBe("Ada Lovelace")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...profileContact, lastName: null } as ContactModel,
+        }),
+        systemFieldTypes.enum.full_name,
+      ),
+    ).resolves.toBe("Ada")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: {
+            ...profileContact,
+            firstName: null,
+            lastName: null,
+          } as ContactModel,
+        }),
+        systemFieldTypes.enum.full_name,
+      ),
+    ).resolves.toBe("")
+  })
+
+  test("gender is localised through the workspace language even when the contact speaks another", async () => {
+    mockResolveGenderLabel.mockReturnValue("Chị")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...profileContact, locale: "en_US" } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            language: "en",
+          } as ContactInboxModel,
+          workspace: { ...workspace, language: "vi" } as WorkspaceModel,
+        }),
+        systemFieldTypes.enum.gender,
+      ),
+    ).resolves.toBe("Chị")
+    expect(mockResolveGenderLabel).toHaveBeenCalledWith("vi", "female")
+  })
+
+  test("gender passes an undefined language when there is no workspace", async () => {
+    mockResolveGenderLabel.mockReturnValue("Male/Female")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...profileContact, locale: "vi_VN" } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            language: "vi",
+          } as ContactInboxModel,
+          workspace: null,
+        }),
+        systemFieldTypes.enum.gender,
+      ),
+    ).resolves.toBe("Male/Female")
+    expect(mockResolveGenderLabel).toHaveBeenCalledWith(undefined, "female")
+  })
+
+  test("last_ref prefers the contact column over the referral payload", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, ref: "from-contact" } as ContactModel,
+          contactInbox: {
+            ...contactInbox,
+            referral: { ref: "from-referral" },
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.last_ref,
+      ),
+    ).resolves.toBe("from-contact")
+  })
+
+  test("last_ref falls back to the referral payload, then to null", async () => {
+    const refless = { ...contact, ref: null } as ContactModel
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: refless,
+          contactInbox: {
+            ...contactInbox,
+            referral: { ref: "from-referral" },
+          } as ContactInboxModel,
+        }),
+        systemFieldTypes.enum.last_ref,
+      ),
+    ).resolves.toBe("from-referral")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contact: refless, contactInbox: null }),
+        systemFieldTypes.enum.last_ref,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("last_order stays null until an order source exists", async () => {
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.last_order),
+    ).resolves.toBeNull()
+  })
+})
+
+describe("getSystemFieldValue — workspace and account fields", () => {
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+  })
+
+  test("workspace and account aliases resolve from the same sources", async () => {
+    mockResolveDefaultTokenPlaintext.mockResolvedValue("cbx_ws_plaintext")
+    const context = createContext()
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.workspace_id),
+    ).resolves.toBe("workspace-1")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.account_id),
+    ).resolves.toBe("workspace-1")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.workspace_name),
+    ).resolves.toBe("Workspace One")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.account_name),
+    ).resolves.toBe("Workspace One")
+    // {{api_key}} resolves the workspace's default token, minted/recovered
+    // by workspaceApiTokenService.resolveDefaultTokenPlaintext.
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.api_key),
+    ).resolves.toBe("cbx_ws_plaintext")
+    expect(mockResolveDefaultTokenPlaintext).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+    })
+  })
+
+  // Legacy spelling of {{api_key}} ("Account API Key"); same value.
+  test("page_api_key resolves the same default token as api_key", async () => {
+    mockResolveDefaultTokenPlaintext.mockResolvedValue("cbx_ws_plaintext")
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.page_api_key),
+    ).resolves.toBe("cbx_ws_plaintext")
+  })
+
+  test("api_key resolves null when the workspace is scheduled for deletion", async () => {
+    mockResolveDefaultTokenPlaintext.mockResolvedValue("cbx_ws_plaintext")
+    const context = createContext({
+      workspace: {
+        ...workspace,
+        scheduledDeletionAt: new Date("2026-01-01T00:00:00.000Z"),
+      } as WorkspaceModel,
+    })
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.api_key),
+    ).resolves.toBeNull()
+    expect(mockResolveDefaultTokenPlaintext).not.toHaveBeenCalled()
+  })
+
+  test("api_key resolves null when resolveDefaultTokenPlaintext throws, instead of failing the render", async () => {
+    mockResolveDefaultTokenPlaintext.mockRejectedValue(
+      new Error("decrypt failed: AAD mismatch"),
+    )
+    const context = createContext()
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.api_key),
+    ).resolves.toBeNull()
+  })
+
+  test("workspace-backed fields are null without a workspace, but ids and api_key survive", async () => {
+    mockResolveDefaultTokenPlaintext.mockResolvedValue("cbx_ws_plaintext")
+    const context = createContext({ workspace: null })
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.workspace_name),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.account_name),
+    ).resolves.toBeNull()
+    // api_key is resolved off contact.workspaceId, not the workspace row, so
+    // it survives even when `workspace` itself is null.
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.api_key),
+    ).resolves.toBe("cbx_ws_plaintext")
+    // Both ids come off the contact, so they hold even without the workspace row.
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.workspace_id),
+    ).resolves.toBe("workspace-1")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.account_id),
+    ).resolves.toBe("workspace-1")
+  })
+})
+
+describe("getSystemFieldValue — clock fields", () => {
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-01-02T03:04:05.000Z"))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test("current_time uses workspace timezone while current_user_time uses contact timezone first", async () => {
+    const context = createContext({
+      contact: { ...profileContact, timezone: "Asia/Tokyo" } as ContactModel,
+      workspace: { ...workspace, timezone: "Asia/Bangkok" } as WorkspaceModel,
+    })
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.current_time),
+    ).resolves.toBe("2026-01-02 10:04:05")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.current_user_time),
+    ).resolves.toBe("2026-01-02 12:04:05")
+  })
+
+  test("clock fields fall back to the contact timezone, then to UTC", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: "Asia/Tokyo" } as ContactModel,
+          workspace: null,
+        }),
+        systemFieldTypes.enum.current_user_time,
+      ),
+    ).resolves.toBe("2026-01-02 12:04:05")
+
+    await expect(
+      getSystemFieldValue(
+        createContext({
+          contact: { ...contact, timezone: null } as ContactModel,
+          workspace: null,
+        }),
+        systemFieldTypes.enum.current_time,
+      ),
+    ).resolves.toBe("2026-01-02 03:04:05")
+  })
+})
+
+describe("getSystemFieldValue — appointment fields", () => {
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+  })
+
+  test("booking fields resolve from explicit appointment context", async () => {
+    mockAppointmentFindBy.mockResolvedValue({
+      id: "appointment-1",
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+      startAt: new Date("2026-01-02T03:04:05.000Z"),
+      inviteeTimezone: "Asia/Ho_Chi_Minh",
+      calendar: { name: "Discovery Call" },
+    })
+    const context = createContext({ appointmentId: "appointment-1" })
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.booking_calendar),
+    ).resolves.toBe("Discovery Call")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.booking_date),
+    ).resolves.toBe("2026-01-02 10:04:05")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.booking_id),
+    ).resolves.toBe("appointment-1")
+
+    expect(mockAppointmentFindBy).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      id: "appointment-1",
+    })
+    expect(mockAppointmentFindLatestForContact).not.toHaveBeenCalled()
+  })
+
+  test("booking fields fall back to the contact's latest appointment without explicit appointment context", async () => {
+    mockAppointmentFindLatestForContact.mockResolvedValue({
+      id: "appointment-2",
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+      startAt: new Date("2026-01-02T03:04:05.000Z"),
+      inviteeTimezone: "Asia/Ho_Chi_Minh",
+      calendar: { name: "Discovery Call" },
+    })
+    const context = createContext()
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.booking_calendar),
+    ).resolves.toBe("Discovery Call")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.booking_date),
+    ).resolves.toBe("2026-01-02 10:04:05")
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.booking_id),
+    ).resolves.toBe("appointment-2")
+
+    expect(mockAppointmentFindBy).not.toHaveBeenCalled()
+    expect(mockAppointmentFindLatestForContact).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+    })
+  })
+
+  test("booking_id resolves null when the explicit appointment belongs to another contact", async () => {
+    mockAppointmentFindBy.mockResolvedValue({
+      id: "appointment-9",
+      workspaceId: "workspace-1",
+      contactId: "someone-else",
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ appointmentId: "appointment-9" }),
+        systemFieldTypes.enum.booking_id,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("booking_link resolves null without any appointment for the contact", async () => {
+    mockAppointmentFindLatestForContact.mockResolvedValue(null)
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.booking_id),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.booking_link),
+    ).resolves.toBeNull()
+
+    expect(mockAppointmentFindBy).not.toHaveBeenCalled()
+    expect(mockAppointmentFindLatestForContact).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+    })
+  })
+
+  test("booking_link resolves a schedule URL with an appointmentId", async () => {
+    mockAppointmentFindBy.mockResolvedValue({
+      id: "appointment-1",
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+      conversationId: "conversation-1",
+      startAt: new Date("2026-01-02T03:04:05.000Z"),
+      inviteeTimezone: "Asia/Ho_Chi_Minh",
+      calendar: { name: "Discovery Call" },
+    })
+    mockResolveTenantSettings.mockResolvedValue({
+      appUrl: "https://app.example.test",
+    })
+    const context = createContext({ appointmentId: "appointment-1" })
+
+    const value = await getSystemFieldValue(
+      context,
+      systemFieldTypes.enum.booking_link,
+    )
+
+    expect(value).toMatch(BOOKING_SCHEDULE_URL_RE)
+    expect(mockAppointmentFindLatestForContact).not.toHaveBeenCalled()
+  })
+
+  test("explicit appointmentId takes priority over the contact's latest appointment", async () => {
+    mockAppointmentFindBy.mockResolvedValue({
+      id: "appointment-1",
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+      startAt: new Date("2026-01-02T03:04:05.000Z"),
+      inviteeTimezone: "Asia/Ho_Chi_Minh",
+      calendar: { name: "Discovery Call" },
+    })
+    mockAppointmentFindLatestForContact.mockResolvedValue({
+      id: "appointment-2",
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+      startAt: new Date("2026-02-02T03:04:05.000Z"),
+      inviteeTimezone: "Asia/Ho_Chi_Minh",
+      calendar: { name: "Newer Calendar" },
+    })
+    const context = createContext({ appointmentId: "appointment-1" })
+
+    await expect(
+      getSystemFieldValue(context, systemFieldTypes.enum.booking_calendar),
+    ).resolves.toBe("Discovery Call")
+
+    expect(mockAppointmentFindLatestForContact).not.toHaveBeenCalled()
+  })
+})
+
+describe("getSystemFieldValue — questionnaire fields", () => {
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+  })
+
+  test("last_points resolves the points of the contact's latest completed submission", async () => {
+    mockQuestionnaireFindLatestCompleted.mockResolvedValue({
+      id: "submission-1",
+      totalPoints: 7,
+    })
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.last_points),
+    ).resolves.toBe("7")
+
+    expect(mockQuestionnaireFindLatestCompleted).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+    })
+  })
+
+  test("last_points keeps a legitimate zero score", async () => {
+    mockQuestionnaireFindLatestCompleted.mockResolvedValue({
+      id: "submission-1",
+      totalPoints: 0,
+    })
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.last_points),
+    ).resolves.toBe("0")
+  })
+
+  // A contact who never filled a questionnaire renders 0.
+  test("last_points resolves 0 when the contact has no completed scored submission", async () => {
+    mockQuestionnaireFindLatestCompleted.mockResolvedValue(undefined)
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.last_points),
+    ).resolves.toBe("0")
+  })
+})
+
+describe("getSystemFieldValue — empty", () => {
+  // `{{empty}}` is how a flow clears a field or leaves a template slot blank,
+  // so it renders as an empty string.
+  test("empty resolves to an empty string", async () => {
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.empty),
+    ).resolves.toBe("")
+  })
+
+  test("empty resolves to an empty string even without a contact inbox", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: null }),
+        systemFieldTypes.enum.empty,
+      ),
+    ).resolves.toBe("")
+  })
+})
+
+describe("getSystemFieldValue — inbox sender fields", () => {
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+    mockFindMemberWithUserByWorkspaceIdAndUserId.mockResolvedValue({
+      userId: "user-7",
+      user: { id: "user-7", name: "Grace", email: "grace@example.com" },
+    })
+    mockListTeamNamesByUserId.mockResolvedValue(["Sales", "Support"])
+  })
+
+  test("admin_name resolves the member who sent the flow from the inbox", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({ sentByUserId: "user-7" }),
+        systemFieldTypes.enum.admin_name,
+      ),
+    ).resolves.toBe("Grace")
+
+    expect(mockFindMemberWithUserByWorkspaceIdAndUserId).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      userId: "user-7",
+    })
+  })
+
+  test("admin_team_name joins the names of all the sender's teams", async () => {
+    await expect(
+      getSystemFieldValue(
+        createContext({ sentByUserId: "user-7" }),
+        systemFieldTypes.enum.admin_team_name,
+      ),
+    ).resolves.toBe("Sales, Support")
+
+    expect(mockListTeamNamesByUserId).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      userId: "user-7",
+    })
+  })
+
+  test("both resolve null without a sender and do not query", async () => {
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.admin_name),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext(),
+        systemFieldTypes.enum.admin_team_name,
+      ),
+    ).resolves.toBeNull()
+
+    expect(mockFindMemberWithUserByWorkspaceIdAndUserId).not.toHaveBeenCalled()
+    expect(mockListTeamNamesByUserId).not.toHaveBeenCalled()
+  })
+
+  test("admin_name resolves null when the sender is no longer a workspace member", async () => {
+    mockFindMemberWithUserByWorkspaceIdAndUserId.mockResolvedValue(undefined)
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ sentByUserId: "user-7" }),
+        systemFieldTypes.enum.admin_name,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("admin_team_name resolves null when the sender belongs to no team", async () => {
+    mockListTeamNamesByUserId.mockResolvedValue([])
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ sentByUserId: "user-7" }),
+        systemFieldTypes.enum.admin_team_name,
+      ),
+    ).resolves.toBeNull()
+  })
+})
+
+describe("getSystemFieldValue — lead ads fields", () => {
+  const latestLead = {
+    leadgenId: "lead-9",
+    formId: "form-3",
+    formName: "Summer promo",
+    adgroupId: "adgroup-5",
+  }
+
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+  })
+
+  test.each([
+    [systemFieldTypes.enum.last_lead_id, "lead-9"],
+    [systemFieldTypes.enum.last_form_id, "form-3"],
+    [systemFieldTypes.enum.last_form_name, "Summer promo"],
+    [systemFieldTypes.enum.last_adgroup_id, "adgroup-5"],
+  ] as const)("%s resolves from the contact's latest lead", async (key, expected) => {
+    mockLeadAdsFindLatestByContact.mockResolvedValue(latestLead)
+
+    await expect(getSystemFieldValue(createContext(), key)).resolves.toBe(
+      expected,
+    )
+
+    expect(mockLeadAdsFindLatestByContact).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      contactId: "contact-1",
+    })
+  })
+
+  test.each([
+    systemFieldTypes.enum.last_lead_id,
+    systemFieldTypes.enum.last_form_id,
+    systemFieldTypes.enum.last_form_name,
+    systemFieldTypes.enum.last_adgroup_id,
+  ] as const)("%s resolves null when the contact has no lead", async (key) => {
+    mockLeadAdsFindLatestByContact.mockResolvedValue(undefined)
+
+    await expect(getSystemFieldValue(createContext(), key)).resolves.toBeNull()
+  })
+
+  test("a lead without a stored form name or adgroup resolves those to null", async () => {
+    mockLeadAdsFindLatestByContact.mockResolvedValue({
+      leadgenId: "lead-9",
+      formId: "form-3",
+      formName: null,
+      adgroupId: null,
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext(),
+        systemFieldTypes.enum.last_form_name,
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      getSystemFieldValue(
+        createContext(),
+        systemFieldTypes.enum.last_adgroup_id,
+      ),
+    ).resolves.toBeNull()
+  })
+})
+
+describe("getSystemFieldValue — inbox identity fields", () => {
+  beforeEach(() => {
+    cache.clear()
+    vi.clearAllMocks()
+  })
+
+  test("page_user_name reads the integration name for the inbox channel", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({
+      integrationMessenger: { id: "messenger-1", name: "Acme Page" },
+    })
+
+    await expect(
+      getSystemFieldValue(
+        createContext(),
+        systemFieldTypes.enum.page_user_name,
+      ),
+    ).resolves.toBe("Acme Page")
+  })
+
+  test("page_user_name is null when the channel has no integration row", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({})
+
+    await expect(
+      getSystemFieldValue(
+        createContext(),
+        systemFieldTypes.enum.page_user_name,
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("user_code exposes the platform-side contact id", async () => {
+    mockFindWithIntegrationsById.mockResolvedValue({})
+
+    await expect(
+      getSystemFieldValue(createContext(), systemFieldTypes.enum.user_code),
+    ).resolves.toBe("source-1")
+  })
+
+  test("integration-backed fields are null without a contact inbox", async () => {
+    mockFindRecentByContactId.mockResolvedValue(null)
+
+    await expect(
+      getSystemFieldValue(
+        createContext({ contactInbox: null }),
+        systemFieldTypes.enum.user_code,
+      ),
+    ).resolves.toBeNull()
+    expect(mockFindWithIntegrationsById).not.toHaveBeenCalled()
+  })
+})

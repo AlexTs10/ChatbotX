@@ -1,0 +1,1240 @@
+import {
+  AISpeechToTextDefaultFn,
+  aiSegmentImageDefaultFn,
+  FlowAuthoringException,
+  performActionNodeDefaultFn,
+  sendMessageNodeDefaultFn,
+} from "@chatbotx.io/flow-config"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+const SPEC_STEP_PATH_PATTERN = /^steps\[/
+
+type RouteConfig = {
+  method: string
+  path: string
+  summary: string
+  tags: string[]
+  successStatus?: number
+}
+
+type CapturedProcedure = {
+  route: RouteConfig
+  handler?: (...args: any[]) => any
+}
+
+const { workspaceTokenAuthAPIForScope, capturedProcedures } = vi.hoisted(() => {
+  const capturedProcedures: CapturedProcedure[] = []
+
+  const makeProcedure = (route: RouteConfig) => {
+    const record: CapturedProcedure = { route }
+    capturedProcedures.push(record)
+
+    const chain = {
+      input: vi.fn(() => chain),
+      output: vi.fn(() => chain),
+      errors: vi.fn(() => chain),
+      handler: vi.fn((fn: (...args: any[]) => any) => {
+        record.handler = fn
+        return { handler: fn }
+      }),
+    }
+    return chain
+  }
+
+  const workspaceTokenAuthAPI = {
+    route: vi.fn((config: RouteConfig) => makeProcedure(config)),
+  }
+
+  return {
+    workspaceTokenAuthAPIForScope: vi.fn(
+      (_scope: string) => workspaceTokenAuthAPI,
+    ),
+    capturedProcedures,
+  }
+})
+
+vi.mock("@/orpc", () => ({ workspaceTokenAuthAPIForScope }))
+
+const flowService = {
+  list: vi.fn(),
+  listNodes: vi.fn(),
+  findById: vi.fn(),
+  createDraft: vi.fn(),
+  createPublished: vi.fn(),
+  update: vi.fn(),
+  deleteMany: vi.fn(),
+  duplicate: vi.fn(),
+}
+const flowVersionService = {
+  publish: vi.fn(),
+  updateDraftByFlowId: vi.fn(),
+  list: vi.fn(),
+}
+const importService = {
+  startFlowImport: vi.fn(),
+}
+const messengerWelcomeMessageFlowService = {
+  listCurrentByFlow: vi.fn(async () => []),
+}
+vi.mock("@chatbotx.io/business", () => ({
+  flowService,
+  flowVersionService,
+  messengerWelcomeMessageFlowService,
+}))
+vi.mock("@chatbotx.io/business/import", () => ({ importService }))
+
+vi.mock("@chatbotx.io/business/errors", () => ({
+  BROADCAST_PLAN_LIMIT_CODE: "broadcastPlanLimit",
+  validationException: (field: string, message: string) =>
+    new Error(`${field}: ${message}`),
+}))
+
+const getFlowAuthoringContext = vi.fn(async () => ({
+  templatesByName: new Map(),
+  customFieldsByName: new Map(),
+  flowsByName: new Map(),
+}))
+vi.mock("@chatbotx.io/business/capabilities", () => ({
+  getFlowAuthoringContext,
+}))
+
+vi.mock("@chatbotx.io/worker-config", () => ({
+  DefaultJobAction: { runImport: "runImport" },
+  defaultQueue: { add: vi.fn() },
+}))
+
+vi.mock("@chatbotx.io/database/schema", () => {
+  const schema = {
+    pick: vi.fn(() => schema),
+    extend: vi.fn(() => schema),
+    omit: vi.fn(() => schema),
+    and: vi.fn(() => schema),
+  }
+  return {
+    createSelectSchema: vi.fn(() => schema),
+    flowModel: {},
+    flowVersionModel: {},
+  }
+})
+
+await import("@/features/flows/api/public")
+const { defaultQueue } = await import("@chatbotx.io/worker-config")
+
+const findProcedure = (method: string, path: string) => {
+  const found = capturedProcedures.find(
+    (p) => p.route.method === method && p.route.path === path,
+  )
+  if (!found) {
+    throw new Error(`No procedure registered for ${method} ${path}`)
+  }
+  return found
+}
+
+const scopeArgAtImport = workspaceTokenAuthAPIForScope.mock.calls[0]?.[0]
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+test("registers the flows public router under the automation scope", () => {
+  expect(scopeArgAtImport).toBe("automation")
+})
+
+describe("GET /v1/flows/{id}/nodes", () => {
+  const procedure = findProcedure("GET", "/v1/flows/{id}/nodes")
+
+  test("lists the published nodes of the flow, scoped to the token's workspace", async () => {
+    const nodes = [
+      { flowId: "7", nodeId: "9", label: "Welcome", nodeType: "sendMessage" },
+    ]
+    flowService.listNodes.mockResolvedValue(nodes)
+
+    const result = await procedure.handler?.({
+      context: { workspace: { id: "ws-1" } },
+      input: { id: "7" },
+    })
+
+    expect(flowService.listNodes).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      flowId: "7",
+    })
+    expect(result).toEqual({ data: nodes })
+  })
+
+  test("tells the agent which operation supplies the flow id", () => {
+    expect(procedure.route.summary).toBe("List flow nodes")
+    expect(procedure.route.tags).toEqual(["Flows"])
+  })
+
+  test("surfaces a missing flow instead of returning an empty list", async () => {
+    flowService.listNodes.mockRejectedValue(new Error("Flow does not exists."))
+
+    await expect(
+      procedure.handler?.({
+        context: { workspace: { id: "ws-1" } },
+        input: { id: "404" },
+      }),
+    ).rejects.toThrow("Flow does not exists.")
+  })
+})
+
+describe("GET /v1/flows", () => {
+  const procedure = findProcedure("GET", "/v1/flows")
+
+  test("delegates to flowService.list", async () => {
+    flowService.list.mockResolvedValueOnce({ data: [], pageCount: 1 })
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { page: 1, perPage: 50, active: true },
+    })
+
+    expect(flowService.list).toHaveBeenCalledWith({
+      page: 1,
+      perPage: 50,
+      active: true,
+      workspaceId: "workspace-1",
+      sort: [{ id: "createdAt", desc: true }],
+    })
+  })
+
+  test("forwards name, folderId and sort filters", async () => {
+    flowService.list.mockResolvedValueOnce({ data: [], pageCount: 1 })
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        page: 2,
+        perPage: 10,
+        active: true,
+        name: "welcome",
+        folderId: "0",
+        sort: [{ id: "name", desc: false }],
+      },
+    })
+
+    expect(flowService.list).toHaveBeenCalledWith({
+      page: 2,
+      perPage: 10,
+      active: true,
+      name: "welcome",
+      folderId: "0",
+      workspaceId: "workspace-1",
+      sort: [{ id: "name", desc: false }],
+    })
+  })
+
+  test("passes startType and integrationWhatsappId to the service with the page", async () => {
+    flowService.list.mockResolvedValueOnce({ data: [], pageCount: 0 })
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        page: 2,
+        perPage: 2,
+        active: true,
+        startType: "sendWaTemplateMessage",
+        integrationWhatsappId: "42",
+      },
+    })
+
+    expect(flowService.list).toHaveBeenCalledWith({
+      page: 2,
+      perPage: 2,
+      active: true,
+      startType: "sendWaTemplateMessage",
+      integrationWhatsappId: "42",
+      workspaceId: "workspace-1",
+      sort: [{ id: "createdAt", desc: true }],
+    })
+  })
+
+  test("returns id, name, folderId and active per flow, not the full resource", async () => {
+    flowService.list.mockResolvedValueOnce({
+      data: [
+        {
+          id: "flow-1",
+          name: "Flow 1",
+          workspaceId: "workspace-1",
+          folderId: "folder-1",
+          active: true,
+          flowVersions: [{ id: "version-1" }],
+        },
+      ],
+      pageCount: 1,
+    })
+
+    const result = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { page: 1, perPage: 50, active: true },
+    })
+
+    expect(result).toEqual({
+      data: [
+        { id: "flow-1", name: "Flow 1", folderId: "folder-1", active: true },
+      ],
+      pageCount: 1,
+    })
+  })
+})
+
+describe("GET /v1/flows — enableInInbox", () => {
+  const procedure = findProcedure("GET", "/v1/flows")
+  const input = { page: 1, perPage: 50, active: true }
+  const member = (permissions: Record<string, boolean>) => ({
+    userId: "user-7",
+    workspaceId: "workspace-1",
+    permissions,
+  })
+
+  test("forwards the enableInInbox filter", async () => {
+    flowService.list.mockResolvedValueOnce({ data: [], pageCount: 1 })
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { ...input, enableInInbox: true },
+    })
+
+    expect(flowService.list).toHaveBeenCalledWith(
+      expect.objectContaining({ enableInInbox: true }),
+    )
+  })
+
+  test("omitting the filter lists every flow, as before", async () => {
+    flowService.list.mockResolvedValueOnce({ data: [], pageCount: 1 })
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input,
+    })
+
+    expect(flowService.list.mock.calls[0][0].enableInInbox).toBeUndefined()
+  })
+
+  test("returns enableInInbox on every listed flow", async () => {
+    flowService.list.mockResolvedValueOnce({
+      data: [
+        {
+          id: "flow-1",
+          name: "Flow 1",
+          folderId: null,
+          active: true,
+          enableInInbox: false,
+          flowVersions: [],
+        },
+      ],
+      pageCount: 1,
+    })
+
+    const result = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input,
+    })
+
+    expect(result.data[0]).toEqual({
+      id: "flow-1",
+      name: "Flow 1",
+      folderId: null,
+      active: true,
+      enableInInbox: false,
+    })
+  })
+
+  test("a mobile member without the flows permission only ever sees inbox flows, whatever they ask for", async () => {
+    flowService.list.mockResolvedValue({ data: [], pageCount: 1 })
+
+    for (const asked of [undefined, false, true]) {
+      await procedure.handler?.({
+        context: {
+          workspace: { id: "workspace-1" },
+          member: member({ contacts: true }),
+        },
+        input: { ...input, enableInInbox: asked },
+      })
+    }
+
+    expect(
+      flowService.list.mock.calls.map(([call]) => call.enableInInbox),
+    ).toEqual([true, true, true])
+  })
+
+  test("a mobile member with the flows permission may list every flow", async () => {
+    flowService.list.mockResolvedValue({ data: [], pageCount: 1 })
+
+    await procedure.handler?.({
+      context: {
+        workspace: { id: "workspace-1" },
+        member: member({ flows: true }),
+      },
+      input,
+    })
+
+    expect(flowService.list.mock.calls[0][0].enableInInbox).toBeUndefined()
+  })
+})
+
+describe("GET /v1/flows/{id}", () => {
+  const procedure = findProcedure("GET", "/v1/flows/{id}")
+
+  test("delegates to flowService.findById", async () => {
+    flowService.findById.mockResolvedValueOnce({ id: "flow-1" })
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { id: "flow-1" },
+    })
+
+    expect(flowService.findById).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      id: "flow-1",
+    })
+  })
+  test("returns the flow's current Meta welcome message flows", async () => {
+    flowService.findById.mockResolvedValueOnce({ id: "flow-1" })
+    messengerWelcomeMessageFlowService.listCurrentByFlow.mockResolvedValueOnce([
+      { integrationMessengerId: "3", pageId: "p", welcomeMessageFlowId: "m" },
+    ] as never)
+
+    const result = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { id: "flow-1" },
+    })
+
+    expect(
+      messengerWelcomeMessageFlowService.listCurrentByFlow,
+    ).toHaveBeenCalledWith({ workspaceId: "workspace-1", flowId: "flow-1" })
+    expect(result).toEqual({
+      id: "flow-1",
+      welcomeMessageFlows: [
+        { integrationMessengerId: "3", pageId: "p", welcomeMessageFlowId: "m" },
+      ],
+    })
+  })
+})
+
+describe("POST /v1/flows", () => {
+  const procedure = findProcedure("POST", "/v1/flows")
+
+  test("route metadata", () => {
+    expect(procedure.route).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        path: "/v1/flows",
+        successStatus: 201,
+      }),
+    )
+  })
+
+  test("delegates to flowService.createDraft", async () => {
+    flowService.createDraft.mockResolvedValueOnce({ id: "flow-1" })
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { name: "New flow" },
+    })
+
+    expect(flowService.createDraft).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      data: { name: "New flow" },
+    })
+  })
+
+  test("spec content: createDraft receives a positioned graph and startNodeId; publish is not called", async () => {
+    flowService.createDraft.mockResolvedValueOnce({ id: "flow-1" })
+
+    const response = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        name: "New flow",
+        folderId: null,
+        spec: {
+          formatVersion: 1,
+          name: "Spec flow",
+          steps: [{ type: "send", text: "Hi" }],
+        },
+      },
+    })
+
+    expect(flowService.createDraft).toHaveBeenCalledTimes(1)
+    const call = flowService.createDraft.mock.calls[0][0]
+    expect(call.data).toEqual({ name: "New flow", folderId: null })
+    expect(call.graph.nodes).toHaveLength(1)
+    expect(call.graph.nodes[0].position).toEqual({ x: 100, y: 100 })
+    expect(call.graph.startNodeId).toBe(call.graph.nodes[0].id)
+    expect(flowVersionService.publish).not.toHaveBeenCalled()
+    expect(flowService.createPublished).not.toHaveBeenCalled()
+    // A `{ spec }` graph has no authored node ids to report.
+    expect(response.nodeIds).toBeUndefined()
+  })
+
+  test("raw graph content: createDraft receives normalized positions/edges and startNodeId", async () => {
+    flowService.createDraft.mockResolvedValueOnce({ id: "flow-1" })
+
+    const response = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        name: "New flow",
+        folderId: null,
+        nodes: [
+          { id: "n1", type: "sendMessage", data: {} },
+          { id: "n2", type: "sendMessage", data: {} },
+        ],
+        edges: [{ source: "n1", target: "n2" }],
+      },
+    })
+
+    const call = flowService.createDraft.mock.calls[0][0]
+    const [nodeN1, nodeN2] = call.graph.nodes
+    // Authored ids ("n1"/"n2") are request-scoped wiring tokens, remapped to
+    // fresh internal ids server-side — assert the relationship, not the
+    // literal authored string.
+    expect(nodeN1.id).not.toBe("n1")
+    expect(nodeN2.id).not.toBe("n2")
+    expect(nodeN1.position).toEqual({ x: 100, y: 100 })
+    expect(call.graph.edges[0]).toEqual(
+      expect.objectContaining({
+        source: nodeN1.id,
+        target: nodeN2.id,
+        sourceHandle: nodeN1.id,
+        targetHandle: nodeN2.id,
+      }),
+    )
+    expect(call.graph.startNodeId).toBe(nodeN1.id)
+    expect(flowVersionService.publish).not.toHaveBeenCalled()
+    expect(flowService.createPublished).not.toHaveBeenCalled()
+    // The response reports the authored → persisted id mapping so the
+    // caller can edit the graph it just created without a `flows.get`.
+    expect(response.nodeIds).toEqual({ n1: nodeN1.id, n2: nodeN2.id })
+  })
+
+  test("publish: true validates the graph and creates it atomically via flowService.createPublished, not createDraft + publish", async () => {
+    flowService.createPublished.mockResolvedValueOnce({ id: "flow-9" })
+    // Authored id is deliberately non-numeric ("n1") — normalizeAuthoredGraph
+    // must remap it to an internal createId() id before publishFlowSchema
+    // validates it, since baseNodeSchema.id requires digits only.
+    const node = sendMessageNodeDefaultFn({
+      nodeProps: { id: "n1" },
+      dataProps: {},
+      detailProps: {},
+    })
+
+    const response = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        name: "New flow",
+        folderId: null,
+        nodes: [node],
+        edges: [],
+        publish: true,
+      },
+    })
+
+    expect(flowService.createDraft).not.toHaveBeenCalled()
+    expect(flowVersionService.publish).not.toHaveBeenCalled()
+    expect(flowService.createPublished).toHaveBeenCalledTimes(1)
+    const createPublishedCall = flowService.createPublished.mock.calls[0][0]
+    expect(createPublishedCall.workspaceId).toBe("workspace-1")
+    expect(createPublishedCall.data).toEqual({
+      name: "New flow",
+      folderId: null,
+    })
+    expect(createPublishedCall.graph.nodes[0].id).not.toBe("n1")
+    expect(response).toEqual({
+      id: "flow-9",
+      nodeIds: { n1: createPublishedCall.graph.nodes[0].id },
+    })
+  })
+
+  test("publish: true rejects an invalid node before createDraft is called", async () => {
+    await expect(
+      procedure.handler?.({
+        context: { workspace: { id: "workspace-1" } },
+        input: {
+          name: "New flow",
+          folderId: null,
+          nodes: [{ id: "n1", type: "sendMessage", data: {} }],
+          edges: [],
+          publish: true,
+        },
+      }),
+    ).rejects.toBeInstanceOf(FlowAuthoringException)
+
+    expect(flowService.createDraft).not.toHaveBeenCalled()
+  })
+
+  const segmentNode = (
+    overrides: Parameters<typeof aiSegmentImageDefaultFn>[0] = {},
+  ) => {
+    const node = performActionNodeDefaultFn({
+      nodeProps: { id: "n1" },
+      dataProps: {},
+      detailProps: {},
+    })
+    node.data.details.steps = [
+      aiSegmentImageDefaultFn({
+        inputFieldId: "1",
+        target: "product box",
+        outputFieldId: "2",
+        ...overrides,
+      }),
+    ]
+    return node
+  }
+
+  test("publish: true accepts an aiSegmentImage step through the shared flow schema", async () => {
+    flowService.createPublished.mockResolvedValueOnce({ id: "flow-10" })
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        name: "Segment flow",
+        folderId: null,
+        nodes: [segmentNode({ detailsOutputFieldId: "3" })],
+        edges: [],
+        publish: true,
+      },
+    })
+
+    const graph = flowService.createPublished.mock.calls[0][0].graph
+    expect(graph.nodes[0].data.details.steps[0]).toMatchObject({
+      stepType: "aiSegmentImage",
+      target: "product box",
+      detailsOutputFieldId: "3",
+    })
+  })
+
+  test("publish: true rejects an aiSegmentImage step whose details share the output field", async () => {
+    await expect(
+      procedure.handler?.({
+        context: { workspace: { id: "workspace-1" } },
+        input: {
+          name: "Segment flow",
+          folderId: null,
+          nodes: [segmentNode({ detailsOutputFieldId: "2" })],
+          edges: [],
+          publish: true,
+        },
+      }),
+    ).rejects.toBeInstanceOf(FlowAuthoringException)
+
+    expect(flowService.createPublished).not.toHaveBeenCalled()
+  })
+
+  const speechNode = (step: Record<string, unknown>) => {
+    const node = performActionNodeDefaultFn({
+      nodeProps: { id: "n1" },
+      dataProps: {},
+      detailProps: {},
+    })
+    node.data.details.steps = [
+      {
+        ...AISpeechToTextDefaultFn({ inputFieldId: "1", outputFieldId: "2" }),
+        ...step,
+      } as never,
+    ]
+    return node
+  }
+
+  const createSpeechFlow = (step: Record<string, unknown>) =>
+    procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        name: "Speech flow",
+        folderId: null,
+        nodes: [speechNode(step)],
+        edges: [],
+        publish: true,
+      },
+    })
+
+  test("publish: true accepts a Muse aiSpeechToText step through the shared flow schema", async () => {
+    flowService.createPublished.mockResolvedValueOnce({ id: "flow-11" })
+
+    await createSpeechFlow({
+      provider: "muse",
+      model: "muse-voice-transcribe-1.0",
+      languageBias: ["Vietnamese"],
+    })
+
+    const graph = flowService.createPublished.mock.calls[0][0].graph
+    expect(graph.nodes[0].data.details.steps[0]).toMatchObject({
+      stepType: "aiSpeechToText",
+      provider: "muse",
+      model: "muse-voice-transcribe-1.0",
+      languageBias: ["Vietnamese"],
+    })
+  })
+
+  test.each([
+    [
+      "a Muse step with another model",
+      { provider: "muse", model: "whisper-1" },
+    ],
+    [
+      "a Muse step with an unknown language",
+      {
+        provider: "muse",
+        model: "muse-voice-transcribe-1.0",
+        languageBias: ["Klingon"],
+      },
+    ],
+    [
+      "an OpenAI step with Muse-only fields",
+      { provider: "openai", model: "whisper-1", keywords: ["ChatbotX"] },
+    ],
+  ])("publish: true rejects %s", async (_name, step) => {
+    await expect(createSpeechFlow(step)).rejects.toBeInstanceOf(
+      FlowAuthoringException,
+    )
+    expect(flowService.createPublished).not.toHaveBeenCalled()
+  })
+})
+
+describe("PATCH /v1/flows/{id}", () => {
+  const procedure = findProcedure("PATCH", "/v1/flows/{id}")
+
+  test("delegates to flowService.update", async () => {
+    flowService.update.mockResolvedValueOnce(undefined)
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { id: "flow-1", name: "Renamed" },
+    })
+
+    expect(flowService.update).toHaveBeenCalledWith(
+      { workspaceId: "workspace-1", id: "flow-1" },
+      { name: "Renamed" },
+    )
+  })
+})
+
+describe("DELETE /v1/flows/{id}", () => {
+  const procedure = findProcedure("DELETE", "/v1/flows/{id}")
+
+  test("delegates to flowService.deleteMany", async () => {
+    flowService.deleteMany.mockResolvedValueOnce(undefined)
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { id: "flow-1" },
+    })
+
+    expect(flowService.deleteMany).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      ids: ["flow-1"],
+    })
+  })
+})
+
+describe("POST /v1/flows/{id}/duplicate", () => {
+  const procedure = findProcedure("POST", "/v1/flows/{id}/duplicate")
+
+  test("delegates to flowService.duplicate", async () => {
+    flowService.duplicate.mockResolvedValueOnce("flow-2")
+
+    await expect(
+      procedure.handler?.({
+        context: { workspace: { id: "workspace-1" } },
+        input: { id: "flow-1" },
+      }),
+    ).resolves.toEqual({ id: "flow-2" })
+
+    expect(flowService.duplicate).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      id: "flow-1",
+    })
+  })
+})
+
+describe("POST /v1/flows/{id}/publish", () => {
+  const procedure = findProcedure("POST", "/v1/flows/{id}/publish")
+
+  test("delegates to flowVersionService.publish", async () => {
+    flowVersionService.publish.mockResolvedValueOnce(undefined)
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { id: "flow-1", nodes: [], edges: [] },
+    })
+
+    expect(flowVersionService.publish).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      flowId: "flow-1",
+      nodes: [],
+      edges: [],
+    })
+  })
+
+  test("compiles a { spec } input into nodes/edges before publishing", async () => {
+    flowVersionService.publish.mockResolvedValueOnce(undefined)
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        id: "flow-1",
+        spec: {
+          formatVersion: 1,
+          name: "Spec flow",
+          steps: [{ type: "send", text: "Hello!" }],
+        },
+      },
+    })
+
+    expect(getFlowAuthoringContext).toHaveBeenCalledWith("workspace-1")
+    expect(flowVersionService.publish).toHaveBeenCalledTimes(1)
+    const call = flowVersionService.publish.mock.calls[0][0]
+    expect(call.workspaceId).toBe("workspace-1")
+    expect(call.flowId).toBe("flow-1")
+    expect(call.nodes).toHaveLength(1)
+    expect(call.nodes[0].type).toBe("sendMessage")
+    expect(call.edges).toEqual([])
+  })
+
+  test("throws FlowAuthoringException (not a raw 500) when the compiled spec fails channel refinement", async () => {
+    const input = {
+      id: "flow-1",
+      spec: {
+        formatVersion: 1,
+        name: "Spec flow",
+        channel: "instagram",
+        steps: [
+          {
+            type: "send",
+            imageUrl: "https://example.com/a.png",
+            buttons: [{ text: "Yes" }],
+          },
+        ],
+      },
+    }
+
+    let caught: unknown
+    try {
+      await procedure.handler?.({
+        context: { workspace: { id: "workspace-1" } },
+        input,
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(FlowAuthoringException)
+    expect((caught as FlowAuthoringException).errors[0]?.path).toMatch(
+      SPEC_STEP_PATH_PATTERN,
+    )
+    expect(flowVersionService.publish).not.toHaveBeenCalled()
+  })
+})
+
+describe("POST /v1/flows/validate", () => {
+  const procedure = findProcedure("POST", "/v1/flows/validate")
+
+  test("compiles a spec and returns the graph without persisting anything", async () => {
+    const result = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        spec: {
+          formatVersion: 1,
+          name: "Spec flow",
+          steps: [{ type: "send", text: "Hello!" }],
+        },
+      },
+    })
+
+    expect(getFlowAuthoringContext).toHaveBeenCalledWith("workspace-1")
+    expect(result.nodes).toHaveLength(1)
+    expect(result.nodes[0].type).toBe("sendMessage")
+    expect(result.edges).toEqual([])
+    expect(flowVersionService.publish).not.toHaveBeenCalled()
+    expect(flowVersionService.updateDraftByFlowId).not.toHaveBeenCalled()
+  })
+
+  test("compiles a Call Phone Number button from `call`", async () => {
+    const result = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        spec: {
+          formatVersion: 1,
+          name: "Call flow",
+          channel: "messenger",
+          steps: [
+            {
+              type: "send",
+              text: "Need help?",
+              buttons: [{ text: "Call us", call: "+14155552671" }],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.nodes[0].data.details.steps[0].buttons[0]).toMatchObject({
+      buttonType: "callPhoneNumber",
+      beforeStep: { phoneNumber: "+14155552671" },
+      steps: [],
+    })
+    expect(result.edges).toEqual([])
+  })
+
+  test("compiles a Copy Text button from `copy` on Telegram", async () => {
+    const result = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        spec: {
+          formatVersion: 1,
+          name: "PIX flow",
+          channel: "telegram",
+          steps: [
+            {
+              type: "send",
+              text: "Pague com PIX",
+              buttons: [{ text: "Copiar PIX", copy: "{{pix_code}}" }],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.nodes[0].data.details.steps[0].buttons[0]).toMatchObject({
+      buttonType: "copyText",
+      beforeStep: { stepType: "copyText", text: "{{pix_code}}" },
+      steps: [],
+    })
+    expect(result.edges).toEqual([])
+  })
+
+  test("rejects a `call` number that is not a real international number", async () => {
+    await expect(
+      procedure.handler?.({
+        context: { workspace: { id: "workspace-1" } },
+        input: {
+          spec: {
+            formatVersion: 1,
+            name: "Call flow",
+            steps: [
+              {
+                type: "send",
+                text: "Need help?",
+                buttons: [{ text: "Call us", call: "+9991234567" }],
+              },
+            ],
+          },
+        },
+      }),
+    ).rejects.toThrow()
+  })
+
+  test("compiles a pipeline step through publishFlowSchema using the authoring context", async () => {
+    getFlowAuthoringContext.mockResolvedValueOnce({
+      templatesByName: new Map(),
+      customFieldsByName: new Map(),
+      flowsByName: new Map(),
+      pipelinesByReferenceName: new Map([
+        [
+          "sales",
+          {
+            id: "5001",
+            name: "Sales",
+            referenceName: "sales",
+            stages: [{ id: "5101", name: "Won" }],
+            fields: [],
+          },
+        ],
+      ]),
+    } as never)
+
+    const result = await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        spec: {
+          formatVersion: 1,
+          name: "Pipeline flow",
+          steps: [
+            {
+              type: "pipeline",
+              action: "moveToStage",
+              pipeline: "sales",
+              stage: "Won",
+              onSkip: [{ type: "send", text: "No deal yet" }],
+            },
+          ],
+        },
+      },
+    })
+
+    expect(result.nodes[0].type).toBe("performAction")
+    expect(result.nodes[0].data.details.steps[0]).toMatchObject({
+      stepType: "pipeline",
+      pipelineId: "5001",
+      stageId: "5101",
+    })
+    expect(result.edges).toHaveLength(1)
+  })
+
+  test("reports an unknown pipeline with its spec path", async () => {
+    let caught: unknown
+    try {
+      await procedure.handler?.({
+        context: { workspace: { id: "workspace-1" } },
+        input: {
+          spec: {
+            formatVersion: 1,
+            name: "Pipeline flow",
+            steps: [
+              {
+                type: "pipeline",
+                action: "removeFromPipeline",
+                pipeline: "missing",
+              },
+            ],
+          },
+        },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(FlowAuthoringException)
+    expect((caught as FlowAuthoringException).errors[0]).toMatchObject({
+      path: "steps[0].pipeline",
+      code: "unknownPipeline",
+    })
+  })
+
+  test("throws FlowAuthoringException for an unknown template name", async () => {
+    let caught: unknown
+    try {
+      await procedure.handler?.({
+        context: { workspace: { id: "workspace-1" } },
+        input: {
+          spec: {
+            formatVersion: 1,
+            name: "Spec flow",
+            steps: [{ type: "sendTemplate", templateName: "does_not_exist" }],
+          },
+        },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(FlowAuthoringException)
+    expect((caught as FlowAuthoringException).errors[0]?.code).toBe(
+      "unknownTemplate",
+    )
+  })
+})
+
+describe("PUT /v1/flows/{id}/draft", () => {
+  const procedure = findProcedure("PUT", "/v1/flows/{id}/draft")
+
+  test("delegates to flowVersionService.updateDraftByFlowId", async () => {
+    flowVersionService.updateDraftByFlowId.mockResolvedValueOnce(undefined)
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: { id: "flow-1", nodes: [], edges: [] },
+    })
+
+    expect(flowVersionService.updateDraftByFlowId).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      flowId: "flow-1",
+      nodes: [],
+      edges: [],
+    })
+  })
+
+  test("compiles a { spec } input into nodes/edges before updating the draft", async () => {
+    flowVersionService.updateDraftByFlowId.mockResolvedValueOnce(undefined)
+
+    await procedure.handler?.({
+      context: { workspace: { id: "workspace-1" } },
+      input: {
+        id: "flow-1",
+        spec: {
+          formatVersion: 1,
+          name: "Spec flow",
+          steps: [{ type: "send", text: "Hello!" }],
+        },
+      },
+    })
+
+    expect(getFlowAuthoringContext).toHaveBeenCalledWith("workspace-1")
+    expect(flowVersionService.updateDraftByFlowId).toHaveBeenCalledTimes(1)
+    const call = flowVersionService.updateDraftByFlowId.mock.calls[0][0]
+    expect(call.workspaceId).toBe("workspace-1")
+    expect(call.flowId).toBe("flow-1")
+    expect(call.nodes).toHaveLength(1)
+    expect(call.nodes[0].type).toBe("sendMessage")
+    expect(call.edges).toEqual([])
+  })
+})
+
+describe("GET /v1/flows/{id}/versions", () => {
+  const procedure = findProcedure("GET", "/v1/flows/{id}/versions")
+
+  test("delegates to flowVersionService.list", async () => {
+    flowVersionService.list.mockResolvedValueOnce([{ id: "version-1" }])
+
+    await expect(
+      procedure.handler?.({
+        context: { workspace: { id: "workspace-1" } },
+        input: { id: "flow-1" },
+      }),
+    ).resolves.toEqual({ data: [{ id: "version-1" }] })
+
+    expect(flowVersionService.list).toHaveBeenCalledWith({
+      flowId: "flow-1",
+      workspaceId: "workspace-1",
+    })
+  })
+})
+
+describe("publishFlowRequest / updateDraftFlowRequest — mixed body rejection", () => {
+  const validSpec = {
+    formatVersion: 1,
+    name: "Spec flow",
+    steps: [{ type: "send", text: "Hello!" }],
+  }
+
+  test("publishFlowRequest rejects a body carrying both nodes/edges and spec", async () => {
+    const { publishFlowRequest } = await import(
+      "@/features/flows/schema/action"
+    )
+
+    const result = publishFlowRequest.safeParse({
+      nodes: [],
+      edges: [],
+      spec: validSpec,
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  test("publishFlowRequest still accepts a spec-only body", async () => {
+    const { publishFlowRequest } = await import(
+      "@/features/flows/schema/action"
+    )
+
+    const result = publishFlowRequest.safeParse({ spec: validSpec })
+
+    expect(result.success).toBe(true)
+    expect(result.success && "spec" in result.data).toBe(true)
+  })
+
+  test("publishFlowRequest still accepts a graph-only body", async () => {
+    const { publishFlowRequest } = await import(
+      "@/features/flows/schema/action"
+    )
+
+    const result = publishFlowRequest.safeParse({ nodes: [], edges: [] })
+
+    expect(result.success).toBe(true)
+    expect(result.success && "spec" in result.data).toBe(false)
+  })
+
+  test("updateDraftFlowRequest rejects a body carrying both nodes/edges and spec", async () => {
+    const { updateDraftFlowRequest } = await import(
+      "@/features/flows/schema/action"
+    )
+
+    const result = updateDraftFlowRequest.safeParse({
+      nodes: [],
+      edges: [],
+      spec: validSpec,
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  test("updateDraftFlowRequest still accepts a spec-only body", async () => {
+    const { updateDraftFlowRequest } = await import(
+      "@/features/flows/schema/action"
+    )
+
+    const result = updateDraftFlowRequest.safeParse({ spec: validSpec })
+
+    expect(result.success).toBe(true)
+    expect(result.success && "spec" in result.data).toBe(true)
+  })
+
+  test("updateDraftFlowRequest still accepts a graph-only body", async () => {
+    const { updateDraftFlowRequest } = await import(
+      "@/features/flows/schema/action"
+    )
+
+    const result = updateDraftFlowRequest.safeParse({ nodes: [], edges: [] })
+
+    expect(result.success).toBe(true)
+    expect(result.success && "spec" in result.data).toBe(false)
+  })
+
+  // The actual route input is `publishFlowRequest.and(publicIdParam(...))` —
+  // a plain `.strict()` union member rejects the intersection's `id` key
+  // before the two schemas ever merge, which would break every real
+  // request. Pin the composed shape directly so a future refactor can't
+  // silently reintroduce that regression.
+  test("publishFlowRequest composed with the route's id param still accepts spec-only and graph-only bodies", async () => {
+    const { publishFlowRequest } = await import(
+      "@/features/flows/schema/action"
+    )
+    const { publicIdParam } = await import("@/lib/public-api/params")
+
+    const composed = publishFlowRequest.and(publicIdParam("flow", "flows.list"))
+
+    expect(composed.safeParse({ id: "1", spec: validSpec }).success).toBe(true)
+    expect(composed.safeParse({ id: "1", nodes: [], edges: [] }).success).toBe(
+      true,
+    )
+    expect(
+      composed.safeParse({ id: "1", nodes: [], edges: [], spec: validSpec })
+        .success,
+    ).toBe(false)
+  })
+})
+
+describe("POST /v1/flows/import", () => {
+  const procedure = findProcedure("POST", "/v1/flows/import")
+
+  test("delegates to importService.startFlowImport with a null userId and queues the import job", async () => {
+    importService.startFlowImport.mockResolvedValueOnce({
+      ok: true,
+      importId: "import-1",
+    })
+
+    await expect(
+      procedure.handler?.({
+        context: { workspace: { id: "workspace-1", ownerId: "user-1" } },
+        input: { fileId: "file-1", folderId: null },
+      }),
+    ).resolves.toEqual({ importId: "import-1" })
+
+    // `userId: null` — matches the contacts public-API precedent so a
+    // token-initiated import is never mis-attributed to the workspace owner.
+    expect(importService.startFlowImport).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      userId: null,
+      fileId: "file-1",
+      folderId: null,
+    })
+    expect(defaultQueue.add).toHaveBeenCalledWith("runImport", {
+      type: "runImport",
+      data: { importId: "import-1" },
+    })
+  })
+
+  test("throws a validation exception when the file is not found", async () => {
+    importService.startFlowImport.mockResolvedValueOnce({
+      ok: false,
+      reason: "fileNotFound",
+    })
+
+    await expect(
+      procedure.handler?.({
+        context: { workspace: { id: "workspace-1", ownerId: "user-1" } },
+        input: { fileId: "file-1", folderId: null },
+      }),
+    ).rejects.toThrow("File not found")
+
+    expect(defaultQueue.add).not.toHaveBeenCalled()
+  })
+})

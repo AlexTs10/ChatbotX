@@ -1,0 +1,1760 @@
+import { sql } from "@chatbotx.io/database/client"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+
+const mocks = vi.hoisted(() => ({
+  isUserOnShift: vi.fn(),
+  assignmentSelectForUpdate: vi.fn(),
+  conversationFindMany: vi.fn(),
+  conversationFindFirst: vi.fn(),
+  latestAttribution: vi.fn(),
+  updateSet: vi.fn(),
+  updateWhere: vi.fn(),
+  updateReturning: vi.fn(),
+  findLastByConversation: vi.fn(),
+  createMessageRepository: vi.fn(),
+  getSafeSinceTime: vi.fn(
+    (value: Date | undefined) => value as Date | undefined,
+  ),
+  findByWorkspaceIdAndUserId: vi.fn(),
+  findInboxTeamByIdOrFail: vi.fn(),
+  inboxTeamExists: vi.fn(),
+  assignUserIfUnassigned: vi.fn(),
+  publishWorkspaceRealtimeEvent: vi.fn(),
+  releaseOwnedThreadsForContacts: vi.fn(),
+  // Captures tagged-template calls (`sql\`GREATEST(${a}, ${b})\``) as a plain
+  // `{ strings, values }` fragment so tests can assert both the emitted SQL
+  // shape and the interpolated values without a real Postgres connection.
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings: Array.from(strings),
+    values,
+  })),
+  cancelQuickReplyFollowUps: vi.fn(),
+  closeHumanReplyWindow: vi.fn(),
+  insertDmConversationsIfAbsent: vi.fn(),
+  trackWindow: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/database/client", () => {
+  const update = (..._args: unknown[]) => ({
+    set: (values: unknown) => {
+      mocks.updateSet(values)
+      return {
+        where: (condition: unknown) => {
+          mocks.updateWhere(condition)
+          return {
+            returning: (...returningArgs: unknown[]) =>
+              mocks.updateReturning(...returningArgs),
+          }
+        },
+      }
+    },
+  })
+  const select = () => ({
+    from: () => ({
+      where: () => ({ for: mocks.assignmentSelectForUpdate }),
+    }),
+  })
+  return {
+    db: {
+      query: {
+        conversationModel: {
+          findMany: mocks.conversationFindMany,
+          findFirst: mocks.conversationFindFirst,
+        },
+      },
+      select,
+      transaction: (callback: (tx: unknown) => unknown) =>
+        callback({ select, update }),
+      update,
+    },
+    and: (...args: unknown[]) => ({ and: args }),
+    eq: (a: unknown, b: unknown) => ({ eq: [a, b] }),
+    inArray: (col: unknown, vals: unknown) => ({ inArray: [col, vals] }),
+    sql: mocks.sql,
+  }
+})
+
+// Plain object stubs only — importing the real schema opens a database
+// connection through the sharding client. The extra models come from
+// `contactService`, now in `conversationService`'s import chain.
+vi.mock("@chatbotx.io/database/schema", () => ({
+  workingHoursDateOverrideModel: {},
+  contactInboxModel: {},
+  workspaceUsageModel: {},
+  userQuotaModel: {},
+  questionnaireSubmissionModel: {},
+  adsConversionEventModel: {},
+  refLinkStatModel: {},
+  contactsOnSequenceModel: {},
+  contactsOnBroadcastsModel: {},
+  contactsToTagsModel: {},
+  contactModel: {},
+  conversationModel: {},
+  inboxModel: {},
+}))
+
+vi.mock("@chatbotx.io/redis", () => ({
+  // Identity passthrough: just calls the loader, so `findByOrFail`/`findBy`
+  // hit `conversationFindFirst` directly without exercising real caching.
+  withCache: vi.fn((_key: string, loader: () => unknown) => loader()),
+  invalidateCacheByTags: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/database/repositories", () => ({
+  contactInboxRepository: {
+    listLatestAnalyticsAttribution: mocks.latestAttribution,
+  },
+  createMessageRepository: mocks.createMessageRepository,
+  getSafeSinceTime: mocks.getSafeSinceTime,
+  assignUserIfUnassigned: mocks.assignUserIfUnassigned,
+  closeHumanReplyWindow: mocks.closeHumanReplyWindow,
+  insertDmConversationsIfAbsent: mocks.insertDmConversationsIfAbsent,
+}))
+
+vi.mock("@chatbotx.io/worker-config", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@chatbotx.io/worker-config")>()
+  return {
+    ...actual,
+    notificationQueue: { addBulk: vi.fn() },
+  }
+})
+
+vi.mock("@chatbotx.io/realtime-protocol", () => ({
+  RealtimeEventType: {
+    conversationCreated: "conversationCreated",
+    conversationUpdated: "conversationUpdated",
+    conversationAssigned: "conversationAssigned",
+  },
+  routeForAssignment: vi.fn(() => ({
+    assignedTeamIds: [],
+    assignedUserIds: [],
+  })),
+  routeForConversation: vi.fn(() => ({
+    assignedTeamIds: [],
+    assignedUserIds: [],
+  })),
+}))
+
+vi.mock("../../platform/realtime-broadcast", () => ({
+  publishWorkspaceRealtimeEvent: mocks.publishWorkspaceRealtimeEvent,
+  queueWorkspaceRealtimeEvent: mocks.publishWorkspaceRealtimeEvent,
+}))
+
+// `conversationService` now imports `contactService` (for the location write
+// inside `recordInboundActivity`), which pulls the analytics package into the
+// import chain; its MAC tracking service reads `bloomFilter` off
+// `@chatbotx.io/redis` at module scope. Stub analytics rather than partially
+// mocking redis — matches the contact-service tests' convention.
+vi.mock("@chatbotx.io/analytics", () => ({
+  macAnalyticsService: {},
+}))
+
+vi.mock("@chatbotx.io/event-bus", () => ({
+  emit: vi.fn(),
+}))
+
+vi.mock("@chatbotx.io/events", () => ({
+  emitConversationArchived: vi.fn(),
+  emitConversationAssigned: vi.fn(),
+  emitConversationFollowUp: vi.fn(),
+  emitConversationTransferredToBot: vi.fn(),
+  emitConversationTransferredToHuman: vi.fn(),
+  emitConversationUnassigned: vi.fn(),
+}))
+
+vi.mock("../../working-hours/on-shift", () => ({
+  isUserOnShift: mocks.isUserOnShift,
+}))
+
+vi.mock("../../response-sla/service", () => ({
+  responseSlaService: {
+    // No policy: the statement just runs on the given client.
+    trackWindow: async (
+      props: { tx?: unknown },
+      run: (client: unknown) => Promise<unknown>,
+    ) => {
+      mocks.trackWindow(props)
+      return run(props.tx ?? (await import("@chatbotx.io/database/client")).db)
+    },
+  },
+}))
+
+vi.mock("../../thread-control/service", () => ({
+  threadControlService: {
+    releaseOwnedThreadsForContacts: mocks.releaseOwnedThreadsForContacts,
+  },
+}))
+
+vi.mock("../../contact-inbox/service", () => ({
+  contactInboxService: {},
+}))
+
+vi.mock("../../workspace-member/service", () => ({
+  workspaceMemberService: {
+    findByWorkspaceIdAndUserId: mocks.findByWorkspaceIdAndUserId,
+  },
+}))
+
+vi.mock("../../enterprise/inbox-team/service", () => ({
+  inboxTeamService: {
+    findByIdOrFail: mocks.findInboxTeamByIdOrFail,
+    exists: mocks.inboxTeamExists,
+  },
+}))
+
+vi.mock("../../smart-delay/service", () => ({
+  smartDelayService: {
+    cancelQuickReplyFollowUps: mocks.cancelQuickReplyFollowUps,
+  },
+}))
+
+const { conversationService } = await import("../service")
+const { emit } = await import("@chatbotx.io/event-bus")
+const { emitConversationAssigned, emitConversationTransferredToHuman } =
+  await import("@chatbotx.io/events")
+const { invalidateCacheByTags } = await import("@chatbotx.io/redis")
+const { notificationQueue } = await import("@chatbotx.io/worker-config")
+
+const WORKSPACE_ID = "ws-1"
+
+beforeEach(() => {
+  mocks.isUserOnShift.mockReset()
+  mocks.isUserOnShift.mockResolvedValue(true)
+  mocks.latestAttribution.mockReset()
+  mocks.latestAttribution.mockResolvedValue([])
+  mocks.assignmentSelectForUpdate.mockReset()
+  mocks.assignmentSelectForUpdate.mockResolvedValue([])
+  mocks.conversationFindMany.mockReset()
+  mocks.conversationFindFirst.mockReset()
+  mocks.updateSet.mockReset()
+  mocks.updateWhere.mockReset()
+  mocks.updateReturning.mockReset()
+  mocks.updateReturning.mockResolvedValue([])
+  mocks.findLastByConversation.mockReset()
+  mocks.findLastByConversation.mockResolvedValue([])
+  mocks.createMessageRepository.mockReset()
+  mocks.createMessageRepository.mockResolvedValue({
+    findLastByConversation: mocks.findLastByConversation,
+  })
+  mocks.getSafeSinceTime.mockReset()
+  mocks.getSafeSinceTime.mockImplementation((value: Date | undefined) => value)
+  mocks.findByWorkspaceIdAndUserId.mockReset()
+  mocks.findInboxTeamByIdOrFail.mockReset()
+  mocks.inboxTeamExists.mockReset()
+  mocks.assignUserIfUnassigned.mockReset()
+  vi.mocked(invalidateCacheByTags).mockReset()
+  mocks.publishWorkspaceRealtimeEvent.mockReset()
+  vi.mocked(notificationQueue.addBulk).mockReset()
+  vi.mocked(emitConversationAssigned).mockReset()
+  vi.mocked(emit).mockReset()
+  mocks.releaseOwnedThreadsForContacts.mockReset()
+  mocks.releaseOwnedThreadsForContacts.mockResolvedValue(undefined)
+  mocks.cancelQuickReplyFollowUps.mockReset()
+  mocks.cancelQuickReplyFollowUps.mockResolvedValue(undefined)
+  vi.mocked(emitConversationTransferredToHuman).mockReset()
+  mocks.sql.mockClear()
+  mocks.closeHumanReplyWindow.mockReset()
+})
+
+describe("ConversationService.updateFlowStepState lastActivityAt monotonicity", () => {
+  test("uses GREATEST to advance lastActivityAt without regressing or retaining NULL", async () => {
+    const at = new Date("2024-01-02T00:00:00Z")
+
+    await conversationService.updateFlowStepState({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      lastActivityAt: at,
+    })
+
+    expect(mocks.updateSet).toHaveBeenCalledOnce()
+    const [data] = mocks.updateSet.mock.calls.at(-1) as [
+      { lastActivityAt: { strings: string[]; values: unknown[] } },
+    ]
+    expect(data.lastActivityAt.strings.join("")).toContain("GREATEST")
+    expect(data.lastActivityAt.strings.join("")).not.toContain("COALESCE")
+    expect(data.lastActivityAt.values).toEqual([undefined, at])
+  })
+
+  test("omits lastActivityAt entirely when not provided, leaving currentStep/lastStep unconditional", async () => {
+    await conversationService.updateFlowStepState({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      currentStep: "step-2",
+      lastStep: "step-1",
+    })
+
+    expect(mocks.updateSet).toHaveBeenCalledWith({
+      currentStep: "step-2",
+      lastStep: "step-1",
+    })
+    expect(mocks.sql).not.toHaveBeenCalled()
+  })
+})
+
+describe("ConversationService.findDMByContactIds", () => {
+  test("queries only DM conversations (sourceId IS NULL) scoped to the workspace", async () => {
+    const rows = [
+      { id: "conv-1", contactId: "contact-1" },
+      { id: "conv-2", contactId: "contact-2" },
+    ]
+    mocks.conversationFindMany.mockResolvedValue(rows)
+
+    const result = await conversationService.findDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-1", "contact-2"],
+    })
+
+    expect(result).toEqual(rows)
+    expect(mocks.conversationFindMany).toHaveBeenCalledWith({
+      where: {
+        workspaceId: WORKSPACE_ID,
+        contactId: { in: ["contact-1", "contact-2"] },
+        sourceId: { isNull: true },
+      },
+    })
+  })
+
+  test("deduplicates contactIds before querying", async () => {
+    mocks.conversationFindMany.mockResolvedValue([])
+
+    await conversationService.findDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-1", "contact-1", "contact-2"],
+    })
+
+    expect(mocks.conversationFindMany).toHaveBeenCalledWith({
+      where: {
+        workspaceId: WORKSPACE_ID,
+        contactId: { in: ["contact-1", "contact-2"] },
+        sourceId: { isNull: true },
+      },
+    })
+  })
+
+  test("short-circuits with an empty result and no query when contactIds is empty", async () => {
+    const result = await conversationService.findDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: [],
+    })
+
+    expect(result).toEqual([])
+    expect(mocks.conversationFindMany).not.toHaveBeenCalled()
+  })
+
+  test("filters on the null sourceId DM convention, on every channel", async () => {
+    mocks.conversationFindMany.mockResolvedValue([])
+
+    await conversationService.findDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-1"],
+    })
+
+    expect(mocks.conversationFindMany).toHaveBeenCalledWith({
+      where: {
+        workspaceId: WORKSPACE_ID,
+        contactId: { in: ["contact-1"] },
+        sourceId: { isNull: true },
+      },
+    })
+  })
+
+  test("returns the conversations as-is without post-processing", async () => {
+    const rows = [
+      { id: "1", contactId: "contact-1" },
+      { id: "2", contactId: "contact-2" },
+    ]
+    mocks.conversationFindMany.mockResolvedValue(rows)
+
+    const result = await conversationService.findDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-1", "contact-2"],
+    })
+
+    expect(result).toEqual(rows)
+  })
+
+  test("uses the provided transaction client instead of the default db", async () => {
+    const txFindMany = vi.fn().mockResolvedValue([{ id: "conv-tx" }])
+    const tx = {
+      query: { conversationModel: { findMany: txFindMany } },
+    } as unknown as Parameters<
+      typeof conversationService.findDMByContactIds
+    >[0]["tx"]
+
+    const result = await conversationService.findDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-1"],
+      tx,
+    })
+
+    expect(result).toEqual([{ id: "conv-tx" }])
+    expect(txFindMany).toHaveBeenCalledOnce()
+    expect(mocks.conversationFindMany).not.toHaveBeenCalled()
+  })
+})
+
+// `Conversation` carries two partial unique indexes — `Conversation_contactId_dm_key`
+// on (contactId) WHERE sourceId IS NULL, and `Conversation_contactId_sourceId_key`
+// otherwise — so a find-then-insert can lose the race to a concurrent writer.
+describe("ConversationService.findOrCreate concurrent insert", () => {
+  function buildTx(props: {
+    findFirst: ReturnType<typeof vi.fn>
+    returning: ReturnType<typeof vi.fn>
+  }) {
+    const onConflictDoNothing = vi.fn(() => ({ returning: props.returning }))
+    const values = vi.fn(() => ({ onConflictDoNothing }))
+    const insert = vi.fn(() => ({ values }))
+    return {
+      tx: {
+        query: { conversationModel: { findFirst: props.findFirst } },
+        insert,
+      } as unknown as Parameters<
+        typeof conversationService.findOrCreate
+      >[0]["tx"],
+      onConflictDoNothing,
+    }
+  }
+
+  test("returns the row the concurrent writer created instead of throwing", async () => {
+    const winner = { id: "conv-winner", contactId: "contact-1", sourceId: null }
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(winner)
+    const { tx, onConflictDoNothing } = buildTx({
+      findFirst,
+      // ON CONFLICT DO NOTHING swallowed the insert.
+      returning: vi.fn().mockResolvedValue([]),
+    })
+
+    const result = await conversationService.findOrCreate({
+      workspaceId: WORKSPACE_ID,
+      contactId: "contact-1",
+      sourceId: null,
+      tx,
+    })
+
+    expect(result).toEqual(winner)
+    expect(onConflictDoNothing).toHaveBeenCalledOnce()
+    expect(findFirst).toHaveBeenCalledTimes(2)
+  })
+
+  test("throws when the insert produced nothing and no row can be re-read", async () => {
+    const findFirst = vi.fn().mockResolvedValue(undefined)
+    const { tx } = buildTx({
+      findFirst,
+      returning: vi.fn().mockResolvedValue([]),
+    })
+
+    await expect(
+      conversationService.findOrCreate({
+        workspaceId: WORKSPACE_ID,
+        contactId: "contact-1",
+        sourceId: null,
+        tx,
+      }),
+    ).rejects.toThrow("Conversation not found")
+  })
+
+  test("skips the insert entirely when the conversation already exists", async () => {
+    const existing = { id: "conv-existing", contactId: "contact-1" }
+    const findFirst = vi.fn().mockResolvedValue(existing)
+    const returning = vi.fn()
+    const { tx } = buildTx({ findFirst, returning })
+
+    const result = await conversationService.findOrCreate({
+      workspaceId: WORKSPACE_ID,
+      contactId: "contact-1",
+      sourceId: null,
+      tx,
+    })
+
+    expect(result).toEqual(existing)
+    expect(returning).not.toHaveBeenCalled()
+  })
+})
+
+// A broadcast must reach every contact in its audience, including a contact
+// that has only ever commented (no DM yet): the bulk resolver opens the
+// missing DMs instead of leaving them out.
+describe("ConversationService.findOrCreateDMByContactIds", () => {
+  const tx = {
+    query: { conversationModel: { findMany: mocks.conversationFindMany } },
+  } as unknown as Parameters<
+    typeof conversationService.findOrCreateDMByContactIds
+  >[0]["tx"]
+
+  beforeEach(() => {
+    mocks.conversationFindMany.mockReset()
+    mocks.insertDmConversationsIfAbsent.mockReset()
+  })
+
+  test("returns existing DMs without inserting when every contact has one", async () => {
+    const rows = [
+      { id: "conv-1", contactId: "contact-1" },
+      { id: "conv-2", contactId: "contact-2" },
+    ]
+    mocks.conversationFindMany.mockResolvedValue(rows)
+
+    const result = await conversationService.findOrCreateDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-1", "contact-2"],
+      tx,
+    })
+
+    expect(result).toEqual(rows)
+    expect(mocks.insertDmConversationsIfAbsent).not.toHaveBeenCalled()
+  })
+
+  test("opens a DM only for contacts that have none, then re-reads them all", async () => {
+    const existing = { id: "conv-1", contactId: "contact-1" }
+    const opened = { id: "conv-2", contactId: "contact-2" }
+    mocks.conversationFindMany
+      .mockResolvedValueOnce([existing])
+      .mockResolvedValueOnce([existing, opened])
+
+    const result = await conversationService.findOrCreateDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-1", "contact-2", "contact-2"],
+      tx,
+    })
+
+    expect(mocks.insertDmConversationsIfAbsent).toHaveBeenCalledWith(
+      { workspaceId: WORKSPACE_ID, contactIds: ["contact-2"] },
+      tx,
+    )
+    expect(result).toEqual([existing, opened])
+  })
+
+  test("returns the DM a concurrent writer opened first when our insert is skipped", async () => {
+    const winner = { id: "conv-winner", contactId: "contact-1" }
+    mocks.conversationFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([winner])
+
+    const result = await conversationService.findOrCreateDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-1"],
+      tx,
+    })
+
+    expect(mocks.insertDmConversationsIfAbsent).toHaveBeenCalledTimes(1)
+    expect(result).toEqual([winner])
+  })
+
+  test("propagates an insert failure instead of returning a partial list", async () => {
+    mocks.conversationFindMany.mockResolvedValueOnce([])
+    mocks.insertDmConversationsIfAbsent.mockRejectedValueOnce(
+      new Error("insert failed"),
+    )
+
+    await expect(
+      conversationService.findOrCreateDMByContactIds({
+        workspaceId: WORKSPACE_ID,
+        contactIds: ["contact-1"],
+        tx,
+      }),
+    ).rejects.toThrow("insert failed")
+    expect(mocks.conversationFindMany).toHaveBeenCalledTimes(1)
+  })
+
+  test("short-circuits with no query when contactIds is empty", async () => {
+    const result = await conversationService.findOrCreateDMByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: [],
+      tx,
+    })
+
+    expect(result).toEqual([])
+    expect(mocks.conversationFindMany).not.toHaveBeenCalled()
+    expect(mocks.insertDmConversationsIfAbsent).not.toHaveBeenCalled()
+  })
+})
+
+describe("ConversationService.updateAssignment", () => {
+  test("scopes the update WHERE clause to the workspace, not just the conversation ids", async () => {
+    // Regression test for a cross-tenant write: this method previously
+    // built its WHERE as `inArray(id, ids)` only, unlike its siblings
+    // `updateArchived`/`updateBotEnabled`, which both scope by workspaceId
+    // too. A caller passing ids from another workspace would have updated
+    // them. See packages/business/src/conversation/service.ts.
+    await conversationService.updateAssignment({
+      workspaceId: WORKSPACE_ID,
+      conversations: [{ id: "conv-1", contactId: "contact-1" }],
+      assignedUserId: "user-1",
+      assignedInboxTeamId: null,
+      triggerContext: {
+        triggerSource: "api",
+        triggerHandler: "test",
+        triggerType: "conversation_assigned",
+      },
+    })
+
+    expect(mocks.updateWhere).toHaveBeenCalledWith({
+      and: [
+        { eq: [undefined, WORKSPACE_ID] },
+        { inArray: [undefined, ["conv-1"]] },
+      ],
+    })
+  })
+
+  // `updateAssignment` publishes from the UPDATE's RETURNED rows rather than
+  // the caller's `conversations` input (the behavior `claimForCallAgent`
+  // requires, since it has no other source of the true row), in the fixed
+  // side-effect order (invalidate -> conversationAssigned -> notification
+  // unless self -> emitConversationAssigned -> analytics), and pins the exact
+  // payload of every event, not just that it fired.
+  test("publishes assignment side effects in order, built from the UPDATE's returned rows rather than the caller's input", async () => {
+    const order: string[] = []
+    vi.mocked(invalidateCacheByTags).mockImplementation(() => {
+      order.push("invalidate")
+      return Promise.resolve()
+    })
+    mocks.publishWorkspaceRealtimeEvent.mockImplementation(() => {
+      order.push("broadcast")
+      return Promise.resolve()
+    })
+    vi.mocked(notificationQueue.addBulk).mockImplementation(() => {
+      order.push("notify")
+      return Promise.resolve(undefined as never)
+    })
+    vi.mocked(emitConversationAssigned).mockImplementation(() => {
+      order.push("emitAssigned")
+      return Promise.resolve()
+    })
+    vi.mocked(emit).mockImplementation((): undefined => {
+      order.push("analytics")
+      return
+    })
+    mocks.updateReturning.mockResolvedValue([
+      { id: "conv-1", contactId: "returned-contact-1" },
+    ])
+
+    await conversationService.updateAssignment({
+      workspaceId: WORKSPACE_ID,
+      conversations: [{ id: "conv-1", contactId: "input-contact-1" }],
+      assignedUserId: "user-2",
+      assignedInboxTeamId: null,
+      assignedBy: "user-3",
+      triggerContext: {
+        triggerSource: "api",
+        triggerHandler: "test",
+        triggerType: "conversation_assigned",
+      },
+    })
+
+    // Built from the returned row's contactId ("returned-contact-1"), not
+    // the caller-supplied input's ("input-contact-1").
+    expect(emitConversationAssigned).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      "returned-contact-1",
+      "conv-1",
+      "user-2",
+      "user-3",
+    )
+    expect(invalidateCacheByTags).toHaveBeenCalledWith([
+      "conversations",
+      `conversations:${WORKSPACE_ID}`,
+      "conversations:conv-1",
+    ])
+    expect(mocks.publishWorkspaceRealtimeEvent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.objectContaining({
+        eventType: "conversationAssigned",
+        data: {
+          conversationIds: ["conv-1"],
+          assignedUserId: "user-2",
+          assignedInboxTeamId: null,
+        },
+      }),
+    )
+    expect(notificationQueue.addBulk).toHaveBeenCalledWith([
+      {
+        name: "notifyConversationAssigned",
+        data: {
+          type: "notifyConversationAssigned",
+          data: {
+            workspaceId: WORKSPACE_ID,
+            conversationId: "conv-1",
+            assignedUserId: "user-2",
+          },
+        },
+        opts: { jobId: "notify-assigned-conv-1-user-2" },
+      },
+    ])
+    expect(order).toEqual([
+      "invalidate",
+      "broadcast",
+      "notify",
+      "emitAssigned",
+      "analytics",
+    ])
+  })
+
+  // The guarded UPDATE matching no rows (e.g. `updateAssignment`
+  // called with ids that no longer exist/match the workspace) must publish
+  // NOTHING — no cache invalidation, no realtime broadcast with an empty
+  // `conversationIds: []`, no notification, no domain/analytics event. This
+  // is the same guard `claimForCallAgent`'s losing claim relies on; it lives
+  // once, in `publishAssignmentChanges`, not duplicated per caller.
+  test("publishes nothing when the UPDATE matches no rows", async () => {
+    mocks.updateReturning.mockResolvedValue([])
+
+    const result = await conversationService.updateAssignment({
+      workspaceId: WORKSPACE_ID,
+      conversations: [{ id: "conv-missing", contactId: "contact-1" }],
+      assignedUserId: "user-2",
+      assignedInboxTeamId: null,
+      triggerContext: {
+        triggerSource: "api",
+        triggerHandler: "test",
+        triggerType: "conversation_assigned",
+      },
+    })
+
+    expect(result).toEqual([])
+    expect(invalidateCacheByTags).not.toHaveBeenCalled()
+    expect(mocks.publishWorkspaceRealtimeEvent).not.toHaveBeenCalled()
+    expect(notificationQueue.addBulk).not.toHaveBeenCalled()
+    expect(emitConversationAssigned).not.toHaveBeenCalled()
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  // The unassign branch (`assignedUserId`/`assignedInboxTeamId` both
+  // null) had zero coverage — pin it alongside the assign branch above.
+  test("publishes emitConversationUnassigned (not emitConversationAssigned) when unassigning", async () => {
+    const { emitConversationUnassigned } = await import("@chatbotx.io/events")
+    mocks.updateReturning.mockResolvedValue([
+      { id: "conv-1", contactId: "contact-1" },
+    ])
+
+    await conversationService.updateAssignment({
+      workspaceId: WORKSPACE_ID,
+      conversations: [{ id: "conv-1", contactId: "contact-1" }],
+      assignedUserId: null,
+      assignedInboxTeamId: null,
+      assignedBy: "user-3",
+      triggerContext: {
+        triggerSource: "api",
+        triggerHandler: "test",
+        triggerType: "conversation_unassigned",
+      },
+    })
+
+    expect(emitConversationUnassigned).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      "contact-1",
+      "conv-1",
+      "user-3",
+    )
+    expect(emitConversationAssigned).not.toHaveBeenCalled()
+    // Unassigning is never "self-assigned", so the notification branch (only
+    // gated on a truthy assignedUserId) never fires here either.
+    expect(notificationQueue.addBulk).not.toHaveBeenCalled()
+  })
+})
+
+describe("ConversationService.claimForCallAgent", () => {
+  test("claims an unassigned conversation and publishes the assignment", async () => {
+    mocks.assignUserIfUnassigned.mockResolvedValue([
+      { id: "conv-1", contactId: "contact-1" },
+    ])
+
+    const result = await conversationService.claimForCallAgent({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      userId: "agent-1",
+      triggerHandler: "whatsappCallAnswered",
+    })
+
+    expect(mocks.assignUserIfUnassigned).toHaveBeenCalledWith(
+      {
+        workspaceId: WORKSPACE_ID,
+        conversationId: "conv-1",
+        userId: "agent-1",
+      },
+      expect.anything(),
+    )
+    expect(result).toEqual([{ id: "conv-1", contactId: "contact-1" }])
+  })
+
+  test("skips publishing when the guarded UPDATE returns no rows (already user- or team-assigned)", async () => {
+    mocks.assignUserIfUnassigned.mockResolvedValue([])
+
+    const result = await conversationService.claimForCallAgent({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      userId: "agent-1",
+      triggerHandler: "whatsappCallAnswered",
+    })
+
+    expect(result).toEqual([])
+    expect(mocks.publishWorkspaceRealtimeEvent).not.toHaveBeenCalled()
+    expect(notificationQueue.addBulk).not.toHaveBeenCalled()
+    expect(emitConversationAssigned).not.toHaveBeenCalled()
+    expect(emit).not.toHaveBeenCalled()
+    expect(invalidateCacheByTags).not.toHaveBeenCalled()
+  })
+
+  // Concurrency: a manual assignment landing between the read and this
+  // agent's claim attempt must win. The repository's guarded UPDATE is what
+  // enforces that (proven in the repository's own test); here we only need
+  // to prove the service treats "no returned rows" as "did not claim" and
+  // never overrides it.
+  test("a concurrent manual assignment wins: no rows returned means no publish", async () => {
+    mocks.assignUserIfUnassigned.mockResolvedValue([])
+
+    await conversationService.claimForCallAgent({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      userId: "agent-1",
+      triggerHandler: "whatsappCallDialed",
+    })
+
+    expect(emitConversationAssigned).not.toHaveBeenCalled()
+  })
+
+  test("self-assigns without a notification, but still emits the assignment event", async () => {
+    mocks.assignUserIfUnassigned.mockResolvedValue([
+      { id: "conv-1", contactId: "contact-1" },
+    ])
+
+    await conversationService.claimForCallAgent({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      userId: "agent-1",
+      triggerHandler: "whatsappCallAnswered",
+    })
+
+    expect(notificationQueue.addBulk).not.toHaveBeenCalled()
+    expect(emitConversationAssigned).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      "contact-1",
+      "conv-1",
+      "agent-1",
+      "agent-1",
+    )
+  })
+
+  test("sets triggerType to conversation_assigned and forwards the given triggerHandler", async () => {
+    mocks.assignUserIfUnassigned.mockResolvedValue([
+      { id: "conv-1", contactId: "contact-1" },
+    ])
+
+    await conversationService.claimForCallAgent({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      userId: "agent-1",
+      triggerHandler: "whatsappCallDialed",
+    })
+
+    expect(emit).toHaveBeenCalledWith(
+      "analytics:dashboard",
+      expect.objectContaining({
+        metadata: {
+          triggerContext: {
+            triggerSource: "api",
+            triggerHandler: "whatsappCallDialed",
+            triggerType: "conversation_assigned",
+          },
+        },
+      }),
+    )
+  })
+})
+
+describe("ConversationService.markUnread sinceTime anchor", () => {
+  test("anchors sinceTime on the conversation's own lastActivityAt, not a shared contactInbox anchor", async () => {
+    // Two conversations for the same contact could share one ContactInbox
+    // (its lastMessageAt would reflect whichever was most recently active —
+    // irrelevant here since the fix no longer reads it at all). This
+    // conversation is the older, less-active one.
+    const olderCommentConversation = {
+      id: "conv-comment",
+      workspaceId: WORKSPACE_ID,
+      contactId: "contact-1",
+      lastActivityAt: new Date("2026-01-01T00:00:00Z"),
+      createdAt: new Date("2025-12-01T00:00:00Z"),
+    }
+    mocks.conversationFindFirst.mockResolvedValue(olderCommentConversation)
+
+    await conversationService.markUnread({
+      workspaceId: WORKSPACE_ID,
+      id: "conv-comment",
+    })
+
+    expect(mocks.findLastByConversation).toHaveBeenCalledWith(
+      "conv-comment",
+      expect.objectContaining({
+        sinceTime: olderCommentConversation.lastActivityAt,
+      }),
+    )
+  })
+
+  test("falls back to the conversation's createdAt when lastActivityAt is unset", async () => {
+    const conversation = {
+      id: "conv-new",
+      workspaceId: WORKSPACE_ID,
+      contactId: "contact-2",
+      lastActivityAt: null,
+      createdAt: new Date("2026-02-01T00:00:00Z"),
+    }
+    mocks.conversationFindFirst.mockResolvedValue(conversation)
+
+    await conversationService.markUnread({
+      workspaceId: WORKSPACE_ID,
+      id: "conv-new",
+    })
+
+    expect(mocks.findLastByConversation).toHaveBeenCalledWith(
+      "conv-new",
+      expect.objectContaining({
+        sinceTime: conversation.createdAt,
+      }),
+    )
+  })
+
+  test("marks the second-to-last incoming message as the new read boundary", async () => {
+    const conversation = {
+      id: "conv-1",
+      workspaceId: WORKSPACE_ID,
+      contactId: "contact-1",
+      lastActivityAt: new Date("2026-01-01T00:00:00Z"),
+      createdAt: new Date("2025-12-01T00:00:00Z"),
+    }
+    mocks.conversationFindFirst.mockResolvedValue(conversation)
+    mocks.findLastByConversation.mockResolvedValue([
+      { createdAt: new Date("2026-01-01T00:05:00Z") },
+      { createdAt: new Date("2026-01-01T00:00:00Z") },
+    ])
+
+    const result = await conversationService.markUnread({
+      workspaceId: WORKSPACE_ID,
+      id: "conv-1",
+    })
+
+    expect(result.agentLastReadAt).toEqual(new Date("2026-01-01T00:00:00Z"))
+    expect(mocks.updateWhere).toHaveBeenCalled()
+    expect(mocks.updateSet).toHaveBeenCalledWith({
+      agentLastReadAt: new Date("2026-01-01T00:00:00Z"),
+    })
+  })
+})
+
+describe("ConversationService.resolveAssignmentTarget (via assignByContactIds)", () => {
+  test("throws invalidAssignee when the u_ prefixed user is not a workspace member", async () => {
+    mocks.findByWorkspaceIdAndUserId.mockResolvedValue(undefined)
+
+    await expect(
+      conversationService.assignByContactIds({
+        workspaceId: WORKSPACE_ID,
+        contactIds: ["contact-1"],
+        assignedId: "u_unknown-user",
+        triggerContext: { triggerSource: "api", triggerHandler: "test" },
+      }),
+    ).rejects.toMatchObject({ code: "invalidAssignee" })
+
+    expect(mocks.conversationFindMany).not.toHaveBeenCalled()
+  })
+
+  test("throws invalidAssignee when the t_ prefixed team does not exist", async () => {
+    mocks.findInboxTeamByIdOrFail.mockRejectedValue(
+      new Error("Inbox team not found"),
+    )
+
+    await expect(
+      conversationService.assignByContactIds({
+        workspaceId: WORKSPACE_ID,
+        contactIds: ["contact-1"],
+        assignedId: "t_unknown-team",
+        triggerContext: { triggerSource: "api", triggerHandler: "test" },
+      }),
+    ).rejects.toThrow("Inbox team not found")
+  })
+
+  test("throws invalidAssignee on an unrecognized prefix", async () => {
+    await expect(
+      conversationService.assignByContactIds({
+        workspaceId: WORKSPACE_ID,
+        contactIds: ["contact-1"],
+        assignedId: "bogus-assignee",
+        triggerContext: { triggerSource: "api", triggerHandler: "test" },
+      }),
+    ).rejects.toMatchObject({ code: "invalidAssignee" })
+  })
+
+  test("validates the assignee before short-circuiting on no matching conversations", async () => {
+    mocks.conversationFindMany.mockResolvedValue([])
+
+    await expect(
+      conversationService.assignByContactIds({
+        workspaceId: WORKSPACE_ID,
+        contactIds: ["contact-none"],
+        assignedId: "u_unknown-user",
+        triggerContext: { triggerSource: "api", triggerHandler: "test" },
+      }),
+    ).rejects.toMatchObject({ code: "invalidAssignee" })
+
+    // resolveAssignmentTarget ran (and threw) before findManyByContactIds
+    // would have been reached.
+    expect(mocks.conversationFindMany).not.toHaveBeenCalled()
+  })
+
+  test("early-returns without updating when no conversations match the contact ids", async () => {
+    mocks.findByWorkspaceIdAndUserId.mockResolvedValue({
+      userId: "user-1",
+      workspaceId: WORKSPACE_ID,
+    })
+    mocks.conversationFindMany.mockResolvedValue([])
+
+    await conversationService.assignByContactIds({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["contact-none"],
+      assignedId: "u_user-1",
+      triggerContext: { triggerSource: "api", triggerHandler: "test" },
+    })
+
+    expect(mocks.updateWhere).not.toHaveBeenCalled()
+  })
+})
+
+// Worker trigger-action/flow-step variant: a stale or invalid assignedId
+// must silently no-op, matching the pre-existing behavior of
+// `stepAssignConversation`/`ActionExecutor`'s assignConversation case — a
+// single bad id in a flow/trigger must not hard-fail the whole run.
+describe("ConversationService.assignOneOrSkip", () => {
+  const conversation = { id: "conv-1", contactId: "contact-1" }
+
+  test("silently does nothing when the u_ prefixed user is not a workspace member", async () => {
+    mocks.findByWorkspaceIdAndUserId.mockResolvedValue(undefined)
+
+    await conversationService.assignOneOrSkip({
+      workspaceId: WORKSPACE_ID,
+      conversation,
+      assignedId: "u_unknown-user",
+      triggerContext: {
+        triggerSource: "worker",
+        triggerHandler: "test",
+        triggerType: "trigger_action",
+      },
+    })
+
+    expect(mocks.updateWhere).not.toHaveBeenCalled()
+  })
+
+  test("silently does nothing when the t_ prefixed team does not exist", async () => {
+    mocks.inboxTeamExists.mockResolvedValue(false)
+
+    await conversationService.assignOneOrSkip({
+      workspaceId: WORKSPACE_ID,
+      conversation,
+      assignedId: "t_unknown-team",
+      triggerContext: {
+        triggerSource: "worker",
+        triggerHandler: "test",
+        triggerType: "trigger_action",
+      },
+    })
+
+    expect(mocks.updateWhere).not.toHaveBeenCalled()
+  })
+
+  test("silently does nothing on an unrecognized prefix", async () => {
+    await conversationService.assignOneOrSkip({
+      workspaceId: WORKSPACE_ID,
+      conversation,
+      assignedId: "bogus-assignee",
+      triggerContext: {
+        triggerSource: "worker",
+        triggerHandler: "test",
+        triggerType: "trigger_action",
+      },
+    })
+
+    expect(mocks.updateWhere).not.toHaveBeenCalled()
+  })
+
+  test("assigns the conversation when the u_ prefixed user is a valid workspace member", async () => {
+    mocks.findByWorkspaceIdAndUserId.mockResolvedValue({
+      userId: "user-1",
+      workspaceId: WORKSPACE_ID,
+    })
+
+    await conversationService.assignOneOrSkip({
+      workspaceId: WORKSPACE_ID,
+      conversation,
+      assignedId: "u_user-1",
+      triggerContext: {
+        triggerSource: "worker",
+        triggerHandler: "test",
+        triggerType: "trigger_action",
+      },
+    })
+
+    expect(mocks.updateSet).toHaveBeenCalledWith({
+      assignedUserId: "user-1",
+      assignedInboxTeamId: null,
+      assignedUserAt: expect.anything(),
+    })
+  })
+
+  test("skips an agent who is off shift", async () => {
+    mocks.findByWorkspaceIdAndUserId.mockResolvedValue({
+      userId: "user-1",
+      workspaceId: WORKSPACE_ID,
+    })
+    mocks.isUserOnShift.mockResolvedValue(false)
+
+    await conversationService.assignOneOrSkip({
+      workspaceId: WORKSPACE_ID,
+      conversation,
+      assignedId: "u_user-1",
+      triggerContext: {
+        triggerSource: "worker",
+        triggerHandler: "test",
+        triggerType: "trigger_action",
+      },
+    })
+
+    expect(mocks.isUserOnShift).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      userId: "user-1",
+    })
+    expect(mocks.updateSet).not.toHaveBeenCalled()
+  })
+
+  test("does not check shifts for a team target", async () => {
+    mocks.inboxTeamExists.mockResolvedValue(true)
+    mocks.isUserOnShift.mockResolvedValue(false)
+
+    await conversationService.assignOneOrSkip({
+      workspaceId: WORKSPACE_ID,
+      conversation,
+      assignedId: "t_team-1",
+      triggerContext: {
+        triggerSource: "worker",
+        triggerHandler: "test",
+        triggerType: "trigger_action",
+      },
+    })
+
+    expect(mocks.isUserOnShift).not.toHaveBeenCalled()
+    expect(mocks.updateSet).toHaveBeenCalled()
+  })
+
+  // Regression: `assignOneOrSkip` must forward the caller's own
+  // `triggerType` ("trigger_action"/"flow_action" — how the assignment
+  // fired) into the analytics event untouched, not overwrite it with the
+  // "conversation_assigned"/"unassigned" value `assignByContactIds`/
+  // `assignOne` derive for the API's DB-event taxonomy — those are two
+  // different axes that happen to share the `triggerType` field name.
+  test("forwards the caller's triggerType into the analytics event unchanged", async () => {
+    mocks.findByWorkspaceIdAndUserId.mockResolvedValue({
+      userId: "user-1",
+      workspaceId: WORKSPACE_ID,
+    })
+    // `updateAssignment` publishes from the UPDATE's returned rows, not the
+    // caller's input — mirror the DB behavior it depends on here.
+    mocks.updateReturning.mockResolvedValue([conversation])
+
+    await conversationService.assignOneOrSkip({
+      workspaceId: WORKSPACE_ID,
+      conversation,
+      assignedId: "u_user-1",
+      triggerContext: {
+        triggerSource: "worker",
+        triggerHandler: "actionExecutor.assignConversation",
+        triggerType: "trigger_action",
+      },
+    })
+
+    expect(emit).toHaveBeenCalledWith(
+      "analytics:dashboard",
+      expect.objectContaining({
+        metadata: {
+          triggerContext: {
+            triggerSource: "worker",
+            triggerHandler: "actionExecutor.assignConversation",
+            triggerType: "trigger_action",
+          },
+        },
+      }),
+    )
+  })
+})
+
+describe("ConversationService.updateArchived — conversation routing release", () => {
+  const conversations = [
+    { id: "conv-1", contactId: "contact-1" },
+    { id: "conv-2", contactId: "contact-2" },
+  ]
+  const triggerContext = {
+    triggerSource: "test",
+    triggerHandler: "test",
+    triggerType: "test",
+  }
+
+  test("archiving asks the thread-control service to release the contacts' owned threads", async () => {
+    const archivedAt = new Date()
+    await conversationService.updateArchived({
+      workspaceId: WORKSPACE_ID,
+      conversations,
+      archivedAt,
+      triggerContext,
+    })
+
+    expect(mocks.releaseOwnedThreadsForContacts).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      conversations,
+      archivedAt,
+    })
+  })
+
+  test("unarchiving never releases a thread", async () => {
+    await conversationService.updateArchived({
+      workspaceId: WORKSPACE_ID,
+      conversations,
+      archivedAt: null,
+      triggerContext,
+    })
+
+    expect(mocks.releaseOwnedThreadsForContacts).not.toHaveBeenCalled()
+  })
+
+  test("a failed release enqueue does not fail the archive", async () => {
+    mocks.releaseOwnedThreadsForContacts.mockRejectedValue(
+      new Error("redis down"),
+    )
+
+    await expect(
+      conversationService.updateArchived({
+        workspaceId: WORKSPACE_ID,
+        conversations,
+        archivedAt: new Date(),
+        triggerContext,
+      }),
+    ).resolves.toBeUndefined()
+    expect(mocks.updateSet).toHaveBeenCalledWith({
+      archivedAt: expect.any(Date),
+      awaitingHumanReplySince: expect.anything(),
+      awaitingHumanReplyClosedAt: expect.anything(),
+      responseDueAt: expect.anything(),
+      responseSlaBreachingAt: expect.anything(),
+      responseSlaTargetSeconds: expect.anything(),
+    })
+  })
+})
+
+describe("ConversationService quick-reply challenge CAS", () => {
+  const renderSql = (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    text: strings.join("?").replace(/\s+/g, " "),
+    values,
+  })
+
+  beforeEach(() => {
+    vi.mocked(sql).mockImplementation(renderSql as never)
+  })
+
+  afterEach(() => {
+    vi.mocked(sql).mockReset()
+  })
+
+  test("setQuickReplyChallengeAttempts only wins when type, nodeId and current attempts all match", async () => {
+    mocks.updateReturning.mockResolvedValueOnce([{ id: "conv-1" }])
+
+    const won = await conversationService.setQuickReplyChallengeAttempts({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      nodeId: "node-1",
+      fromAttempts: 1,
+      toAttempts: 2,
+    })
+
+    expect(won).toBe(true)
+    const where = mocks.updateWhere.mock.calls[0][0] as {
+      and: { text?: string; values?: unknown[] }[]
+    }
+    const texts = where.and.map((c) => c.text ?? "")
+    expect(where.and[0]).toEqual({ eq: [undefined, WORKSPACE_ID] })
+    expect(where.and[1]).toEqual({ eq: [undefined, "conv-1"] })
+    expect(texts.some((t) => t.includes("->>'type' = 'quickReply'"))).toBe(true)
+    expect(where.and[3]?.values).toContain("node-1")
+    expect(where.and[4]?.values).toContain(1)
+  })
+
+  test("clearQuickReplyChallenge scopes by the current attempts when given", async () => {
+    mocks.updateReturning.mockResolvedValueOnce([])
+
+    const won = await conversationService.clearQuickReplyChallenge({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      nodeId: "node-1",
+      attempts: 3,
+    })
+
+    expect(won).toBe(false)
+    const where = mocks.updateWhere.mock.calls[0][0] as {
+      and: ({ text?: string; values?: unknown[] } | undefined)[]
+    }
+    const attemptsClause = where.and.find((c) =>
+      c?.text?.includes("->>'attempts')::int = ?"),
+    )
+    expect(attemptsClause?.values).toContain(3)
+  })
+
+  test("clearQuickReplyChallenge without attempts has no attempts predicate", async () => {
+    await conversationService.clearQuickReplyChallenge({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      nodeId: "node-1",
+    })
+
+    const where = mocks.updateWhere.mock.calls[0][0] as {
+      and: ({ text?: string } | undefined)[]
+    }
+    expect(where.and.some((c) => c?.text?.includes("attempts"))).toBe(false)
+  })
+
+  test("returns false when the CAS matched no row", async () => {
+    mocks.updateReturning.mockResolvedValueOnce([])
+
+    await expect(
+      conversationService.setQuickReplyChallengeAttempts({
+        workspaceId: WORKSPACE_ID,
+        conversationId: "conv-1",
+        nodeId: "node-1",
+        fromAttempts: 1,
+        toAttempts: 2,
+      }),
+    ).resolves.toBe(false)
+  })
+})
+
+describe("ConversationService.updateBotEnabled quick-reply follow-up cancel", () => {
+  test("pausing the bot cancels pending quick-reply follow-ups", async () => {
+    await conversationService.updateBotEnabled({
+      workspaceId: WORKSPACE_ID,
+      ids: ["conv-1"],
+      botEnabled: false,
+    })
+
+    expect(mocks.cancelQuickReplyFollowUps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: WORKSPACE_ID,
+        conversationIds: ["conv-1"],
+      }),
+    )
+    expect(invalidateCacheByTags).toHaveBeenCalled()
+  })
+
+  test("enabling the bot does not cancel follow-ups", async () => {
+    await conversationService.updateBotEnabled({
+      workspaceId: WORKSPACE_ID,
+      ids: ["conv-1"],
+      botEnabled: true,
+    })
+
+    expect(mocks.cancelQuickReplyFollowUps).not.toHaveBeenCalled()
+    expect(invalidateCacheByTags).toHaveBeenCalled()
+  })
+
+  test("a rejected cancel still resolves, invalidates and emits the handoff", async () => {
+    mocks.cancelQuickReplyFollowUps.mockRejectedValueOnce(
+      new Error('invalid input value for enum "SmartDelayType"'),
+    )
+
+    await expect(
+      conversationService.disableBotState({
+        workspaceId: WORKSPACE_ID,
+        conversations: [{ id: "conv-1", contactId: "contact-1" }],
+        triggerContext: { source: "manual" } as never,
+      }),
+    ).resolves.toBeUndefined()
+
+    expect(invalidateCacheByTags).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.stringContaining("conv-1")]),
+    )
+    expect(emitConversationTransferredToHuman).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      "contact-1",
+      "conv-1",
+      undefined,
+    )
+    expect(emit).toHaveBeenCalledWith(
+      "analytics:dashboard",
+      expect.objectContaining({
+        eventType: "conversation:transferred_to_human",
+      }),
+    )
+  })
+
+  test("inside a caller tx the cancel runs behind a savepoint and a failure is swallowed", async () => {
+    const savepoint = { savepoint: true }
+    const transaction = vi.fn(
+      async (fn: (client: unknown) => Promise<unknown>) => fn(savepoint),
+    )
+    const updateWhere = vi.fn()
+    const tx = {
+      update: () => ({ set: () => ({ where: updateWhere }) }),
+      transaction,
+    }
+    mocks.cancelQuickReplyFollowUps.mockRejectedValueOnce(new Error("boom"))
+
+    await expect(
+      conversationService.updateBotEnabled({
+        workspaceId: WORKSPACE_ID,
+        ids: ["conv-1"],
+        botEnabled: false,
+        tx: tx as never,
+      }),
+    ).resolves.toBeUndefined()
+
+    expect(transaction).toHaveBeenCalledTimes(1)
+    expect(mocks.cancelQuickReplyFollowUps).toHaveBeenCalledWith(
+      expect.objectContaining({ tx: savepoint }),
+    )
+    expect(invalidateCacheByTags).toHaveBeenCalled()
+  })
+})
+
+describe("ConversationService analytics attribution", () => {
+  const handoff = (conversations: { id: string; contactId: string }[]) =>
+    conversationService.enableBotState({
+      workspaceId: WORKSPACE_ID,
+      conversations,
+      triggerContext: {
+        triggerSource: "api",
+        triggerHandler: "test",
+        triggerType: "test",
+      },
+    })
+
+  const dashboardPayloads = () =>
+    vi
+      .mocked(emit)
+      .mock.calls.filter(([type]) => type === "analytics:dashboard")
+      .map(([, payload]) => payload as Record<string, unknown>)
+
+  beforeEach(() => {
+    vi.mocked(emit).mockClear()
+  })
+
+  test("looks the contacts' latest inboxes up once per call, deduped and workspace-scoped", async () => {
+    await handoff([
+      { id: "cv1", contactId: "c1" },
+      { id: "cv2", contactId: "c1" },
+      { id: "cv3", contactId: "c2" },
+    ])
+
+    expect(mocks.latestAttribution).toHaveBeenCalledExactlyOnceWith({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["c1", "c2"],
+    })
+  })
+
+  test("stamps channel and inbox on every event, and leaves unmatched contacts unattributed", async () => {
+    mocks.latestAttribution.mockResolvedValue([
+      { contactId: "c1", inboxId: "7", channel: "messenger" },
+    ])
+
+    await handoff([
+      { id: "cv1", contactId: "c1" },
+      { id: "cv3", contactId: "c2" },
+    ])
+
+    const [attributed, unattributed] = dashboardPayloads()
+    expect(attributed).toMatchObject({
+      conversationId: "cv1",
+      channel: "messenger",
+      inboxId: "7",
+    })
+    expect(unattributed?.channel).toBeUndefined()
+    expect(unattributed?.inboxId).toBeUndefined()
+  })
+
+  test("a follow inside a caller's transaction never reads on that transaction", async () => {
+    // A failed read inside a Postgres transaction would abort the caller's own
+    // commit, so the lookup goes through the repository's default client.
+    mocks.latestAttribution.mockResolvedValue([
+      { contactId: "c1", inboxId: "7", channel: "messenger" },
+    ])
+    const tx = {
+      update: () => ({ set: () => ({ where: vi.fn() }) }),
+    }
+
+    await conversationService.updateFollowed({
+      workspaceId: WORKSPACE_ID,
+      id: "cv1",
+      contactId: "c1",
+      followed: false,
+      triggerContext: {
+        triggerSource: "api",
+        triggerHandler: "test",
+        triggerType: "test",
+      },
+      tx: tx as never,
+    })
+
+    expect(mocks.latestAttribution).toHaveBeenCalledExactlyOnceWith({
+      workspaceId: WORKSPACE_ID,
+      contactIds: ["c1"],
+    })
+    expect(dashboardPayloads()[0]).toMatchObject({
+      eventType: "conversation:unfollowed",
+      channel: "messenger",
+      inboxId: "7",
+    })
+  })
+
+  test("a failed attribution lookup still emits the event, unattributed, and never fails the handoff", async () => {
+    mocks.latestAttribution.mockRejectedValue(new Error("db down"))
+
+    await expect(
+      handoff([{ id: "cv1", contactId: "c1" }]),
+    ).resolves.toBeUndefined()
+
+    const [payload] = dashboardPayloads()
+    expect(payload).toMatchObject({ conversationId: "cv1" })
+    expect(payload?.channel).toBeUndefined()
+    expect(payload?.inboxId).toBeUndefined()
+  })
+})
+
+const fragmentText = (fragment: unknown): string => JSON.stringify(fragment)
+
+describe("ConversationService human-reply-window writers", () => {
+  const triggerContext = {
+    triggerSource: "test",
+    triggerHandler: "test",
+    triggerType: "test",
+  }
+  const lastSet = () => mocks.updateSet.mock.calls.at(-1)?.[0]
+
+  test("updateAssignment keeps assignedUserAt for the same user and clears it on unassign", async () => {
+    await conversationService.updateAssignment({
+      workspaceId: WORKSPACE_ID,
+      conversations: [{ id: "conv-1", contactId: "contact-1" }],
+      assignedUserId: "user-1",
+      assignedInboxTeamId: null,
+      triggerContext,
+    })
+    const assign = fragmentText(lastSet().assignedUserAt)
+    expect(assign).toContain("IS DISTINCT FROM")
+    expect(assign).toContain('ELSE \\"assignedUserAt\\" END')
+    expect(lastSet().assignedUserAt.values).toContain("user-1")
+
+    await conversationService.updateAssignment({
+      workspaceId: WORKSPACE_ID,
+      conversations: [{ id: "conv-1", contactId: "contact-1" }],
+      assignedUserId: null,
+      assignedInboxTeamId: "team-1",
+      triggerContext,
+    })
+    expect(lastSet().assignedUserAt.values[0]).toBeNull()
+    expect(fragmentText(lastSet().assignedUserAt)).toContain("THEN NULL")
+  })
+
+  test("archiving closes the window as archive and unarchiving does not touch it", async () => {
+    await conversationService.updateArchived({
+      workspaceId: WORKSPACE_ID,
+      conversations: [{ id: "conv-1", contactId: "contact-1" }],
+      archivedAt: new Date(),
+      triggerContext,
+    })
+    expect(lastSet()).toHaveProperty("awaitingHumanReplyClosedAt")
+    expect(fragmentText(lastSet().awaitingHumanReplySince)).not.toContain(
+      "botEnabled",
+    )
+
+    await conversationService.updateArchived({
+      workspaceId: WORKSPACE_ID,
+      conversations: [{ id: "conv-1", contactId: "contact-1" }],
+      archivedAt: null,
+      triggerContext,
+    })
+    expect(lastSet()).toEqual({ archivedAt: null })
+  })
+
+  test("pausing reopens the window only when the caller opts in; enabling never does", async () => {
+    await conversationService.updateBotEnabled({
+      workspaceId: WORKSPACE_ID,
+      ids: ["conv-1"],
+      botEnabled: false,
+    })
+    expect(lastSet()).not.toHaveProperty("awaitingHumanReplySince")
+
+    await conversationService.updateBotEnabled({
+      workspaceId: WORKSPACE_ID,
+      ids: ["conv-1"],
+      botEnabled: false,
+      reopenUnansweredHumanReplyWindow: true,
+    })
+    const reopen = fragmentText(lastSet().awaitingHumanReplySince)
+    expect(reopen).toContain("IS NULL AND")
+    expect(reopen).toContain("contactRepliedAt")
+
+    await conversationService.updateBotEnabled({
+      workspaceId: WORKSPACE_ID,
+      ids: ["conv-1"],
+      botEnabled: true,
+      reopenUnansweredHumanReplyWindow: true,
+    })
+    expect(lastSet()).not.toHaveProperty("awaitingHumanReplySince")
+  })
+
+  test("disableBotState forwards the reopen opt-in", async () => {
+    const conversations = [{ id: "conv-1", contactId: "contact-1" }]
+    mocks.conversationFindMany.mockResolvedValue(conversations)
+
+    await conversationService.disableBotState({
+      workspaceId: WORKSPACE_ID,
+      conversations,
+      triggerContext,
+      reopenUnansweredHumanReplyWindow: true,
+    })
+    expect(lastSet()).toHaveProperty("awaitingHumanReplySince")
+
+    await conversationService.disableBotState({
+      workspaceId: WORKSPACE_ID,
+      conversations,
+      triggerContext,
+    })
+    expect(lastSet()).not.toHaveProperty("awaitingHumanReplySince")
+  })
+
+  test("handOffIfBotEnabled without the opt-in does not touch the window", async () => {
+    mocks.updateReturning.mockResolvedValueOnce([{ id: "conv-1" }])
+
+    await conversationService.handOffIfBotEnabled({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+    })
+
+    expect(lastSet()).not.toHaveProperty("awaitingHumanReplySince")
+    // No window is reopened, so the response SLA has nothing to track.
+    expect(mocks.trackWindow).not.toHaveBeenCalled()
+  })
+
+  test("a handoff that reopens the window is tracked for the response SLA", async () => {
+    mocks.updateReturning.mockResolvedValueOnce([{ id: "conv-1" }])
+
+    await conversationService.handOffIfBotEnabled({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      reopenUnansweredHumanReplyWindow: true,
+    })
+
+    expect(mocks.trackWindow).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      conversationIds: ["conv-1"],
+      tx: undefined,
+    })
+  })
+
+  test("handOffIfBotEnabled is workspace-scoped, guarded by botEnabled and reopens on opt-in", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"))
+    mocks.updateReturning.mockResolvedValueOnce([{ id: "conv-1" }])
+
+    let handedOff: boolean
+    try {
+      handedOff = await conversationService.handOffIfBotEnabled({
+        workspaceId: WORKSPACE_ID,
+        conversationId: "conv-1",
+        reopenUnansweredHumanReplyWindow: true,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(handedOff).toBe(true)
+    expect(lastSet()).toMatchObject({
+      botEnabled: false,
+      botResumeAt: new Date("2026-01-02T00:00:00.000Z"),
+      awaitingHumanReplySince: expect.anything(),
+    })
+    expect(mocks.updateWhere).toHaveBeenCalledWith({
+      and: [
+        { eq: [undefined, "conv-1"] },
+        { eq: [undefined, WORKSPACE_ID] },
+        { eq: [undefined, true] },
+      ],
+    })
+    expect(invalidateCacheByTags).toHaveBeenCalled()
+  })
+
+  test("handOffIfBotEnabled reports false and does not invalidate when already handed off", async () => {
+    mocks.updateReturning.mockResolvedValueOnce([])
+
+    const handedOff = await conversationService.handOffIfBotEnabled({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+    })
+
+    expect(handedOff).toBe(false)
+    expect(invalidateCacheByTags).not.toHaveBeenCalled()
+  })
+
+  test("markAgentReplied returns the claim with isFirstResponse from the previous adminRepliedAt", async () => {
+    const at = new Date("2026-10-18T09:05:00.000Z")
+    const since = new Date("2026-10-18T09:00:00.000Z")
+    mocks.closeHumanReplyWindow.mockResolvedValueOnce({
+      closedAwaitingSince: since,
+      previousAdminRepliedAt: null,
+      assignedUserId: "user-1",
+      assignedUserAt: null,
+    })
+
+    const result = await conversationService.markAgentReplied({
+      id: "conv-1",
+      workspaceId: WORKSPACE_ID,
+      at,
+    })
+
+    expect(mocks.closeHumanReplyWindow).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      conversationId: "conv-1",
+      repliedAt: at,
+    })
+    expect(result).toEqual({
+      closedAwaitingSince: since,
+      isFirstResponse: true,
+      assignedUserId: "user-1",
+      assignedUserAt: null,
+    })
+    expect(invalidateCacheByTags).toHaveBeenCalled()
+  })
+
+  test("markAgentReplied is not a first response once a human replied before", async () => {
+    mocks.closeHumanReplyWindow.mockResolvedValueOnce({
+      closedAwaitingSince: null,
+      previousAdminRepliedAt: new Date("2026-10-17T00:00:00.000Z"),
+      assignedUserId: null,
+      assignedUserAt: null,
+    })
+
+    const result = await conversationService.markAgentReplied({
+      id: "conv-1",
+      workspaceId: WORKSPACE_ID,
+      at: new Date(),
+    })
+
+    expect(result).toMatchObject({
+      closedAwaitingSince: null,
+      isFirstResponse: false,
+    })
+  })
+
+  test("markAgentReplied returns null for a conversation outside the workspace", async () => {
+    mocks.closeHumanReplyWindow.mockResolvedValueOnce(null)
+
+    await expect(
+      conversationService.markAgentReplied({
+        id: "conv-x",
+        workspaceId: WORKSPACE_ID,
+        at: new Date(),
+      }),
+    ).resolves.toBeNull()
+  })
+})
