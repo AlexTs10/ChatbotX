@@ -1,7 +1,8 @@
 //! App-defined SQL functions (spec section 3), registered on every connection.
 //!
 //! `lower_u`, `upper_u`, `ilike`, `like_cs`, `regexp` (the `REGEXP` operator),
-//! `regexp_replace`, `tz_resolve`, `tz_wall_ms`, `tz_from_wall_ms`, `vector_distance_cos`.
+//! `regexp_replace`, `tz_resolve`, `tz_wall_ms`, `tz_from_wall_ms`, `vector_distance_cos`,
+//! `vector32` (P2.5 spec 1.7 item 3).
 //! All are `SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS` (`regexp_replace` is used
 //! in an index expression and `trusted_schema = OFF`). A SQL `NULL` argument gives `NULL`,
 //! except for `tz_resolve` (`NULL` -> `'UTC'`).
@@ -42,6 +43,7 @@ pub(crate) fn register(conn: &Connection) -> rusqlite::Result<()> {
     conn.create_scalar_function("vector_distance_cos", 2, flags, |ctx| {
         vector_distance_cos_fn(ctx)
     })?;
+    conn.create_scalar_function("vector32", 1, flags, |ctx| vector32_fn(ctx))?;
     Ok(())
 }
 
@@ -561,6 +563,48 @@ pub fn vector_distance_cos(a: &[u8], b: &[u8]) -> Result<Option<f64>, String> {
     Ok(Some(1.0 - similarity.clamp(-1.0, 1.0)))
 }
 
+/// libSQL `vector32(text)`: the JSON array text `'[0.1,0.2,…]'` as a little-endian `f32`
+/// blob (the layout of `vector_distance_cos` and of the `embedding` columns). Non-finite
+/// values are rejected, as pgvector rejects NaN / Infinity on input.
+pub fn vector32(text: &str) -> Result<Vec<u8>, String> {
+    let invalid = || format!("invalid vector: {text}");
+    let inner = text
+        .trim()
+        .strip_prefix('[')
+        .and_then(|t| t.strip_suffix(']'))
+        .ok_or_else(invalid)?
+        .trim();
+    if inner.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::with_capacity(inner.len() / 2);
+    for item in inner.split(',') {
+        let item = item.trim();
+        let starts_ok = item
+            .bytes()
+            .next()
+            .is_some_and(|b| b == b'-' || b.is_ascii_digit());
+        let value: f32 = item.parse().map_err(|_| invalid())?;
+        if !starts_ok || !value.is_finite() {
+            return Err(invalid());
+        }
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    Ok(out)
+}
+
+fn vector32_fn(ctx: &Context<'_>) -> rusqlite::Result<Option<Vec<u8>>> {
+    match ctx.get_raw(0) {
+        ValueRef::Null => Ok(None),
+        ValueRef::Text(bytes) => {
+            let text = std::str::from_utf8(bytes).map_err(|_| fn_error("invalid vector"))?;
+            vector32(text).map(Some).map_err(fn_error)
+        }
+        ValueRef::Blob(b) if b.len() % 4 == 0 => Ok(Some(b.to_vec())),
+        _ => Err(fn_error("invalid vector")),
+    }
+}
+
 fn vector_distance_cos_fn(ctx: &Context<'_>) -> rusqlite::Result<Option<f64>> {
     match (ctx.get_raw(0), ctx.get_raw(1)) {
         (ValueRef::Null, _) | (_, ValueRef::Null) => Ok(None),
@@ -1046,5 +1090,56 @@ mod tests {
             q("SELECT vector_distance_cos(NULL, x'00000000')"),
             Value::Null
         );
+    }
+
+    #[test]
+    fn vector32_text_gives_the_little_endian_f32_blob() {
+        let expected: Vec<u8> = [0.1f32, -2.5, 3e-3]
+            .iter()
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
+        assert_eq!(
+            q("SELECT vector32('[0.1, -2.5,3e-3]')"),
+            Value::Blob(expected)
+        );
+        assert_eq!(q("SELECT vector32('[]')"), Value::Blob(Vec::new()));
+        assert_eq!(q("SELECT vector32(NULL)"), Value::Null);
+        // A valid blob passes through (libSQL accepts both forms).
+        assert_eq!(
+            q("SELECT vector32(x'0000803f')"),
+            Value::Blob(1f32.to_le_bytes().to_vec())
+        );
+    }
+
+    #[test]
+    fn vector32_matches_vector_distance_cos_on_blobs() {
+        let d = match q(&format!(
+            "SELECT vector_distance_cos(vector32('[1,0]'), {})",
+            blob(&[1.0, 1.0])
+        )) {
+            Value::Real(f) => f,
+            other => panic!("not real: {other:?}"),
+        };
+        assert!((d - (1.0 - 1.0 / 2f64.sqrt())).abs() < 1e-6, "{d}");
+    }
+
+    #[test]
+    fn vector32_rejects_bad_input() {
+        for bad in [
+            "'0.1,0.2'",
+            "'[0.1,]'",
+            "'[a]'",
+            "'[NaN]'",
+            "'[inf]'",
+            "'[1e400]'",
+            "'[+1]'",
+            "x'000000'",
+            "1",
+        ] {
+            assert!(
+                err(&format!("SELECT vector32({bad})")).contains("invalid vector"),
+                "{bad}"
+            );
+        }
     }
 }

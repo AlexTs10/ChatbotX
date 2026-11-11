@@ -41,6 +41,7 @@ pub const MIGRATIONS: &[Migration] = &[
     migration!(1, "core", "0001_core.sql"),
     migration!(2, "messaging", "0002_messaging.sql"),
     migration!(3, "jobs", "0003_jobs.sql"),
+    migration!(4, "rest", "0004_rest.sql"),
 ];
 
 const CREATE_SCHEMA_MIGRATIONS: &str = r#"CREATE TABLE IF NOT EXISTS "schema_migrations" (
@@ -402,11 +403,11 @@ mod tests {
     #[test]
     fn fresh_apply_then_second_run_is_a_no_op() {
         let mut conn = conn();
-        assert_eq!(migrate(&mut conn).expect("migrate").applied, [1, 2, 3]);
-        assert_eq!(count(&conn, "PRAGMA user_version"), 3);
+        assert_eq!(migrate(&mut conn).expect("migrate").applied, [1, 2, 3, 4]);
+        assert_eq!(count(&conn, "PRAGMA user_version"), 4);
         assert_eq!(
             count(&conn, r#"SELECT count(*) FROM "schema_migrations""#),
-            3
+            4
         );
         let checksums: Vec<String> = conn
             .prepare(r#"SELECT "checksum" FROM "schema_migrations" ORDER BY "version""#)
@@ -417,7 +418,7 @@ mod tests {
             .expect("rows");
         assert_eq!(
             checksums,
-            MIGRATIONS[0..3]
+            MIGRATIONS[0..4]
                 .iter()
                 .map(Migration::checksum)
                 .collect::<Vec<_>>()
@@ -433,8 +434,8 @@ mod tests {
              AND sql NOT LIKE 'CREATE VIRTUAL TABLE%' AND name NOT LIKE '%\\_fts\\_%' ESCAPE '\\' \
              AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
         );
-        // 130 app tables (P2.3 + P2.4) + 9 jobs tables (P2.6).
-        assert_eq!(tables, 139);
+        // 260 app tables (P2.3 + P2.4 + P2.5: 126 + 4 rollup tables) + 9 jobs tables (P2.6).
+        assert_eq!(tables, 269);
         assert_eq!(
             count(&conn, "SELECT count(*) FROM pragma_foreign_key_check"),
             0
@@ -445,10 +446,10 @@ mod tests {
             migrate(&mut conn).expect("second run").applied,
             Vec::<u32>::new()
         );
-        assert_eq!(count(&conn, "PRAGMA user_version"), 3);
+        assert_eq!(count(&conn, "PRAGMA user_version"), 4);
         assert_eq!(
             count(&conn, r#"SELECT count(*) FROM "schema_migrations""#),
-            3
+            4
         );
     }
 

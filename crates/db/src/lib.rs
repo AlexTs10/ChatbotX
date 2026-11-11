@@ -27,6 +27,8 @@ pub mod functions;
 mod migrate;
 #[cfg(test)]
 mod query_plan_tests;
+#[cfg(test)]
+mod schema_part3_tests;
 
 pub use error::{DatabaseErrorDescription, DbError, describe_database_error};
 pub use migrate::{MIGRATIONS, MigrateReport, Migration, MigrationError, migrate};
@@ -481,6 +483,23 @@ pub mod schema {
         "IntegrationWebchat.persistentMenus",
         "Trigger.actions",
         "UserPersistentMenu.menus",
+    ];
+
+    /// The 4 rollup tables of `0004_rest.sql` (they replace the TimescaleDB continuous
+    /// aggregates, same names) with their event table, as `(rollup, events)`. Triggers on
+    /// the event table keep each rollup exact (P2.5 spec 1.5). Purge and retention code
+    /// deletes the rollup rows of a workspace before its events (spec 1.5.2, doubt 12).
+    pub const ROLLUP_TABLES: &[(&str, &str)] = &[
+        ("analytics_contact_events_hourly", "AnalyticsContactEvent"),
+        (
+            "analytics_bot_message_events_hourly",
+            "AnalyticsBotMessageEvent",
+        ),
+        (
+            "analytics_conversation_events_hourly",
+            "AnalyticsConversationEvent",
+        ),
+        ("analytics_message_events_hourly", "AnalyticsMessageEvent"),
     ];
 }
 
