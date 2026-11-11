@@ -102,3 +102,9 @@ From `conversion/specs/P2.2.md`, adopted:
 - Possible SSRF/DNS-rebinding gap in the original: `packages/business/src/decision/transport.ts` "pinned dial" still does a normal DNS lookup after the DoH check. The Rust port must pin the connection to the DoH-resolved IP (no second lookup). Parity tests do not assert the extra lookup, so this is not a parity break.
 - The Rust stack must: accept `MCP_PUBLIC_URL=https://app/mcp` in the parity env; pass a single-value `X-Forwarded-For` through the edge (better-auth rate limits per IP).
 - Snapshots made with `--update-snapshots` on the Dell must be copied back to the Mac before the next `chatbotx-dell` sync (it deletes PC-only files).
+
+## 2026-11-11 — Phase 1 work method (orchestrator)
+
+- For each Phase 1 unit (P1.2–P1.27), one subagent does the analysis and writes the parity tests (the "implementation" under test is the original stack, which already exists), and a separate independent verifier checks the tests against the original source and reruns them. The spec goes to `conversion/specs/<ID>.md` as usual.
+- Up to 3 Phase 1 units run in parallel. Each unit writes only under `conversion/parity/tests/<unit-folder>/`, `src/fixtures/ext/<unit>.ts` and `stacks/original/ext/<unit>.ts` (loader: `src/fixtures/ext.ts`). Shared harness files (`src/*.ts`, `driver.ts`, `stacks/original/fixtures.ts`, compose, Caddyfile, run script) change only through the orchestrator.
+- Each unit runs only its own folder on the Dell: `run-original.sh --no-build -- tests/<unit-folder>`. Runs queue behind the `chatbotx-dell` lock.
