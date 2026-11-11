@@ -14,7 +14,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P0.6 | 0 | RSS baseline of original stack into `MEMORY.md` | done | P0.1 | - | User-set baseline 2 GB (no measurement, see DECISIONS) | commit `conversion(P0.4+P0.6)` |
 | P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | done | P0.5 | A: smoke | See "Proof P1.1" | commit `conversion(P1.1)` |
 | P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | done | P1.1 | A: 52 ops, 260 tests | See "Proof P1.2" | commit `conversion(P1.2)` |
-| P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | in_progress | P1.1 | A: 49 ops | | |
+| P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | done | P1.1 | A: 49 ops, 389 tests | See "Proof P1.3" | commit `conversion(P1.3)` |
 | P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | in_progress | P1.1 | A: 55 ops | | |
 | P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | in_progress | P1.1 | A: 25 ops | | |
 | P1.6 | 1 | Public API parity: `contacts` | in_progress | P1.1 | A: 58 ops | | |
@@ -42,7 +42,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.28 | 1 | Full Class A run against the original stack: 100% pass, then freeze `parity/` into `MANIFEST.sha256` | todo | P1.2–P1.27 | A | | |
 | P2.1 | 2 | Cargo workspace + one binary skeleton: crates `api` (axum), `core`, `db`, `jobs`, `rt`, `files`, bin `chatbotx-server`; config from env, tracing, `/api/health`, graceful shutdown; release profile for size/RSS | done | P0.5 | - | See "Proof P2.1" | commit `conversion(P2.1)` |
 | P2.2 | 2 | SQLite schema analysis: map all 224 Drizzle schema files (Postgres types, enums, jsonb, hypertables, pgvector, partial indexes, triggers) to libSQL; spec only | done | P2.1 | - | See "Proof P2.2" | commit `conversion(P2.2)` |
-| P2.3 | 2 | `db` crate: embedded SQLite file via `rusqlite` (bundled), migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | todo | P2.2 | C | | |
+| P2.3 | 2 | `db` crate: embedded SQLite file via `rusqlite` (bundled), migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | done | P2.2 | C:48 (+6 n/a) | See "Proof P2.3" | commit `conversion(P2.3)` |
 | P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | todo | P2.3 | C | | |
 | P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | todo | P2.4 | C | | |
 | P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | todo | P2.3 | C | | |
@@ -212,3 +212,27 @@ verifier run 2:  Test Files 12 passed (12)   Tests 261 passed (261)   29.81s   e
 writer run:      [run-original] vitest exit code 0; stopping the stack (down -v)
 ```
 Known gaps (in the spec): 503 reportTimeout, 429 rate limits, three 400 codes that need rows the app never writes, Graph paging > 20 pages, worker retries, aiFiles reindex 409/coalesced (timing), enqueueFailed/502, template locks, aiFunctions with a real flow.
+
+### Proof P2.3
+
+Analyst spec `conversion/specs/P2.3.md` → porter (48 Rust tests, failing, `ecb4fa5a5`; rustfmt-only commits `14a519f85`, `cc571cb45`) → implementer → independent verifier (items 1, 2, 4, 5, 6 PASS; item 3 FAIL only on rustfmt of 6 test files → fixed in `cc571cb45`, formatting only, rerun below).
+
+```
+$ chatbotx-dell bash -c 'cargo fmt -p chatbotx-db -- --check && cargo clippy -p chatbotx-db --all-targets -- -D warnings && cargo test -p chatbotx-db'
+FMT_OK
+    Finished `dev` profile [unoptimized + debuginfo] target(s)      (clippy clean)
+passed 113 failed 0      (48 ported in 18 files + 65 unit tests)
+test map: 59 cases = 26 ported, 21 adapted, 6 replacement, 6 not-applicable (user decision)
+0001_core.sql: 65 STRICT tables, 81 json_valid, 82 enum CHECKs, no part-2/3 FKs
+idle RSS (writer + 3 readers, one read + one write, release): VmHWM 10,092 kB
+```
+
+### Proof P1.3
+
+Writer (spec `conversion/specs/P1.3.md`) → independent verifier (PASS 5/5, two runs). 49/49 operations, 389 tests in `conversion/parity/tests/p1-03-ai-handover-analytics/` + interception check.
+
+```
+verifier run 1:  Test Files 13 passed (13)   Tests 390 passed (390)   26.49s   exit 0
+verifier run 2:  Test Files 13 passed (13)   Tests 390 passed (390)   26.32s   exit 0
+```
+Analytics numbers asserted in UTC, Asia/Ho_Chi_Minh and America/New_York across the 2025-03-09 DST change.
