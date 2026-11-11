@@ -1,0 +1,797 @@
+{
+  "$comment": "getExpectedSchema(...) output of packages/auth/__tests__/schema-parity.test.ts:34, generated once (2026-11-11) with better-auth 1.7.14, @better-auth/core 1.7.14, @better-auth/mcp 1.7.14, @better-auth/oauth-provider 1.7.14, the exact options of that test (anonymous(), jwt(), mcp(buildMcpPluginOptions(\"https://app.example.com/mcp\")), user/account additionalFields). Keys are the adapter model names. fields: the field names Better Auth writes (diffSchema uses only the names, idColumn (default \"id\"), disableMigrations and schema). Frozen: do not edit by hand.",
+  "betterAuthVersion": "1.7.14",
+  "oauthTableNames": [
+    "jwks",
+    "oauthAccessToken",
+    "oauthClient",
+    "oauthClientAssertion",
+    "oauthClientResource",
+    "oauthConsent",
+    "oauthRefreshToken",
+    "oauthResource"
+  ],
+  "tables": {
+    "user": {
+      "disableMigrations": false,
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "email": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "emailVerified": {
+          "type": "boolean",
+          "required": true,
+          "hasDefaultValue": true
+        },
+        "image": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": true
+        },
+        "updatedAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": true
+        },
+        "isAnonymous": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": true
+        },
+        "mustChangePassword": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "tenantId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "session": {
+      "disableMigrations": false,
+      "fields": {
+        "expiresAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "token": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": true
+        },
+        "updatedAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "ipAddress": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "userAgent": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "userId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "user",
+            "field": "id"
+          }
+        }
+      }
+    },
+    "account": {
+      "disableMigrations": false,
+      "fields": {
+        "accountId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "providerId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "userId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "user",
+            "field": "id"
+          }
+        },
+        "accessToken": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "refreshToken": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "idToken": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "accessTokenExpiresAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "refreshTokenExpiresAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "scope": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "password": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": true
+        },
+        "updatedAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "tenantId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "verification": {
+      "disableMigrations": false,
+      "fields": {
+        "identifier": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "value": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "expiresAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": true
+        },
+        "updatedAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": true
+        }
+      }
+    },
+    "jwks": {
+      "disableMigrations": false,
+      "fields": {
+        "publicKey": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "privateKey": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "expiresAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "alg": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "crv": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "oauthClient": {
+      "disableMigrations": false,
+      "fields": {
+        "clientId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "clientSecret": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "clientDiscoveryId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "disabled": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": true
+        },
+        "skipConsent": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "enableEndSession": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "subjectType": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "scopes": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "clientCredentialsScopes": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": true
+        },
+        "userId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "user",
+            "field": "id"
+          }
+        },
+        "createdAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "updatedAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "name": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "uri": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "icon": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "contacts": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "tos": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "policy": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "softwareId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "softwareVersion": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "softwareStatement": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "redirectUris": {
+          "type": "string[]",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "postLogoutRedirectUris": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "backchannelLogoutUri": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "backchannelLogoutSessionRequired": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "tokenEndpointAuthMethod": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "applicationType": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "jwks": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "jwksUri": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "grantTypes": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "responseTypes": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "requirePKCE": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "dpopBoundAccessTokens": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": true
+        },
+        "referenceId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "metadata": {
+          "type": "json",
+          "required": false,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "oauthResource": {
+      "disableMigrations": false,
+      "fields": {
+        "identifier": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "name": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "accessTokenTtl": {
+          "type": "number",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "refreshTokenTtl": {
+          "type": "number",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "signingAlgorithm": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "signingKeyId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "allowedScopes": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "customClaims": {
+          "type": "json",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "dpopBoundAccessTokensRequired": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": true
+        },
+        "disabled": {
+          "type": "boolean",
+          "required": false,
+          "hasDefaultValue": true
+        },
+        "createdAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "updatedAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "policyVersion": {
+          "type": "number",
+          "required": false,
+          "hasDefaultValue": true
+        },
+        "metadata": {
+          "type": "json",
+          "required": false,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "oauthClientResource": {
+      "disableMigrations": false,
+      "fields": {
+        "clientId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "oauthClient",
+            "field": "clientId"
+          }
+        },
+        "resourceId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "oauthResource",
+            "field": "identifier"
+          }
+        },
+        "metadata": {
+          "type": "json",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "oauthRefreshToken": {
+      "disableMigrations": false,
+      "fields": {
+        "token": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "clientId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "oauthClient",
+            "field": "clientId"
+          }
+        },
+        "sessionId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "session",
+            "field": "id"
+          }
+        },
+        "userId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "user",
+            "field": "id"
+          }
+        },
+        "referenceId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "authorizationCodeId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "resources": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "requestedUserInfoClaims": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "expiresAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "revoked": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "rotatedAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "rotationReplayResponse": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "rotationReplayExpiresAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "authTime": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "confirmation": {
+          "type": "json",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "scopes": {
+          "type": "string[]",
+          "required": true,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "oauthAccessToken": {
+      "disableMigrations": false,
+      "fields": {
+        "token": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "clientId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "oauthClient",
+            "field": "clientId"
+          }
+        },
+        "sessionId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "session",
+            "field": "id"
+          }
+        },
+        "userId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "user",
+            "field": "id"
+          }
+        },
+        "referenceId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "authorizationCodeId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "resources": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "requestedUserInfoClaims": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "refreshId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "oauthRefreshToken",
+            "field": "id"
+          }
+        },
+        "expiresAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "revoked": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "confirmation": {
+          "type": "json",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "scopes": {
+          "type": "string[]",
+          "required": true,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "oauthConsent": {
+      "disableMigrations": false,
+      "fields": {
+        "clientId": {
+          "type": "string",
+          "required": true,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "oauthClient",
+            "field": "clientId"
+          }
+        },
+        "userId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false,
+          "references": {
+            "model": "user",
+            "field": "id"
+          }
+        },
+        "referenceId": {
+          "type": "string",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "resources": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "requestedUserInfoClaims": {
+          "type": "string[]",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "scopes": {
+          "type": "string[]",
+          "required": true,
+          "hasDefaultValue": false
+        },
+        "createdAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        },
+        "updatedAt": {
+          "type": "date",
+          "required": false,
+          "hasDefaultValue": false
+        }
+      }
+    },
+    "oauthClientAssertion": {
+      "disableMigrations": false,
+      "fields": {
+        "expiresAt": {
+          "type": "date",
+          "required": true,
+          "hasDefaultValue": false
+        }
+      }
+    }
+  }
+}
