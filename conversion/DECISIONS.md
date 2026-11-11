@@ -28,3 +28,12 @@ Dated log of each decision and each question to the user. Newest entry at the bo
 - The frozen set includes test support files (helpers, fixtures, mocks, Vitest configs), not only `*.test.*` files, because the tests import them. 3,104 test files + 115 support files = 3,219.
 - `MANIFEST.sha256` itself has SHA-256 `09e8faff6524ab94ca17b9ce8dae03419229df71afac0cb5277f9858a6c850f8`. If this hash changes, the manifest was edited.
 - The originals in `apps/`, `packages/`, `integrations/` can later be deleted at cutover. The copies in `frozen-tests/` never change.
+
+## 2026-11-11 — Heavy work and baseline (user decision)
+
+- User: do not run heavy work on the Mac. Heavy commands (pnpm test/build, tsc, cargo, Docker) run on the Dell through a private helper `~/.local/bin/chatbotx-dell` (not in the repo). It copies the worktree to `dell-5570:~/chatbotx-remote/ChatbotX-lean` and runs with Node 24.22.1, pnpm 10.34.5, Rust stable.
+- User: no full benchmark of the original stack. Baseline RSS = **2 GB** (user-set). P0.6 is done with this value.
+- User: do units back to back; do not stop after one unit.
+- P0.3 (baseline test run) runs on the Dell. The stack services (Postgres/Redis) are not started for it; tests that need them are recorded as `baseline-fail` with reason `needs-service`.
+- P0.4 analyst note: `packages/variables/src/javascript-interpolation.ts` (+ `interpolate-into-javascript.test.ts`) is used only by the Execute JavaScript step? To check when the step is deleted. If it is used only there, it is dropped too.
+- The repo commit-msg hook (lefthook) rejects the `conversion(<ID>): …` format. Conversion commits use `git commit -n` only when the staged files are all under `conversion/` or Rust (no TS staged), so no lint hook is skipped for TS code; the pre-commit hooks still run.

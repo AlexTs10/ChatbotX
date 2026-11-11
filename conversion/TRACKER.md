@@ -8,9 +8,9 @@ Only one unit can be `in_progress` at a time. Units for Phase 1 and later are ad
 | P0.1 | 0 | Fork, clone, `conversion` branch, empty tracker files | done | - | - | See "Proof P0.1" | commit `conversion(P0.1)` in git log |
 | P0.2 | 0 | Copy all tests to `frozen-tests/` + `MANIFEST.sha256` | done | P0.1 | - | See "Proof P0.2" | commit `conversion(P0.2)` |
 | P0.3 | 0 | Run original suite (`pnpm install && pnpm test`), record baseline, mark `baseline-fail` | todo | P0.2 | - | | |
-| P0.4 | 0 | Feature inventory in `FEATURES.md` (LOC + test count); keep/drop already decided (see DECISIONS 2026-11-11: drop Execute JavaScript only) | todo | P0.1 | - | | |
+| P0.4 | 0 | Feature inventory in `FEATURES.md` (LOC + test count); keep/drop already decided (see DECISIONS 2026-11-11: drop Execute JavaScript only) | done | P0.1 | - | See "Proof P0.4" | commit `conversion(P0.4+P0.6)` |
 | P0.5 | 0 | Classify every test file A/B/C in `TEST_MAP.md`; mark dropped-feature tests `dropped` | todo | P0.2, P0.3, P0.4 | - | | |
-| P0.6 | 0 | Measure RSS of original stack (`docker stats --no-stream`) into `MEMORY.md` | todo | P0.1 | - | | |
+| P0.6 | 0 | RSS baseline of original stack into `MEMORY.md` | done | P0.1 | - | User-set baseline 2 GB (no measurement, see DECISIONS) | commit `conversion(P0.4+P0.6)` |
 
 ## Proof
 
@@ -51,3 +51,17 @@ $ shasum -a 256 conversion/frozen-tests/MANIFEST.sha256
 ```
 
 Rule from now: run `conversion/check-manifest.sh` before every commit. If it fails, stop and revert.
+
+### Proof P0.4
+
+```
+features: 114 rows + 14 shared-infrastructure rows
+non-test source LOC: ~830,400 (features) + ~61,800 (infra) = ~892,200; SQL migrations: 308 files, ~10,776 lines (separate)
+test files assigned: 3104 / 3104 (2905 feature rows, 199 infra rows), unassigned: 0
+rows with decision drop: 1 (Execute JavaScript flow step, 12 test files)
+per-test feature: conversion/feature-of-test.tsv (3104 lines)
+```
+
+### Proof P0.6
+
+No measurement. The user set the baseline on 2026-11-11: original stack ≈ 2 GB RSS. Target stays ≤ 200 MB.
