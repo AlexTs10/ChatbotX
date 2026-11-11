@@ -161,3 +161,11 @@ Spec: `conversion/specs/P2.4.md` (65 tables, 234 indexes, 155 FKs; 46 runtime ca
 ## 2026-11-11 — Subagent limit (user)
 
 - **User: at most 1–2 subagents at the same time** (helpers spawned by a subagent count too). Phase 1 units no longer run 3 in parallel.
+
+## 2026-11-11 — Findings from P1.7–P1.9 (orchestrator; details in each spec)
+
+- **Security (P1.7):** `decisionConnections.test` follows a provider 3xx redirect with a GET, and the redirect target gets **no DoH/SSRF check**. The Rust port must re-check every redirect hop (as `crates/files` `fetch_following_safe_redirects` does). Parity tests do not assert the unsafe follow.
+- **Security (P1.8):** dynamic-image static `url` layers are fetched without the SSRF guard (only `customField` layers are checked). Rust port: guard all fetched URLs. Not asserted by parity tests.
+- **Infra (P1.9):** the daily `googleAdsSyncSetups` cron runs at 03:30 UTC; a run that crosses 03:30 UTC with a test Google Ads connection can make an unscripted upstream call and fail `99-interception`. Do not schedule full runs across 03:30 UTC (or script that call in P1.28).
+- **Harness (P1.8):** marketing-messages tests script shared Graph paths (`/debug_token`, `/me/adaccounts`); correct only while `3x` files run after `0x` files. Optional later: a query matcher in `fake-upstream/store.ts` (orchestrator change).
+- Behaviors the Rust port must match are listed in `conversion/specs/P1.7.md` (conversations list ignores `status`; coupon `issueCoupon` 500 `couponIssueUnavailable`, `markCouponUsed` 500 `couponNotIssued`; discountCodes create 200; customFields delete 204 for unknown ids; same-second thread-control precedence), `P1.8.md` §13, `P1.9.md` §8 (flows publish keeps old `startNodeId`; `folders.list` without `parentId` lists sub-folders; flows delete unknown → 204; compile errors 422 bare array).
