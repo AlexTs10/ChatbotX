@@ -1,0 +1,98 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a broadcast sent by the worker > delivers the flow to the audience; getAudience and listContacts show the recipient > audience 1`] = `
+{
+  "data": [
+    {
+      "contact": {
+        "avatar": null,
+        "email": "",
+        "firstName": "Ada",
+        "fullName": "Ada Parity",
+        "gender": "unknown",
+        "id": "<id:1>",
+        "lastName": "Parity",
+        "phoneNumber": null,
+      },
+      "contactId": "<id:1>",
+      "sent": true,
+    },
+  ],
+  "pageCount": 1,
+}
+`;
+
+exports[`a broadcast sent by the worker > delivers the flow to the audience; getAudience and listContacts show the recipient > message:sent recipients 1`] = `
+{
+  "data": [
+    {
+      "avatar": null,
+      "channel": "webchat",
+      "contactId": "<id:1>",
+      "contactInboxId": "<id:2>",
+      "conversationId": "<id:3>",
+      "errorContent": null,
+      "firstName": "Ada",
+      "fullName": "Ada Parity",
+      "lastName": "Parity",
+      "occurredAt": "<ts>",
+      "sourceId": "<sourceId>",
+    },
+  ],
+  "pageCount": 1,
+  "total": 1,
+}
+`;
+
+exports[`a broadcast sent by the worker > resends a sent broadcast as a new one; refuses a broadcast that was not sent > empty audience outcome 1`] = `
+{
+  "contactCount": 0,
+  "status": "sent",
+}
+`;
+
+exports[`a broadcast sent by the worker > resends a sent broadcast as a new one; refuses a broadcast that was not sent > not sent 1`] = `
+{
+  "code": "systemError",
+  "defined": true,
+  "httpStatus": 400,
+  "status": 400,
+}
+`;
+
+exports[`a broadcast sent by the worker > resends a sent broadcast as a new one; refuses a broadcast that was not sent > resent 1`] = `
+{
+  "audienceRangeEnd": null,
+  "audienceRangeStart": null,
+  "channel": "omnichannel",
+  "contactCount": null,
+  "contactFilter": {
+    "conditions": [],
+    "operator": "and",
+  },
+  "flowId": "<id:1>",
+  "id": "<id:2>",
+  "integrationMessengerId": null,
+  "integrationWhatsappId": null,
+  "name": "Resend flow (Resend)",
+  "occurrenceAt": null,
+  "parentBroadcastId": null,
+  "schedulesAt": "<ts>",
+  "schedulesType": "now",
+  "sendRatePerMinute": null,
+  "status": "scheduled",
+  "subaction": "allContacts",
+  "targetMode": "channel",
+  "templateData": null,
+  "templateId": null,
+}
+`;
+
+exports[`a broadcast sent by the worker > resends a sent broadcast as a new one; refuses a broadcast that was not sent > unknown 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;

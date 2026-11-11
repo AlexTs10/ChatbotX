@@ -1,0 +1,195 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`broadcasts.create (recurring) > creates a running series whose detail shows the schedule > created series 1`] = `
+{
+  "audienceRangeEnd": null,
+  "audienceRangeStart": null,
+  "channel": "omnichannel",
+  "contactCount": null,
+  "contactFilter": {
+    "conditions": [],
+    "operator": "and",
+  },
+  "flowId": "<id:1>",
+  "id": "<id:2>",
+  "integrationMessengerId": null,
+  "integrationWhatsappId": null,
+  "name": "Series flow",
+  "occurrenceAt": null,
+  "parentBroadcastId": null,
+  "schedulesAt": "2030-01-01T09:00:00.000Z",
+  "schedulesType": "recurring",
+  "sendRatePerMinute": null,
+  "status": "recurring",
+  "subaction": "allContacts",
+  "targetMode": "channel",
+  "templateData": null,
+  "templateId": null,
+}
+`;
+
+exports[`broadcasts.create (recurring) > creates a running series whose detail shows the schedule > series detail 1`] = `
+{
+  "audienceRangeEnd": null,
+  "audienceRangeStart": null,
+  "channel": "omnichannel",
+  "contactCount": null,
+  "contactFilter": {
+    "conditions": [],
+    "operator": "and",
+  },
+  "flowId": "<id:1>",
+  "id": "<id:2>",
+  "integrationMessengerId": null,
+  "integrationWhatsappId": null,
+  "name": "Series flow",
+  "occurrenceAt": null,
+  "parent": null,
+  "parentBroadcastId": null,
+  "recurrence": {
+    "endedAt": null,
+    "id": "<id:3>",
+    "lastOccurrenceAt": null,
+    "nextRunAt": "2030-01-01T09:00:00.000Z",
+    "nextSendAt": "2030-01-01T09:00:00.000Z",
+    "occurrenceCount": 0,
+    "pausedAt": null,
+    "rule": {
+      "end": {
+        "kind": "never",
+      },
+      "frequency": "daily",
+      "interval": 1,
+      "startsOn": "2030-01-01",
+      "timeOfDay": "09:00",
+      "timezone": "UTC",
+    },
+    "upcomingRuns": [
+      "2030-01-01T09:00:00.000Z",
+      "2030-01-02T09:00:00.000Z",
+      "2030-01-03T09:00:00.000Z",
+    ],
+  },
+  "schedulesAt": "2030-01-01T09:00:00.000Z",
+  "schedulesType": "recurring",
+  "sendRatePerMinute": null,
+  "status": "recurring",
+  "subaction": "allContacts",
+  "targetMode": "channel",
+  "targets": [],
+  "templateData": null,
+  "templateId": null,
+}
+`;
+
+exports[`broadcasts.create (recurring) > saves a repeating draft without arming it > repeating draft 1`] = `
+{
+  "recurrence": {
+    "endedAt": null,
+    "id": "<id:1>",
+    "lastOccurrenceAt": null,
+    "nextRunAt": null,
+    "nextSendAt": null,
+    "occurrenceCount": 0,
+    "pausedAt": null,
+    "rule": {
+      "end": {
+        "kind": "never",
+      },
+      "frequency": "daily",
+      "interval": 1,
+      "startsOn": "2030-01-01",
+      "timeOfDay": "09:00",
+      "timezone": "UTC",
+    },
+    "upcomingRuns": [],
+  },
+  "status": "draft",
+}
+`;
+
+exports[`broadcasts.previewRecurrence > returns the next runs of daily, weekly and monthly rules > ending with an excluded date 1`] = `
+{
+  "upcomingRuns": [
+    "2030-01-02T09:00:00.000Z",
+    "2030-01-03T09:00:00.000Z",
+  ],
+}
+`;
+
+exports[`broadcasts.skipOccurrence and broadcasts.restoreOccurrence > rejects dates without a run, empty requests and non-repeating broadcasts > no run 1`] = `
+{
+  "code": "validation",
+  "defined": true,
+  "httpStatus": 422,
+  "status": 422,
+}
+`;
+
+exports[`stop, resume, moveToDraft and schedule on a series > pauses and restarts a series; moves it to draft and arms it again > paused 1`] = `
+{
+  "audienceRangeEnd": null,
+  "audienceRangeStart": null,
+  "channel": "omnichannel",
+  "contactCount": null,
+  "contactFilter": {
+    "conditions": [],
+    "operator": "and",
+  },
+  "flowId": "<id:1>",
+  "id": "<id:2>",
+  "integrationMessengerId": null,
+  "integrationWhatsappId": null,
+  "name": "Series flow",
+  "occurrenceAt": null,
+  "parent": null,
+  "parentBroadcastId": null,
+  "recurrence": {
+    "endedAt": null,
+    "id": "<id:3>",
+    "lastOccurrenceAt": null,
+    "nextRunAt": null,
+    "nextSendAt": null,
+    "occurrenceCount": 0,
+    "pausedAt": "<ts>",
+    "rule": {
+      "end": {
+        "kind": "never",
+      },
+      "frequency": "daily",
+      "interval": 1,
+      "startsOn": "2030-01-01",
+      "timeOfDay": "09:00",
+      "timezone": "UTC",
+    },
+    "upcomingRuns": [],
+  },
+  "schedulesAt": "2030-01-01T09:00:00.000Z",
+  "schedulesType": "recurring",
+  "sendRatePerMinute": null,
+  "status": "cancelled",
+  "subaction": "allContacts",
+  "targetMode": "channel",
+  "targets": [],
+  "templateData": null,
+  "templateId": null,
+}
+`;
+
+exports[`stop, resume, moveToDraft and schedule on a series > refuses stop and resume on broadcasts in another state > resume a draft 1`] = `
+{
+  "code": "systemError",
+  "defined": true,
+  "httpStatus": 400,
+  "status": 400,
+}
+`;
+
+exports[`stop, resume, moveToDraft and schedule on a series > refuses stop and resume on broadcasts in another state > stop a draft 1`] = `
+{
+  "code": "systemError",
+  "defined": true,
+  "httpStatus": 400,
+  "status": 400,
+}
+`;

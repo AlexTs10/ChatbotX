@@ -1,0 +1,217 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`capabilities.get > narrows with include and projects a channel policy > whatsapp policy 1`] = `
+{
+  "flowSpec": {
+    "channels": [
+      "omnichannel",
+      "webchat",
+      "messenger",
+      "whatsapp",
+      "zalo",
+      "smtp",
+      "telegram",
+      "instagram",
+      "threads",
+      "tiktok",
+      "api",
+    ],
+    "policyVersion": 3,
+    "selectedChannelPolicy": {
+      "limits": {
+        "buttonCount": 3,
+        "buttonLabel": 20,
+        "text": 4096,
+        "viewCatalog": {
+          "footer": 60,
+          "text": 1024,
+        },
+      },
+      "nativeButtonTypes": [],
+      "noButtonSteps": [],
+      "policyVersion": 3,
+      "productMessages": {
+        "displays": {
+          "carousel": {
+            "body": {
+              "allowedWhen": "always",
+              "max": 1024,
+              "requiredWhen": "always",
+            },
+            "maxProducts": 10,
+            "maxSections": 1,
+            "minProducts": 2,
+          },
+          "products": {
+            "body": {
+              "allowedWhen": "always",
+              "max": 1024,
+              "requiredWhen": "multipleProducts",
+            },
+            "footer": {
+              "allowedWhen": "always",
+              "max": 60,
+              "requiredWhen": "never",
+            },
+            "header": {
+              "allowedWhen": "multipleProducts",
+              "max": 60,
+              "requiredWhen": "multipleProducts",
+            },
+            "maxProducts": 30,
+            "maxSections": 10,
+            "minProducts": 1,
+            "sectionTitle": {
+              "allowedWhen": "always",
+              "max": 24,
+              "requiredWhen": "multipleSections",
+            },
+          },
+        },
+      },
+      "unsupportedSteps": [
+        "sendCard",
+        "sendVideo",
+        "sendGif",
+        "sendAudio",
+        "sendFile",
+        "sendQuickReply",
+        "sendCollection",
+        "sendMessengerTemplateMessage",
+      ],
+    },
+    "stepTypes": [
+      {
+        "description": "Sends one message (text, image, or file), optionally with quick-reply buttons.",
+        "type": "send",
+      },
+      {
+        "description": "Sends an existing WhatsApp message template.",
+        "type": "sendTemplate",
+      },
+      {
+        "description": "Sends products from the workspace catalog (single product, product list or carousel; use sendViewCatalog to open the whole catalog). Only on channels that support product messages.",
+        "type": "sendProducts",
+      },
+      {
+        "description": "Shares the product catalog: a message with a button that opens it. Publish rejects it on channels that cannot deliver it (see \`capabilities.get\`'s \`unsupportedSteps\`); in an omnichannel flow (\`channel\` omitted) it is accepted but only sent to WhatsApp contacts, so set \`channel\` to check it at publish.",
+        "type": "sendViewCatalog",
+      },
+      {
+        "description": "Pauses the flow for a fixed duration before continuing.",
+        "type": "wait",
+      },
+      {
+        "description": "Splits the flow by contact-filter-style conditions. Terminal within its step list — nothing may follow a \`branch\` at the same level; continue inside \`cases[].then\` / \`otherwise\` instead.",
+        "type": "branch",
+      },
+      {
+        "description": "Performs a workspace side-effect: tag, custom field, or conversation action.",
+        "type": "action",
+      },
+      {
+        "description": "Runs a Pipelines (CRM kanban) action for the contact: addToPipeline, moveToStage, changeValue, assign, changeStatus, changePriority, changeDueDate, changeTitle, setCustomField, clearCustomField, changeDescription, removeFromPipeline, addComment or transfer. Pipelines, stages and fields are referenced by name/referenceName (see \`pipelines.list\` / \`pipelines.get\`). Success continues to the next step; \`onError\` / \`onSkip\` hold the steps for those outcomes.",
+        "type": "pipeline",
+      },
+      {
+        "description": "Starts another flow for the contact; this flow keeps running afterward (an ordinary step may follow).",
+        "type": "startFlow",
+      },
+      {
+        "description": "Adds an internal note to the conversation.",
+        "type": "addNote",
+      },
+      {
+        "description": "Terminal — routes to an already-defined step instead of continuing. Must be the last step in its list.",
+        "type": "goto",
+      },
+    ],
+    "waitUnits": [
+      "seconds",
+      "minutes",
+      "hours",
+      "days",
+    ],
+  },
+}
+`;
+
+exports[`capabilities.get > returns the default sets for a new workspace > default 1`] = `
+{
+  "botFields": [],
+  "customFields": [],
+  "flowSpec": {
+    "channels": [
+      "omnichannel",
+      "webchat",
+      "messenger",
+      "whatsapp",
+      "zalo",
+      "smtp",
+      "telegram",
+      "instagram",
+      "threads",
+      "tiktok",
+      "api",
+    ],
+    "policyVersion": 3,
+    "stepTypes": [
+      {
+        "description": "Sends one message (text, image, or file), optionally with quick-reply buttons.",
+        "type": "send",
+      },
+      {
+        "description": "Sends an existing WhatsApp message template.",
+        "type": "sendTemplate",
+      },
+      {
+        "description": "Sends products from the workspace catalog (single product, product list or carousel; use sendViewCatalog to open the whole catalog). Only on channels that support product messages.",
+        "type": "sendProducts",
+      },
+      {
+        "description": "Shares the product catalog: a message with a button that opens it. Publish rejects it on channels that cannot deliver it (see \`capabilities.get\`'s \`unsupportedSteps\`); in an omnichannel flow (\`channel\` omitted) it is accepted but only sent to WhatsApp contacts, so set \`channel\` to check it at publish.",
+        "type": "sendViewCatalog",
+      },
+      {
+        "description": "Pauses the flow for a fixed duration before continuing.",
+        "type": "wait",
+      },
+      {
+        "description": "Splits the flow by contact-filter-style conditions. Terminal within its step list — nothing may follow a \`branch\` at the same level; continue inside \`cases[].then\` / \`otherwise\` instead.",
+        "type": "branch",
+      },
+      {
+        "description": "Performs a workspace side-effect: tag, custom field, or conversation action.",
+        "type": "action",
+      },
+      {
+        "description": "Runs a Pipelines (CRM kanban) action for the contact: addToPipeline, moveToStage, changeValue, assign, changeStatus, changePriority, changeDueDate, changeTitle, setCustomField, clearCustomField, changeDescription, removeFromPipeline, addComment or transfer. Pipelines, stages and fields are referenced by name/referenceName (see \`pipelines.list\` / \`pipelines.get\`). Success continues to the next step; \`onError\` / \`onSkip\` hold the steps for those outcomes.",
+        "type": "pipeline",
+      },
+      {
+        "description": "Starts another flow for the contact; this flow keeps running afterward (an ordinary step may follow).",
+        "type": "startFlow",
+      },
+      {
+        "description": "Adds an internal note to the conversation.",
+        "type": "addNote",
+      },
+      {
+        "description": "Terminal — routes to an already-defined step instead of continuing. Must be the last step in its list.",
+        "type": "goto",
+      },
+    ],
+    "waitUnits": [
+      "seconds",
+      "minutes",
+      "hours",
+      "days",
+    ],
+  },
+  "flows": [],
+  "inboxes": [],
+  "sequences": [],
+  "tags": [],
+  "templates": [],
+}
+`;

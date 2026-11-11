@@ -1,0 +1,57 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Google Calendar effects of the appointment routes > a booking fails when Google cannot be reached for the busy check > booking with Google down 1`] = `
+{
+  "code": "BAD_REQUEST",
+  "defined": false,
+  "httpStatus": 400,
+  "status": 400,
+}
+`;
+
+exports[`Google Calendar effects of the appointment routes > a booking makes the worker create the Google event; a cancel deletes it > event keys 1`] = `
+[
+  "attendees",
+  "end",
+  "id",
+  "start",
+  "summary",
+]
+`;
+
+exports[`appointmentExternalCalendars.disconnect > is 409 connectionInUse while a calendar uses it, 404 for unknown ids > 409 shape 1`] = `
+{
+  "code": "connectionInUse",
+  "defined": true,
+  "httpStatus": 409,
+  "status": 409,
+}
+`;
+
+exports[`appointmentExternalCalendars.list > lists Google connections newest first with labels and usage counts > list 1`] = `
+{
+  "data": [
+    {
+      "connectedCount": 0,
+      "createdAt": "<ts>",
+      "email": null,
+      "id": "<id:1>",
+      "label": "<calendar:2>",
+      "providerCalendarId": "<calendar:2>",
+      "providerType": "googleCalendar",
+      "updatedAt": "<ts>",
+    },
+    {
+      "connectedCount": 0,
+      "createdAt": "<ts>",
+      "email": "owner@parity.test",
+      "id": "<id:2>",
+      "label": "owner@parity.test (<calendar:1>)",
+      "providerCalendarId": "<calendar:1>",
+      "providerType": "googleCalendar",
+      "updatedAt": "<ts>",
+    },
+  ],
+  "pageCount": 1,
+}
+`;

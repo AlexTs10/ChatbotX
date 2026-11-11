@@ -1,0 +1,135 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`appointments.book > books a slot silently (201) and the slot leaves the availability > booked 1`] = `
+{
+  "calendarId": "<id:1>",
+  "cancelledAt": null,
+  "contactId": "<id:2>",
+  "conversationId": null,
+  "createdAt": "<ts>",
+  "endAt": "2030-01-07T09:30:00.000Z",
+  "externalEventId": null,
+  "id": "<id:3>",
+  "inviteeTimezone": "UTC",
+  "locationDetail": null,
+  "locationType": "onlineMeeting",
+  "startAt": "2030-01-07T09:00:00.000Z",
+  "status": "scheduled",
+  "updatedAt": "<ts>",
+}
+`;
+
+exports[`appointments.book > enforces slots, capacity and one booking per contact and start (409) > 409 slotUnavailable 1`] = `
+{
+  "code": "slotUnavailable",
+  "defined": true,
+  "httpStatus": 409,
+  "status": 409,
+}
+`;
+
+exports[`appointments.book > is 404 for an unknown contact or calendar and 400 for another contact's conversation > unknown contact 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`appointments.book > rejects bad input with 422 > 422 shape 1`] = `
+{
+  "code": "invalidRequestData",
+  "defined": true,
+  "httpStatus": 422,
+  "status": 422,
+}
+`;
+
+exports[`appointments.cancel > cancels an upcoming appointment (200) and frees the slot > cancelled 1`] = `
+{
+  "calendarId": "<id:1>",
+  "cancelledAt": "<ts>",
+  "contactId": "<id:2>",
+  "conversationId": null,
+  "createdAt": "<ts>",
+  "endAt": "2030-01-07T09:30:00.000Z",
+  "externalEventId": null,
+  "id": "<id:3>",
+  "inviteeTimezone": "UTC",
+  "locationDetail": null,
+  "locationType": "onlineMeeting",
+  "startAt": "2030-01-07T09:00:00.000Z",
+  "status": "cancelled",
+  "updatedAt": "<ts>",
+}
+`;
+
+exports[`appointments.cancel > is 409 appointmentNotCancellable twice or in the past, 404 for unknown ids > 409 shape 1`] = `
+{
+  "code": "appointmentNotCancellable",
+  "defined": true,
+  "httpStatus": 409,
+  "status": 409,
+}
+`;
+
+exports[`appointments.createBookingLink > returns a 24 h booking picker link without sending (201) > link 1`] = `
+{
+  "calendar": {
+    "id": "<id:1>",
+    "name": "Parity calendar",
+  },
+  "expiresAt": "<ts>",
+  "messageId": null,
+  "url": "http://app/booking/picker",
+}
+`;
+
+exports[`appointments.list > lists upcoming appointments newest start first, with schedule links > list 1`] = `
+{
+  "data": [
+    {
+      "calendarId": "<id:1>",
+      "calendarName": "Parity calendar",
+      "cancellable": true,
+      "cancelledAt": null,
+      "contactId": "<id:2>",
+      "conversationId": null,
+      "createdAt": "<ts>",
+      "deletable": false,
+      "endAt": "2030-01-07T10:00:00.000Z",
+      "externalEventId": null,
+      "id": "<id:3>",
+      "inviteeTimezone": "UTC",
+      "locationDetail": null,
+      "locationType": "onlineMeeting",
+      "scheduleUrl": "http://app/booking/schedule",
+      "startAt": "2030-01-07T09:30:00.000Z",
+      "status": "scheduled",
+      "updatedAt": "<ts>",
+    },
+    {
+      "calendarId": "<id:1>",
+      "calendarName": "Parity calendar",
+      "cancellable": true,
+      "cancelledAt": null,
+      "contactId": "<id:2>",
+      "conversationId": null,
+      "createdAt": "<ts>",
+      "deletable": false,
+      "endAt": "2030-01-07T09:30:00.000Z",
+      "externalEventId": null,
+      "id": "<id:4>",
+      "inviteeTimezone": "UTC",
+      "locationDetail": null,
+      "locationType": "onlineMeeting",
+      "scheduleUrl": "http://app/booking/schedule",
+      "startAt": "2030-01-07T09:00:00.000Z",
+      "status": "scheduled",
+      "updatedAt": "<ts>",
+    },
+  ],
+  "pageCount": 1,
+}
+`;

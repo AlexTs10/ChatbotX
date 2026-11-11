@@ -1,0 +1,70 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`channelPosts.list > lists posts newest first with inbox and public thumbnail URL; search by caption > list 1`] = `
+{
+  "items": [
+    {
+      "caption": null,
+      "channel": "instagram",
+      "externalPostId": "post-3",
+      "id": "<id:1>",
+      "inboxId": "<id:2>",
+      "inboxName": "Parity IG",
+      "permalink": "https://www.instagram.com/p/post-3/",
+      "publishedAt": "2026-01-03T10:00:00.000Z",
+      "thumbnailUrl": null,
+    },
+    {
+      "caption": "Winter SALE",
+      "channel": "instagram",
+      "externalPostId": "post-2",
+      "id": "<id:3>",
+      "inboxId": "<id:2>",
+      "inboxName": "Parity IG",
+      "permalink": "https://www.instagram.com/p/post-2/",
+      "publishedAt": "2026-01-02T10:00:00.000Z",
+      "thumbnailUrl": "http://app/storage/media/thumb-2.jpg",
+    },
+    {
+      "caption": "Summer sale",
+      "channel": "instagram",
+      "externalPostId": "post-1",
+      "id": "<id:4>",
+      "inboxId": "<id:2>",
+      "inboxName": "Parity IG",
+      "permalink": "https://www.instagram.com/p/post-1/",
+      "publishedAt": "2026-01-01T10:00:00.000Z",
+      "thumbnailUrl": null,
+    },
+  ],
+}
+`;
+
+exports[`channelPosts.listSelected > resolves the workspace's posts by id and drops unknown and foreign ids > selected 1`] = `
+{
+  "data": [
+    {
+      "caption": "Summer sale",
+      "channel": "instagram",
+      "externalPostId": "post-1",
+      "id": "<id:1>",
+      "inboxId": "<id:2>",
+      "inboxName": "Parity IG",
+      "permalink": "https://www.instagram.com/p/post-1/",
+      "publishedAt": "2026-01-01T10:00:00.000Z",
+      "thumbnailUrl": null,
+    },
+    {
+      "caption": null,
+      "channel": "instagram",
+      "externalPostId": "post-3",
+      "id": "<id:3>",
+      "inboxId": "<id:2>",
+      "inboxName": "Parity IG",
+      "permalink": "https://www.instagram.com/p/post-3/",
+      "publishedAt": "2026-01-03T10:00:00.000Z",
+      "thumbnailUrl": null,
+    },
+  ],
+}
+`;

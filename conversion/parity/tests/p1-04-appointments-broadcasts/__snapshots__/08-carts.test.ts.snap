@@ -1,0 +1,98 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`carts.get > is 404 for an unknown or foreign contact and rejects a bare identifier > 404 shape 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`carts.get > is 404 for an unknown or foreign contact and rejects a bare identifier > bare identifier 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`carts.get > lists items whose product no longer exists as unavailable, out of the totals > cart with unavailable item 1`] = `
+{
+  "availableDiscounts": [],
+  "belowMinimum": null,
+  "currency": "USD",
+  "discount": null,
+  "discountError": null,
+  "enteredDiscountCode": null,
+  "items": [
+    {
+      "productId": "123456789012345678",
+      "quantity": 2,
+      "variantId": null,
+    },
+  ],
+  "lines": [],
+  "shippingType": "delivery",
+  "totals": {
+    "couponDiscount": 0,
+    "discountTotal": 0,
+    "serviceFeeTotal": 0,
+    "shippingTotal": 0,
+    "subtotal": 0,
+    "taxTotal": 0,
+    "total": 0,
+  },
+  "unavailable": [
+    {
+      "name": null,
+      "productId": "123456789012345678",
+      "quantity": 2,
+      "variantId": null,
+    },
+  ],
+}
+`;
+
+exports[`carts.get > rejects a blank identifier and an unknown prefix > blank identifier 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`carts.get > rejects a blank identifier and an unknown prefix > unknown prefix 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`carts.get > returns an empty cart for a contact without one, by id or email > empty cart 1`] = `
+{
+  "availableDiscounts": [],
+  "belowMinimum": null,
+  "currency": "USD",
+  "discount": null,
+  "discountError": null,
+  "enteredDiscountCode": null,
+  "items": [],
+  "lines": [],
+  "shippingType": "delivery",
+  "totals": {
+    "couponDiscount": 0,
+    "discountTotal": 0,
+    "serviceFeeTotal": 0,
+    "shippingTotal": 0,
+    "subtotal": 0,
+    "taxTotal": 0,
+    "total": 0,
+  },
+  "unavailable": [],
+}
+`;

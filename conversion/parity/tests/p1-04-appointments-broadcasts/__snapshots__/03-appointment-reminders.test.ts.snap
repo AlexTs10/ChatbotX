@@ -1,0 +1,60 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`appointmentReminders.list > lists one pending dispatch per calendar reminder of a booking, by send time > pending 1`] = `
+{
+  "data": [
+    {
+      "appointmentId": "<id:1>",
+      "cancelledAt": null,
+      "contactInboxId": null,
+      "createdAt": "<ts>",
+      "failedReason": null,
+      "id": "<id:2>",
+      "jobId": "<jobId>",
+      "reminderConfigId": "<id:3>",
+      "sendAt": "2030-01-06T09:00:00.000Z",
+      "sentAt": null,
+      "status": "pending",
+      "updatedAt": "<ts>",
+    },
+    {
+      "appointmentId": "<id:1>",
+      "cancelledAt": null,
+      "contactInboxId": null,
+      "createdAt": "<ts>",
+      "failedReason": null,
+      "id": "<id:4>",
+      "jobId": "<jobId>",
+      "reminderConfigId": "<id:5>",
+      "sendAt": "2030-01-07T08:00:00.000Z",
+      "sentAt": null,
+      "status": "pending",
+      "updatedAt": "<ts>",
+    },
+    {
+      "appointmentId": "<id:1>",
+      "cancelledAt": null,
+      "contactInboxId": null,
+      "createdAt": "<ts>",
+      "failedReason": null,
+      "id": "<id:6>",
+      "jobId": "<jobId>",
+      "reminderConfigId": "<id:7>",
+      "sendAt": "2030-01-07T08:50:00.000Z",
+      "sentAt": null,
+      "status": "pending",
+      "updatedAt": "<ts>",
+    },
+  ],
+  "pageCount": 1,
+}
+`;
+
+exports[`appointmentReminders.list > reschedules future dispatches when the calendar's reminders change > after reschedule 1`] = `
+[
+  {
+    "sendAt": "2030-01-07T07:00:00.000Z",
+    "status": "pending",
+  },
+]
+`;

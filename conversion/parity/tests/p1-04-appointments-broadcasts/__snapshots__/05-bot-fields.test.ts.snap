@@ -1,0 +1,94 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`botFields.applyOperation > rejects an operation the type does not support, a missing operand and unknown operations > unsupported operation 1`] = `
+{
+  "code": "invalidFieldOperation",
+  "defined": true,
+  "httpStatus": 400,
+  "status": 400,
+}
+`;
+
+exports[`botFields.create > creates a field (201) with null value and description by default > created 1`] = `
+{
+  "createdAt": "<ts>",
+  "description": null,
+  "folderId": null,
+  "id": "<id:1>",
+  "name": "shop_name",
+  "type": "shortText",
+  "updatedAt": "<ts>",
+  "value": null,
+}
+`;
+
+exports[`botFields.create > creates a field (201) with null value and description by default > normalized number value 1`] = `
+{
+  "value": "7",
+}
+`;
+
+exports[`botFields.create > rejects bad input with 422 and a duplicate name of the same type > duplicate name 1`] = `
+{
+  "code": "validation",
+  "defined": true,
+  "httpStatus": 422,
+  "status": 422,
+}
+`;
+
+exports[`botFields.create > rejects bad input with 422 and a duplicate name of the same type > unknown folder 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`botFields.get > finds a field by id or by name; 404 otherwise > 404 shape 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`botFields.list > lists fields newest first, filters by name and folder, sorts and pages > list 1`] = `
+{
+  "data": [
+    {
+      "createdAt": "<ts>",
+      "description": null,
+      "folderId": null,
+      "id": "<id:1>",
+      "name": "gamma_field",
+      "type": "boolean",
+      "updatedAt": "<ts>",
+      "value": null,
+    },
+    {
+      "createdAt": "<ts>",
+      "description": null,
+      "folderId": null,
+      "id": "<id:2>",
+      "name": "beta_field",
+      "type": "number",
+      "updatedAt": "<ts>",
+      "value": "2",
+    },
+    {
+      "createdAt": "<ts>",
+      "description": null,
+      "folderId": null,
+      "id": "<id:3>",
+      "name": "alpha_field",
+      "type": "shortText",
+      "updatedAt": "<ts>",
+      "value": "a",
+    },
+  ],
+  "pageCount": 1,
+}
+`;

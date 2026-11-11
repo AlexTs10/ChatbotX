@@ -15,7 +15,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | done | P0.5 | A: smoke | See "Proof P1.1" | commit `conversion(P1.1)` |
 | P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | done | P1.1 | A: 52 ops, 260 tests | See "Proof P1.2" | commit `conversion(P1.2)` |
 | P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | done | P1.1 | A: 49 ops, 389 tests | See "Proof P1.3" | commit `conversion(P1.3)` |
-| P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | in_progress | P1.1 | A: 55 ops | | |
+| P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | done | P1.1 | A: 55 ops, 355 tests | See "Proof P1.4" | commit `conversion(P1.4)` |
 | P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | in_progress | P1.1 | A: 25 ops | | |
 | P1.6 | 1 | Public API parity: `contacts` | in_progress | P1.1 | A: 58 ops | | |
 | P1.7 | 1 | Public API parity: `conversations`, `coupons`, `customFields`, `decisionConnections`, `decisionProfiles`, `discountCodes` | in_progress | P1.1 | A: 53 ops | | |
@@ -236,3 +236,13 @@ verifier run 1:  Test Files 13 passed (13)   Tests 390 passed (390)   26.49s   e
 verifier run 2:  Test Files 13 passed (13)   Tests 390 passed (390)   26.32s   exit 0
 ```
 Analytics numbers asserted in UTC, Asia/Ho_Chi_Minh and America/New_York across the 2025-03-09 DST change.
+
+### Proof P1.4
+
+Writer (spec `conversion/specs/P1.4.md`) → independent verifier (PASS 6/6, two green runs; 12 operations cross-checked against the source). 55/55 operations, 355 tests in `conversion/parity/tests/p1-04-appointments-broadcasts/` (13 normalized snapshot files) + interception check.
+
+```
+verifier run 1:  Test Files 15 passed (15)   Tests 356 passed (356)   348.59s   exit 0
+verifier run 2:  Test Files 15 passed (15)   Tests 356 passed (356)   395.58s   exit 0
+```
+Two earlier run-2 attempts failed before any test ran (infra): worker boot wait timed out under load (exit 4); rsync collision with another unit's sync (exit 23). See DECISIONS "Harness infra flakiness".

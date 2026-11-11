@@ -1,0 +1,258 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`broadcasts.create > creates a draft named after its flow (201) > created draft 1`] = `
+{
+  "audienceRangeEnd": null,
+  "audienceRangeStart": null,
+  "channel": "omnichannel",
+  "contactCount": null,
+  "contactFilter": {
+    "conditions": [],
+    "operator": "and",
+  },
+  "flowId": "<id:1>",
+  "id": "<id:2>",
+  "integrationMessengerId": null,
+  "integrationWhatsappId": null,
+  "name": "Parity broadcast flow",
+  "occurrenceAt": null,
+  "parentBroadcastId": null,
+  "schedulesAt": "2030-01-07T09:00:00.000Z",
+  "schedulesType": "future",
+  "sendRatePerMinute": null,
+  "status": "draft",
+  "subaction": "allContacts",
+  "targetMode": "channel",
+  "templateData": null,
+  "templateId": null,
+}
+`;
+
+exports[`broadcasts.create > rejects payloads that break the schema rules (422 invalidRequestData) > 422 shape 1`] = `
+{
+  "code": "invalidRequestData",
+  "defined": true,
+  "httpStatus": 422,
+  "status": 422,
+}
+`;
+
+exports[`broadcasts.create > rejects payloads the service refuses (422 validation) > 422 validation shape 1`] = `
+{
+  "code": "validation",
+  "defined": true,
+  "httpStatus": 422,
+  "status": 422,
+}
+`;
+
+exports[`broadcasts.create > schedules a future broadcast and keeps the send limits > scheduled detail 1`] = `
+{
+  "audienceRangeEnd": 10,
+  "audienceRangeStart": 2,
+  "channel": "omnichannel",
+  "contactCount": null,
+  "contactFilter": {
+    "conditions": [],
+    "operator": "and",
+  },
+  "flowId": "<id:1>",
+  "id": "<id:2>",
+  "integrationMessengerId": null,
+  "integrationWhatsappId": null,
+  "name": "Parity broadcast flow",
+  "occurrenceAt": null,
+  "parent": null,
+  "parentBroadcastId": null,
+  "recurrence": null,
+  "schedulesAt": "2030-01-07T09:00:00.000Z",
+  "schedulesType": "future",
+  "sendRatePerMinute": 30,
+  "status": "scheduled",
+  "subaction": "allContacts",
+  "targetMode": "channel",
+  "targets": [],
+  "templateData": null,
+  "templateId": null,
+}
+`;
+
+exports[`broadcasts.duplicate and broadcasts.clone > copies into drafts with numbered copy names > duplicate 1`] = `
+{
+  "audienceRangeEnd": null,
+  "audienceRangeStart": null,
+  "channel": "omnichannel",
+  "contactCount": null,
+  "contactFilter": {
+    "conditions": [],
+    "operator": "and",
+  },
+  "flowId": "<id:1>",
+  "id": "<id:2>",
+  "integrationMessengerId": null,
+  "integrationWhatsappId": null,
+  "name": "Parity broadcast flow (Copy 1)",
+  "occurrenceAt": null,
+  "parentBroadcastId": null,
+  "schedulesAt": "2030-01-07T09:00:00.000Z",
+  "schedulesType": "future",
+  "sendRatePerMinute": 20,
+  "status": "draft",
+  "subaction": "allContacts",
+  "targetMode": "channel",
+  "templateData": null,
+  "templateId": null,
+}
+`;
+
+exports[`broadcasts.get > finds a broadcast by id or exact name; 404 otherwise > 404 shape 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`broadcasts.list > lists newest first and filters by status, name, channel, schedule window and type > list 1`] = `
+{
+  "data": [
+    {
+      "audienceRangeEnd": null,
+      "audienceRangeStart": null,
+      "channel": "omnichannel",
+      "contactCount": null,
+      "contactFilter": {
+        "conditions": [],
+        "operator": "and",
+      },
+      "flowId": "<id:1>",
+      "id": "<id:2>",
+      "integrationMessengerId": null,
+      "integrationWhatsappId": null,
+      "name": "February send",
+      "occurrenceAt": null,
+      "parent": null,
+      "parentBroadcastId": null,
+      "recurrence": null,
+      "schedulesAt": "2030-02-01T00:00:00.000Z",
+      "schedulesType": "future",
+      "sendRatePerMinute": null,
+      "status": "scheduled",
+      "subaction": "allContacts",
+      "targetMode": "channel",
+      "targets": [],
+      "templateData": null,
+      "templateId": null,
+    },
+    {
+      "audienceRangeEnd": null,
+      "audienceRangeStart": null,
+      "channel": "omnichannel",
+      "contactCount": null,
+      "contactFilter": {
+        "conditions": [],
+        "operator": "and",
+      },
+      "flowId": "<id:1>",
+      "id": "<id:3>",
+      "integrationMessengerId": null,
+      "integrationWhatsappId": null,
+      "name": "Parity broadcast flow",
+      "occurrenceAt": null,
+      "parent": null,
+      "parentBroadcastId": null,
+      "recurrence": null,
+      "schedulesAt": "2030-01-07T09:00:00.000Z",
+      "schedulesType": "future",
+      "sendRatePerMinute": null,
+      "status": "draft",
+      "subaction": "allContacts",
+      "targetMode": "channel",
+      "targets": [],
+      "templateData": null,
+      "templateId": null,
+    },
+  ],
+  "pageCount": 1,
+}
+`;
+
+exports[`broadcasts.moveToDraft > moves a scheduled broadcast back to draft; 400 when it is not scheduled > not scheduled 1`] = `
+{
+  "code": "systemError",
+  "defined": true,
+  "httpStatus": 400,
+  "status": 400,
+}
+`;
+
+exports[`broadcasts.previewAudience > counts and pages the contact inboxes a broadcast would reach > bounded 1`] = `
+{
+  "countCap": 100000,
+  "data": [
+    {
+      "avatar": null,
+      "channel": "webchat",
+      "contactId": "<id:1>",
+      "contactInboxId": "<id:2>",
+      "conversationId": "<id:3>",
+      "firstName": "Ada",
+      "fullName": "Ada Parity",
+      "lastName": "Parity",
+      "occurredAt": "<ts>",
+    },
+  ],
+  "total": 2,
+  "totalCountCapped": false,
+}
+`;
+
+exports[`broadcasts.previewAudience > counts and pages the contact inboxes a broadcast would reach > preview 1`] = `
+{
+  "data": [
+    {
+      "avatar": null,
+      "channel": "webchat",
+      "contactId": "<id:1>",
+      "contactInboxId": "<id:2>",
+      "conversationId": "<id:3>",
+      "firstName": "Ada",
+      "fullName": "Ada Parity",
+      "lastName": "Parity",
+      "occurredAt": "<ts>",
+    },
+    {
+      "avatar": null,
+      "channel": "webchat",
+      "contactId": "<id:4>",
+      "contactInboxId": "<id:5>",
+      "conversationId": "<id:6>",
+      "firstName": "Bob",
+      "fullName": "Bob Parity",
+      "lastName": "Parity",
+      "occurredAt": "<ts>",
+    },
+  ],
+  "total": 2,
+  "totalCountCapped": false,
+}
+`;
+
+exports[`broadcasts.update > validates the name and is 404 for an unknown broadcast > 404 shape 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`broadcasts.updateDraft > replaces a draft's payload and schedules it with saveAsDraft false > not a draft 1`] = `
+{
+  "code": "systemError",
+  "defined": true,
+  "httpStatus": 400,
+  "status": 400,
+}
+`;

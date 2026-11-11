@@ -1,0 +1,324 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`appointmentCalendars.create > creates an active UTC calendar with a confirmation flow and three default reminders > created calendar 1`] = `
+{
+  "active": true,
+  "allowGroupMeeting": false,
+  "availability": [],
+  "bufferAfterMinutes": null,
+  "cancellationFlowId": null,
+  "confirmationFlowId": "<id:1>",
+  "confirmationMessage": null,
+  "createdAt": "<ts>",
+  "dailyLimitEnabled": false,
+  "description": null,
+  "durationMinutes": 30,
+  "externalConnectionId": null,
+  "id": "<id:2>",
+  "locationDetail": null,
+  "locationType": "onlineMeeting",
+  "maxAppointmentsPerUser": null,
+  "maxPerDay": null,
+  "maxPerSlot": null,
+  "name": "Parity calendar",
+  "publicLinkSlug": "<slug:1>",
+  "publicUrl": "http://app/booking/%3Cslug:1%3E",
+  "reminders": [
+    {
+      "createdAt": "<ts>",
+      "flowId": "<id:3>",
+      "id": "<id:4>",
+      "timingUnit": "days",
+      "timingValue": 1,
+      "updatedAt": "<ts>",
+    },
+    {
+      "createdAt": "<ts>",
+      "flowId": "<id:3>",
+      "id": "<id:5>",
+      "timingUnit": "hours",
+      "timingValue": 1,
+      "updatedAt": "<ts>",
+    },
+    {
+      "createdAt": "<ts>",
+      "flowId": "<id:3>",
+      "id": "<id:6>",
+      "timingUnit": "minutes",
+      "timingValue": 10,
+      "updatedAt": "<ts>",
+    },
+  ],
+  "scheduleWindowConfig": {},
+  "scheduleWindowType": "rollingDays",
+  "timezone": "UTC",
+  "updatedAt": "<ts>",
+}
+`;
+
+exports[`appointmentCalendars.create > rejects a duplicate name with 409 nameAlreadyExists > 409 shape 1`] = `
+{
+  "code": "nameAlreadyExists",
+  "defined": true,
+  "httpStatus": 409,
+  "status": 409,
+}
+`;
+
+exports[`appointmentCalendars.create > rejects a missing, blank or too long name with 422 > 422 shape 1`] = `
+{
+  "code": "invalidRequestData",
+  "defined": true,
+  "httpStatus": 422,
+  "status": 422,
+}
+`;
+
+exports[`appointmentCalendars.delete > deletes a calendar (204): get is 404, list leaves it out, the name is free again > delete twice 1`] = `
+{
+  "body": null,
+  "status": 204,
+}
+`;
+
+exports[`appointmentCalendars.duplicate > copies the configuration into a new inactive calendar (201) > copy 1`] = `
+{
+  "active": false,
+  "allowGroupMeeting": false,
+  "availability": [
+    {
+      "createdAt": "<ts>",
+      "endMinute": 660,
+      "id": "<id:1>",
+      "startMinute": 540,
+      "updatedAt": "<ts>",
+      "weekday": 1,
+    },
+  ],
+  "bufferAfterMinutes": 30,
+  "cancellationFlowId": null,
+  "confirmationFlowId": "<id:2>",
+  "confirmationMessage": null,
+  "createdAt": "<ts>",
+  "dailyLimitEnabled": false,
+  "description": null,
+  "durationMinutes": 30,
+  "externalConnectionId": null,
+  "id": "<id:3>",
+  "locationDetail": "Room 2",
+  "locationType": "onlineMeeting",
+  "maxAppointmentsPerUser": null,
+  "maxPerDay": null,
+  "maxPerSlot": null,
+  "name": "Source - Copy",
+  "publicLinkSlug": "<slug:1>",
+  "publicUrl": "http://app/booking/%3Cslug:1%3E",
+  "reminders": [
+    {
+      "createdAt": "<ts>",
+      "flowId": "<id:4>",
+      "id": "<id:5>",
+      "timingUnit": "days",
+      "timingValue": 1,
+      "updatedAt": "<ts>",
+    },
+    {
+      "createdAt": "<ts>",
+      "flowId": "<id:4>",
+      "id": "<id:6>",
+      "timingUnit": "hours",
+      "timingValue": 1,
+      "updatedAt": "<ts>",
+    },
+    {
+      "createdAt": "<ts>",
+      "flowId": "<id:4>",
+      "id": "<id:7>",
+      "timingUnit": "minutes",
+      "timingValue": 10,
+      "updatedAt": "<ts>",
+    },
+  ],
+  "scheduleWindowConfig": {
+    "endDate": "2030-01-08",
+    "minAdvanceDays": 0,
+    "scheduleWindowType": "dateRange",
+    "startDate": "2030-01-07",
+  },
+  "scheduleWindowType": "dateRange",
+  "timezone": "UTC",
+  "updatedAt": "<ts>",
+}
+`;
+
+exports[`appointmentCalendars.duplicate > copies the configuration into a new inactive calendar (201) > copy names 1`] = `
+{
+  "first": "Source - Copy",
+  "second": "Source - Copy 2",
+}
+`;
+
+exports[`appointmentCalendars.get > is 404 notFound for an unknown or foreign id and 422 for a non-numeric id > 404 shape 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`appointmentCalendars.list > lists calendars by name, with search and paging > list 1`] = `
+{
+  "data": [
+    {
+      "active": true,
+      "allowGroupMeeting": false,
+      "bufferAfterMinutes": null,
+      "cancellationFlowId": null,
+      "confirmationFlowId": "<id:1>",
+      "confirmationMessage": null,
+      "createdAt": "<ts>",
+      "dailyLimitEnabled": false,
+      "description": null,
+      "durationMinutes": 30,
+      "externalConnectionId": null,
+      "id": "<id:2>",
+      "locationDetail": null,
+      "locationType": "onlineMeeting",
+      "maxAppointmentsPerUser": null,
+      "maxPerDay": null,
+      "maxPerSlot": null,
+      "name": "Calendar A",
+      "publicLinkSlug": "<slug:1>",
+      "publicUrl": "http://app/booking/%3Cslug:1%3E",
+      "scheduleWindowConfig": {},
+      "scheduleWindowType": "rollingDays",
+      "timezone": "UTC",
+      "updatedAt": "<ts>",
+    },
+    {
+      "active": true,
+      "allowGroupMeeting": false,
+      "bufferAfterMinutes": null,
+      "cancellationFlowId": null,
+      "confirmationFlowId": "<id:3>",
+      "confirmationMessage": null,
+      "createdAt": "<ts>",
+      "dailyLimitEnabled": false,
+      "description": null,
+      "durationMinutes": 30,
+      "externalConnectionId": null,
+      "id": "<id:4>",
+      "locationDetail": null,
+      "locationType": "onlineMeeting",
+      "maxAppointmentsPerUser": null,
+      "maxPerDay": null,
+      "maxPerSlot": null,
+      "name": "Calendar B",
+      "publicLinkSlug": "<slug:2>",
+      "publicUrl": "http://app/booking/%3Cslug:2%3E",
+      "scheduleWindowConfig": {},
+      "scheduleWindowType": "rollingDays",
+      "timezone": "UTC",
+      "updatedAt": "<ts>",
+    },
+    {
+      "active": true,
+      "allowGroupMeeting": false,
+      "bufferAfterMinutes": null,
+      "cancellationFlowId": null,
+      "confirmationFlowId": "<id:5>",
+      "confirmationMessage": null,
+      "createdAt": "<ts>",
+      "dailyLimitEnabled": false,
+      "description": null,
+      "durationMinutes": 30,
+      "externalConnectionId": null,
+      "id": "<id:6>",
+      "locationDetail": null,
+      "locationType": "onlineMeeting",
+      "maxAppointmentsPerUser": null,
+      "maxPerDay": null,
+      "maxPerSlot": null,
+      "name": "Calendar C",
+      "publicLinkSlug": "<slug:3>",
+      "publicUrl": "http://app/booking/%3Cslug:3%3E",
+      "scheduleWindowConfig": {},
+      "scheduleWindowType": "rollingDays",
+      "timezone": "UTC",
+      "updatedAt": "<ts>",
+    },
+  ],
+  "pageCount": 1,
+}
+`;
+
+exports[`appointmentCalendars.update > is 404 for an unknown calendar or external connection, and checks the flows > unknown flow error 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;
+
+exports[`appointmentCalendars.update > replaces the configuration (204) and get shows it > updated calendar 1`] = `
+{
+  "active": true,
+  "allowGroupMeeting": true,
+  "availability": [
+    {
+      "createdAt": "<ts>",
+      "endMinute": 60,
+      "id": "<id:1>",
+      "startMinute": 0,
+      "updatedAt": "<ts>",
+      "weekday": 1,
+    },
+    {
+      "createdAt": "<ts>",
+      "endMinute": 660,
+      "id": "<id:2>",
+      "startMinute": 540,
+      "updatedAt": "<ts>",
+      "weekday": 1,
+    },
+    {
+      "createdAt": "<ts>",
+      "endMinute": 1439,
+      "id": "<id:3>",
+      "startMinute": 600,
+      "updatedAt": "<ts>",
+      "weekday": 3,
+    },
+  ],
+  "bufferAfterMinutes": 15,
+  "cancellationFlowId": null,
+  "confirmationFlowId": "<id:4>",
+  "confirmationMessage": "See you",
+  "createdAt": "<ts>",
+  "dailyLimitEnabled": true,
+  "description": "Parity description",
+  "durationMinutes": 30,
+  "externalConnectionId": null,
+  "id": "<id:5>",
+  "locationDetail": "Room 1",
+  "locationType": "inPerson",
+  "maxAppointmentsPerUser": 2,
+  "maxPerDay": 5,
+  "maxPerSlot": 3,
+  "name": "Parity calendar",
+  "publicLinkSlug": "<slug:1>",
+  "publicUrl": "http://app/booking/%3Cslug:1%3E",
+  "reminders": [],
+  "scheduleWindowConfig": {
+    "endDate": "2030-01-08",
+    "minAdvanceDays": 0,
+    "scheduleWindowType": "dateRange",
+    "startDate": "2030-01-07",
+  },
+  "scheduleWindowType": "dateRange",
+  "timezone": "UTC",
+  "updatedAt": "<ts>",
+}
+`;

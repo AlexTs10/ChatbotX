@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`botSimulator.getLink > rejects a website off the allowed domains, a non-http URL and a disabled webchat (422) > off domain 1`] = `
+{
+  "code": "validation",
+  "defined": true,
+  "httpStatus": 422,
+  "status": 422,
+}
+`;
+
+exports[`botSimulator.getLink > validates the query and is 404 for an unknown webchat > unknown webchat 1`] = `
+{
+  "code": "notFound",
+  "defined": true,
+  "httpStatus": 404,
+  "status": 404,
+}
+`;

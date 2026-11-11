@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`channelIntegrations.list > lists a connected Zalo OA without credentials; the channel filter narrows > zalo 1`] = `
+[
+  {
+    "adsEligible": false,
+    "capiConnected": false,
+    "capiDisconnected": false,
+    "capiTestEventCode": null,
+    "channel": "zalo",
+    "coexistEnabled": false,
+    "datasetId": null,
+    "displayPhoneNumber": null,
+    "externalId": "<oaId>",
+    "handoverResumeFlowId": null,
+    "hasCapiScope": false,
+    "id": "<id:1>",
+    "inboxId": "<id:2>",
+    "isCoexist": null,
+    "name": "Parity OA",
+    "syncTagEnabledAt": null,
+    "tokenRefreshError": null,
+    "username": null,
+    "wabaId": null,
+  },
+]
+`;
