@@ -68,3 +68,16 @@ Spec: `conversion/specs/P2.9.md` (40 test cases from 6 frozen files).
 - `build_copy_source` is ported (tests 11–15) even if `object_store` builds its own copy source.
 - Image dimensions: if a test needs SVG sizes, parse `width`/`height`/`viewBox` with std; no new crate for SVG.
 - Clock and HTTP: injected (`*_at(.., date)` variants and an `HttpFetcher` trait), so ported tests need no global mocks. The assertions stay the same.
+
+## 2026-11-11 — P2.2 schema mapping (orchestrator) + one question to the user
+
+From `conversion/specs/P2.2.md`, adopted:
+- Ids: app-generated snowflakes → `INTEGER PRIMARY KEY`; the API returns them as strings (as now).
+- Timestamps: `INTEGER` unix ms; JSON output keeps `toISOString()` format.
+- Money: `INTEGER` × 10,000; the 3 unbounded `numeric` columns → `TEXT` + `rust_decimal`.
+- jsonb/arrays → `TEXT` + `json_valid` CHECK; pgEnum → `TEXT CHECK(IN …)`; vector(1536) → `F32_BLOB(1536)` layout, exact filtered cosine scan.
+- TimescaleDB → plain tables + time index + retention jobs + rollup tables in the same write tx. Sharding not used.
+- Locks → `BEGIN IMMEDIATE` (one writer) + lease-based claims; keep transactions short, never hold a write tx across network I/O.
+- Semantic traps to test for: enum sort order (declaration vs alphabetical), `GREATEST`/`LEAST` NULLs, ASCII-only `LIKE`/`lower()`, 0/1 booleans, aggregate types.
+
+**Question to the user (P2.3 blocked until answered):** the prompt names Turso/libSQL. The analyst recommends `rusqlite` (bundled SQLite) because it can register custom SQL functions (Unicode lower, ilike, time zone, regexp, cosine distance), and it is the most mature crate. The file stays a plain SQLite file with the libSQL vector byte layout, so a later move to libSQL is small.

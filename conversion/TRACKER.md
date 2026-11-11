@@ -41,8 +41,8 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.27 | 1 | Realtime WebSocket events (`apps/realtime`) | todo | P1.1 | A | | |
 | P1.28 | 1 | Full Class A run against the original stack: 100% pass, then freeze `parity/` into `MANIFEST.sha256` | todo | P1.2–P1.27 | A | | |
 | P2.1 | 2 | Cargo workspace + one binary skeleton: crates `api` (axum), `core`, `db`, `jobs`, `rt`, `files`, bin `chatbotx-server`; config from env, tracing, `/api/health`, graceful shutdown; release profile for size/RSS | done | P0.5 | - | See "Proof P2.1" | commit `conversion(P2.1)` |
-| P2.2 | 2 | SQLite schema analysis: map all 224 Drizzle schema files (Postgres types, enums, jsonb, hypertables, pgvector, partial indexes, triggers) to libSQL; spec only | todo | P2.1 | - | | |
-| P2.3 | 2 | `db` crate: libSQL embedded file, migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | todo | P2.2 | C | | |
+| P2.2 | 2 | SQLite schema analysis: map all 224 Drizzle schema files (Postgres types, enums, jsonb, hypertables, pgvector, partial indexes, triggers) to libSQL; spec only | done | P2.1 | - | See "Proof P2.2" | commit `conversion(P2.2)` |
+| P2.3 | 2 | `db` crate: embedded SQLite file (crate choice: see DECISIONS P2.2), migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | blocked (user decision: rusqlite vs libsql) | P2.2 | C | | |
 | P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | todo | P2.3 | C | | |
 | P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | todo | P2.4 | C | | |
 | P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | todo | P2.3 | C | | |
@@ -151,4 +151,19 @@ idle RSS: 3832 KiB, 3 threads (main + 2 workers)
 GET /api/health -> 200 application/json {"status":"healthy","timestamp":"2026-11-11T09:13:54.885Z","service":"builder"}
 SIGTERM -> "shutdown complete", exit 0
 verifier: iso8601 vs python datetime on 200,000 random instants 1970-9999: 0 mismatches
+```
+
+### Proof P2.2
+
+Spec: `conversion/specs/P2.2.md` (872 lines), from the newest Drizzle snapshot + all 308 SQL migrations.
+
+```
+tables 258 | columns 3273 | indexes 745 (116 partial) | foreign keys 556 | enums 154 | CHECK 50
+no sequences, no RLS, no plain views, no LISTEN/NOTIFY
+vector columns: 2 (1536-d, cosine); HNSW index declared but never created by a migration
+partitioned tables 11 -> one table each; message sharding tables not created
+trigger functions 4 (3 -> SQLite triggers, updatedAt -> Rust); trigram indexes 5 -> FTS5 trigram
+locks: FOR UPDATE 87, SKIP LOCKED 30, advisory 22 -> BEGIN IMMEDIATE + lease claims
+analytics: time_bucket 42, AT TIME ZONE 79, continuous aggregates 4 -> rollup tables written in the same tx
+part sizes: P2.3 65 tables, P2.4 65 (+2 not created), P2.5 126
 ```
