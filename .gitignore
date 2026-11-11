@@ -76,3 +76,6 @@ docs/plans/
 
 # TypeScript incremental build info (restored from cache in CI)
 *.tsbuildinfo
+
+# Rust
+/target

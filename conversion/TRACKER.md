@@ -40,7 +40,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.26 | 1 | Public pages API: guest messages + realtime token, leaderboards, reflinks, email-topic open/click, `/r/*` | todo | P1.1 | A | | |
 | P1.27 | 1 | Realtime WebSocket events (`apps/realtime`) | todo | P1.1 | A | | |
 | P1.28 | 1 | Full Class A run against the original stack: 100% pass, then freeze `parity/` into `MANIFEST.sha256` | todo | P1.2–P1.27 | A | | |
-| P2.1 | 2 | Cargo workspace + one binary skeleton: crates `api` (axum), `core`, `db`, `jobs`, `rt`, `files`, bin `chatbotx-server`; config from env, tracing, `/api/health`, graceful shutdown; release profile for size/RSS | in_progress | P0.5 | - | | |
+| P2.1 | 2 | Cargo workspace + one binary skeleton: crates `api` (axum), `core`, `db`, `jobs`, `rt`, `files`, bin `chatbotx-server`; config from env, tracing, `/api/health`, graceful shutdown; release profile for size/RSS | done | P0.5 | - | See "Proof P2.1" | commit `conversion(P2.1)` |
 | P2.2 | 2 | SQLite schema analysis: map all 224 Drizzle schema files (Postgres types, enums, jsonb, hypertables, pgvector, partial indexes, triggers) to libSQL; spec only | todo | P2.1 | - | | |
 | P2.3 | 2 | `db` crate: libSQL embedded file, migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | todo | P2.2 | C | | |
 | P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | todo | P2.3 | C | | |
@@ -133,4 +133,22 @@ builder:test:       Tests  10474 passed | 41 skipped (10515)
 FAIL __tests__/public-spec-operations.test.ts  Error: Hook timed out in 120000ms.  (public-spec-operations.test.ts:153 beforeAll)
 all packages: test files 3093, tests 36633, passed 35629, failed 0, skipped 1004
 TEST_MAP: baseline-fail 1, baseline-skip 96 (88 integration files that skip without DATABASE_URL/REDIS_URL + 8 worker integration files outside the default config)
+```
+
+### Proof P2.1
+
+Implementer + independent verifier (overall PASS, 7/7). Run on the Dell.
+
+```
+FMT_OK
+CLIPPY_OK   (cargo clippy --workspace --all-targets -- -D warnings)
+test result: ok. 5 passed; 0 failed   (chatbotx-api iso8601)
+test result: ok. 2 passed; 0 failed   (chatbotx-api tests/health.rs)
+test result: ok. 5 passed; 0 failed   (chatbotx-server config)
+TEST_OK
+release binary: 1442632 bytes (target/release/chatbotx-server), 63 crates
+idle RSS: 3832 KiB, 3 threads (main + 2 workers)
+GET /api/health -> 200 application/json {"status":"healthy","timestamp":"2026-11-11T09:13:54.885Z","service":"builder"}
+SIGTERM -> "shutdown complete", exit 0
+verifier: iso8601 vs python datetime on 200,000 random instants 1970-9999: 0 mismatches
 ```
