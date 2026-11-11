@@ -45,7 +45,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P2.3 | 2 | `db` crate: embedded SQLite file via `rusqlite` (bundled), migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | done | P2.2 | C:48 (+6 n/a) | See "Proof P2.3" | commit `conversion(P2.3)` |
 | P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | done | P2.3 | C:36 (+10 n/a) | See "Proof P2.4" | commit `59ae66f4f` |
 | P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | in_progress | P2.4 | C | | |
-| P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | in_progress | P2.3 | C | | |
+| P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | done | P2.3 | C:455 (+1 n/a) | See "Proof P2.6" | commit `c05a22f96` |
 | P2.7 | 2 | Redis replacement: locks (`tokio::sync::Mutex` map), pub/sub (`broadcast`), cache/presence/rate limits (in-memory), bloom filter (unique-index table); map each `packages/redis` use | todo | P2.6 | C | | |
 | P2.8 | 2 | `rt` crate: axum WebSocket endpoint + `broadcast` fan-out, protocol from `packages/realtime-protocol` | todo | P2.7 | C | | |
 | P2.9 | 2 | `files` crate: `object_store` LocalFileSystem (S3 by config), presigned-style upload/download tokens | done | P2.1 | C:40 | See "Proof P2.9" | commit `conversion(P2.9)` |
@@ -308,3 +308,15 @@ verifier run 1:  Test Files 18 passed (18)   Tests 458 passed (458)   63.76s   e
 verifier run 2:  Test Files 18 passed (18)   Tests 458 passed (458)   63.24s   exit 0
 ```
 Minor gaps: hook `WORKSPACE_BLOCKED` 403 / `WORKSPACE_UNAVAILABLE` 410; per-webhook rate limit.
+
+### Proof P2.6
+
+Analyst spec `conversion/specs/P2.6.md` → porter (455 tests, failing, `9895f4db9`) → implementer (`c05a22f96`; lint-only allows `d0e4a791b`) → independent verifier (PASS 6/6; user decisions confirmed in code: per-job retention, UTC cron, quota skip on community, BullMQ backoff, workspace filter in every sequence query, no write tx across network I/O, no idle polling).
+
+```
+git diff 9895f4db9 HEAD -- crates/jobs/tests    (only 3 one-line clippy allow attributes)
+cargo fmt --check: OK; cargo clippy -p chatbotx-jobs --all-targets -- -D warnings: clean
+cargo test -p chatbotx-jobs: 493 passed, 0 failed (455 ported = 335 ported + 49 adapted + 71 formerly blocked-by-P2.4; 38 unit)
+idle (release example, 17 workers + sequence producer + 4 event-bus consumers, 30 s): 0.17 context switches/s, VmHWM 16.4 MB; with 44 crons 4.0/s (9 cron runs), 15.7 MB
+```
+Open for later units: flock guard against a second process, producer claim+enqueue in one tx, group commit for event emits, real `SequenceConsumerServices`, typed event payloads, `*_WORKER_CONCURRENCY` envs (worker boot tests, Phase 3).

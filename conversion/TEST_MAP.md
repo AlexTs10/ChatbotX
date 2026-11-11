@@ -1268,7 +1268,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/comment-moderation.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `apps/worker/__tests__/condition-evaluator.test.ts` | C | tbd | todo | Triggers |
 | `apps/worker/__tests__/condition-handler.test.ts` | C | tbd | todo | Triggers |
-| `apps/worker/__tests__/connection-send-gate.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
+| `apps/worker/__tests__/connection-send-gate.test.ts` | C | `crates/jobs/tests/connection_send_gate.rs` | passing | Inbox and live chat (conversations, messages) |
 | `apps/worker/__tests__/contact-profile-refresh-real-service.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `apps/worker/__tests__/contact-profile-refresh.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `apps/worker/__tests__/contact-scan-engine.test.ts` | C | tbd | todo | Contact scan |
@@ -1282,7 +1282,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/copy-text-handler.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/count-characters-step.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/coupon-step-handler.test.ts` | C | tbd | todo | Coupons and discount codes |
-| `apps/worker/__tests__/create-queue-worker.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
+| `apps/worker/__tests__/create-queue-worker.test.ts` | C | `crates/jobs/tests/create_queue_worker.rs` | passing | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/custom-field-value.test.ts` | C | tbd | todo | Custom fields |
 | `apps/worker/__tests__/datetime-calculator-timezone.test.ts` | C | tbd | todo | Triggers |
 | `apps/worker/__tests__/datetime-trigger-evaluator.test.ts` | C | tbd | todo | Triggers |
@@ -1299,7 +1299,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/enqueue-recurring-broadcasts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `apps/worker/__tests__/evaluate-conversion-trigger.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `apps/worker/__tests__/evaluate-template-sent.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `apps/worker/__tests__/events-worker-shutdown.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
+| `apps/worker/__tests__/events-worker-shutdown.test.ts` | C | `crates/jobs/tests/events_worker_shutdown.rs` | passing | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/execute-javascript-handler.test.ts` | - | - | dropped | Execute JavaScript flow step; feature dropped (DECISIONS 2026-11-11) |
 | `apps/worker/__tests__/expire-unpaid-orders.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
 | `apps/worker/__tests__/export-contacts-csv.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -1364,7 +1364,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/integration/whatsapp-conversation-routing.chain.test.ts` | C | tbd | baseline-skip | WhatsApp channel; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `apps/worker/__tests__/integrations-service-threads.test.ts` | C | tbd | todo | Threads channel |
 | `apps/worker/__tests__/is-bot-message-quota-reached.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `apps/worker/__tests__/job-attempts.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
+| `apps/worker/__tests__/job-attempts.test.ts` | C | `crates/jobs/tests/job_attempts.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/klaviyo-handler.test.ts` | C | tbd | todo | Klaviyo integration |
 | `apps/worker/__tests__/klaviyo-step-registration.test.ts` | C | tbd | todo | Klaviyo integration |
 | `apps/worker/__tests__/lead-ads.test.ts` | C | tbd | todo | Facebook Lead Ads automation |
@@ -1372,7 +1372,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/leaderboard-jobs.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/leaderboard-sources.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/live-comment.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
-| `apps/worker/__tests__/lock-contention-deferral.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
+| `apps/worker/__tests__/lock-contention-deferral.test.ts` | C | `crates/jobs/tests/lock_contention_deferral.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/low-worker-boot.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/mailer-lite-handler.test.ts` | C | tbd | todo | MailerLite integration |
 | `apps/worker/__tests__/mailer-lite-step-registration.test.ts` | C | tbd | todo | MailerLite integration |
@@ -1440,7 +1440,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/received-message.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `apps/worker/__tests__/reconcile-broadcasts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `apps/worker/__tests__/reconcile-tenants.test.ts` | C | tbd | todo | Workspaces |
-| `apps/worker/__tests__/reconcile.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
+| `apps/worker/__tests__/reconcile.test.ts` | C | `crates/jobs/tests/reconcile.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/record-provider-error-log.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/redispatch-template-jobs.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/refresh-channel-tokens-table.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -1448,7 +1448,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/refresh-threads-tokens.test.ts` | C | tbd | todo | Threads channel |
 | `apps/worker/__tests__/refresh-tiktok-tokens.test.ts` | C | tbd | todo | TikTok channel |
 | `apps/worker/__tests__/refresh-whatsapp-tokens.test.ts` | C | tbd | todo | WhatsApp channel |
-| `apps/worker/__tests__/register-schedules-edition.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
+| `apps/worker/__tests__/register-schedules-edition.test.ts` | C | `crates/jobs/tests/register_schedules_edition.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/reply-to-inbound-cart.test.ts` | C | tbd | todo | Ecommerce: products, categories, vendors |
 | `apps/worker/__tests__/reregister-telegram-webhooks.test.ts` | C | tbd | todo | Telegram channel |
 | `apps/worker/__tests__/resolve-action-contact-inbox.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
@@ -1480,8 +1480,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/schedule-worker-contact-export-purge.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/schedule-worker-google-ads-dispatch.test.ts` | C | tbd | todo | Google Ads integration |
 | `apps/worker/__tests__/schedule-worker-recurring-broadcasts-dispatch.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `apps/worker/__tests__/schedule-worker-register-failure.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
-| `apps/worker/__tests__/scheduler-tick-interval-env.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
+| `apps/worker/__tests__/schedule-worker-register-failure.test.ts` | C | `crates/jobs/tests/schedule_worker_register_failure.rs` | passing | Scheduler and scheduled jobs |
+| `apps/worker/__tests__/scheduler-tick-interval-env.test.ts` | C | `crates/jobs/tests/scheduler_tick_interval_env.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/segment-image-handler.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/segment-image-retry-policy.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/send-appointment-reminder.test.ts` | C | tbd | todo | Appointments and booking |
@@ -1504,11 +1504,11 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/sendgrid-step-registration.test.ts` | C | tbd | todo | SendGrid integration |
 | `apps/worker/__tests__/sequence-dispatch-processor.test.ts` | C | tbd | todo | Sequences |
 | `apps/worker/__tests__/sequence-flow.test.ts` | C | tbd | todo | Sequences |
-| `apps/worker/__tests__/sequence-retry-scheduler.test.ts` | C | tbd | todo | Sequences |
+| `apps/worker/__tests__/sequence-retry-scheduler.test.ts` | C | `crates/jobs/tests/sequence_retry_scheduler.rs` | passing | Sequences |
 | `apps/worker/__tests__/sequence-step-executor.test.ts` | C | tbd | todo | Sequences |
-| `apps/worker/__tests__/sequence-worker-consumer.test.ts` | C | tbd | todo | Sequences |
-| `apps/worker/__tests__/sequence-worker-logging.test.ts` | C | tbd | todo | Sequences |
-| `apps/worker/__tests__/sequence-worker-producer.test.ts` | C | tbd | todo | Sequences |
+| `apps/worker/__tests__/sequence-worker-consumer.test.ts` | C | `crates/jobs/tests/sequence_worker_consumer.rs` | passing | Sequences |
+| `apps/worker/__tests__/sequence-worker-logging.test.ts` | C | `crates/jobs/tests/sequence_worker_logging.rs` | passing | Sequences |
+| `apps/worker/__tests__/sequence-worker-producer.test.ts` | C | `crates/jobs/tests/sequence_worker_producer.rs` | passing | Sequences |
 | `apps/worker/__tests__/set-custom-field-step.test.ts` | C | tbd | todo | Custom fields |
 | `apps/worker/__tests__/settle-and-log.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/smart-delay-resume-job.test.ts` | C | tbd | todo | Smart delay |
@@ -1565,7 +1565,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/update-contact-avatar.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `apps/worker/__tests__/wa-payment-request-guard.test.ts` | C | tbd | todo | WhatsApp message templates |
 | `apps/worker/__tests__/wa-template-handler.test.ts` | C | tbd | todo | WhatsApp message templates |
-| `apps/worker/__tests__/wait-for-chat-job-completion.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
+| `apps/worker/__tests__/wait-for-chat-job-completion.test.ts` | C | `crates/jobs/tests/wait_for_chat_job_completion.rs` | passing | Flow steps: logic and utilities |
 | `apps/worker/__tests__/webhook-executor-payloads.test.ts` | C | tbd | todo | Outbound webhooks |
 | `apps/worker/__tests__/webhook-matcher-catalog.test.ts` | C | tbd | todo | Outbound webhooks |
 | `apps/worker/__tests__/webhook-matcher-datetime.test.ts` | C | tbd | todo | Outbound webhooks |
@@ -1585,9 +1585,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/whatsapp-identity-change.test.ts` | C | tbd | todo | WhatsApp channel |
 | `apps/worker/__tests__/whatsapp-voip-signaling.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `apps/worker/__tests__/will-send-retry.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `apps/worker/__tests__/worker-consumer.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
-| `apps/worker/__tests__/worker-entries.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
-| `apps/worker/__tests__/worker-shutdown.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
+| `apps/worker/__tests__/worker-consumer.test.ts` | C | `crates/jobs/tests/worker_consumer.rs` | passing | Worker runtime (boot, queues, shutdown) |
+| `apps/worker/__tests__/worker-entries.test.ts` | C | `crates/jobs/tests/worker_entries.rs` | passing | Worker runtime (boot, queues, shutdown) |
+| `apps/worker/__tests__/worker-shutdown.test.ts` | C | `crates/jobs/tests/worker_shutdown.rs` | passing | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/write-error-log.test.ts` | C | tbd | todo | Error logs |
 | `apps/worker/src/default/handlers/meta-catalog/__tests__/safe-error-log.test.ts` | C | tbd | todo | Meta Catalog |
 | `apps/worker/src/integration/handlers/comment-automation/__tests__/automation-matching.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
@@ -2847,10 +2847,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/encryption/__tests__/shop-token.test.ts` | C | tbd | todo | Encryption and signed tokens |
 | `packages/encryption/__tests__/user-data-webview-token.test.ts` | C | tbd | todo | Encryption and signed tokens |
 | `packages/encryption/__tests__/user-hash.test.ts` | C | tbd | todo | Encryption and signed tokens |
-| `packages/event-bus/__tests__/configured-buses.test.ts` | C | tbd | todo | Event bus and domain events |
-| `packages/event-bus/__tests__/event-bus.test.ts` | C | tbd | todo | Event bus and domain events |
-| `packages/event-bus/__tests__/index.test.ts` | C | tbd | todo | Event bus and domain events |
-| `packages/event-bus/__tests__/worker.test.ts` | C | tbd | todo | Event bus and domain events |
+| `packages/event-bus/__tests__/configured-buses.test.ts` | C | `crates/jobs/tests/configured_buses.rs` | passing | Event bus and domain events |
+| `packages/event-bus/__tests__/event-bus.test.ts` | C | `crates/jobs/tests/event_bus.rs` | passing | Event bus and domain events |
+| `packages/event-bus/__tests__/index.test.ts` | C | `crates/jobs/tests/index.rs` | passing | Event bus and domain events |
+| `packages/event-bus/__tests__/worker.test.ts` | C | `crates/jobs/tests/worker.rs` | passing | Event bus and domain events |
 | `packages/events/__tests__/commerce-events.test.ts` | C | tbd | todo | Event bus and domain events |
 | `packages/events/__tests__/commerce-webhook-context.test.ts` | C | tbd | todo | Event bus and domain events |
 | `packages/events/__tests__/contact-inbox-context.test.ts` | C | tbd | todo | Event bus and domain events |
@@ -2980,7 +2980,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/redis/__tests__/integration/leaderboard-store.test.ts` | C | tbd | baseline-skip | Redis (cache, locks, queues, stores); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/redis/__tests__/integration/live-counter-scripts.test.ts` | C | tbd | baseline-skip | Redis (cache, locks, queues, stores); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/redis/__tests__/presence-store.test.ts` | C | tbd | todo | Redis (cache, locks, queues, stores) |
-| `packages/scheduler/__tests__/smoke.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
+| `packages/scheduler/__tests__/smoke.test.ts` | C | `crates/jobs/tests/smoke.rs` | passing | Scheduler and scheduled jobs |
 | `packages/sdk/__tests__/auth.test.ts` | C | tbd | todo | Channel SDK and registry |
 | `packages/sdk/__tests__/channel-error.test.ts` | C | tbd | todo | Channel SDK and registry |
 | `packages/sdk/__tests__/connection-helpers.test.ts` | C | tbd | todo | Channel SDK and registry |
@@ -2993,14 +2993,14 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/sdk/__tests__/thread-control-result-kinds.test.ts` | C | tbd | todo | Channel SDK and registry |
 | `packages/sdk/__tests__/to-keep-original.test.ts` | C | tbd | todo | Channel SDK and registry |
 | `packages/sdk/__tests__/whatsapp-payment-method-entity.test.ts` | C | tbd | todo | Channel SDK and registry |
-| `packages/sequence-scheduler/__tests__/advance-enrollment.test.ts` | C | tbd | todo | Sequences |
-| `packages/sequence-scheduler/__tests__/calculate-next-run-at.test.ts` | C | tbd | todo | Sequences |
-| `packages/sequence-scheduler/__tests__/cancel-pending-dispatches.test.ts` | C | tbd | todo | Sequences |
-| `packages/sequence-scheduler/__tests__/contacts-on-sequences.test.ts` | C | tbd | todo | Sequences |
-| `packages/sequence-scheduler/__tests__/dispatch-manager.test.ts` | C | tbd | todo | Sequences |
-| `packages/sequence-scheduler/__tests__/enroll-contact.test.ts` | C | tbd | todo | Sequences |
-| `packages/sequence-scheduler/__tests__/send-time-validator.test.ts` | C | tbd | todo | Sequences |
-| `packages/sequence-scheduler/__tests__/sequence-dispatch.test.ts` | C | tbd | todo | Sequences |
+| `packages/sequence-scheduler/__tests__/advance-enrollment.test.ts` | C | `crates/jobs/tests/advance_enrollment.rs` | passing | Sequences |
+| `packages/sequence-scheduler/__tests__/calculate-next-run-at.test.ts` | C | `crates/jobs/tests/calculate_next_run_at.rs` | passing | Sequences |
+| `packages/sequence-scheduler/__tests__/cancel-pending-dispatches.test.ts` | C | `crates/jobs/tests/cancel_pending_dispatches.rs` | passing | Sequences |
+| `packages/sequence-scheduler/__tests__/contacts-on-sequences.test.ts` | C | `crates/jobs/tests/contacts_on_sequences.rs` | passing | Sequences |
+| `packages/sequence-scheduler/__tests__/dispatch-manager.test.ts` | C | `crates/jobs/tests/dispatch_manager.rs` | passing | Sequences |
+| `packages/sequence-scheduler/__tests__/enroll-contact.test.ts` | C | `crates/jobs/tests/enroll_contact.rs` | passing | Sequences |
+| `packages/sequence-scheduler/__tests__/send-time-validator.test.ts` | C | `crates/jobs/tests/send_time_validator.rs` | passing | Sequences |
+| `packages/sequence-scheduler/__tests__/sequence-dispatch.test.ts` | C | `crates/jobs/tests/sequence_dispatch.rs` | passing | Sequences |
 | `packages/ui/__tests__/bar-chart.test.tsx` | B | - | todo | UI component library; frontend package |
 | `packages/ui/__tests__/chart-colors.test.ts` | B | - | todo | UI component library; frontend package |
 | `packages/ui/__tests__/chart-value-format.test.ts` | B | - | todo | UI component library; frontend package |
@@ -3091,23 +3091,23 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/variables/__tests__/system-fields.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |
 | `packages/vitest-config/__tests__/msw.test.ts` | C | tbd | todo | Tooling configs |
 | `packages/vitest-config/__tests__/setup-dom.test.ts` | C | tbd | todo | Tooling configs |
-| `packages/worker-config/__tests__/ai-agent-job-schema.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/ai-file-job-ids.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/broadcast-job-ids.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/coexist-job-ids.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/connection-build-phase.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/connection-queue-groups.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/enqueue-integration-job.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/heavy-job-schema.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/inbound-webhook-request-job.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/job-wait-strict.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/job-wait.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/marketing-message-job-ids.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/no-redis-env.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/queue-events.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/resolve-step-input-job.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/stored-image-optimization.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/template-queue.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/whatsapp-call-native-media-job-ids.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/whatsapp-identity-change-job.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
-| `packages/worker-config/__tests__/whatsapp-voip-signaling-job-ids.test.ts` | C | tbd | todo | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/ai-agent-job-schema.test.ts` | C | `crates/jobs/tests/ai_agent_job_schema.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/ai-file-job-ids.test.ts` | C | `crates/jobs/tests/ai_file_job_ids.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/broadcast-job-ids.test.ts` | C | `crates/jobs/tests/broadcast_job_ids.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/coexist-job-ids.test.ts` | C | `crates/jobs/tests/coexist_job_ids.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/connection-build-phase.test.ts` | C | `crates/jobs/tests/connection_build_phase.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/connection-queue-groups.test.ts` | C | `crates/jobs/tests/connection_queue_groups.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/enqueue-integration-job.test.ts` | C | `crates/jobs/tests/enqueue_integration_job.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/heavy-job-schema.test.ts` | C | `crates/jobs/tests/heavy_job_schema.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/inbound-webhook-request-job.test.ts` | C | `crates/jobs/tests/inbound_webhook_request_job.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/job-wait-strict.test.ts` | C | `crates/jobs/tests/job_wait_strict.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/job-wait.test.ts` | C | `crates/jobs/tests/job_wait.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/marketing-message-job-ids.test.ts` | C | `crates/jobs/tests/marketing_message_job_ids.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/no-redis-env.test.ts` | C | `crates/jobs/tests/no_redis_env.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/queue-events.test.ts` | C | `crates/jobs/tests/queue_events.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/resolve-step-input-job.test.ts` | C | `crates/jobs/tests/resolve_step_input_job.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/stored-image-optimization.test.ts` | C | `crates/jobs/tests/stored_image_optimization.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/template-queue.test.ts` | C | `crates/jobs/tests/template_queue.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/whatsapp-call-native-media-job-ids.test.ts` | C | `crates/jobs/tests/whatsapp_call_native_media_job_ids.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/whatsapp-identity-change-job.test.ts` | C | `crates/jobs/tests/whatsapp_identity_change_job.rs` | passing | Worker config (queues, job schemas) |
+| `packages/worker-config/__tests__/whatsapp-voip-signaling-job-ids.test.ts` | C | `crates/jobs/tests/whatsapp_voip_signaling_job_ids.rs` | passing | Worker config (queues, job schemas) |
