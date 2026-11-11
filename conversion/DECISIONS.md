@@ -109,3 +109,14 @@ From `conversion/specs/P2.2.md`, adopted:
 - Up to 3 Phase 1 units run in parallel. Each unit writes only under `conversion/parity/tests/<unit-folder>/`, `src/fixtures/ext/<unit>.ts` and `stacks/original/ext/<unit>.ts` (loader: `src/fixtures/ext.ts`). Shared harness files (`src/*.ts`, `driver.ts`, `stacks/original/fixtures.ts`, compose, Caddyfile, run script) change only through the orchestrator.
 - Each unit runs only its own folder on the Dell: `run-original.sh --no-build -- tests/<unit-folder>`. Runs queue behind the `chatbotx-dell` lock.
 - Frozen fixtures live in `conversion/fixtures/` with their own `MANIFEST.sha256`; `check-manifest.sh` checks both folders. First entry: `better-auth-expected-schema.json` (better-auth 1.7.14 `getExpectedSchema`, sha256 `c518f2dd…7647`), made by the P2.3 porter from the frozen test options.
+
+## 2026-11-11 — P2.6 jobs (user decisions)
+
+Spec: `conversion/specs/P2.6.md` (19 queues, 44 cron schedulers, 381 frozen cases in 50 files).
+- **Cron time zone: UTC only** (user). No `TZ` support in the scheduler.
+- **Retention: per-job** (user). Each finished job row is deleted only by its own rule (age or count). This differs from BullMQ's queue-wide trim (likely a bug in the original); not visible to parity tests.
+- **`quota` queue: skip enqueue on the community edition** (user). The private enterprise quota-worker is out of scope.
+- **Bull Board: replaced by a small read-only page** (user) in Phase 4: counts per state, failed jobs with reason, retry/remove buttons. Added as a Phase 4 unit.
+- Adopted from the spec: one `jobs` table (unique (queue, job_id)), `job_dedup` table with BullMQ's 4 dedup modes, batch claim with lease, BullMQ backoff formulas, tokio Notify wake-up, per-queue semaphore + rate limiter, std-only cron, in-process broadcast for QueueEvents, `sequence_schedule` and `event_entry` tables. Visible improvements accepted: sequence sends at due time (not up to 5 s late); batch schedule writes all-or-nothing (the frozen `smoke.test.ts:10` port asserts the error and no row written — marked `adapted`).
+- The 105 sequence-scheduler cases need the P2.4 schema: port them failing and mark them blocked by P2.4 if P2.4 is not done.
+- P2.3: the orchestrator ran `cargo fmt -p chatbotx-db` on the ported test files (formatting only: import order and line breaks; no token change other than whitespace and commas). Separate commit, so the verifier can check it.

@@ -23,7 +23,10 @@ const AUDITED_TABLES: &[&str] = &[
 async fn every_audited_table_was_found_in_the_database() {
     let db = fresh_db().await;
     for table in AUDITED_TABLES {
-        assert!(!columns(&db, table).await.is_empty(), "no columns for {table}");
+        assert!(
+            !columns(&db, table).await.is_empty(),
+            "no columns for {table}"
+        );
     }
 }
 
@@ -31,7 +34,10 @@ async fn every_audited_table_was_found_in_the_database() {
 #[tokio::test]
 async fn the_inbox_columns_a_connect_must_supply_are_still_exactly_these() {
     let db = fresh_db().await;
-    assert_eq!(required_columns(&db, "Inbox").await, ["channel", "name", "sourceId", "workspaceId"]);
+    assert_eq!(
+        required_columns(&db, "Inbox").await,
+        ["channel", "name", "sourceId", "workspaceId"]
+    );
 }
 
 /// Port of: packages/database/__tests__/integration/insert-required-columns.test.ts:272 "repository inserts satisfy the real column definitions > the IntegrationWhatsapp columns a connect must supply are still exactly these"
@@ -40,7 +46,15 @@ async fn the_integration_whatsapp_columns_a_connect_must_supply_are_still_exactl
     let db = fresh_db().await;
     assert_eq!(
         required_columns(&db, "IntegrationWhatsapp").await,
-        ["auth", "businessId", "inboxId", "name", "phoneNumberId", "wabaId", "workspaceId"]
+        [
+            "auth",
+            "businessId",
+            "inboxId",
+            "name",
+            "phoneNumberId",
+            "wabaId",
+            "workspaceId"
+        ]
     );
 }
 
@@ -89,6 +103,13 @@ async fn the_integration_api_columns_a_connect_must_supply_are_still_exactly_the
     let db = fresh_db().await;
     assert_eq!(
         required_columns(&db, "IntegrationApi").await,
-        ["auth", "inboxId", "name", "tokenHash", "tokenPrefix", "workspaceId"]
+        [
+            "auth",
+            "inboxId",
+            "name",
+            "tokenHash",
+            "tokenPrefix",
+            "workspaceId"
+        ]
     );
 }

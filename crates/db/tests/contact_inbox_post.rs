@@ -14,8 +14,21 @@ use common::{fresh_db, index, primary_key, table_sql};
 #[tokio::test]
 async fn contact_inbox_post_key_and_indexes() {
     let db = fresh_db().await;
-    assert_eq!(primary_key(&db, "ContactInboxPost").await, ["workspaceId", "contactInboxId", "postId"]);
-    let sql = table_sql(&db, "ContactInboxPost").await.expect("ContactInboxPost is missing");
-    assert!(sql.contains(r#"CONSTRAINT "ContactInboxPost_pkey" PRIMARY KEY"#), "{sql}");
-    index(&db, "ContactInboxPost", "ContactInboxPost_workspaceId_postId_idx").await;
+    assert_eq!(
+        primary_key(&db, "ContactInboxPost").await,
+        ["workspaceId", "contactInboxId", "postId"]
+    );
+    let sql = table_sql(&db, "ContactInboxPost")
+        .await
+        .expect("ContactInboxPost is missing");
+    assert!(
+        sql.contains(r#"CONSTRAINT "ContactInboxPost_pkey" PRIMARY KEY"#),
+        "{sql}"
+    );
+    index(
+        &db,
+        "ContactInboxPost",
+        "ContactInboxPost_workspaceId_postId_idx",
+    )
+    .await;
 }

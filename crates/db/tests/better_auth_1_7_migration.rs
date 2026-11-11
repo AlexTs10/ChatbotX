@@ -7,8 +7,8 @@
 
 mod common;
 
-use common::{column, columns, fresh_db, seed, SEED_CLIENT_ID};
 use chatbotx_db::rusqlite::params;
+use common::{SEED_CLIENT_ID, column, columns, fresh_db, seed};
 
 /// Port of: packages/database/__tests__/better-auth-1-7-migration.test.ts:21 "better-auth 1.7 migration > casts Verification.id to text before anything depends on it"
 ///
@@ -29,7 +29,10 @@ async fn oauth_consent_has_no_consent_given_column() {
     let db = fresh_db().await;
     let cols = columns(&db, "OAuthConsent").await;
     assert!(!cols.is_empty(), "OAuthConsent is missing");
-    assert!(cols.iter().all(|c| c.name != "consentGiven"), "OAuthConsent still has consentGiven");
+    assert!(
+        cols.iter().all(|c| c.name != "consentGiven"),
+        "OAuthConsent still has consentGiven"
+    );
 }
 
 /// Port of: packages/database/__tests__/better-auth-1-7-migration.test.ts:39 "better-auth 1.7 migration > converts OAuthConsent.scopes from a space-separated string to text[]"

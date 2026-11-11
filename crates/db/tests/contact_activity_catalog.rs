@@ -14,10 +14,19 @@ use common::{fresh_db, index, index_columns, primary_key, schema_sql, table_sql}
 /// `primaryKey` of the frozen `TABLES` list + the PK constraint text.
 async fn assert_primary_key(table: &str, expected: &[&str]) {
     let db = fresh_db().await;
-    assert_eq!(primary_key(&db, table).await, expected, "{table} primary key");
-    let sql = table_sql(&db, table).await.unwrap_or_else(|| panic!("{table} is missing"));
+    assert_eq!(
+        primary_key(&db, table).await,
+        expected,
+        "{table} primary key"
+    );
+    let sql = table_sql(&db, table)
+        .await
+        .unwrap_or_else(|| panic!("{table} is missing"));
     let constraint = format!("CONSTRAINT \"{table}_pkey\" PRIMARY KEY");
-    assert!(sql.contains(&constraint), "{table} has no `{constraint}`: {sql}");
+    assert!(
+        sql.contains(&constraint),
+        "{table} has no `{constraint}`: {sql}"
+    );
 }
 
 /// Port of: packages/database/__tests__/integration/contact-activity-catalog.test.ts:62 "contact activity partition catalog > ContactActivity is hash partitioned by workspaceId"
@@ -25,7 +34,14 @@ async fn assert_primary_key(table: &str, expected: &[&str]) {
 async fn contact_activity_primary_key() {
     assert_primary_key(
         "ContactActivity",
-        &["workspaceId", "contactId", "activityType", "referenceType", "parentReferenceId", "referenceId"],
+        &[
+            "workspaceId",
+            "contactId",
+            "activityType",
+            "referenceType",
+            "parentReferenceId",
+            "referenceId",
+        ],
     )
     .await;
 }
@@ -33,7 +49,11 @@ async fn contact_activity_primary_key() {
 /// Port of: packages/database/__tests__/integration/contact-activity-catalog.test.ts:62 "contact activity partition catalog > ContactKeywordMessage is hash partitioned by workspaceId"
 #[tokio::test]
 async fn contact_keyword_message_primary_key() {
-    assert_primary_key("ContactKeywordMessage", &["workspaceId", "contactId", "messageId"]).await;
+    assert_primary_key(
+        "ContactKeywordMessage",
+        &["workspaceId", "contactId", "messageId"],
+    )
+    .await;
 }
 
 /// Port of: packages/database/__tests__/integration/contact-activity-catalog.test.ts:62 "contact activity partition catalog > ContactState is hash partitioned by workspaceId"
@@ -57,17 +77,31 @@ async fn contact_activity_has_its_named_indexes() {
 #[tokio::test]
 async fn contact_keyword_message_has_its_named_indexes() {
     let db = fresh_db().await;
-    index(&db, "ContactKeywordMessage", "ContactKeywordMessage_text_prefix_idx").await;
+    index(
+        &db,
+        "ContactKeywordMessage",
+        "ContactKeywordMessage_text_prefix_idx",
+    )
+    .await;
     assert_eq!(
         index_columns(&db, "ContactKeywordMessage_text_prefix_idx").await,
-        [Some("workspaceId".to_owned()), Some("normalizedText".to_owned())]
+        [
+            Some("workspaceId".to_owned()),
+            Some("normalizedText".to_owned())
+        ]
     );
     let fts = schema_sql(&db, "table", "ContactKeywordMessage_fts")
         .await
         .expect("ContactKeywordMessage_fts is missing");
     assert!(fts.contains("fts5"), "not an FTS5 table: {fts}");
-    assert!(fts.contains("tokenize='trigram"), "not a trigram tokenizer: {fts}");
-    assert!(fts.contains("content='ContactKeywordMessage'"), "not external content: {fts}");
+    assert!(
+        fts.contains("tokenize='trigram"),
+        "not a trigram tokenizer: {fts}"
+    );
+    assert!(
+        fts.contains("content='ContactKeywordMessage'"),
+        "not external content: {fts}"
+    );
 }
 
 /// Port of: packages/database/__tests__/integration/contact-activity-catalog.test.ts:100 "contact activity partition catalog > ContactState has its named indexes on all 64 leaves"
@@ -75,15 +109,25 @@ async fn contact_keyword_message_has_its_named_indexes() {
 async fn contact_state_has_its_named_indexes() {
     let db = fresh_db().await;
     let idx = index(&db, "ContactState", "ContactState_lastDeliveredAt_idx").await;
-    assert!(idx.partial, "ContactState_lastDeliveredAt_idx must be partial");
+    assert!(
+        idx.partial,
+        "ContactState_lastDeliveredAt_idx must be partial"
+    );
 }
 
 /// Port of: packages/database/__tests__/integration/contact-activity-catalog.test.ts:131 "contact activity partition catalog > has the allowed-pair CHECK constraint on the parent"
 #[tokio::test]
 async fn has_the_allowed_pair_check_constraint() {
     let db = fresh_db().await;
-    let sql = table_sql(&db, "ContactActivity").await.expect("ContactActivity is missing");
-    assert_eq!(sql.matches(r#"CONSTRAINT "ContactActivity_allowed_pair_check" CHECK"#).count(), 1, "{sql}");
+    let sql = table_sql(&db, "ContactActivity")
+        .await
+        .expect("ContactActivity is missing");
+    assert_eq!(
+        sql.matches(r#"CONSTRAINT "ContactActivity_allowed_pair_check" CHECK"#)
+            .count(),
+        1,
+        "{sql}"
+    );
 
     // flowExecuted is not parent-scoped: parentReferenceId must be 0.
     let err = db

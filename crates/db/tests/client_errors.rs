@@ -6,7 +6,7 @@ mod common;
 use std::fmt;
 
 use chatbotx_db::rusqlite::params;
-use chatbotx_db::{describe_database_error, DatabaseErrorDescription, DbError, StatementTimeout};
+use chatbotx_db::{DatabaseErrorDescription, DbError, StatementTimeout, describe_database_error};
 use common::fresh_db;
 
 /// The wrapper the query layer puts around a driver error (drizzle's "Failed query").
@@ -58,13 +58,22 @@ async fn extracts_database_fields_from_a_nested_cause() {
         })
         .await
         .expect_err("statement timeout");
-    let (message, detail, table) =
-        (timeout.message().to_owned(), timeout.detail().map(str::to_owned), timeout.table().map(str::to_owned));
+    let (message, detail, table) = (
+        timeout.message().to_owned(),
+        timeout.detail().map(str::to_owned),
+        timeout.table().map(str::to_owned),
+    );
     assert!(!message.is_empty());
     let described = describe_database_error(&FailedQuery(timeout));
     assert_eq!(
         described,
-        DatabaseErrorDescription { code: Some("57014".to_owned()), constraint: None, detail, message, table }
+        DatabaseErrorDescription {
+            code: Some("57014".to_owned()),
+            constraint: None,
+            detail,
+            message,
+            table
+        }
     );
     assert_ne!(described.message, "Failed query");
 
@@ -82,7 +91,10 @@ async fn extracts_database_fields_from_a_nested_cause() {
         .expect_err("duplicate (email, tenantId)");
     let described = describe_database_error(&FailedQuery(unique));
     assert_eq!(described.code.as_deref(), Some("23505"));
-    assert_eq!(described.constraint.as_deref(), Some("User_email_tenant_key"));
+    assert_eq!(
+        described.constraint.as_deref(),
+        Some("User_email_tenant_key")
+    );
     assert_eq!(described.table.as_deref(), Some("User"));
     assert!(described.detail.is_some());
     assert_ne!(described.message, "Failed query");
@@ -93,6 +105,9 @@ async fn extracts_database_fields_from_a_nested_cause() {
 fn falls_back_to_the_top_level_error_message_when_no_database_code_exists() {
     assert_eq!(
         describe_database_error(&Network),
-        DatabaseErrorDescription { message: "network failed".to_owned(), ..Default::default() }
+        DatabaseErrorDescription {
+            message: "network failed".to_owned(),
+            ..Default::default()
+        }
     );
 }

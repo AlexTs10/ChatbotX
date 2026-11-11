@@ -7,15 +7,16 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use chatbotx_db::rusqlite::params;
 use chatbotx_db::StatementTimeout;
+use chatbotx_db::rusqlite::params;
 use common::{fresh_db, query_i64};
 
 /// PostgreSQL SQLSTATE for `canceling statement due to statement timeout`.
 const QUERY_CANCELED: &str = "57014";
 
 /// A statement that never ends.
-const ENDLESS: &str = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c";
+const ENDLESS: &str =
+    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c";
 
 /// Port of: packages/database/__tests__/integration/statement-timeout.test.ts:57 "setLocalStatementTimeout against Postgres > cancels a statement that outlives the cap and aborts the transaction"
 #[tokio::test]
@@ -39,7 +40,12 @@ async fn cancels_a_statement_that_outlives_the_cap_and_aborts_the_transaction() 
     assert!(started.elapsed() < Duration::from_secs(30));
 
     // The transaction was rolled back: the row inserted before the statement is gone.
-    let rows = query_i64(&db, r#"SELECT count(*) FROM "Verification" WHERE "id" = 'v-timeout'"#, vec![]).await;
+    let rows = query_i64(
+        &db,
+        r#"SELECT count(*) FROM "Verification" WHERE "id" = 'v-timeout'"#,
+        vec![],
+    )
+    .await;
     assert_eq!(rows, 0);
 }
 
@@ -47,7 +53,10 @@ async fn cancels_a_statement_that_outlives_the_cap_and_aborts_the_transaction() 
 #[tokio::test]
 async fn is_scoped_to_the_transaction_the_session_keeps_its_own_setting() {
     let db = fresh_db().await;
-    let before = db.write(|tx| Ok(tx.statement_timeout())).await.expect("write job");
+    let before = db
+        .write(|tx| Ok(tx.statement_timeout()))
+        .await
+        .expect("write job");
 
     let inside = db
         .write(|tx| {
@@ -83,5 +92,8 @@ async fn is_scoped_to_the_transaction_the_session_keeps_its_own_setting() {
     assert_eq!(after, before);
     assert_eq!(after, None);
     assert_eq!(installs, 0);
-    assert!(elapsed >= Duration::from_millis(200), "the probe statement ran only {elapsed:?}");
+    assert!(
+        elapsed >= Duration::from_millis(200),
+        "the probe statement ran only {elapsed:?}"
+    );
 }

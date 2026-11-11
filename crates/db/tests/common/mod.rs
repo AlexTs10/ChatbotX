@@ -150,7 +150,11 @@ pub async fn column(db: &Db, table: &str, name: &str) -> Column {
 
 /// Primary key columns of `table`, in key order (`pk > 0` ordered by `pk`).
 pub async fn primary_key(db: &Db, table: &str) -> Vec<String> {
-    let mut cols: Vec<Column> = columns(db, table).await.into_iter().filter(|c| c.pk > 0).collect();
+    let mut cols: Vec<Column> = columns(db, table)
+        .await
+        .into_iter()
+        .filter(|c| c.pk > 0)
+        .collect();
     cols.sort_by_key(|c| c.pk);
     cols.into_iter().map(|c| c.name).collect()
 }
@@ -159,8 +163,9 @@ pub async fn primary_key(db: &Db, table: &str) -> Vec<String> {
 pub async fn indexes(db: &Db, table: &str) -> Vec<Index> {
     let table = table.to_owned();
     db.read(move |conn| {
-        let mut stmt =
-            conn.prepare(r#"SELECT name, "unique", origin, partial FROM pragma_index_list(?1) ORDER BY name"#)?;
+        let mut stmt = conn.prepare(
+            r#"SELECT name, "unique", origin, partial FROM pragma_index_list(?1) ORDER BY name"#,
+        )?;
         let rows = stmt
             .query_map(params![table], |row| {
                 Ok(Index {
@@ -249,7 +254,8 @@ pub async fn schema_sql(db: &Db, kind: &str, name: &str) -> Option<String> {
     let kind = kind.to_owned();
     let name = name.to_owned();
     db.read(move |conn| {
-        let mut stmt = conn.prepare("SELECT sql FROM sqlite_schema WHERE type = ?1 AND name = ?2")?;
+        let mut stmt =
+            conn.prepare("SELECT sql FROM sqlite_schema WHERE type = ?1 AND name = ?2")?;
         let mut rows = stmt.query(params![kind, name])?;
         match rows.next()? {
             Some(row) => Ok(row.get::<_, Option<String>>(0)?),
@@ -385,7 +391,12 @@ pub const SEED_CLIENT_ID: &str = "client-1";
 /// Inserts (and commits) one User, Workspace, Inbox, Contact and OAuthClient
 /// with only the columns that have no default.
 pub async fn seed(db: &Db) -> Seed {
-    let ids = Seed { user_id: 1001, workspace_id: 2001, inbox_id: 3001, contact_id: 4001 };
+    let ids = Seed {
+        user_id: 1001,
+        workspace_id: 2001,
+        inbox_id: 3001,
+        contact_id: 4001,
+    };
     db.write(move |tx| {
         tx.execute(
             r#"INSERT INTO "User" ("id", "email") VALUES (?1, 'owner@example.com')"#,
@@ -428,7 +439,14 @@ pub fn insert_contact_inbox(
              ("id", "originalContactId", "contactId", "inboxId", "channel", "source", "sourceId",
               "sourceParentUserId", "sourceIdentityHistory")
            VALUES (?1, ?2, ?2, ?3, 'messenger', 'messenger', ?4, ?5, ?6)"#,
-        params![id, seed.contact_id, seed.inbox_id, source_id, source_parent_user_id, source_identity_history],
+        params![
+            id,
+            seed.contact_id,
+            seed.inbox_id,
+            source_id,
+            source_parent_user_id,
+            source_identity_history
+        ],
     )?)
 }
 
@@ -436,7 +454,11 @@ pub fn insert_contact_inbox(
 pub async fn query_text(db: &Db, sql: &str, args: Vec<rusqlite::types::Value>) -> Option<String> {
     let sql = sql.to_owned();
     db.read(move |conn| {
-        Ok(conn.query_row(&sql, rusqlite::params_from_iter(args.iter()), |row| row.get::<_, Option<String>>(0))?)
+        Ok(
+            conn.query_row(&sql, rusqlite::params_from_iter(args.iter()), |row| {
+                row.get::<_, Option<String>>(0)
+            })?,
+        )
     })
     .await
     .expect("query_text")
@@ -445,7 +467,13 @@ pub async fn query_text(db: &Db, sql: &str, args: Vec<rusqlite::types::Value>) -
 /// Runs `sql` with one integer result row on a reader.
 pub async fn query_i64(db: &Db, sql: &str, args: Vec<rusqlite::types::Value>) -> i64 {
     let sql = sql.to_owned();
-    db.read(move |conn| Ok(conn.query_row(&sql, rusqlite::params_from_iter(args.iter()), |row| row.get::<_, i64>(0))?))
-        .await
-        .expect("query_i64")
+    db.read(move |conn| {
+        Ok(
+            conn.query_row(&sql, rusqlite::params_from_iter(args.iter()), |row| {
+                row.get::<_, i64>(0)
+            })?,
+        )
+    })
+    .await
+    .expect("query_i64")
 }
