@@ -19,7 +19,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | done | P1.1 | A: 25 ops, 210 tests | See "Proof P1.5" | commit `conversion(P1.5+P1.6)` |
 | P1.6 | 1 | Public API parity: `contacts` | done | P1.1 | A: 58 ops, 539 tests | See "Proof P1.6" | commit `conversion(P1.5+P1.6)` |
 | P1.7 | 1 | Public API parity: `conversations`, `coupons`, `customFields`, `decisionConnections`, `decisionProfiles`, `discountCodes` | done | P1.1 | A: 53 ops, 437 tests | See "Proof P1.7" | commit `868c4acee` |
-| P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | in_progress | P1.1 | A: 48 ops | | |
+| P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | done | P1.1 | A: 48 ops, 335 tests | See "Proof P1.8" | commit `868c4acee` |
 | P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | in_progress | P1.1 | A: 53 ops | | |
 | P1.10 | 1 | Public API parity: `inboxes`, `instagramChannels`, `integrations`, `keywords`, `leaderboards` | todo | P1.1 | A: 52 ops | | |
 | P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | todo | P1.1 | A: 52 ops | | |
@@ -45,7 +45,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P2.3 | 2 | `db` crate: embedded SQLite file via `rusqlite` (bundled), migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | done | P2.2 | C:48 (+6 n/a) | See "Proof P2.3" | commit `conversion(P2.3)` |
 | P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | done | P2.3 | C:36 (+10 n/a) | See "Proof P2.4" | commit `59ae66f4f` |
 | P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | todo | P2.4 | C | | |
-| P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | todo | P2.3 | C | | |
+| P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | in_progress | P2.3 | C | | |
 | P2.7 | 2 | Redis replacement: locks (`tokio::sync::Mutex` map), pub/sub (`broadcast`), cache/presence/rate limits (in-memory), bloom filter (unique-index table); map each `packages/redis` use | todo | P2.6 | C | | |
 | P2.8 | 2 | `rt` crate: axum WebSocket endpoint + `broadcast` fan-out, protocol from `packages/realtime-protocol` | todo | P2.7 | C | | |
 | P2.9 | 2 | `files` crate: `object_store` LocalFileSystem (S3 by config), presigned-style upload/download tokens | done | P2.1 | C:40 | See "Proof P2.9" | commit `conversion(P2.9)` |
@@ -288,3 +288,13 @@ verifier run 1:  Test Files 12 passed (12)   Tests 438 passed (438)   42.60s   e
 verifier run 2:  Test Files 12 passed (12)   Tests 438 passed (438)   54.33s   exit 0
 ```
 Minor: `decisionProfiles.get` has no stand-alone happy test (read back after create; 404/422 tested).
+
+### Proof P1.8
+
+Writer (spec `conversion/specs/P1.8.md`) → independent verifier (PASS 4/4, two runs; 8 operations cross-checked incl. encrypted grant/credential format). 48/48 operations, 335 tests in `conversion/parity/tests/p1-08-ecommerce-webhooks-fb/` + interception check.
+
+```
+verifier run 1:  Test Files 15 passed (15)   Tests 336 passed (336)   127.86s   exit 0
+verifier run 2:  Test Files 15 passed (15)   Tests 336 passed (336)   exit 0
+```
+Timing risk: `campaigns.send` waits up to 150 s for the worker (took 58–59 s).
