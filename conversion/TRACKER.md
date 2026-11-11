@@ -21,7 +21,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.7 | 1 | Public API parity: `conversations`, `coupons`, `customFields`, `decisionConnections`, `decisionProfiles`, `discountCodes` | done | P1.1 | A: 53 ops, 437 tests | See "Proof P1.7" | commit `868c4acee` |
 | P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | done | P1.1 | A: 48 ops, 335 tests | See "Proof P1.8" | commit `868c4acee` |
 | P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | done | P1.1 | A: 53 ops + hook route, 457 tests | See "Proof P1.9" | commit `868c4acee` |
-| P1.10 | 1 | Public API parity: `inboxes`, `instagramChannels`, `integrations`, `keywords`, `leaderboards` | in_progress | P1.1 | A: 52 ops | | |
+| P1.10 | 1 | Public API parity: `inboxes`, `instagramChannels`, `integrations`, `keywords`, `leaderboards` | done | P1.1 | A: 52 ops, 398 tests | See "Proof P1.10" | commit `c01a4eea9` |
 | P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | todo | P1.1 | A: 52 ops | | |
 | P1.12 | 1 | Public API parity: `miniApps`, `minigames`, `openHours`, `orders`, `paymentProviders` | todo | P1.1 | A: 43 ops | | |
 | P1.13 | 1 | Public API parity: `pipelines`, `placeCategories`, `placeLocations`, `polls` | todo | P1.1 | A: 51 ops | | |
@@ -308,6 +308,16 @@ verifier run 1:  Test Files 18 passed (18)   Tests 458 passed (458)   63.76s   e
 verifier run 2:  Test Files 18 passed (18)   Tests 458 passed (458)   63.24s   exit 0
 ```
 Minor gaps: hook `WORKSPACE_BLOCKED` 403 / `WORKSPACE_UNAVAILABLE` 410; per-webhook rate limit.
+
+### Proof P1.10
+
+Writer (spec `conversion/specs/P1.10.md`) → independent verifier (PASS 4/4, two runs; one earlier attempt stopped in rsync before vitest, infra only). 52/52 operations, 398 tests in `conversion/parity/tests/p1-10-inboxes-keywords-leaderboards/` + interception check.
+
+```
+verifier run 1:  Test Files 13 passed (13)   Tests 399 passed (399)   159.65s   exit 0
+verifier run 2:  Test Files 13 passed (13)   Tests 399 passed (399)   141.44s   exit 0
+```
+Minor gaps: `perPage` > 50 clamp not proven (only 11 rows); leaderboards `adjust`/`export`/`triggerRewards` field names checked by error codes only; unlimited 200 for `DELETE graph.instagram.com /v*/me/messenger_profile` in the fake upstream (check P1.9 IG tests do not expect an error there at P1.28).
 
 ### Proof P2.6
 
