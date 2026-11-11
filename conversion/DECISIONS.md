@@ -169,3 +169,14 @@ Spec: `conversion/specs/P2.4.md` (65 tables, 234 indexes, 155 FKs; 46 runtime ca
 - **Infra (P1.9):** the daily `googleAdsSyncSetups` cron runs at 03:30 UTC; a run that crosses 03:30 UTC with a test Google Ads connection can make an unscripted upstream call and fail `99-interception`. Do not schedule full runs across 03:30 UTC (or script that call in P1.28).
 - **Harness (P1.8):** marketing-messages tests script shared Graph paths (`/debug_token`, `/me/adaccounts`); correct only while `3x` files run after `0x` files. Optional later: a query matcher in `fake-upstream/store.ts` (orchestrator change).
 - Behaviors the Rust port must match are listed in `conversion/specs/P1.7.md` (conversations list ignores `status`; coupon `issueCoupon` 500 `couponIssueUnavailable`, `markCouponUsed` 500 `couponNotIssued`; discountCodes create 200; customFields delete 204 for unknown ids; same-second thread-control precedence), `P1.8.md` §13, `P1.9.md` §8 (flows publish keeps old `startNodeId`; `folders.list` without `parentId` lists sub-folders; flows delete unknown → 204; compile errors 422 bare array).
+
+## 2026-11-11 — P2.5 schema part 3 (orchestrator)
+
+Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300 FKs, 12 triggers; 43 cases = 31 1:1, 5 adapted, 1 replacement, 6 not-applicable). Kept as one unit, migration version 4 (after `0003_jobs.sql` from P2.6).
+1. Vector columns: `BLOB` (6,144 bytes, libSQL byte layout) in STRICT tables, not the `F32_BLOB(1536)` type name (STRICT allows only base types). Exact cosine scan; the file search uses `INDEXED BY "AIEmbedding_aiFileId_chunkIndex_idx"`.
+2. Rollups are kept by **SQLite triggers** in the same transaction (they also catch FK cascades and backfills), not by Rust code as P2.2 proposed.
+3. No production access for ChatbotX, so the real chunk counts are unknown. Risk accepted: an agent with ≥ 50,000 chunks makes the scan slow; revisit in Phase 5 (option: libSQL vector index).
+4. The HNSW index is not created (no migration ever made it). `AIAgent.webSearchAuthorizedDomains` gets `DEFAULT '[]'` (production has it) **unless** a frozen test pins "no DB default" for it — the implementer checks.
+5. The 4 `lower_u` indexes are accepted (tools without the app functions cannot write those 4 tables).
+- Retention: new cron `purgeAnalyticsEvents` on the `schedule` queue at 03:45 UTC (events 10 years; rollups 3 years, message rollup 10 years). `maintainMacPartitions` becomes a no-op; `maintainLeaderboardPartitions` deletes in chunks. These go into the jobs crate in Phase 3 (worker handlers).
+- The P2.3 ports `schema_default_parity` (≥ 10) and `workspace_purge_coverage` (≥ 18) used minimum limits because parts 2–3 did not exist. Now that the full schema exists, the **P2.5 porter** sets them to the frozen originals' exact values (16 columns, 83 baseline entries). This makes the ports equal to the originals, not weaker; recorded here.
