@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::enqueue::BoxFuture;
 use crate::events::bus::{EventBus, EventBusError};
+use crate::events::config::{BusKind, bus_for_event_type};
 
 /// The emit side of a bus. `Err` = a synchronous failure (the bus threw
 /// before returning a promise).
@@ -24,7 +25,7 @@ impl EventEmitter for EventBus {
         event_type: &'a str,
         payload: Value,
     ) -> Result<BoxFuture<'a, Result<String, EventBusError>>, EventBusError> {
-        todo!()
+        Ok(Box::pin(EventBus::emit(self, event_type, payload)))
     }
 }
 
@@ -45,5 +46,19 @@ pub fn emit<'a>(
     event_type: &'a str,
     payload: Value,
 ) -> Option<BoxFuture<'a, Result<String, EventBusError>>> {
-    todo!()
+    let bus = match bus_for_event_type(event_type) {
+        Some(BusKind::Message) => &buses.message,
+        Some(BusKind::Flow) => &buses.flow,
+        Some(BusKind::Dashboard) => &buses.dashboard,
+        Some(BusKind::ErrorLog) => &buses.error_log,
+        None => return Some(Box::pin(async { Ok(String::new()) })),
+    };
+    let logged = payload.clone();
+    match bus.emit(event_type, payload) {
+        Ok(future) => Some(future),
+        Err(err) => {
+            tracing::error!(err = %err, payload = %logged, "Failed to emit event: {event_type}");
+            None
+        }
+    }
 }

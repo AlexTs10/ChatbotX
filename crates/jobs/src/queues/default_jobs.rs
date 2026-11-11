@@ -9,11 +9,13 @@ pub enum DefaultJobAction {
 impl DefaultJobAction {
     /// Every default-queue action (`Object.values(DefaultJobAction)`).
     pub fn all() -> &'static [DefaultJobAction] {
-        todo!()
+        &[DefaultJobAction::ProcessInboundWebhookRequest]
     }
 
     /// `"processInboundWebhookRequest"`, ...
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            DefaultJobAction::ProcessInboundWebhookRequest => "processInboundWebhookRequest",
+        }
     }
 }

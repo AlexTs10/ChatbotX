@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::options::NewJob;
+use crate::options::{Dedup, JobOptions, NewJob};
 
 /// `IntegrationJobAction.resolveStepInput`.
 pub const RESOLVE_STEP_INPUT_ACTION: &str = "resolveStepInput";
@@ -35,5 +35,21 @@ pub struct ResolveStepInput {
 /// `{ type, data: input }`, and simple deduplication
 /// `step-input-<conversationId>-<challengeId>` (no fixed job id).
 pub fn build_resolve_step_input_job(input: &ResolveStepInput) -> NewJob {
-    todo!()
+    NewJob {
+        name: RESOLVE_STEP_INPUT_ACTION.to_owned(),
+        data: serde_json::json!({
+            "type": RESOLVE_STEP_INPUT_ACTION,
+            "data": serde_json::to_value(input).unwrap_or(serde_json::Value::Null),
+        }),
+        opts: JobOptions {
+            dedup: Some(Dedup {
+                id: format!(
+                    "step-input-{}-{}",
+                    input.conversation_id, input.challenge_id
+                ),
+                ..Dedup::default()
+            }),
+            ..JobOptions::default()
+        },
+    }
 }

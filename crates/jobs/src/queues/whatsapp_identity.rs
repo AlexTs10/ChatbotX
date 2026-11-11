@@ -45,11 +45,14 @@ pub struct WhatsappIdentityChangeJob {
 impl WhatsappIdentityChangeJob {
     /// The job type (`"whatsappIdentityChange"`).
     pub fn job_type(&self) -> &'static str {
-        todo!()
+        WHATSAPP_IDENTITY_CHANGE_ACTION
     }
 
     /// `{ type, data }` as written to the queue.
     pub fn to_value(&self) -> Value {
-        todo!()
+        serde_json::json!({
+            "type": self.job_type(),
+            "data": serde_json::to_value(&self.data).unwrap_or(Value::Null),
+        })
     }
 }

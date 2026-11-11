@@ -4,6 +4,9 @@
 //! `sequence_schedule` table; tests use recording fakes.
 
 use std::fmt;
+use std::sync::Arc;
+
+use tokio::sync::Notify;
 
 use crate::enqueue::BoxFuture;
 
@@ -35,8 +38,27 @@ pub enum ScheduleError {
 
 impl fmt::Display for ScheduleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self {
+            ScheduleError::LockAcquisition { key } => {
+                write!(f, "Failed to acquire lock {key}")
+            }
+            ScheduleError::Aggregate(errors) => {
+                write!(f, "Schedule batch failed: {}", errors.join("; "))
+            }
+            ScheduleError::Store(m) => f.write_str(m),
+        }
     }
+}
+
+/// When the next schedule or retry entry of some buckets is due.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NextDue {
+    /// This schedule cannot tell (poll at the tick interval).
+    Unknown,
+    /// No entry at all (wait for an add).
+    Nothing,
+    /// The earliest due time (unix ms).
+    At(i64),
 }
 
 impl std::error::Error for ScheduleError {}
@@ -44,7 +66,7 @@ impl std::error::Error for ScheduleError {}
 /// `seq:dispatch:{<bucket>}:lock:<dispatch id>` (the lock key the consumer
 /// compares against a `LockAcquisitionError`).
 pub fn dispatch_lock_key(bucket: u32, dispatch_id: &str) -> String {
-    todo!()
+    format!("seq:dispatch:{{{bucket}}}:lock:{dispatch_id}")
 }
 
 /// A held dispatch lock. Dropping it releases the lock.
@@ -144,4 +166,27 @@ pub trait DispatchSchedule: Send + Sync {
         dispatch_id: &'a str,
         ttl_secs: u64,
     ) -> BoxFuture<'a, Result<DispatchLock, ScheduleError>>;
+
+    /// When the next entry of `buckets` is due (both sets). The default
+    /// cannot tell: the producer then polls at its tick interval.
+    fn next_due<'a>(&'a self, buckets: &'a [u32]) -> BoxFuture<'a, Result<NextDue, ScheduleError>> {
+        let _ = buckets;
+        Box::pin(async { Ok(NextDue::Unknown) })
+    }
+
+    /// The buckets of `buckets` with an entry due at `now_ms` (`None` = this
+    /// schedule cannot tell: every bucket is polled).
+    fn due_buckets<'a>(
+        &'a self,
+        now_ms: i64,
+        buckets: &'a [u32],
+    ) -> BoxFuture<'a, Result<Option<Vec<u32>>, ScheduleError>> {
+        let _ = (now_ms, buckets);
+        Box::pin(async { Ok(None) })
+    }
+
+    /// Notified after every add (`None` = no signal).
+    fn change_signal(&self) -> Option<Arc<Notify>> {
+        None
+    }
 }

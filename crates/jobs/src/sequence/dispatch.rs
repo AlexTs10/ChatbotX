@@ -1,13 +1,22 @@
 //! `dispatch-manager.ts`: bucket hash, idempotency key and `createDispatch`.
 
-use chatbotx_db::rusqlite::Connection;
+use std::sync::Arc;
 
-use crate::sequence::repo::{ClientMode, IdGenerator, SequenceCtx, SequenceError};
+use chatbotx_db::rusqlite::{Connection, OptionalExtension, params};
+
+use crate::sequence::repo::{
+    ClientMode, IdGenerator, SequenceCtx, SequenceError, parse_id, write_tx,
+};
 
 /// `calculateBucket(workspaceId, contactId)`: base-31 hash over UTF-16 code
 /// units, mod 2 147 483 647, then `% 256` (0..=255). Persisted on the row.
 pub fn calculate_bucket(workspace_id: &str, contact_id: &str) -> u32 {
-    todo!()
+    let key = format!("{workspace_id}:{contact_id}");
+    let mut hash: u64 = 0;
+    for unit in key.encode_utf16() {
+        hash = (hash * 31 + u64::from(unit)) % 2_147_483_647;
+    }
+    (hash % 256) as u32
 }
 
 /// `generateIdempotencyKey`: `<ws>:<enrollment>:<step>:<runAt.toISOString()>`
@@ -18,7 +27,10 @@ pub fn generate_idempotency_key(
     step_id: &str,
     run_at_ms: i64,
 ) -> String {
-    todo!()
+    format!(
+        "{workspace_id}:{enrollment_id}:{step_id}:{}",
+        crate::schedules::iso_ms(run_at_ms)
+    )
 }
 
 /// `createDispatch` input.
@@ -76,7 +88,36 @@ impl DispatchInserter for SqlDispatchInserter {
         conn: &Connection,
         row: &NewDispatchRow,
     ) -> Result<Option<DispatchRecord>, SequenceError> {
-        todo!()
+        Ok(conn
+            .prepare_cached(
+                r#"INSERT INTO "SequenceDispatch" ("id", "workspaceId", "sequenceId", "contactId",
+                   "contactInboxId", "stepId", "enrollmentId", "runAtMs", "bucket", "idempotencyKey",
+                   "status", "attempt")
+                   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 0)
+                   RETURNING "id", "bucket", "runAtMs""#,
+            )?
+            .query_row(
+                params![
+                    parse_id(&row.id)?,
+                    parse_id(&row.workspace_id)?,
+                    parse_id(&row.sequence_id)?,
+                    parse_id(&row.contact_id)?,
+                    parse_id(&row.contact_inbox_id)?,
+                    parse_id(&row.step_id)?,
+                    parse_id(&row.enrollment_id)?,
+                    row.run_at_ms,
+                    row.bucket,
+                    row.idempotency_key,
+                ],
+                |r| {
+                    Ok(DispatchRecord {
+                        id: r.get::<_, i64>(0)?.to_string(),
+                        bucket: r.get(1)?,
+                        run_at_ms: r.get(2)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 }
 
@@ -89,7 +130,26 @@ pub fn create_dispatch_in(
     ids: &dyn IdGenerator,
     params: &CreateDispatchParams,
 ) -> Result<DispatchRecord, SequenceError> {
-    todo!()
+    let row = NewDispatchRow {
+        id: ids.next_id(),
+        workspace_id: params.workspace_id.clone(),
+        sequence_id: params.sequence_id.clone(),
+        contact_id: params.contact_id.clone(),
+        contact_inbox_id: params.contact_inbox_id.clone(),
+        step_id: params.step_id.clone(),
+        enrollment_id: params.enrollment_id.clone(),
+        bucket: calculate_bucket(&params.workspace_id, &params.contact_id),
+        run_at_ms: params.run_at_ms,
+        idempotency_key: generate_idempotency_key(
+            &params.workspace_id,
+            &params.enrollment_id,
+            &params.step_id,
+            params.run_at_ms,
+        ),
+    };
+    inserter
+        .insert_returning(conn, &row)?
+        .ok_or_else(|| SequenceError::Other("Failed to create dispatch".to_owned()))
 }
 
 /// `createDispatch(params)` without a client (`ClientMode::Default`) or with
@@ -100,5 +160,13 @@ pub async fn create_dispatch(
     params: CreateDispatchParams,
     mode: ClientMode,
 ) -> Result<DispatchRecord, SequenceError> {
-    todo!()
+    // One statement on the default or the root client: no transaction of
+    // its own in either mode.
+    let _ = mode;
+    let inserter = Arc::clone(&ctx.inserter);
+    let ids = Arc::clone(&ctx.ids);
+    write_tx(&ctx.db, move |conn| {
+        create_dispatch_in(conn, inserter.as_ref(), ids.as_ref(), &params)
+    })
+    .await
 }

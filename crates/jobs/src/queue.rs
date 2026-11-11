@@ -50,12 +50,40 @@ impl QueueName {
 
     /// The TypeScript queue name: `"integration"`, `"aiAgent"`, `"whatsappVoipSignaling"`, ...
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            QueueName::Integration => "integration",
+            QueueName::Chat => "chat",
+            QueueName::AiAgent => "aiAgent",
+            QueueName::Heavy => "heavy",
+            QueueName::Schedule => "schedule",
+            QueueName::Trigger => "trigger",
+            QueueName::Webhook => "webhook",
+            QueueName::Default => "default",
+            QueueName::SequenceScheduler => "sequenceScheduler",
+            QueueName::Broadcast => "broadcast",
+            QueueName::Quota => "quota",
+            QueueName::Notification => "notification",
+            QueueName::CallTranscription => "callTranscription",
+            QueueName::ProfileSnapshot => "profileSnapshot",
+            QueueName::WhatsappVoipSignaling => "whatsappVoipSignaling",
+            QueueName::Low => "low",
+            QueueName::Leaderboard => "leaderboard",
+            QueueName::MarketingMessage => "marketingMessage",
+            QueueName::Template => "template",
+        }
+    }
+
+    /// Position in [`QueueName::ALL`].
+    pub(crate) fn index(self) -> usize {
+        QueueName::ALL
+            .iter()
+            .position(|q| *q == self)
+            .unwrap_or_default()
     }
 
     /// Inverse of [`QueueName::as_str`].
     pub fn parse(name: &str) -> Option<QueueName> {
-        todo!()
+        QueueName::ALL.into_iter().find(|q| q.as_str() == name)
     }
 }
 
@@ -69,5 +97,21 @@ pub enum QueueGroup {
 
 /// `queueGroupByName[queue]`.
 pub fn queue_group(queue: QueueName) -> QueueGroup {
-    todo!()
+    match queue {
+        QueueName::Integration
+        | QueueName::Chat
+        | QueueName::SequenceScheduler
+        | QueueName::Broadcast
+        | QueueName::Notification
+        | QueueName::CallTranscription
+        | QueueName::WhatsappVoipSignaling
+        | QueueName::Low => QueueGroup::Hot,
+        _ => QueueGroup::Bulk,
+    }
+}
+
+impl std::fmt::Display for QueueName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }

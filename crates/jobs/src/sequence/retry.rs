@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use chatbotx_db::Db;
+use chatbotx_db::rusqlite::params;
 
 use crate::clock::Clock;
 use crate::enqueue::JobsError;
@@ -29,7 +30,36 @@ impl RetrySchedulerService {
         workspace_id: &str,
         error_message: &str,
     ) -> Result<(), JobsError> {
-        todo!()
+        self.set_terminal(dispatch_id, workspace_id, "failed", error_message)
+            .await?;
+        tracing::error!(dispatch_id, error_message, "Dispatch marked as failed");
+        Ok(())
+    }
+
+    /// `status = <status>`, `lastError`, `updatedAt = now` (and `failedAt`
+    /// for a failure), only for the running row of that workspace.
+    async fn set_terminal(
+        &self,
+        dispatch_id: &str,
+        workspace_id: &str,
+        status: &'static str,
+        last_error: &str,
+    ) -> Result<(), JobsError> {
+        let (id, ws) = (number(dispatch_id)?, number(workspace_id)?);
+        let now = self.clock.now_ms();
+        let last_error = last_error.to_owned();
+        self.db
+            .write(move |tx| {
+                tx.execute(
+                    r#"UPDATE "SequenceDispatch" SET "status" = ?3, "lastError" = ?4, "updatedAt" = ?5,
+                       "failedAt" = CASE WHEN ?3 = 'failed' THEN ?5 ELSE "failedAt" END
+                       WHERE "id" = ?1 AND "workspaceId" = ?2 AND "status" = 'running'"#,
+                    params![id, ws, status, last_error, now],
+                )?;
+                Ok(())
+            })
+            .await?;
+        Ok(())
     }
 
     /// `status = 'canceled'`, `lastError = reason`, `updatedAt = now`; no
@@ -40,7 +70,8 @@ impl RetrySchedulerService {
         workspace_id: &str,
         reason: &str,
     ) -> Result<(), JobsError> {
-        todo!()
+        self.set_terminal(dispatch_id, workspace_id, "canceled", reason)
+            .await
     }
 }
 
@@ -53,5 +84,23 @@ pub async fn revert_dispatch_to_pending(
     dispatch_id: &str,
     workspace_id: &str,
 ) -> Result<(), JobsError> {
-    todo!()
+    let (id, ws) = (number(dispatch_id)?, number(workspace_id)?);
+    let now = clock.now_ms();
+    db.write(move |tx| {
+        tx.execute(
+            r#"UPDATE "SequenceDispatch" SET "status" = 'pending', "lockedAt" = NULL,
+               "lockOwner" = NULL, "updatedAt" = ?3
+               WHERE "id" = ?1 AND "workspaceId" = ?2 AND "status" = 'running'"#,
+            params![id, ws, now],
+        )?;
+        Ok(())
+    })
+    .await?;
+    Ok(())
+}
+
+fn number(id: &str) -> Result<i64, JobsError> {
+    id.trim()
+        .parse()
+        .map_err(|_| JobsError::InvalidOptions(format!("invalid id {id:?}")))
 }

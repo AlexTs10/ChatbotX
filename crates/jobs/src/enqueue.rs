@@ -32,7 +32,14 @@ pub enum JobsError {
 
 impl fmt::Display for JobsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self {
+            JobsError::InvalidOptions(m)
+            | JobsError::Store(m)
+            | JobsError::Unavailable(m)
+            | JobsError::Shutdown(m)
+            | JobsError::Config(m)
+            | JobsError::Other(m) => f.write_str(m),
+        }
     }
 }
 
@@ -55,4 +62,30 @@ pub trait Enqueuer: Send + Sync {
         queue: QueueName,
         jobs: Vec<NewJob>,
     ) -> BoxFuture<'_, Result<Vec<AddResult>, JobsError>>;
+}
+
+impl From<chatbotx_db::DbError> for JobsError {
+    fn from(error: chatbotx_db::DbError) -> JobsError {
+        JobsError::Store(error.to_string())
+    }
+}
+
+impl<T: Enqueuer + ?Sized> Enqueuer for std::sync::Arc<T> {
+    fn add(
+        &self,
+        queue: QueueName,
+        name: &str,
+        data: Value,
+        opts: JobOptions,
+    ) -> BoxFuture<'_, Result<AddResult, JobsError>> {
+        (**self).add(queue, name, data, opts)
+    }
+
+    fn add_bulk(
+        &self,
+        queue: QueueName,
+        jobs: Vec<NewJob>,
+    ) -> BoxFuture<'_, Result<Vec<AddResult>, JobsError>> {
+        (**self).add_bulk(queue, jobs)
+    }
 }

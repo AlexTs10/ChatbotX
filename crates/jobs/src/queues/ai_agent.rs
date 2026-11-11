@@ -19,7 +19,12 @@ impl AiJobAction {
     /// `"processAutomatedResponse"`, `"commentAIReply"`,
     /// `"processStoryReplyAutomation"`, `"processStoryMentionAutomation"`.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            AiJobAction::ProcessAutomatedResponse => "processAutomatedResponse",
+            AiJobAction::CommentAiReply => "commentAIReply",
+            AiJobAction::ProcessStoryReplyAutomation => "processStoryReplyAutomation",
+            AiJobAction::ProcessStoryMentionAutomation => "processStoryMentionAutomation",
+        }
     }
 }
 
@@ -98,11 +103,11 @@ pub enum AiJobData {
 impl AiJobData {
     /// `aiJobDataSchema.parse` (string identifiers only).
     pub fn parse(value: &Value) -> Result<AiJobData, SchemaError> {
-        todo!()
+        serde_json::from_value(value.clone()).map_err(SchemaError::from_serde)
     }
 
     /// The JSON written to the queue.
     pub fn to_value(&self) -> Value {
-        todo!()
+        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }

@@ -11,7 +11,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::options::JobOptions;
+use crate::options::{Backoff, JobOptions, Retention};
 
 /// `HeavyJobAction` (serde names = the TypeScript strings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -30,7 +30,17 @@ pub enum HeavyJobAction {
 impl HeavyJobAction {
     /// `"processAIFile"`, `"aiEditImage"`, ..., `"optimizeStoredImage"`.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            HeavyJobAction::ProcessAiFile => "processAIFile",
+            HeavyJobAction::AiEditImage => "aiEditImage",
+            HeavyJobAction::AiSegmentImage => "aiSegmentImage",
+            HeavyJobAction::AiGenerateImage => "aiGenerateImage",
+            HeavyJobAction::AiSpeechToText => "aiSpeechToText",
+            HeavyJobAction::AiTextToSpeech => "aiTextToSpeech",
+            HeavyJobAction::ExtractTextFromFile => "extractTextFromFile",
+            HeavyJobAction::AnalyzeImage => "analyzeImage",
+            HeavyJobAction::OptimizeStoredImage => "optimizeStoredImage",
+        }
     }
 }
 
@@ -38,13 +48,64 @@ impl HeavyJobAction {
 /// attempt (`wait_timeout_ms` each) plus the backoff between them plus the
 /// 60 000 ms handoff (spec S8).
 pub fn heavy_completion_wait_timeout_ms(action: HeavyJobAction, wait_timeout_ms: u64) -> u64 {
-    todo!()
+    let options = heavy_job_options(action);
+    let attempts = u64::from(options.attempts.unwrap_or(1));
+    let retries = attempts.saturating_sub(1);
+    let backoff_total: u64 = match options.backoff {
+        None => 0,
+        Some(Backoff::Fixed(delay)) => delay.saturating_mul(retries),
+        Some(Backoff::Exponential(delay)) => (0..retries)
+            .map(|i| delay.saturating_mul(1u64 << i.min(62)))
+            .fold(0u64, u64::saturating_add),
+    };
+    attempts
+        .saturating_mul(wait_timeout_ms)
+        .saturating_add(backoff_total)
+        .saturating_add(HEAVY_JOB_COMPLETION_WAIT_BUFFER_MS)
 }
+
+/// Extra time for the completion event and worker handoff after the final
+/// provider attempt (`HEAVY_JOB_COMPLETION_WAIT_BUFFER_MS`).
+const HEAVY_JOB_COMPLETION_WAIT_BUFFER_MS: u64 = 60_000;
 
 /// `getHeavyJobOptions(action)`: attempts, backoff and retention per action
 /// (spec 1.2 row `heavy`).
 pub fn heavy_job_options(action: HeavyJobAction) -> JobOptions {
-    todo!()
+    let paid = |delay: u64| JobOptions {
+        attempts: Some(2),
+        backoff: Some(Backoff::Exponential(delay)),
+        remove_on_complete: Some(Retention::KeepCount(200)),
+        remove_on_fail: Some(Retention::KeepCount(500)),
+        ..JobOptions::default()
+    };
+    match action {
+        HeavyJobAction::ProcessAiFile => JobOptions {
+            attempts: Some(3),
+            backoff: Some(Backoff::Exponential(30_000)),
+            remove_on_complete: Some(Retention::KeepCount(500)),
+            remove_on_fail: Some(Retention::KeepCount(1000)),
+            ..JobOptions::default()
+        },
+        HeavyJobAction::AiEditImage
+        | HeavyJobAction::AiSegmentImage
+        | HeavyJobAction::AiGenerateImage
+        | HeavyJobAction::AnalyzeImage => paid(30_000),
+        HeavyJobAction::AiSpeechToText
+        | HeavyJobAction::AiTextToSpeech
+        | HeavyJobAction::ExtractTextFromFile => paid(15_000),
+        HeavyJobAction::OptimizeStoredImage => JobOptions {
+            attempts: Some(2),
+            backoff: Some(Backoff::Exponential(60_000)),
+            delay_ms: Some(5000),
+            priority: Some(1000),
+            remove_on_complete: Some(Retention::KeepAge {
+                age_secs: 3600,
+                count: Some(1000),
+            }),
+            remove_on_fail: Some(Retention::KeepCount(1000)),
+            ..JobOptions::default()
+        },
+    }
 }
 
 /// A payload that does not match its schema (the zod `safeParse` failure).
@@ -53,9 +114,21 @@ pub struct SchemaError {
     pub message: String,
 }
 
+impl SchemaError {
+    pub fn new(message: impl Into<String>) -> SchemaError {
+        SchemaError {
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn from_serde(error: serde_json::Error) -> SchemaError {
+        SchemaError::new(error.to_string())
+    }
+}
+
 impl fmt::Display for SchemaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        f.write_str(&self.message)
     }
 }
 
@@ -169,12 +242,127 @@ impl HeavyJobData {
     /// type matches the job, segment details field differs from the output
     /// field, string identifiers).
     pub fn parse(value: &Value) -> Result<HeavyJobData, SchemaError> {
-        todo!()
+        let parsed: HeavyJobData =
+            serde_json::from_value(value.clone()).map_err(SchemaError::from_serde)?;
+        parsed.validate()?;
+        Ok(parsed)
     }
 
     /// The JSON written to the queue.
     pub fn to_value(&self) -> Value {
-        todo!()
+        serde_json::to_value(self).unwrap_or(Value::Null)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        match self {
+            HeavyJobData::ProcessAiFile(d) => {
+                non_empty("aiFileId", &d.ai_file_id)?;
+                if let Some(run) = &d.run_id {
+                    non_empty("runId", run)?;
+                }
+                Ok(())
+            }
+            HeavyJobData::AiEditImage(d) => d.validate("aiEditImage"),
+            HeavyJobData::AiSegmentImage(d) => {
+                d.validate("aiSegmentImage")?;
+                let field = |name: &str| d.step.get(name).and_then(Value::as_str);
+                if let Some(details) = field("detailsOutputFieldId").filter(|s| !s.is_empty()) {
+                    if Some(details) == field("outputFieldId") {
+                        return Err(SchemaError::new(
+                            "Details field must differ from the output image field",
+                        ));
+                    }
+                    if Some(details) == field("inputFieldId") {
+                        return Err(SchemaError::new(
+                            "Details field must differ from the source image field",
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            HeavyJobData::AiGenerateImage(d) => d.validate("aiGenerateImage"),
+            HeavyJobData::AiSpeechToText(d) => d.validate("aiSpeechToText"),
+            HeavyJobData::AiTextToSpeech(d) => d.validate("aiTextToSpeech"),
+            HeavyJobData::ExtractTextFromFile(d) => {
+                for (name, value) in [
+                    ("workspaceId", &d.workspace_id),
+                    ("conversationId", &d.conversation_id),
+                    ("attachmentId", &d.attachment_id),
+                    ("originPath", &d.origin_path),
+                    ("mimeType", &d.mime_type),
+                    ("query", &d.query),
+                ] {
+                    non_empty(name, value)?;
+                }
+                Ok(())
+            }
+            HeavyJobData::AnalyzeImage(d) => {
+                for (name, value) in [
+                    ("workspaceId", &d.workspace_id),
+                    ("originPath", &d.origin_path),
+                    ("mimeType", &d.mime_type),
+                    ("prompt", &d.prompt),
+                ] {
+                    non_empty(name, value)?;
+                }
+                match &d.provider_info {
+                    ImageProviderInfo::OpenaiCompatible {
+                        kind,
+                        integration_id,
+                        model,
+                    } => {
+                        if kind != "openaiCompatible" {
+                            return Err(SchemaError::new("providerInfo.kind is not valid"));
+                        }
+                        non_empty("providerInfo.integrationId", integration_id)?;
+                        non_empty("providerInfo.model", model)
+                    }
+                    ImageProviderInfo::Builtin { provider, model } => {
+                        non_empty("providerInfo.provider", provider)?;
+                        non_empty("providerInfo.model", model)
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn non_empty(name: &str, value: &str) -> Result<(), SchemaError> {
+    if value.is_empty() {
+        Err(SchemaError::new(format!("{name} must not be empty")))
+    } else {
+        Ok(())
+    }
+}
+
+impl HeavyStepJobData {
+    fn validate(&self, step_type: &str) -> Result<(), SchemaError> {
+        non_empty("conversationId", &self.conversation_id)?;
+        non_empty("contactInboxId", &self.contact_inbox_id)?;
+        if let Some(key) = &self.outcome_key {
+            non_empty("outcomeKey", key)?;
+        }
+        if let Some(c) = &self.continuation {
+            non_empty("continuation.flowExecutionKey", &c.flow_execution_key)?;
+            non_empty("continuation.flowId", &c.flow_id)?;
+            if let Some(send_from) = &c.send_from
+                && send_from != "inbox"
+            {
+                return Err(SchemaError::new("continuation.sendFrom must be inbox"));
+            }
+        }
+        let Some(step) = self.step.as_object() else {
+            return Err(SchemaError::new("step must be an object"));
+        };
+        if step.get("stepType").and_then(Value::as_str) != Some(step_type) {
+            return Err(SchemaError::new(format!(
+                "step.stepType must be \"{step_type}\""
+            )));
+        }
+        match step.get("id") {
+            Some(Value::String(id)) if !id.is_empty() => Ok(()),
+            _ => Err(SchemaError::new("step.id must be a string")),
+        }
     }
 }
 
@@ -204,11 +392,28 @@ pub enum HeavyStepResult {
 impl HeavyStepResult {
     /// `heavyStepResultSchema.parse`.
     pub fn parse(value: &Value) -> Result<HeavyStepResult, SchemaError> {
-        todo!()
+        let parsed: HeavyStepResult =
+            serde_json::from_value(value.clone()).map_err(SchemaError::from_serde)?;
+        match &parsed {
+            HeavyStepResult::Success { output_values } => {
+                if output_values.is_empty() {
+                    return Err(SchemaError::new("outputValues must not be empty"));
+                }
+                for v in output_values {
+                    non_empty("outputValues.customFieldId", &v.custom_field_id)?;
+                    non_empty("outputValues.value", &v.value)?;
+                }
+            }
+            HeavyStepResult::Skip => {}
+            HeavyStepResult::Error { error_message } => {
+                non_empty("errorMessage", error_message)?;
+            }
+        }
+        Ok(parsed)
     }
 
     pub fn to_value(&self) -> Value {
-        todo!()
+        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
 
@@ -221,11 +426,11 @@ pub struct HeavyExtractTextFromFileResult {
 
 impl HeavyExtractTextFromFileResult {
     pub fn parse(value: &Value) -> Result<HeavyExtractTextFromFileResult, SchemaError> {
-        todo!()
+        serde_json::from_value(value.clone()).map_err(SchemaError::from_serde)
     }
 
     pub fn to_value(&self) -> Value {
-        todo!()
+        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
 
@@ -237,36 +442,86 @@ pub struct HeavyAnalyzeImageResult {
 
 impl HeavyAnalyzeImageResult {
     pub fn parse(value: &Value) -> Result<HeavyAnalyzeImageResult, SchemaError> {
-        todo!()
+        serde_json::from_value(value.clone()).map_err(SchemaError::from_serde)
     }
 
     pub fn to_value(&self) -> Value {
-        todo!()
+        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
 
 /// Stand-in for flow-config `aiEditImageDefaultFn(overrides)`: the default
 /// `aiEditImage` step with `overrides` (a JSON object) applied.
 pub fn ai_edit_image_default_step(overrides: Value) -> Value {
-    todo!()
+    default_step(
+        "aiEditImage",
+        serde_json::json!({ "provider": "openai", "model": "gpt-image-1", "inputFieldId": "", "prompt": "", "size": "auto", "quality": "auto", "outputFieldId": "" }),
+        overrides,
+        2,
+    )
 }
 
 /// Stand-in for flow-config `aiSegmentImageDefaultFn(overrides)`.
 pub fn ai_segment_image_default_step(overrides: Value) -> Value {
-    todo!()
+    default_step(
+        "aiSegmentImage",
+        serde_json::json!({ "inputFieldId": "", "target": "", "matchSelection": "largest", "outputFieldId": "" }),
+        overrides,
+        3,
+    )
 }
 
 /// Stand-in for flow-config `aiGenerateImageDefaultFn(overrides)`.
 pub fn ai_generate_image_default_step(overrides: Value) -> Value {
-    todo!()
+    default_step(
+        "aiGenerateImage",
+        serde_json::json!({ "provider": "openai", "model": "gpt-image-1", "prompt": "", "size": "auto", "quality": "auto", "outputFieldId": "" }),
+        overrides,
+        2,
+    )
 }
 
 /// Stand-in for flow-config `AISpeechToTextDefaultFn(overrides)`.
 pub fn ai_speech_to_text_default_step(overrides: Value) -> Value {
-    todo!()
+    default_step(
+        "aiSpeechToText",
+        serde_json::json!({ "inputFieldId": "", "outputFieldId": "" }),
+        overrides,
+        2,
+    )
 }
 
 /// Stand-in for flow-config `AITextToSpeechDefaultFn(overrides)`.
 pub fn ai_text_to_speech_default_step(overrides: Value) -> Value {
-    todo!()
+    default_step(
+        "aiTextToSpeech",
+        serde_json::json!({ "message": "", "outputFieldId": "" }),
+        overrides,
+        2,
+    )
+}
+
+/// `{ id: createId(), ...defaults, ...overrides, stepType, states }` (the
+/// shape of the flow-config `*DefaultFn`s).
+fn default_step(step_type: &str, defaults: Value, overrides: Value, states: usize) -> Value {
+    let mut step = serde_json::Map::new();
+    step.insert("id".to_owned(), Value::String(crate::rand::numeric_id()));
+    if let Value::Object(defaults) = defaults {
+        step.extend(defaults);
+    }
+    if let Value::Object(overrides) = overrides {
+        step.extend(overrides);
+    }
+    step.insert("stepType".to_owned(), Value::String(step_type.to_owned()));
+    let kinds: &[&str] = if states == 3 {
+        &["success", "skip", "error"]
+    } else {
+        &["success", "error"]
+    };
+    let states: Vec<Value> = kinds
+        .iter()
+        .map(|kind| serde_json::json!({ "id": crate::rand::numeric_id(), "type": kind }))
+        .collect();
+    step.insert("states".to_owned(), Value::Array(states));
+    Value::Object(step)
 }

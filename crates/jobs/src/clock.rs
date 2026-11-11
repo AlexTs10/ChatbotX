@@ -12,6 +12,9 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now_ms(&self) -> i64 {
-        todo!()
+        match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) => i64::try_from(d.as_millis()).unwrap_or(i64::MAX),
+            Err(e) => -i64::try_from(e.duration().as_millis()).unwrap_or(i64::MAX),
+        }
     }
 }

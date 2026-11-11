@@ -31,23 +31,23 @@ pub struct JobCtx {
 impl JobCtx {
     /// [`is_final_attempt`] for this job (call from inside a handler).
     pub fn is_final_attempt(&self) -> bool {
-        todo!()
+        is_final_attempt(self.attempts_made, self.attempts)
     }
 
     /// [`has_exhausted_attempts`] for this job (call from a `failed` hook).
     pub fn has_exhausted_attempts(&self) -> bool {
-        todo!()
+        has_exhausted_attempts(self.attempts_made, self.attempts)
     }
 }
 
 /// `isFinalAttempt`: `attempts_made + 1 >= attempts.unwrap_or(1)`.
 pub fn is_final_attempt(attempts_made: u32, attempts: Option<u32>) -> bool {
-    todo!()
+    attempts_made.saturating_add(1) >= attempts.unwrap_or(1)
 }
 
 /// `hasExhaustedAttempts`: `attempts_made >= attempts.unwrap_or(1)`.
 pub fn has_exhausted_attempts(attempts_made: u32, attempts: Option<u32>) -> bool {
-    todo!()
+    attempts_made >= attempts.unwrap_or(1)
 }
 
 /// How a handler ends with an error (spec 2.6).
@@ -60,3 +60,26 @@ pub enum JobError {
     /// `moveToDelayed(run_at_ms)` + `DelayedError`: parked, not a failure.
     Delayed { run_at_ms: i64 },
 }
+
+impl JobError {
+    /// A retryable failure with `message` as its text.
+    pub fn retryable(message: impl Into<String>) -> JobError {
+        JobError::Retryable(message.into().into())
+    }
+
+    /// An unrecoverable failure with `message` as its text.
+    pub fn unrecoverable(message: impl Into<String>) -> JobError {
+        JobError::Unrecoverable(message.into().into())
+    }
+}
+
+impl std::fmt::Display for JobError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JobError::Retryable(e) | JobError::Unrecoverable(e) => write!(f, "{e}"),
+            JobError::Delayed { run_at_ms } => write!(f, "job delayed until {run_at_ms}"),
+        }
+    }
+}
+
+impl std::error::Error for JobError {}

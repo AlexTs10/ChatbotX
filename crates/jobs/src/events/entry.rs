@@ -28,5 +28,24 @@ pub fn run_events_worker(
     worker: Arc<dyn EventWorkerControl>,
     flush_realtime: RealtimeFlush,
 ) -> JoinHandle<()> {
-    todo!()
+    let closer = Arc::clone(&worker);
+    shutdown.on_shutdown("events", Box::new(move || closer.stop()));
+    shutdown.on_shutdown_finalize(
+        "workspace-realtime-events",
+        Box::new(move || flush_realtime()),
+    );
+    let coordinator = Arc::clone(shutdown);
+    shutdown.run_worker(
+        "events",
+        Box::new(move || {
+            Box::pin(async move {
+                worker.start().await?;
+                // A shutdown that began mid-startup stopped a partial set.
+                if coordinator.is_requested() {
+                    worker.stop().await?;
+                }
+                Ok::<(), BoxError>(())
+            })
+        }),
+    )
 }

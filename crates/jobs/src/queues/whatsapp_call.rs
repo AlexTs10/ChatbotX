@@ -14,7 +14,10 @@ pub enum WhatsappCallJobAction {
 impl WhatsappCallJobAction {
     /// `"whatsappCallNativeRecordingFetch"`, `"whatsappCallNativeTranscriptFetch"`.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            WhatsappCallJobAction::NativeRecordingFetch => "whatsappCallNativeRecordingFetch",
+            WhatsappCallJobAction::NativeTranscriptFetch => "whatsappCallNativeTranscriptFetch",
+        }
     }
 }
 
@@ -54,21 +57,21 @@ pub enum WhatsappCallJobData {
 impl WhatsappCallJobData {
     /// The JSON written to the queue.
     pub fn to_value(&self) -> Value {
-        todo!()
+        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
 
 /// `whatsappCallNativeRecordingFetchJobId(wacid)` = `native-rec-fetch-<wacid>`.
 pub fn whatsapp_call_native_recording_fetch_job_id(wacid: &str) -> String {
-    todo!()
+    format!("native-rec-fetch-{wacid}")
 }
 
 /// `whatsappCallNativeTranscriptFetchJobId(wacid)` = `native-transcript-fetch-<wacid>`.
 pub fn whatsapp_call_native_transcript_fetch_job_id(wacid: &str) -> String {
-    todo!()
+    format!("native-transcript-fetch-{wacid}")
 }
 
 /// `whatsappCallRecordingReadyJobId(whatsappCallId)` (the existing job id).
 pub fn whatsapp_call_recording_ready_job_id(whatsapp_call_id: &str) -> String {
-    todo!()
+    format!("rec-ready-{whatsapp_call_id}")
 }

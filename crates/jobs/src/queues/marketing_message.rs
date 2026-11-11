@@ -9,11 +9,13 @@ pub enum MarketingMessageJobAction {
 impl MarketingMessageJobAction {
     /// `"processCampaign"`.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            MarketingMessageJobAction::ProcessCampaign => "processCampaign",
+        }
     }
 }
 
 /// `mm-campaign-<step>-<campaignRowId>`.
 pub fn marketing_message_campaign_job_id(campaign_row_id: &str, step: &str) -> String {
-    todo!()
+    format!("mm-campaign-{step}-{campaign_row_id}")
 }

@@ -10,5 +10,19 @@ pub const BUCKET_COUNT: u32 = 256;
 /// `getAssignedBuckets()` over the value of `SCHEDULER_BUCKET_RANGE`:
 /// `None` → `0..=255`; `"a,b,c"` → that list; `"a-b"` → the inclusive range.
 pub fn assigned_buckets(range: Option<&str>) -> Vec<u32> {
-    todo!()
+    let Some(range) = range.map(str::trim).filter(|r| !r.is_empty()) else {
+        return (0..BUCKET_COUNT).collect();
+    };
+    if range.contains(',') {
+        return range
+            .split(',')
+            .filter_map(|b| b.trim().parse().ok())
+            .collect();
+    }
+    let mut ends = range.splitn(2, '-').map(|b| b.trim().parse::<u32>().ok());
+    match (ends.next().flatten(), ends.next()) {
+        (Some(start), Some(Some(end))) if start <= end => (start..=end).collect(),
+        (Some(single), None) => vec![single],
+        _ => Vec::new(),
+    }
 }

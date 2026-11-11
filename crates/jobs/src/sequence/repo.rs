@@ -11,7 +11,8 @@
 //! `db.transaction`.
 
 use std::fmt;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use chatbotx_db::rusqlite::Connection;
 use chatbotx_db::{Db, DbError};
@@ -41,7 +42,23 @@ pub enum SequenceError {
 
 impl fmt::Display for SequenceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self {
+            SequenceError::NotFound(m) | SequenceError::Db(m) | SequenceError::Other(m) => {
+                f.write_str(m)
+            }
+            SequenceError::Schedule(e) => write!(f, "{e}"),
+            SequenceError::ScheduleRemoval { failed } => {
+                let list: Vec<String> = failed
+                    .iter()
+                    .map(|(id, bucket)| format!("{id} bucket={bucket}"))
+                    .collect();
+                write!(
+                    f,
+                    "Failed to remove sequence dispatches from schedule: {}",
+                    list.join(", ")
+                )
+            }
+        }
     }
 }
 
@@ -49,13 +66,13 @@ impl std::error::Error for SequenceError {}
 
 impl From<DbError> for SequenceError {
     fn from(error: DbError) -> SequenceError {
-        todo!()
+        SequenceError::Db(error.to_string())
     }
 }
 
 impl From<ScheduleError> for SequenceError {
     fn from(error: ScheduleError) -> SequenceError {
-        todo!()
+        SequenceError::Schedule(error)
     }
 }
 
@@ -69,8 +86,19 @@ pub trait IdGenerator: Send + Sync {
 pub struct CreateId;
 
 impl IdGenerator for CreateId {
+    /// A time-ordered integer id (unix ms in the high bits, a counter in the
+    /// low 20 bits), unique in this process.
     fn next_id(&self) -> String {
-        todo!()
+        static LAST: AtomicI64 = AtomicI64::new(0);
+        let now = crate::clock::SystemClock.now_ms().max(0) << 20;
+        let mut last = LAST.load(Ordering::Relaxed);
+        loop {
+            let next = now.max(last + 1);
+            match LAST.compare_exchange_weak(last, next, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => return next.to_string(),
+                Err(current) => last = current,
+            }
+        }
     }
 }
 
@@ -138,7 +166,15 @@ impl ContactInboxLookup for SqlContactInboxLookup {
         workspace_id: &str,
         contact_id: &str,
     ) -> Result<Vec<ContactInboxRef>, SequenceError> {
-        todo!()
+        Ok(crate::sequence::contacts::get_contact_inboxes_in(
+            conn,
+            self.observer.as_deref(),
+            workspace_id,
+            contact_id,
+        )?
+        .into_iter()
+        .map(|row| ContactInboxRef { id: row.id })
+        .collect())
     }
 }
 
@@ -165,7 +201,12 @@ impl DispatchCreator for SqlDispatchCreator {
         conn: &Connection,
         params: &CreateDispatchParams,
     ) -> Result<DispatchRecord, SequenceError> {
-        todo!()
+        crate::sequence::dispatch::create_dispatch_in(
+            conn,
+            self.inserter.as_ref(),
+            self.ids.as_ref(),
+            params,
+        )
     }
 }
 
@@ -182,11 +223,15 @@ pub struct DefaultNextRunPolicy;
 
 impl NextRunPolicy for DefaultNextRunPolicy {
     fn next_run_at_from_step(&self, step: &StepTiming, base_ms: i64) -> i64 {
-        todo!()
+        crate::sequence::next_run::calculate_next_run_at_from_step(
+            step,
+            Some(base_ms),
+            &crate::clock::SystemClock,
+        )
     }
 
     fn next_valid_send_time(&self, at_ms: i64, window: &SendWindow) -> i64 {
-        todo!()
+        crate::sequence::send_time::calculate_next_valid_send_time(at_ms, window, chrono_tz::UTC)
     }
 }
 
@@ -213,6 +258,96 @@ impl SequenceCtx {
         schedule: Arc<dyn DispatchSchedule>,
         clock: Arc<dyn Clock>,
     ) -> SequenceCtx {
-        todo!()
+        let inserter: Arc<dyn DispatchInserter> =
+            Arc::new(crate::sequence::dispatch::SqlDispatchInserter);
+        let ids: Arc<dyn IdGenerator> = Arc::new(CreateId);
+        SequenceCtx {
+            db,
+            schedule,
+            clock,
+            ids: Arc::clone(&ids),
+            observer: None,
+            contact_inboxes: Arc::new(SqlContactInboxLookup::default()),
+            dispatches: Arc::new(SqlDispatchCreator {
+                inserter: Arc::clone(&inserter),
+                ids,
+            }),
+            inserter,
+            next_run: Arc::new(DefaultNextRunPolicy),
+        }
+    }
+
+    pub(crate) fn note(&self, kind: StatementKind, table: &str) {
+        note(self.observer.as_deref(), kind, table);
+    }
+
+    pub(crate) fn begin(&self) {
+        if let Some(o) = &self.observer {
+            o.on_begin();
+        }
+    }
+
+    pub(crate) fn commit(&self) {
+        if let Some(o) = &self.observer {
+            o.on_commit();
+        }
+    }
+}
+
+/// Reports one statement to `observer`.
+pub(crate) fn note(observer: Option<&dyn TxObserver>, kind: StatementKind, table: &str) {
+    if let Some(o) = observer {
+        o.on_statement(kind, table);
+    }
+}
+
+/// An id as the integer the P2.4 tables store (`"601"` → 601).
+pub fn parse_id(id: &str) -> Result<i64, SequenceError> {
+    id.trim()
+        .parse()
+        .map_err(|_| SequenceError::Other(format!("invalid id {id:?}")))
+}
+
+/// Runs `f` on a reader connection; its `SequenceError` comes back unchanged.
+pub(crate) async fn read_tx<R, F>(db: &Db, f: F) -> Result<R, SequenceError>
+where
+    F: FnOnce(&Connection) -> Result<R, SequenceError> + Send + 'static,
+    R: Send + 'static,
+{
+    db.read(move |conn| Ok(f(conn))).await?
+}
+
+/// Runs `f` in one write transaction; an `Err` of `f` rolls back and comes
+/// back unchanged.
+pub(crate) async fn write_tx<R, F>(db: &Db, f: F) -> Result<R, SequenceError>
+where
+    F: FnOnce(&Connection) -> Result<R, SequenceError> + Send + 'static,
+    R: Send + 'static,
+{
+    let slot: Arc<Mutex<Option<SequenceError>>> = Arc::new(Mutex::new(None));
+    let inner = Arc::clone(&slot);
+    let result = db
+        .write(move |tx| match f(tx) {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                *inner.lock().unwrap_or_else(PoisonError::into_inner) = Some(err);
+                Err(DbError::other("rolled back"))
+            }
+        })
+        .await;
+    match result {
+        Ok(value) => Ok(value),
+        Err(db_err) => Err(slot
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .unwrap_or_else(|| SequenceError::from(db_err))),
+    }
+}
+
+/// `rusqlite` errors of a statement, mapped like the writer maps them.
+impl From<chatbotx_db::rusqlite::Error> for SequenceError {
+    fn from(error: chatbotx_db::rusqlite::Error) -> SequenceError {
+        SequenceError::from(DbError::from(error))
     }
 }

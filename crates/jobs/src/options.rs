@@ -17,7 +17,27 @@ impl Backoff {
     /// (BullMQ `classes/backoffs.js`, no jitter): fixed = delay,
     /// exponential = `round(2^(attempts_made - 1) * delay)`.
     pub fn delay_ms(self, attempts_made: u32) -> u64 {
-        todo!()
+        match self {
+            Backoff::Fixed(delay) => delay,
+            Backoff::Exponential(delay) => {
+                let exp = i32::try_from(attempts_made)
+                    .unwrap_or(i32::MAX)
+                    .saturating_sub(1);
+                let value = 2f64.powi(exp) * delay as f64;
+                if value >= u64::MAX as f64 {
+                    u64::MAX
+                } else {
+                    value.round() as u64
+                }
+            }
+        }
+    }
+
+    /// The configured delay (`backoff.delay`).
+    pub fn base_ms(self) -> u64 {
+        match self {
+            Backoff::Fixed(delay) | Backoff::Exponential(delay) => delay,
+        }
     }
 }
 
@@ -60,7 +80,16 @@ pub struct JobOptions {
 impl JobOptions {
     /// `{ ...defaults, ...producer }`: every field set in `producer` wins.
     pub fn merge(defaults: &JobOptions, producer: &JobOptions) -> JobOptions {
-        todo!()
+        JobOptions {
+            job_id: producer.job_id.clone().or_else(|| defaults.job_id.clone()),
+            delay_ms: producer.delay_ms.or(defaults.delay_ms),
+            priority: producer.priority.or(defaults.priority),
+            attempts: producer.attempts.or(defaults.attempts),
+            backoff: producer.backoff.or(defaults.backoff),
+            remove_on_complete: producer.remove_on_complete.or(defaults.remove_on_complete),
+            remove_on_fail: producer.remove_on_fail.or(defaults.remove_on_fail),
+            dedup: producer.dedup.clone().or_else(|| defaults.dedup.clone()),
+        }
     }
 }
 
