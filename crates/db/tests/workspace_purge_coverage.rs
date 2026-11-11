@@ -144,9 +144,10 @@ async fn does_not_add_an_unindexed_foreign_key_or_retain_a_fixed_baseline_entry(
             tables.iter().any(|t| t == table)
         })
         .collect();
-    assert!(
-        baseline.len() >= 18,
-        "expected at least the 18 part-1 baseline entries, found {}",
+    assert_eq!(
+        baseline.len(),
+        83,
+        "expected all 83 baseline entries, found {}",
         baseline.len()
     );
 

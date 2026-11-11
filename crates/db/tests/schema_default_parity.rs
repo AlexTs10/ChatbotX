@@ -70,8 +70,8 @@ async fn only_the_known_columns_declare_a_default_the_database_does_not_have() {
         );
         checked += 1;
     }
-    assert!(
-        checked >= 10,
-        "expected the 10 part-1 columns, checked {checked}"
+    assert_eq!(
+        checked, 16,
+        "expected all 16 listed columns, checked {checked}"
     );
 }

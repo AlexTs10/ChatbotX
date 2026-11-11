@@ -529,3 +529,199 @@ pub fn in_list_values(list: &str) -> Vec<String> {
         })
         .collect()
 }
+
+// ---------------------------------------------------------------------------
+// Part-3 rows (P2.5, spec 1.7 item 5)
+// ---------------------------------------------------------------------------
+
+/// Ids of the contact side of the TS `seedLinkedEvent` (one Inbox, Contact, ContactInbox).
+#[derive(Debug, Clone, Copy)]
+pub struct ContactInboxSeed {
+    pub inbox_id: i64,
+    pub contact_id: i64,
+    pub contact_inbox_id: i64,
+}
+
+/// Inserts one Inbox, one Contact and one ContactInbox of `workspace_id` on `channel`
+/// (the TS `seedLinkedEvent` shape: the contact has only `workspaceId`). Ids are
+/// `first_id`, `first_id + 1`, `first_id + 2`. Runs on the caller's connection, so a
+/// test can seed inside its own (rolled back) write job.
+pub fn seed_contact_inbox(
+    tx: &rusqlite::Connection,
+    workspace_id: i64,
+    channel: &str,
+    first_id: i64,
+) -> Result<ContactInboxSeed, DbError> {
+    let ids = ContactInboxSeed {
+        inbox_id: first_id,
+        contact_id: first_id + 1,
+        contact_inbox_id: first_id + 2,
+    };
+    tx.execute(
+        r#"INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId") VALUES (?1, ?2, ?3, ?4, ?5)"#,
+        params![
+            ids.inbox_id,
+            format!("Inbox {first_id}"),
+            channel,
+            format!("{channel}-{first_id}"),
+            workspace_id
+        ],
+    )?;
+    tx.execute(
+        r#"INSERT INTO "Contact" ("id", "workspaceId") VALUES (?1, ?2)"#,
+        params![ids.contact_id, workspace_id],
+    )?;
+    tx.execute(
+        r#"INSERT INTO "ContactInbox" ("id", "originalContactId", "contactId", "inboxId", "channel", "source", "sourceId")
+           VALUES (?1, ?2, ?2, ?3, ?4, ?4, ?5)"#,
+        params![
+            ids.contact_inbox_id,
+            ids.contact_id,
+            ids.inbox_id,
+            channel,
+            format!("contact-{first_id}")
+        ],
+    )?;
+    Ok(ids)
+}
+
+/// Inserts one `Integration` row of `integration_type` (for example `googleAds`).
+pub fn seed_integration(
+    tx: &rusqlite::Connection,
+    id: i64,
+    workspace_id: i64,
+    integration_type: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (?1, ?2, ?3)"#,
+        params![id, workspace_id, integration_type],
+    )?;
+    Ok(id)
+}
+
+/// Inserts one `IntegrationGoogleAds` satellite (`auth = {}`, as the TS tests).
+pub fn insert_integration_google_ads(
+    tx: &rusqlite::Connection,
+    id: i64,
+    workspace_id: i64,
+    integration_id: i64,
+    customer_id: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "IntegrationGoogleAds" ("id", "workspaceId", "integrationId", "auth", "customerId")
+           VALUES (?1, ?2, ?3, '{}', ?4)"#,
+        params![id, workspace_id, integration_id, customer_id],
+    )?;
+    Ok(id)
+}
+
+/// The TS `eventOptions` of `google-ads-conversion-event.test.ts` as JSON text.
+pub const GOOGLE_ADS_EVENT_OPTIONS: &str = r#"{"version":1,"identity":{"version":1,"configuredPolicy":"click","effectivePolicy":"click","keySource":"click","id":null},"timeSource":"recorded","consent":{"adUserData":{"status":null,"source":"notProvided"},"adPersonalization":{"status":null,"source":"notProvided"}}}"#;
+
+/// `2026-10-01T00:00:00Z` in unix ms (the TS `googleClickReceivedAt`).
+pub const GOOGLE_CLICK_RECEIVED_AT_MS: i64 = 1_790_812_800_000;
+
+/// `2026-10-01T01:00:00Z` in unix ms (the TS `occurredAt`).
+pub const GOOGLE_ADS_OCCURRED_AT_MS: i64 = 1_790_816_400_000;
+
+/// One column override of [`insert_google_ads_event`]: `Some(value)` sets the column
+/// (`Value::Null` writes NULL), `None` leaves the column out of the INSERT.
+pub type ColumnOverride = (&'static str, Option<rusqlite::types::Value>);
+
+/// The TS `eventValues(workspaceId, transactionId)` row with `overrides` applied, as
+/// (column names, values) in insert order. Timestamps are unix ms; `options` is JSON text.
+pub fn google_ads_event_row(
+    id: i64,
+    workspace_id: i64,
+    transaction_id: &str,
+    overrides: &[ColumnOverride],
+) -> (Vec<&'static str>, Vec<rusqlite::types::Value>) {
+    use rusqlite::types::Value;
+    let text = |s: &str| Value::Text(s.to_owned());
+    let mut row: Vec<(&'static str, Option<Value>)> = vec![
+        ("id", Some(Value::Integer(id))),
+        ("workspaceId", Some(Value::Integer(workspace_id))),
+        ("customerId", Some(text("1234567890"))),
+        ("conversionCustomerId", Some(text("1234567890"))),
+        ("conversionActionId", Some(text("111"))),
+        ("conversionActionCategory", Some(text("QUALIFIED_LEAD"))),
+        ("channel", Some(text("whatsapp"))),
+        ("source", Some(text("flowStep"))),
+        ("scopeId", Some(text("step-1"))),
+        ("clickIdType", Some(text("gclid"))),
+        ("clickId", Some(text("ABCDEFGHIJKLMNOP"))),
+        (
+            "googleClickReceivedAt",
+            Some(Value::Integer(GOOGLE_CLICK_RECEIVED_AT_MS)),
+        ),
+        (
+            "occurredAt",
+            Some(Value::Integer(GOOGLE_ADS_OCCURRED_AT_MS)),
+        ),
+        ("transactionId", Some(text(transaction_id))),
+        ("options", Some(text(GOOGLE_ADS_EVENT_OPTIONS))),
+        ("uploadMethod", Some(text("dataManager"))),
+        ("status", Some(text("pending"))),
+        ("attempt", Some(Value::Integer(0))),
+        ("processingAttempts", Some(Value::Integer(0))),
+    ];
+    for (name, value) in overrides {
+        match row.iter_mut().find(|(n, _)| *n == *name) {
+            Some(slot) => slot.1 = value.clone(),
+            None => row.push((*name, value.clone())),
+        }
+    }
+    row.into_iter()
+        .filter_map(|(name, value)| value.map(|v| (name, v)))
+        .unzip()
+}
+
+/// The `INSERT INTO "GoogleAdsConversionEvent" (...) VALUES (...)` text for `columns`.
+fn google_ads_event_insert_sql(columns: &[&str]) -> String {
+    let names: Vec<String> = columns.iter().map(|c| format!("\"{c}\"")).collect();
+    let marks: Vec<String> = (1..=columns.len()).map(|i| format!("?{i}")).collect();
+    format!(
+        r#"INSERT INTO "GoogleAdsConversionEvent" ({}) VALUES ({})"#,
+        names.join(", "),
+        marks.join(", ")
+    )
+}
+
+/// Plain insert of one `GoogleAdsConversionEvent` (the TS
+/// `tx.insert(googleAdsConversionEventModel).values({...eventValues(...), ...overrides})`).
+pub fn insert_google_ads_event(
+    tx: &rusqlite::Connection,
+    id: i64,
+    workspace_id: i64,
+    transaction_id: &str,
+    overrides: &[ColumnOverride],
+) -> Result<usize, DbError> {
+    let (columns, values) = google_ads_event_row(id, workspace_id, transaction_id, overrides);
+    Ok(tx.execute(
+        &google_ads_event_insert_sql(&columns),
+        rusqlite::params_from_iter(values.iter()),
+    )?)
+}
+
+/// The insert of `insertIgnoreDuplicate`: `... ON CONFLICT ("workspaceId", "transactionId")
+/// DO NOTHING RETURNING "<returning>"`. `None` when the row already existed.
+pub fn insert_google_ads_event_ignore_duplicate(
+    tx: &rusqlite::Connection,
+    id: i64,
+    workspace_id: i64,
+    transaction_id: &str,
+    overrides: &[ColumnOverride],
+    returning: &str,
+) -> Result<Option<rusqlite::types::Value>, DbError> {
+    let (columns, values) = google_ads_event_row(id, workspace_id, transaction_id, overrides);
+    let sql = format!(
+        r#"{} ON CONFLICT ("workspaceId", "transactionId") DO NOTHING RETURNING "{returning}""#,
+        google_ads_event_insert_sql(&columns)
+    );
+    let mut stmt = tx.prepare(&sql)?;
+    let mut rows = stmt.query(rusqlite::params_from_iter(values.iter()))?;
+    match rows.next()? {
+        Some(row) => Ok(Some(row.get::<_, rusqlite::types::Value>(0)?)),
+        None => Ok(None),
+    }
+}
