@@ -23,14 +23,23 @@ async fn assert_sets_statement_timeout(literal: &'static str, expected: Duration
             let before = Instant::now();
             tx.set_statement_timeout(timeout)?;
             let after = Instant::now();
-            Ok((before, after, tx.statement_deadline(), tx.statement_timeout(), tx.progress_handler_installs()))
+            Ok((
+                before,
+                after,
+                tx.statement_deadline(),
+                tx.statement_timeout(),
+                tx.progress_handler_installs(),
+            ))
         })
         .await
         .expect("write job");
     assert_eq!(installs, 1, "exactly one progress handler");
     assert_eq!(active, Some(expected));
     let deadline = deadline.expect("a deadline");
-    assert!(deadline >= before + expected && deadline <= after + expected, "deadline is not now + {literal}");
+    assert!(
+        deadline >= before + expected && deadline <= after + expected,
+        "deadline is not now + {literal}"
+    );
 }
 
 /// Port of: packages/database/__tests__/statement-timeout.test.ts:12 "setLocalStatementTimeout > issues SET LOCAL statement_timeout with the 10s literal inline"
@@ -55,7 +64,10 @@ async fn sets_the_250ms_statement_timeout() {
 async fn refuses_invalid_statement_timeout_literals() {
     const INVALID: [&str; 6] = ["10s; DROP TABLE x", "10", "1.5s", "-1s", "10 s", ""];
     for invalid in INVALID {
-        assert!(StatementTimeout::parse(invalid).is_err(), "{invalid:?} must be refused");
+        assert!(
+            StatementTimeout::parse(invalid).is_err(),
+            "{invalid:?} must be refused"
+        );
     }
 
     // Nothing is installed: the refused literal never reaches the transaction.

@@ -97,7 +97,10 @@ const LEGACY_UNINDEXED_FKS: &[&str] = &[
 
 fn has_prefix(candidate: &[Option<String>], expected: &[String]) -> bool {
     candidate.len() >= expected.len()
-        && expected.iter().zip(candidate).all(|(e, c)| c.as_deref() == Some(e.as_str()))
+        && expected
+            .iter()
+            .zip(candidate)
+            .all(|(e, c)| c.as_deref() == Some(e.as_str()))
 }
 
 /// Port of: packages/database/__tests__/workspace-purge-coverage.test.ts:188 "workspace purge coverage > does not add an unindexed foreign key or retain a fixed baseline entry"
@@ -117,7 +120,13 @@ async fn does_not_add_an_unindexed_foreign_key_or_retain_a_fixed_baseline_entry(
         for index in indexes(&db, table).await {
             support.push(index_columns(&db, &index.name).await);
         }
-        support.push(primary_key(&db, table).await.into_iter().map(Some).collect());
+        support.push(
+            primary_key(&db, table)
+                .await
+                .into_iter()
+                .map(Some)
+                .collect(),
+        );
 
         for fk in fk_column_lists(&db, table).await {
             if !support.iter().any(|s| has_prefix(s, &fk)) {
@@ -135,14 +144,29 @@ async fn does_not_add_an_unindexed_foreign_key_or_retain_a_fixed_baseline_entry(
             tables.iter().any(|t| t == table)
         })
         .collect();
-    assert!(baseline.len() >= 18, "expected at least the 18 part-1 baseline entries, found {}", baseline.len());
+    assert!(
+        baseline.len() >= 18,
+        "expected at least the 18 part-1 baseline entries, found {}",
+        baseline.len()
+    );
 
-    let unexpected: Vec<&String> =
-        uncovered.iter().filter(|fk| !LEGACY_UNINDEXED_FKS.contains(&fk.as_str())).collect();
-    let mut fixed_baseline: Vec<&str> =
-        baseline.iter().copied().filter(|fk| !uncovered.iter().any(|u| u == fk)).collect();
+    let unexpected: Vec<&String> = uncovered
+        .iter()
+        .filter(|fk| !LEGACY_UNINDEXED_FKS.contains(&fk.as_str()))
+        .collect();
+    let mut fixed_baseline: Vec<&str> = baseline
+        .iter()
+        .copied()
+        .filter(|fk| !uncovered.iter().any(|u| u == fk))
+        .collect();
     fixed_baseline.sort_unstable();
 
-    assert!(unexpected.is_empty(), "Add a leading FK index before adding a new foreign key: {unexpected:?}");
-    assert!(fixed_baseline.is_empty(), "Remove fixed FKs from LEGACY_UNINDEXED_FKS: {fixed_baseline:?}");
+    assert!(
+        unexpected.is_empty(),
+        "Add a leading FK index before adding a new foreign key: {unexpected:?}"
+    );
+    assert!(
+        fixed_baseline.is_empty(),
+        "Remove fixed FKs from LEGACY_UNINDEXED_FKS: {fixed_baseline:?}"
+    );
 }

@@ -50,7 +50,10 @@ async fn only_the_known_columns_declare_a_default_the_database_does_not_have() {
     let db = fresh_db().await;
     let tables = table_names(&db).await;
     for table in PART_1_TABLES {
-        assert!(tables.iter().any(|t| t == table), "part-1 table {table} is missing");
+        assert!(
+            tables.iter().any(|t| t == table),
+            "part-1 table {table} is missing"
+        );
     }
 
     let mut checked = 0;
@@ -61,8 +64,14 @@ async fn only_the_known_columns_declare_a_default_the_database_does_not_have() {
         }
         let col = column(&db, table, name).await;
         assert!(col.notnull, "{entry} must be NOT NULL");
-        assert_eq!(col.dflt_value, None, "{entry} must have no database default");
+        assert_eq!(
+            col.dflt_value, None,
+            "{entry} must have no database default"
+        );
         checked += 1;
     }
-    assert!(checked >= 10, "expected the 10 part-1 columns, checked {checked}");
+    assert!(
+        checked >= 10,
+        "expected the 10 part-1 columns, checked {checked}"
+    );
 }

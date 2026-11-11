@@ -9,9 +9,12 @@ mod common;
 
 use std::collections::BTreeSet;
 
-use common::{columns, fresh_db, APP_GENERATED_COLUMNS};
+use common::{APP_GENERATED_COLUMNS, columns, fresh_db};
 
-const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../conversion/fixtures/better-auth-expected-schema.json");
+const FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../conversion/fixtures/better-auth-expected-schema.json"
+);
 
 const OAUTH_TABLE_NAMES: &[&str] = &[
     "jwks",
@@ -44,10 +47,14 @@ const ADAPTER_TABLES: &[(&str, &str)] = &[
 #[tokio::test]
 async fn better_auth_tables_have_the_expected_columns() {
     let text = std::fs::read_to_string(FIXTURE).unwrap_or_else(|e| {
-        panic!("fixture {FIXTURE} is missing ({e}); generate it once from the TS repo (DECISIONS P2.3)")
+        panic!(
+            "fixture {FIXTURE} is missing ({e}); generate it once from the TS repo (DECISIONS P2.3)"
+        )
     });
     let fixture: serde_json::Value = serde_json::from_str(&text).expect("fixture is JSON");
-    let expected = fixture["tables"].as_object().expect("fixture.tables is an object");
+    let expected = fixture["tables"]
+        .as_object()
+        .expect("fixture.tables is an object");
 
     for name in OAUTH_TABLE_NAMES {
         assert!(expected.contains_key(*name), "expected schema lacks {name}");
@@ -71,7 +78,13 @@ async fn better_auth_tables_have_the_expected_columns() {
         }
         let id_column = table["idColumn"].as_str().unwrap_or("id").to_owned();
         let mut written: BTreeSet<String> = BTreeSet::from([id_column]);
-        written.extend(table["fields"].as_object().expect("fields is an object").keys().cloned());
+        written.extend(
+            table["fields"]
+                .as_object()
+                .expect("fields is an object")
+                .keys()
+                .cloned(),
+        );
 
         for column in &written {
             if !actual.iter().any(|c| &c.name == column) {
@@ -87,7 +100,10 @@ async fn better_auth_tables_have_the_expected_columns() {
             if written.contains(&column.name) || nullable || has_default {
                 continue;
             }
-            findings.push(format!("unexpected-required-column {table_name}.{}", column.name));
+            findings.push(format!(
+                "unexpected-required-column {table_name}.{}",
+                column.name
+            ));
         }
     }
     assert_eq!(findings, Vec::<String>::new());

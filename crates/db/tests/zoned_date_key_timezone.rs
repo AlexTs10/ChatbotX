@@ -4,8 +4,8 @@
 
 mod common;
 
-use chatbotx_db::rusqlite::types::Value;
 use chatbotx_db::Db;
+use chatbotx_db::rusqlite::types::Value;
 use common::{fresh_db, query_text};
 
 /// 2026-09-08T17:30:00Z: 00:30 the next morning in Vietnam.
@@ -29,14 +29,20 @@ async fn day_key_for(db: &Db, timezone: &str, at_ms: i64) -> String {
 #[tokio::test]
 async fn accepts_a_legacy_timezone_name_instead_of_raising_22023() {
     let db = fresh_db().await;
-    assert_eq!(day_key_for(&db, "Asia/Saigon", AFTER_MIDNIGHT_IN_VIETNAM).await, "2026-09-09");
+    assert_eq!(
+        day_key_for(&db, "Asia/Saigon", AFTER_MIDNIGHT_IN_VIETNAM).await,
+        "2026-09-09"
+    );
 }
 
 /// Port of: packages/database/__tests__/integration/zoned-date-key-timezone.test.ts:66 "zonedDateKey against a real PostgreSQL > accepts the canonical spelling of the same zone"
 #[tokio::test]
 async fn accepts_the_canonical_spelling_of_the_same_zone() {
     let db = fresh_db().await;
-    assert_eq!(day_key_for(&db, "Asia/Ho_Chi_Minh", AFTER_MIDNIGHT_IN_VIETNAM).await, "2026-09-09");
+    assert_eq!(
+        day_key_for(&db, "Asia/Ho_Chi_Minh", AFTER_MIDNIGHT_IN_VIETNAM).await,
+        "2026-09-09"
+    );
 }
 
 /// Port of: packages/database/__tests__/integration/zoned-date-key-timezone.test.ts:75 "zonedDateKey against a real PostgreSQL > both spellings agree on the day boundary"
@@ -52,12 +58,18 @@ async fn both_spellings_agree_on_the_day_boundary() {
 #[tokio::test]
 async fn falls_back_to_utc_for_a_name_the_database_does_not_know() {
     let db = fresh_db().await;
-    assert_eq!(day_key_for(&db, "Not/AZone", AFTER_MIDNIGHT_IN_VIETNAM).await, "2026-09-08");
+    assert_eq!(
+        day_key_for(&db, "Not/AZone", AFTER_MIDNIGHT_IN_VIETNAM).await,
+        "2026-09-08"
+    );
 }
 
 /// Port of: packages/database/__tests__/integration/zoned-date-key-timezone.test.ts:93 "zonedDateKey against a real PostgreSQL > a zone the database does know is used, not the fallback"
 #[tokio::test]
 async fn a_zone_the_database_does_know_is_used_not_the_fallback() {
     let db = fresh_db().await;
-    assert_eq!(day_key_for(&db, "America/New_York", EARLY_UTC_MORNING).await, "2026-09-07");
+    assert_eq!(
+        day_key_for(&db, "America/New_York", EARLY_UTC_MORNING).await,
+        "2026-09-07"
+    );
 }
