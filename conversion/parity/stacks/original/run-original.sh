@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
-[[ $update -eq 1 ]] && vitest_args=(-u "${vitest_args[@]}")
+[[ $update -eq 1 ]] && vitest_args=("${vitest_args[@]}" --update)  # after the filters: `-u <path>` would read the path as its value
 
 if ! docker info >/dev/null 2>&1; then
   echo "docker is not usable by $(id -un). Add the user to group docker:" >&2

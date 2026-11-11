@@ -135,3 +135,10 @@ Spec: `conversion/specs/P2.4.md` (65 tables, 234 indexes, 155 FKs; 46 runtime ca
 4. `crates/db/src/error.rs` reads the CHECK constraint name from the SQLite message (two frozen tests assert it). This change to P2.3 code is part of P2.4.
 5. Planner statistics: build bundled SQLite with `SQLITE_ENABLE_STAT4` if rusqlite allows it through `LIBSQLITE3_FLAGS` (else note it); run `PRAGMA optimize` on open and after migrations. Message hot queries must pick the spec's index (check with `EXPLAIN QUERY PLAN` in a unit test).
 - The P2.3 migration-runner unit test that expects exactly 1 migration / 65 tables is updated by the P2.4 implementer (it is the implementer's own unit test, not a ported test).
+
+## 2026-11-11 — Harness fixes after P1.4 (orchestrator)
+
+- `run-original.sh`: `--update-snapshots` now appends `--update` after the test filters (before, `-u <path>` made vitest read the path as the flag's value and run every test).
+- `chatbotx-dell` (private helper): rsync protects `**/__snapshots__/**` on the PC from `--delete`, so new snapshots made by a run are not deleted by another unit's sync. An existing snapshot that changed on the PC can still be overwritten by the Mac copy, so units copy snapshots back at once and **prefer explicit assertions over snapshots**.
+- Parallel units use a per-unit subfolder in the scratchpad for logs.
+- P1.4 findings the Rust port must match: `broadcasts.moveToDraft` on a non-scheduled broadcast → 400 `systemError` (route doc says 404); webchat allowed domains limit the bot-simulator link only after `PATCH /v1/webchats/{id}`, not on create; a broadcast needs `contactFilter` (empty `conditions` accepted); invalid bot-field value → 400 `invalidCustomFieldValue`; `finalizeBroadcasts` runs once a minute (a broadcast reaches `sent` in up to ~2 min).
