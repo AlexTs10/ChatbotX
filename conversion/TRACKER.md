@@ -12,7 +12,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P0.4 | 0 | Feature inventory in `FEATURES.md` (LOC + test count); keep/drop already decided (see DECISIONS 2026-11-11: drop Execute JavaScript only) | done | P0.1 | - | See "Proof P0.4" | commit `conversion(P0.4+P0.6)` |
 | P0.5 | 0 | Classify every test file A/B/C in `TEST_MAP.md`; mark dropped-feature tests `dropped` | done | P0.2, P0.4 | B:665 C:2426 dropped:13 | See "Proof P0.5" | commit `conversion(P0.5)` |
 | P0.6 | 0 | RSS baseline of original stack into `MEMORY.md` | done | P0.1 | - | User-set baseline 2 GB (no measurement, see DECISIONS) | commit `conversion(P0.4+P0.6)` |
-| P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | in_progress | P0.5 | A: smoke | | |
+| P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | done | P0.5 | A: smoke | See "Proof P1.1" | commit `conversion(P1.1)` |
 | P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | todo | P1.1 | A: 52 ops | | |
 | P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | todo | P1.1 | A: 49 ops | | |
 | P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | todo | P1.1 | A: 55 ops | | |
@@ -184,3 +184,20 @@ Running tests/upload_from_url.rs      test result: ok. 7 passed; 0 failed
 Running tests/upload_writer.rs        test result: ok. 7 passed; 0 failed
 ```
 Verifier note: the abort-signal port (`upload_from_url`) checks "at least one fetch/put token is cancelled with the caller's token" — weaker than JS signal identity, accepted (child tokens).
+
+### Proof P1.1
+
+Spec `conversion/specs/P1.1.md` → implementer → independent verifier (PASS, 6/6). Harness: `conversion/parity/` (TypeScript + vitest, own package, not in the pnpm workspace). Run: `~/.local/bin/chatbotx-dell bash conversion/parity/stacks/original/run-original.sh --no-build`.
+
+```
+ ✓ tests/smoke/03-fixtures.test.ts (5 tests)
+ ✓ tests/smoke/04-public-api.test.ts (2 tests)
+ ✓ tests/smoke/05-upstream.test.ts (3 tests)   (DoH on 1.1.1.1 + TLS via test CA + pinned dial)
+ ✓ tests/smoke/06-realtime.test.ts (2 tests)
+ ✓ tests/smoke/99-interception.test.ts (1 test)
+ Test Files  7 passed (7)
+      Tests  17 passed (17)
+[run-original] vitest exit code 0
+```
+Verifier rerun (clean volumes): Test Files 7 passed (7), Tests 17 passed (17). Stack down after the run; no containers left.
+The harness is NOT frozen yet; it is frozen in P1.28 after all Phase 1 tests pass.

@@ -1,0 +1,79 @@
+# Stack-agnostic part of the parity environment: fake upstream, MailHog, the
+# test runner and the two networks. A stack file (stacks/<name>/compose.yml) is
+# merged on top with `-f`. All relative paths resolve against the project
+# directory, which must be `conversion/parity` (`--project-directory`).
+#
+# Networks:
+#   parity-internal  service names (app, mailhog, fake-upstream, stack services)
+#   parity-upstream  subnet 1.1.1.0/24; fake-upstream is 1.1.1.1. App
+#                    containers join it and use `dns: [1.1.1.1]`, so every
+#                    third-party name and the hard-coded DoH resolver of the
+#                    SSRF guard reach the fake.
+
+services:
+  fake-upstream:
+    build:
+      context: ./fake-upstream
+      args:
+        NODE_IMAGE: node:24.22.1-trixie-slim@sha256:89c5244bc22a9bc3287d89ebc7e49b9cb5bb84cd40e6175ac3421d5a9f68b95a
+    image: chatbotx-parity/fake-upstream:local
+    volumes:
+      - parity-tls:/parity-tls
+    networks:
+      parity-internal: {}
+      parity-upstream:
+        ipv4_address: 1.1.1.1
+    ports:
+      - "127.0.0.1:18410:4010"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4010/__admin/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mailhog:
+    image: mailhog/mailhog@sha256:8d76a3d4ffa32a3661311944007a415332c4bb855657f4f6c57996405c009bea
+    networks:
+      - parity-internal
+    ports:
+      - "127.0.0.1:18425:8025"
+
+  # Test runner. Started with `docker compose run --rm parity [vitest args]`.
+  parity:
+    image: node:24.22.1-trixie-slim@sha256:89c5244bc22a9bc3287d89ebc7e49b9cb5bb84cd40e6175ac3421d5a9f68b95a
+    profiles: ["test"]
+    working_dir: /parity
+    init: true
+    environment:
+      BASE_URL: http://app
+      RT_URL: ws://app/ws
+      FAKE_UPSTREAM_ADMIN_URL: http://fake-upstream:4010
+      MAILHOG_URL: http://mailhog:8025
+      CI: "true"
+      NO_COLOR: "1"
+      NODE_EXTRA_CA_CERTS: /parity-tls/ca.crt
+      PARITY_UID: ${PARITY_UID:-1000}
+      PARITY_GID: ${PARITY_GID:-1000}
+      npm_config_cache: /npm-cache
+      npm_config_update_notifier: "false"
+    volumes:
+      - .:/parity
+      - parity-node-modules:/parity/node_modules
+      - parity-npm-cache:/npm-cache
+      - parity-tls:/parity-tls:ro
+    networks:
+      - parity-internal
+    entrypoint: ["sh", "/parity/stacks/runner-entrypoint.sh"]
+
+networks:
+  parity-internal: {}
+  parity-upstream:
+    ipam:
+      config:
+        - subnet: 1.1.1.0/24
+          gateway: 1.1.1.254
+
+volumes:
+  parity-tls: {}
+  parity-node-modules: {}
+  parity-npm-cache: {}

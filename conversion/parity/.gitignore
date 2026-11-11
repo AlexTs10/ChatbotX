@@ -1,0 +1,3 @@
+node_modules/
+# Stack state on the PC: TLS material, reports, logs. Never committed.
+.state/

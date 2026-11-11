@@ -1,0 +1,25 @@
+{
+  "name": "chatbotx-parity",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Black-box parity harness (Class A tests) for the ChatbotX conversion. Not part of the pnpm workspace.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.22.1"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "8.23.1",
+    "ws": "8.22.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "@types/ws": "8.18.2",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

@@ -1,0 +1,22 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`smoke: public API > GET /api/v1/workspace/settings returns the new workspace's settings > body 1`] = `
+{
+  "brandColor": "#016DFF",
+  "capiLimitedDataUse": false,
+  "defaultReply": null,
+  "defaultReplyFrequency": "allTime",
+  "developmentMode": false,
+  "language": "en",
+  "logo": null,
+  "smartResponseDelaySeconds": null,
+  "targetCountry": null,
+  "timezone": "UTC",
+}
+`;
+
+exports[`smoke: public API > GET /api/v1/workspace/settings returns the new workspace's settings > headers 1`] = `
+{
+  "content-type": "application/json",
+}
+`;

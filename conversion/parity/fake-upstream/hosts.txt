@@ -1,0 +1,65 @@
+# SAN entries of the fake upstream leaf certificate (one per line).
+# A wildcard covers exactly one label. Add a host here when a test needs a
+# third-party hostname that no entry covers; the self-check test reports
+# every unknown SNI name.
+
+# DoH resolver of the SSRF guard (packages/business/src/net/ssrf-guard.ts)
+1.1.1.1
+1.0.0.1
+cloudflare-dns.com
+
+# Hosts owned by tests (use a unique label per test, e.g. router-<id>.parity.test)
+parity.test
+*.parity.test
+
+# Meta
+facebook.com
+*.facebook.com
+*.fbcdn.net
+graph.instagram.com
+api.instagram.com
+*.cdninstagram.com
+graph.threads.com
+graph.threads.net
+# Telegram
+api.telegram.org
+# TikTok
+open.tiktokapis.com
+business-api.tiktok.com
+www.tiktok.com
+*.tiktokapis.com
+# Zalo
+openapi.zalo.me
+oauth.zaloapp.com
+# AI providers
+api.openai.com
+api.anthropic.com
+generativelanguage.googleapis.com
+api.deepseek.com
+openrouter.ai
+api.meta.ai
+api.typesafe.ai
+# Payments
+api.stripe.com
+connect.stripe.com
+api-m.paypal.com
+api-m.sandbox.paypal.com
+# Commerce
+*.myshopify.com
+# Marketing
+*.api.mailchimp.com
+api.getdrip.com
+a.klaviyo.com
+api.moosend.com
+api.sendgrid.com
+api.getresponse.com
+connect.mailerlite.com
+*.api-us1.com
+# Google
+*.googleapis.com
+accounts.google.com
+# Other
+exp.host
+api.giphy.com
+chatbotx.io
+*.chatbotx.io

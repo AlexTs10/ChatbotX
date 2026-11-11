@@ -1,0 +1,179 @@
+# The original ChatbotX stack (baseline 40e733cee), community edition, for the
+# parity harness. Merged on top of stacks/harness.compose.yml; relative paths
+# resolve against `conversion/parity` (see run-original.sh).
+#
+# Differences from docker-compose.dev.yml (spec P1.1 section 1.1):
+# - no javascript-executor (feature dropped), worker does not depend on it;
+# - builder healthcheck uses node fetch (the release image has no curl);
+# - worker and realtime wait for a healthy builder (migrations run there);
+# - no published infra ports; only 127.0.0.1:18480 -> edge, for debugging;
+# - every unpinned image is pinned to a digest;
+# - builder, worker and realtime resolve DNS through the fake upstream and
+#   trust its test CA.
+
+x-app: &app
+  env_file:
+    - ./stacks/original/original.env
+  dns:
+    - 1.1.1.1
+  volumes:
+    - parity-tls:/parity-tls:ro
+  networks:
+    - parity-internal
+    - parity-upstream
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha@sha256:e3b8f84dbb032f70c95c689edafa39c0a84ca9246b914782163e2b6fa14858e7 # pg18-all
+    command:
+      - postgres
+      - -c
+      - max_connections=300
+      - -c
+      - shared_buffers=128MB
+    environment:
+      POSTGRES_DB: chatbotx
+      POSTGRES_USER: chatbotx
+      POSTGRES_PASSWORD: secretkey
+    volumes:
+      - pg-data:/home/postgres/pgdata
+    networks:
+      - parity-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d chatbotx -U chatbotx"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  redis:
+    image: redis@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80 # 8-alpine
+    networks:
+      - parity-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  filesystem:
+    image: rustfs/rustfs@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74 # latest on 2026-11-11
+    command: server /data --console-address ":9001"
+    environment:
+      RUSTFS_ACCESS_KEY: chatbotx
+      RUSTFS_SECRET_KEY: secretkey
+      RUSTFS_API_CORS_ALLOW_ORIGIN: "*"
+    volumes:
+      - filesystem-data:/data
+    networks:
+      - parity-internal
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -f http://127.0.0.1:9000/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+
+  filesystem-init:
+    image: rustfs/rc@sha256:7e93fd410a8fe51514f89373e093392c92095b98dc6140335fcfe956810c4c80 # latest on 2026-11-11
+    depends_on:
+      filesystem:
+        condition: service_healthy
+    environment:
+      RUSTFS_ACCESS_KEY: chatbotx
+      RUSTFS_SECRET_KEY: secretkey
+    networks:
+      - parity-internal
+    entrypoint: >
+      /bin/sh -c "rc alias set local http://filesystem:9000
+      $${RUSTFS_ACCESS_KEY} $${RUSTFS_SECRET_KEY} && rc mb local/chatbotx
+      --ignore-existing && touch /tmp/empty && rc cp /tmp/empty
+      local/chatbotx/public/ && rc anonymous set public local/chatbotx/public"
+
+  builder:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: apps/builder/docker/Dockerfile
+    image: chatbotx-parity/builder:original
+    environment:
+      RUN_DB_MIGRATE: "true"
+      RUN_DB_SEED: "true"
+      SNOWFLAKE_PLACE_ID: "1"
+      # Docker sets HOSTNAME to the container id; the entrypoint passes it to
+      # `next start`, which would then not listen on 127.0.0.1.
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      filesystem-init:
+        condition: service_completed_successfully
+      fake-upstream:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
+
+  worker:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: apps/worker/docker/Dockerfile
+    image: chatbotx-parity/worker:original
+    environment:
+      SNOWFLAKE_PLACE_ID: "2"
+    depends_on:
+      builder:
+        condition: service_healthy
+
+  realtime:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: apps/realtime/docker/Dockerfile
+    image: chatbotx-parity/realtime:original
+    environment:
+      REALTIME_HOST: 0.0.0.0
+      PORT: "1999"
+      SNOWFLAKE_PLACE_ID: "3"
+    depends_on:
+      builder:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:1999/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+
+  # Edge proxy: the only entry point for tests (http://app, port 80).
+  app:
+    image: caddy@sha256:78bd35025c7ba85961dd149ae670315129954e77abe2383ac47c89106b35ade9 # 2-alpine
+    volumes:
+      - ./stacks/original/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - parity-internal
+    ports:
+      - "127.0.0.1:18480:80"
+    depends_on:
+      builder:
+        condition: service_healthy
+      realtime:
+        condition: service_healthy
+
+  # Runner settings for this stack (merged into harness.compose.yml).
+  parity:
+    environment:
+      STACK: original
+      PARITY_PG_URL: postgresql://chatbotx:secretkey@postgres:5432/chatbotx
+
+volumes:
+  pg-data: {}
+  filesystem-data: {}

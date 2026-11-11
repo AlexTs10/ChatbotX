@@ -1,0 +1,28 @@
+{
+	admin off
+	auto_https off
+}
+
+# Pass the X-Forwarded-For of the runner through as the only value. Each test
+# client sends its own address; better-auth trusts a single-value header and
+# rate-limits sign-in/sign-up per address (a two-hop chain gives no address).
+(upstream_headers) {
+	header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
+}
+
+:80 {
+	handle_path /ws/* {
+		reverse_proxy realtime:1999 {
+			import upstream_headers
+		}
+	}
+	handle_path /storage/* {
+		rewrite * /chatbotx{path}
+		reverse_proxy filesystem:9000
+	}
+	handle {
+		reverse_proxy builder:3000 {
+			import upstream_headers
+		}
+	}
+}

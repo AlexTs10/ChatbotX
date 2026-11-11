@@ -1,0 +1,20 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`smoke: fake upstream round trip (DoH + TLS + pinned dial) > tests an AI Router connection against a scripted provider > created connection 1`] = `
+{
+  "credentialConfigured": true,
+  "defaultModel": "parity-model",
+  "endpoint": "https://<host>/v1",
+  "id": "<id:1>",
+  "lastTest": {
+    "status": null,
+    "testedAt": null,
+  },
+  "modelCatalog": [
+    "parity-model",
+  ],
+  "name": "Parity router",
+  "providerKind": "systemOneCompatible",
+  "status": "enabled",
+}
+`;
