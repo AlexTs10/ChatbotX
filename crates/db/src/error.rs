@@ -26,6 +26,9 @@ struct Inner {
     /// Columns of `UNIQUE constraint failed: T.a, T.b`, until the writer maps them to an
     /// index name (needs the catalog, see [`DbError::resolve_constraint`]).
     unique_columns: Vec<String>,
+    /// `SQLITE_CONSTRAINT_PRIMARYKEY`: `constraint` is `<table>_pkey` until
+    /// [`DbError::resolve_constraint`] finds a `CONSTRAINT "<name>" PRIMARY KEY` in the table SQL.
+    primary_key: bool,
     source: Option<rusqlite::Error>,
 }
 
@@ -40,6 +43,7 @@ impl DbError {
                 detail: None,
                 message: message.into(),
                 unique_columns: Vec::new(),
+                primary_key: false,
                 source: None,
             }),
         }
@@ -56,8 +60,11 @@ impl DbError {
         self.inner.code
     }
 
-    /// For `23505`: the unique index / UNIQUE constraint name
-    /// (`<table>_pkey` for a primary key). `None` for every other error.
+    /// For `23505`: the unique index / UNIQUE constraint name (`<table>_pkey` for a
+    /// primary key, or the name of a `CONSTRAINT "<name>" PRIMARY KEY`).
+    /// For `23514`: the text after `CHECK constraint failed: ` (the constraint name of a
+    /// named CHECK; the column name or expression of an unnamed column CHECK).
+    /// `None` for every other error.
     pub fn constraint(&self) -> Option<&str> {
         self.inner.constraint.as_deref()
     }
@@ -89,11 +96,20 @@ impl DbError {
 
     /// Maps the column list of a UNIQUE error to the index / constraint name with the
     /// catalog of `conn` (spec 2.4: `(table, [columns]) -> index name`; PRIMARY KEY ->
-    /// `<table>_pkey`; of two indexes on the same columns the non-partial one wins).
+    /// `<table>_pkey`, or the name of `CONSTRAINT "<name>" PRIMARY KEY` in the table SQL;
+    /// of two indexes on the same columns the non-partial one wins).
     /// For the `index 'name'` form it fills in the table. Errors of the catalog lookup
     /// are ignored: the error keeps its code and message.
     pub(crate) fn resolve_constraint(&mut self, conn: &Connection) {
         if !self.is_unique_violation() {
+            return;
+        }
+        if self.inner.primary_key {
+            if let Some(table) = &self.inner.table {
+                if let Ok(Some(name)) = named_primary_key(conn, table) {
+                    self.inner.constraint = Some(name);
+                }
+            }
             return;
         }
         if let (Some(name), None) = (&self.inner.constraint, &self.inner.table) {
@@ -166,6 +182,7 @@ impl From<rusqlite::Error> for DbError {
                         let (table, columns) = parse_column_list(rest);
                         if extended == ffi::SQLITE_CONSTRAINT_PRIMARYKEY {
                             out.inner.constraint = table.as_ref().map(|t| format!("{t}_pkey"));
+                            out.inner.primary_key = true;
                         } else {
                             out.inner.unique_columns = columns;
                         }
@@ -176,6 +193,16 @@ impl From<rusqlite::Error> for DbError {
             Some("23502") => {
                 if let Some(rest) = text.strip_prefix("NOT NULL constraint failed: ") {
                     out.inner.table = parse_column_list(rest).0;
+                }
+            }
+            Some("23514") => {
+                // Named CHECK: `CHECK constraint failed: <name>`; unnamed column CHECK: the
+                // column name or the expression text. The raw text stays in `detail`.
+                if let Some(rest) = text.strip_prefix("CHECK constraint failed: ") {
+                    let name = rest.trim();
+                    if !name.is_empty() {
+                        out.inner.constraint = Some(name.to_owned());
+                    }
                 }
             }
             _ => {}
@@ -297,6 +324,25 @@ fn named_unique_constraint(
     Ok(None)
 }
 
+/// The name of `CONSTRAINT "<name>" PRIMARY KEY` in the SQL of `table`, if it has one.
+fn named_primary_key(conn: &Connection, table: &str) -> rusqlite::Result<Option<String>> {
+    let sql: Option<String> = conn.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?1",
+        params![table],
+        |row| row.get(0),
+    )?;
+    let Some(sql) = sql else { return Ok(None) };
+    let mut rest = sql.as_str();
+    while let Some(start) = rest.find("CONSTRAINT \"") {
+        rest = &rest[start + "CONSTRAINT \"".len()..];
+        let Some(end) = rest.find('"') else { break };
+        if rest[end + 1..].trim_start().starts_with("PRIMARY KEY") {
+            return Ok(Some(rest[..end].to_owned()));
+        }
+    }
+    Ok(None)
+}
+
 /// Port of the return value of `describeDatabaseError` (`src/client.ts`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DatabaseErrorDescription {
@@ -347,7 +393,10 @@ mod tests {
                CREATE UNIQUE INDEX "T_a_b_key" ON "T" ("a", "b");
                CREATE UNIQUE INDEX "T_a_b_partial_key" ON "T" ("a", "b") WHERE "a" IS NOT NULL;
                CREATE UNIQUE INDEX "T_lower_e_key" ON "T" (lower("e"));
-               CREATE TABLE "P" ("x" INTEGER NOT NULL, "y" INTEGER NOT NULL, CONSTRAINT "P_pkey" PRIMARY KEY ("x", "y")) STRICT;"#,
+               CREATE TABLE "P" ("x" INTEGER NOT NULL, "y" INTEGER NOT NULL, CONSTRAINT "P_pkey" PRIMARY KEY ("x", "y")) STRICT;
+               CREATE TABLE "R" ("x" INTEGER NOT NULL, "y" INTEGER NOT NULL, CONSTRAINT "Rs_pkey" PRIMARY KEY ("x", "y")) STRICT;
+               CREATE TABLE "Q" ("id" INTEGER PRIMARY KEY NOT NULL, "a" INTEGER NOT NULL, "b" INTEGER NOT NULL,
+                 CONSTRAINT "Q_order_check" CHECK ("a" < "b")) STRICT;"#,
         )
         .expect("schema");
         conn
@@ -390,6 +439,30 @@ mod tests {
         );
         let err = fail(&conn, r#"INSERT INTO "P" VALUES (1, 2), (1, 2)"#);
         assert_eq!((err.constraint(), err.table()), (Some("P_pkey"), Some("P")));
+        // A named PRIMARY KEY constraint keeps its own name (Postgres `ContactsOnBroadcast_pkey`).
+        let err = fail(&conn, r#"INSERT INTO "R" VALUES (1, 2), (1, 2)"#);
+        assert_eq!(
+            (err.constraint(), err.table()),
+            (Some("Rs_pkey"), Some("R"))
+        );
+    }
+
+    #[test]
+    fn check_errors_carry_the_constraint_name() {
+        let conn = conn();
+        let err = fail(&conn, r#"INSERT INTO "Q" VALUES (1, 5, 5)"#);
+        assert_eq!(
+            (err.sqlstate(), err.constraint()),
+            (Some("23514"), Some("Q_order_check"))
+        );
+        assert_eq!(err.detail(), Some("CHECK constraint failed: Q_order_check"));
+        // Unnamed column CHECK: SQLite names the column or the expression.
+        let err = fail(&conn, r#"INSERT INTO "T" ("id","k") VALUES (1, 'y')"#);
+        assert_eq!(err.sqlstate(), Some("23514"));
+        assert!(err.constraint().is_some_and(|c| c.contains('k')), "{err}");
+        let described =
+            describe_database_error(&fail(&conn, r#"INSERT INTO "Q" VALUES (2, 9, 1)"#));
+        assert_eq!(described.constraint.as_deref(), Some("Q_order_check"));
     }
 
     #[test]

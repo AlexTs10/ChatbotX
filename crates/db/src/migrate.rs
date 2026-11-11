@@ -37,7 +37,10 @@ macro_rules! migration {
 }
 
 /// The migrations of this binary, in order. No files are read at run time.
-pub const MIGRATIONS: &[Migration] = &[migration!(1, "core", "0001_core.sql")];
+pub const MIGRATIONS: &[Migration] = &[
+    migration!(1, "core", "0001_core.sql"),
+    migration!(2, "messaging", "0002_messaging.sql"),
+];
 
 const CREATE_SCHEMA_MIGRATIONS: &str = r#"CREATE TABLE IF NOT EXISTS "schema_migrations" (
   "version"   INTEGER PRIMARY KEY NOT NULL,
@@ -398,19 +401,27 @@ mod tests {
     #[test]
     fn fresh_apply_then_second_run_is_a_no_op() {
         let mut conn = conn();
-        assert_eq!(migrate(&mut conn).expect("migrate").applied, [1]);
-        assert_eq!(count(&conn, "PRAGMA user_version"), 1);
+        assert_eq!(migrate(&mut conn).expect("migrate").applied, [1, 2]);
+        assert_eq!(count(&conn, "PRAGMA user_version"), 2);
         assert_eq!(
             count(&conn, r#"SELECT count(*) FROM "schema_migrations""#),
-            1
+            2
         );
-        let checksum: String = conn
-            .query_row(r#"SELECT "checksum" FROM "schema_migrations""#, [], |r| {
-                r.get(0)
-            })
-            .expect("row");
-        assert_eq!(checksum, MIGRATIONS[0].checksum());
-        assert_eq!(checksum.len(), 64);
+        let checksums: Vec<String> = conn
+            .prepare(r#"SELECT "checksum" FROM "schema_migrations" ORDER BY "version""#)
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .collect::<rusqlite::Result<_>>()
+            .expect("rows");
+        assert_eq!(
+            checksums,
+            MIGRATIONS[0..2]
+                .iter()
+                .map(Migration::checksum)
+                .collect::<Vec<_>>()
+        );
+        assert!(checksums.iter().all(|c| c.len() == 64));
         assert_eq!(
             count(&conn, r#"SELECT count(*) FROM "Tenant" WHERE "id" = 1"#),
             1
@@ -421,7 +432,7 @@ mod tests {
              AND sql NOT LIKE 'CREATE VIRTUAL TABLE%' AND name NOT LIKE '%\\_fts\\_%' ESCAPE '\\' \
              AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
         );
-        assert_eq!(tables, 65);
+        assert_eq!(tables, 130);
         assert_eq!(
             count(&conn, "SELECT count(*) FROM pragma_foreign_key_check"),
             0
@@ -432,10 +443,10 @@ mod tests {
             migrate(&mut conn).expect("second run").applied,
             Vec::<u32>::new()
         );
-        assert_eq!(count(&conn, "PRAGMA user_version"), 1);
+        assert_eq!(count(&conn, "PRAGMA user_version"), 2);
         assert_eq!(
             count(&conn, r#"SELECT count(*) FROM "schema_migrations""#),
-            1
+            2
         );
     }
 

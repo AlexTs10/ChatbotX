@@ -25,6 +25,8 @@ pub use rusqlite;
 mod error;
 pub mod functions;
 mod migrate;
+#[cfg(test)]
+mod query_plan_tests;
 
 pub use error::{DatabaseErrorDescription, DbError, describe_database_error};
 pub use migrate::{MIGRATIONS, MigrateReport, Migration, MigrationError, migrate};
