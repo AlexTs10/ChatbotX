@@ -43,7 +43,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P2.1 | 2 | Cargo workspace + one binary skeleton: crates `api` (axum), `core`, `db`, `jobs`, `rt`, `files`, bin `chatbotx-server`; config from env, tracing, `/api/health`, graceful shutdown; release profile for size/RSS | done | P0.5 | - | See "Proof P2.1" | commit `conversion(P2.1)` |
 | P2.2 | 2 | SQLite schema analysis: map all 224 Drizzle schema files (Postgres types, enums, jsonb, hypertables, pgvector, partial indexes, triggers) to libSQL; spec only | done | P2.1 | - | See "Proof P2.2" | commit `conversion(P2.2)` |
 | P2.3 | 2 | `db` crate: embedded SQLite file via `rusqlite` (bundled), migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | done | P2.2 | C:48 (+6 n/a) | See "Proof P2.3" | commit `conversion(P2.3)` |
-| P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | todo | P2.3 | C | | |
+| P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | in_progress | P2.3 | C | | |
 | P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | todo | P2.4 | C | | |
 | P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | todo | P2.3 | C | | |
 | P2.7 | 2 | Redis replacement: locks (`tokio::sync::Mutex` map), pub/sub (`broadcast`), cache/presence/rate limits (in-memory), bloom filter (unique-index table); map each `packages/redis` use | todo | P2.6 | C | | |

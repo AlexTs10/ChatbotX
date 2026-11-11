@@ -125,3 +125,13 @@ Spec: `conversion/specs/P2.6.md` (19 queues, 44 cron schedulers, 381 frozen case
 
 - P1.2: behavior of the original that the parity tests now lock in (the Rust port must match): `ads.listCustomAudiences` / `startRetargetAudienceSync` without a Facebook Ads connection → 500 `INTERNAL_SERVER_ERROR`; `ads.createCampaign` writes the draft before the connection check (row stays `pending` after a 409); `ads.deleteCampaign` → 200 and keeps the row; `ads.updateRuleLegacy` (PUT) is a partial update; aiAgents PATCH accepts `actionPrompt`/`actionRules` (create rejects them); delete of an unknown aiAgents id → 204, unknown aiFunctions/aiFiles id → 404.
 - P1.3: some analytics routes return 500 for an unparsable `from`/`to`, an unknown time zone, or a non-numeric id. These cases are **not** asserted by parity tests. Open (not blocking): the Rust port may return 422 there; decide in the Phase 3 analytics unit and record it. `InboxContactStat` is kept by a DB trigger (the SQLite schema has it, P2.3).
+
+## 2026-11-11 — P2.4 schema part 2 (orchestrator)
+
+Spec: `conversion/specs/P2.4.md` (65 tables, 234 indexes, 155 FKs; 46 runtime cases: 27 1:1, 9 replacement/adapted, 10 not-applicable per the P2.3 user decision).
+1. Message dedup key stays 3 columns `(contactInboxId, sourceId, createdAt)` (a frozen test pins this conflict target).
+2. Composite PKs (`Message`, `Attachment`, `ContactOnSequence`, `SequenceDispatch`) → `PRIMARY KEY (id)` + `UNIQUE (id, workspaceId)` where a composite FK needs it.
+3. Add the SQLite-only index `Message (workspaceId, sourceId)` for per-webhook "update by source id" queries, **unless** a frozen test pins the exact index set of `Message` (the implementer checks; if pinned, leave it out and note it for Phase 5).
+4. `crates/db/src/error.rs` reads the CHECK constraint name from the SQLite message (two frozen tests assert it). This change to P2.3 code is part of P2.4.
+5. Planner statistics: build bundled SQLite with `SQLITE_ENABLE_STAT4` if rusqlite allows it through `LIBSQLITE3_FLAGS` (else note it); run `PRAGMA optimize` on open and after migrations. Message hot queries must pick the spec's index (check with `EXPLAIN QUERY PLAN` in a unit test).
+- The P2.3 migration-runner unit test that expects exactly 1 migration / 65 tables is updated by the P2.4 implementer (it is the implementer's own unit test, not a ported test).
