@@ -1,3 +1,4 @@
+#![allow(clippy::let_and_return)] // lint only, added by the orchestrator (DECISIONS P2.6 gate); no test logic changed
 //! Port of `packages/sequence-scheduler/__tests__/dispatch-manager.test.ts`
 //! (spec 5.2).
 

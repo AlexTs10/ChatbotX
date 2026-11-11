@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)] // lint only, added by the orchestrator (DECISIONS P2.6 gate); no test logic changed
 //! Port of `packages/database/__tests__/integration/google-ads-conversion-event-fk.test.ts`
 //! (P2.5 spec section 3.1, rows 8.1-8.2). Class C: runs against a migrated SQLite file.
 //!

@@ -1,3 +1,4 @@
+#![allow(clippy::assertions_on_constants)] // lint only, added by the orchestrator (DECISIONS P2.6 gate); no test logic changed
 //! Port of `packages/worker-config/__tests__/template-queue.test.ts` (spec 5.1). The bullmq `Queue` mock
 //! (adds per queue name + a BullMQ-like job map) is `FakeTemplateQueue`.
 

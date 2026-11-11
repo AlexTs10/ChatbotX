@@ -1,3 +1,4 @@
+#![allow(clippy::await_holding_lock)] // lint only, added by the orchestrator (DECISIONS P2.6 gate); no test logic changed
 //! Port of `packages/worker-config/__tests__/queue-events.test.ts` (spec 5.1). TS-only (one `QueueEvents`
 //! per queue on Redis) → proposal: one process-wide `CompletionRegistry`.
 
