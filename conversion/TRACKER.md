@@ -13,7 +13,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P0.5 | 0 | Classify every test file A/B/C in `TEST_MAP.md`; mark dropped-feature tests `dropped` | done | P0.2, P0.4 | B:665 C:2426 dropped:13 | See "Proof P0.5" | commit `conversion(P0.5)` |
 | P0.6 | 0 | RSS baseline of original stack into `MEMORY.md` | done | P0.1 | - | User-set baseline 2 GB (no measurement, see DECISIONS) | commit `conversion(P0.4+P0.6)` |
 | P1.1 | 1 | Harness scaffold: `conversion/parity/` package, Dell stack runner for the original stack, fake upstream server (DNS + test CA), bootstrap helpers (sign-up, workspace, API token), smoke tests | done | P0.5 | A: smoke | See "Proof P1.1" | commit `conversion(P1.1)` |
-| P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | in_progress | P1.1 | A: 52 ops | | |
+| P1.2 | 1 | Public API parity: `ads`, `aiAgents`, `aiFiles`, `aiFunctions` | done | P1.1 | A: 52 ops, 260 tests | See "Proof P1.2" | commit `conversion(P1.2)` |
 | P1.3 | 1 | Public API parity: `aiHandover`, `aiMcpServers`, `analytics` | in_progress | P1.1 | A: 49 ops | | |
 | P1.4 | 1 | Public API parity: `appointmentCalendars`, `appointmentExternalCalendars`, `appointmentReminders`, `appointments`, `botFields`, `botSimulator`, `broadcasts`, `capabilities`, `carts`, `channelIntegrations`, `channelPosts` | in_progress | P1.1 | A: 55 ops | | |
 | P1.5 | 1 | Public API parity: `channels`, `commentAutomations`, `connectSessions`, `connectionProviders`, `connections`, `contactScans` | in_progress | P1.1 | A: 25 ops | | |
@@ -201,3 +201,14 @@ Spec `conversion/specs/P1.1.md` → implementer → independent verifier (PASS, 
 ```
 Verifier rerun (clean volumes): Test Files 7 passed (7), Tests 17 passed (17). Stack down after the run; no containers left.
 The harness is NOT frozen yet; it is frozen in P1.28 after all Phase 1 tests pass.
+
+### Proof P1.2
+
+Writer (analysis + tests, spec `conversion/specs/P1.2.md`) → independent verifier (PASS 5/5, two runs for flakiness). 52/52 operations, 260 tests in `conversion/parity/tests/p1-02-ads-ai/` + the interception self-check.
+
+```
+verifier run 1:  Test Files 12 passed (12)   Tests 261 passed (261)   30.31s   exit 0
+verifier run 2:  Test Files 12 passed (12)   Tests 261 passed (261)   29.81s   exit 0
+writer run:      [run-original] vitest exit code 0; stopping the stack (down -v)
+```
+Known gaps (in the spec): 503 reportTimeout, 429 rate limits, three 400 codes that need rows the app never writes, Graph paging > 20 pages, worker retries, aiFiles reindex 409/coalesced (timing), enqueueFailed/502, template locks, aiFunctions with a real flow.
