@@ -1,0 +1,6 @@
+packages/filesystem/__tests__/bounded-fetch.test.ts	crates/files/tests/bounded_fetch.rs	8
+packages/filesystem/__tests__/channel-media-prefix.test.ts	crates/files/tests/channel_media_prefix.rs	2
+packages/filesystem/__tests__/copy-source.test.ts	crates/files/tests/copy_source.rs	5
+packages/filesystem/__tests__/mime-type.test.ts	crates/files/tests/mime_type.rs	11
+packages/filesystem/__tests__/upload-from-url.test.ts	crates/files/tests/upload_from_url.rs	7
+packages/filesystem/__tests__/upload-writer.test.ts	crates/files/tests/upload_writer.rs	7
