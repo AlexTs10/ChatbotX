@@ -20,7 +20,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.6 | 1 | Public API parity: `contacts` | done | P1.1 | A: 58 ops, 539 tests | See "Proof P1.6" | commit `conversion(P1.5+P1.6)` |
 | P1.7 | 1 | Public API parity: `conversations`, `coupons`, `customFields`, `decisionConnections`, `decisionProfiles`, `discountCodes` | done | P1.1 | A: 53 ops, 437 tests | See "Proof P1.7" | commit `868c4acee` |
 | P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | done | P1.1 | A: 48 ops, 335 tests | See "Proof P1.8" | commit `868c4acee` |
-| P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | in_progress | P1.1 | A: 53 ops | | |
+| P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | done | P1.1 | A: 53 ops + hook route, 457 tests | See "Proof P1.9" | commit `868c4acee` |
 | P1.10 | 1 | Public API parity: `inboxes`, `instagramChannels`, `integrations`, `keywords`, `leaderboards` | todo | P1.1 | A: 52 ops | | |
 | P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | todo | P1.1 | A: 52 ops | | |
 | P1.12 | 1 | Public API parity: `miniApps`, `minigames`, `openHours`, `orders`, `paymentProviders` | todo | P1.1 | A: 43 ops | | |
@@ -44,7 +44,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P2.2 | 2 | SQLite schema analysis: map all 224 Drizzle schema files (Postgres types, enums, jsonb, hypertables, pgvector, partial indexes, triggers) to libSQL; spec only | done | P2.1 | - | See "Proof P2.2" | commit `conversion(P2.2)` |
 | P2.3 | 2 | `db` crate: embedded SQLite file via `rusqlite` (bundled), migration runner, schema part 1 (auth, users, workspaces, members, tokens, channels, contacts, custom fields, tags) | done | P2.2 | C:48 (+6 n/a) | See "Proof P2.3" | commit `conversion(P2.3)` |
 | P2.4 | 2 | `db` crate: schema part 2 (flows, steps, triggers, conversations, messages, inbox, broadcasts, sequences, templates) | done | P2.3 | C:36 (+10 n/a) | See "Proof P2.4" | commit `59ae66f4f` |
-| P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | todo | P2.4 | C | | |
+| P2.5 | 2 | `db` crate: schema part 3 (ecommerce, ads, analytics time tables, AI/RAG vectors, minigames, leaderboards, payments, remaining tables) | in_progress | P2.4 | C | | |
 | P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | in_progress | P2.3 | C | | |
 | P2.7 | 2 | Redis replacement: locks (`tokio::sync::Mutex` map), pub/sub (`broadcast`), cache/presence/rate limits (in-memory), bloom filter (unique-index table); map each `packages/redis` use | todo | P2.6 | C | | |
 | P2.8 | 2 | `rt` crate: axum WebSocket endpoint + `broadcast` fan-out, protocol from `packages/realtime-protocol` | todo | P2.7 | C | | |
@@ -298,3 +298,13 @@ verifier run 1:  Test Files 15 passed (15)   Tests 336 passed (336)   127.86s   
 verifier run 2:  Test Files 15 passed (15)   Tests 336 passed (336)   exit 0
 ```
 Timing risk: `campaigns.send` waits up to 150 s for the worker (took 58–59 s).
+
+### Proof P1.9
+
+Writer (spec `conversion/specs/P1.9.md`) → independent verifier (PASS 5/5, two runs; Execute JavaScript appears only as a rejected unknown step type). 53/53 operations + `POST /api/hooks/<token>`, 457 tests in `conversion/parity/tests/p1-09-flows-webhooks-ig/` + interception check.
+
+```
+verifier run 1:  Test Files 18 passed (18)   Tests 458 passed (458)   63.76s   exit 0
+verifier run 2:  Test Files 18 passed (18)   Tests 458 passed (458)   63.24s   exit 0
+```
+Minor gaps: hook `WORKSPACE_BLOCKED` 403 / `WORKSPACE_UNAVAILABLE` 410; per-webhook rate limit.
