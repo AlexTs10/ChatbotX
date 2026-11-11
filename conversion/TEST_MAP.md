@@ -2857,12 +2857,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/events/__tests__/evaluator-filtered-cache.test.ts` | C | tbd | todo | Event bus and domain events |
 | `packages/events/__tests__/trigger-emitter-contact-inbox-roundtrip.test.ts` | C | tbd | todo | Event bus and domain events |
 | `packages/events/__tests__/webhook-context.test.ts` | C | tbd | todo | Event bus and domain events |
-| `packages/filesystem/__tests__/bounded-fetch.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/filesystem/__tests__/channel-media-prefix.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/filesystem/__tests__/copy-source.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/filesystem/__tests__/mime-type.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/filesystem/__tests__/upload-from-url.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/filesystem/__tests__/upload-writer.test.ts` | C | tbd | todo | Media library and file storage |
+| `packages/filesystem/__tests__/bounded-fetch.test.ts` | C | `crates/files/tests/bounded_fetch.rs` (8 tests) | passing | Media library and file storage |
+| `packages/filesystem/__tests__/channel-media-prefix.test.ts` | C | `crates/files/tests/channel_media_prefix.rs` (2 tests) | passing | Media library and file storage |
+| `packages/filesystem/__tests__/copy-source.test.ts` | C | `crates/files/tests/copy_source.rs` (5 tests) | passing | Media library and file storage |
+| `packages/filesystem/__tests__/mime-type.test.ts` | C | `crates/files/tests/mime_type.rs` (11 tests) | passing | Media library and file storage |
+| `packages/filesystem/__tests__/upload-from-url.test.ts` | C | `crates/files/tests/upload_from_url.rs` (7 tests) | passing | Media library and file storage |
+| `packages/filesystem/__tests__/upload-writer.test.ts` | C | `crates/files/tests/upload_writer.rs` (7 tests) | passing | Media library and file storage |
 | `packages/flow-config/__tests__/active-campaign-sync-contact.test.ts` | C | tbd | todo | ActiveCampaign integration |
 | `packages/flow-config/__tests__/ai-model-catalog.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `packages/flow-config/__tests__/ai-muse-steps.test.ts` | C | tbd | todo | Muse integration |

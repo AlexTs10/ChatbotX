@@ -48,7 +48,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P2.6 | 2 | `jobs` crate: `jobs` table, enqueue/claim/retry/backoff/cron/delayed, tokio workers; map each BullMQ queue in `packages/worker-config` | todo | P2.3 | C | | |
 | P2.7 | 2 | Redis replacement: locks (`tokio::sync::Mutex` map), pub/sub (`broadcast`), cache/presence/rate limits (in-memory), bloom filter (unique-index table); map each `packages/redis` use | todo | P2.6 | C | | |
 | P2.8 | 2 | `rt` crate: axum WebSocket endpoint + `broadcast` fan-out, protocol from `packages/realtime-protocol` | todo | P2.7 | C | | |
-| P2.9 | 2 | `files` crate: `object_store` LocalFileSystem (S3 by config), presigned-style upload/download tokens | in_progress | P2.1 | C | | |
+| P2.9 | 2 | `files` crate: `object_store` LocalFileSystem (S3 by config), presigned-style upload/download tokens | done | P2.1 | C:40 | See "Proof P2.9" | commit `conversion(P2.9)` |
 
 ## Proof
 
@@ -167,3 +167,20 @@ locks: FOR UPDATE 87, SKIP LOCKED 30, advisory 22 -> BEGIN IMMEDIATE + lease cla
 analytics: time_bucket 42, AT TIME ZONE 79, continuous aggregates 4 -> rollup tables written in the same tx
 part sizes: P2.3 65 tables, P2.4 65 (+2 not created), P2.5 126
 ```
+
+### Proof P2.9
+
+Analyst spec `conversion/specs/P2.9.md` → porter (40 tests, failing, commit `e116efd04`) → implementer → independent verifier (PASS, 5/5; assertion parity checked case by case against the 6 frozen files).
+
+```
+$ git diff --stat e116efd04 -- crates/files/tests      # (empty: ported tests unchanged)
+cargo fmt --all -- --check: OK; cargo clippy -p chatbotx-files --all-targets -- -D warnings: OK
+Running unittests src/lib.rs          test result: ok. 41 passed; 0 failed
+Running tests/bounded_fetch.rs        test result: ok. 8 passed; 0 failed
+Running tests/channel_media_prefix.rs test result: ok. 2 passed; 0 failed
+Running tests/copy_source.rs          test result: ok. 5 passed; 0 failed
+Running tests/mime_type.rs            test result: ok. 11 passed; 0 failed
+Running tests/upload_from_url.rs      test result: ok. 7 passed; 0 failed
+Running tests/upload_writer.rs        test result: ok. 7 passed; 0 failed
+```
+Verifier note: the abort-signal port (`upload_from_url`) checks "at least one fetch/put token is cancelled with the caller's token" — weaker than JS signal identity, accepted (child tokens).
