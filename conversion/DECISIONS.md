@@ -57,3 +57,14 @@ Spec: `conversion/specs/P1.1.md`. Answers to its 5 open questions:
 
 - Dell: user `alextoska` added to group `docker`; Docker service enabled (2026-11-11, with the user's sudo password, given through a one-use secret card).
 - Dell memory: the Android emulator (~5 GB, Nana QA) runs there. It is not stopped by this project. If `next build` runs out of memory, the build is retried with lower concurrency; if it still fails, ask the user to stop the emulator.
+
+## 2026-11-11 — P2.9 files crate (orchestrator)
+
+Spec: `conversion/specs/P2.9.md` (40 test cases from 6 frozen files).
+- Backend by config: `FILES_BACKEND=local|s3` (default `local`), `FILES_LOCAL_ROOT` (default `$DATA_DIR/files`). The `S3_*` variables keep their original names.
+- `public-read` ACL: on `local`, the app serves keys under `public/` without auth; on `s3`, a bucket policy on `public/` (documented, not set by the app). The ACL argument stays in the API for parity.
+- Presigned URLs on `local`: HMAC-SHA256-signed app URLs with the same expiry (upload 300 s, download default 3600 s). The route that serves them comes in a Phase 3/4 unit.
+- `packages/filesystem/src/lib/node-upload.ts` has no importers (dead code) → not ported. It has no tests.
+- `build_copy_source` is ported (tests 11–15) even if `object_store` builds its own copy source.
+- Image dimensions: if a test needs SVG sizes, parse `width`/`height`/`viewBox` with std; no new crate for SVG.
+- Clock and HTTP: injected (`*_at(.., date)` variants and an `HttpFetcher` trait), so ported tests need no global mocks. The assertions stay the same.
