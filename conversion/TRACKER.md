@@ -22,7 +22,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | done | P1.1 | A: 48 ops, 335 tests | See "Proof P1.8" | commit `868c4acee` |
 | P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | done | P1.1 | A: 53 ops + hook route, 457 tests | See "Proof P1.9" | commit `868c4acee` |
 | P1.10 | 1 | Public API parity: `inboxes`, `instagramChannels`, `integrations`, `keywords`, `leaderboards` | done | P1.1 | A: 52 ops, 398 tests | See "Proof P1.10" | commit `c01a4eea9` |
-| P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | done | P1.1 | A: 52 ops, 344 tests | See \"Proof P1.11\" | commit `1da6b576d` |
+| P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | done | P1.1 | A: 52 ops, 344 tests | See "Proof P1.11" | commit `1da6b576d` |
 | P1.12 | 1 | Public API parity: `miniApps`, `minigames`, `openHours`, `orders`, `paymentProviders` | todo | P1.1 | A: 43 ops | | |
 | P1.13 | 1 | Public API parity: `pipelines`, `placeCategories`, `placeLocations`, `polls` | todo | P1.1 | A: 51 ops | | |
 | P1.14 | 1 | Public API parity: `productCategories`, `productVendors`, `products`, `qrCodes`, `questionnaires`, `realtime`, `reflinks` | todo | P1.1 | A: 54 ops | | |
