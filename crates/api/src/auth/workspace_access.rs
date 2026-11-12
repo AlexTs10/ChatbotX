@@ -29,12 +29,18 @@ pub enum WorkspaceAccessDenialReason {
 impl WorkspaceAccessDenialReason {
     /// The code (`trialExpired` | `macLimitReached`).
     pub fn as_str(self) -> &'static str {
-        todo!("P3.5a")
+        match self {
+            WorkspaceAccessDenialReason::TrialExpired => "trialExpired",
+            WorkspaceAccessDenialReason::MacLimitReached => "macLimitReached",
+        }
     }
 
     /// `DENIAL_MESSAGES[reason]`.
     pub fn message(self) -> &'static str {
-        todo!("P3.5a")
+        match self {
+            WorkspaceAccessDenialReason::TrialExpired => "Trial expired",
+            WorkspaceAccessDenialReason::MacLimitReached => "Monthly active contact limit reached",
+        }
     }
 }
 
@@ -56,14 +62,14 @@ pub trait WorkspaceQuota {
 
 /// `isWorkspaceMutationMethod(method)`: everything but GET/HEAD/DELETE (no method = POST).
 pub fn is_workspace_mutation_method(method: Option<&str>) -> bool {
-    let _ = method;
-    todo!("P3.5a")
+    !matches!(method.unwrap_or("POST"), "GET" | "HEAD" | "DELETE")
 }
 
 /// `isReadOnlyTokenAllowedMethod(method, path)`.
 pub fn is_read_only_token_allowed_method(method: Option<&str>, path: Option<&str>) -> bool {
-    let _ = (method, path);
-    todo!("P3.5a")
+    matches!(method.unwrap_or("POST"), "GET" | "HEAD")
+        || (method == Some("POST")
+            && READ_ONLY_TOKEN_ALLOWED_POST_PATHS.contains(&path.unwrap_or("")))
 }
 
 /// `checkWorkspaceOwnerAccess({ ownerId })`; `is_cloud` is `isCloud()`.
@@ -72,20 +78,32 @@ pub async fn check_workspace_owner_access<Q: WorkspaceQuota + Sync>(
     is_cloud: bool,
     owner_id: &str,
 ) -> Option<WorkspaceAccessDenialReason> {
-    let _ = (quota, is_cloud, owner_id);
-    todo!("P3.5a")
+    if !is_cloud {
+        return None;
+    }
+    let state = owner_access_state(quota, owner_id).await;
+    if !state.blocked {
+        return None;
+    }
+    Some(if state.reason.as_deref() == Some("mac") {
+        WorkspaceAccessDenialReason::MacLimitReached
+    } else {
+        WorkspaceAccessDenialReason::TrialExpired
+    })
 }
 
 /// `workspaceAccessDenialException(reason)`.
 pub fn workspace_access_denial_exception(reason: WorkspaceAccessDenialReason) -> ChatbotXException {
-    let _ = reason;
-    todo!("P3.5a")
+    ChatbotXException::with_code(reason.message(), reason.as_str(), DENIAL_HTTP_STATUS)
 }
 
 /// `workspaceAccessDenialOrpcError(reason)`.
 pub fn workspace_access_denial_orpc_error(reason: WorkspaceAccessDenialReason) -> OrpcError {
-    let _ = reason;
-    todo!("P3.5a")
+    OrpcError::new(
+        reason.as_str(),
+        Some(DENIAL_HTTP_STATUS),
+        Some(reason.message()),
+    )
 }
 
 /// `assertWorkspaceOwnerAccessForMethod({ method, ownerId, path })`.
@@ -96,6 +114,54 @@ pub async fn assert_workspace_owner_access_for_method<Q: WorkspaceQuota + Sync>(
     owner_id: &str,
     path: Option<&str>,
 ) -> Result<(), OrpcError> {
-    let _ = (quota, is_cloud, method, owner_id, path);
-    todo!("P3.5a")
+    let read_only_post = method == Some("POST")
+        && path.is_some_and(|p| !p.is_empty() && READ_ONLY_POST_PATHS.contains(&p));
+    if !is_workspace_mutation_method(method) || read_only_post {
+        return Ok(());
+    }
+    match check_workspace_owner_access(quota, is_cloud, owner_id).await {
+        Some(reason) => Err(workspace_access_denial_orpc_error(reason)),
+        None => Ok(()),
+    }
+}
+
+const DENIAL_HTTP_STATUS: u16 = 403;
+
+/// POST routes a `read_only` token may call (reads that take a body).
+const READ_ONLY_TOKEN_ALLOWED_POST_PATHS: &[&str] = &[
+    ADS_CAMPAIGNS_INSIGHTS_PATH,
+    FILTER_VALUE_LABELS_TOKEN_PATH,
+    "/v1/templates/dependencies-preview",
+    "/v1/templates/locked-resources",
+];
+
+/// POST routes the owner quota gate lets through (reads, and stops/uninstalls the UI allows).
+const READ_ONLY_POST_PATHS: &[&str] = &[
+    CONVERSATIONS_LIST_POST_PATH,
+    FILTER_VALUE_LABELS_POST_PATH,
+    FILTER_VALUE_LABELS_TOKEN_PATH,
+    BROADCAST_STOP_TOKEN_PATH,
+    MARKETING_MESSAGE_STOP_TOKEN_PATH,
+    BROADCAST_AUDIENCE_PREVIEW_TOKEN_PATH,
+    "/v1/template-installations/{id}/uninstall",
+    "/v1/template-installations/{id}/uninstall/cancel",
+    "/v1/templates/{id}/installers/{installerId}/uninstall",
+];
+
+/// The owner's access state, with the MAC pool limit folded in.
+async fn owner_access_state<Q: WorkspaceQuota + Sync>(
+    quota: &Q,
+    owner_id: &str,
+) -> OwnerAccessState {
+    let state = quota.get_access_state(owner_id).await;
+    if state.blocked {
+        return state;
+    }
+    if quota.is_at_limit(owner_id, "mac").await {
+        return OwnerAccessState {
+            blocked: true,
+            reason: Some("mac".to_string()),
+        };
+    }
+    state
 }

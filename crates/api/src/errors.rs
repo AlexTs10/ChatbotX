@@ -11,8 +11,7 @@ pub struct ChatbotXException {
 impl ChatbotXException {
     /// `new ChatbotXException(message)`: code `systemError`, status 400.
     pub fn new(message: impl Into<String>) -> ChatbotXException {
-        let _ = message;
-        todo!("P3.5a")
+        ChatbotXException::with_code(message, "systemError", 400)
     }
 
     /// `new ChatbotXException(message, code, httpStatusCode)`.
@@ -21,7 +20,10 @@ impl ChatbotXException {
         code: &str,
         http_status_code: u16,
     ) -> ChatbotXException {
-        let _ = (message, code, http_status_code);
-        todo!("P3.5a")
+        ChatbotXException {
+            message: message.into(),
+            code: code.to_string(),
+            http_status_code,
+        }
     }
 }
