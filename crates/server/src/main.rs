@@ -5,6 +5,7 @@ mod config;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use chatbotx_api::auth::LiveAuthDeps;
 use chatbotx_db::Db;
 use chatbotx_kv::{Clock, Kv, KvConfig, SystemClock};
 use chatbotx_rt::{KvPresence, NoRevokeRetry, Realtime, RtConfig};
@@ -12,7 +13,7 @@ use config::Config;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
-/// The SQLite file of the realtime revoke markers (`kv_entry`), under `DATA_DIR`.
+/// The SQLite database (app tables and the kv rows), under `DATA_DIR`.
 const DB_FILE: &str = "chatbotx.db";
 
 fn main() -> ExitCode {
@@ -77,31 +78,56 @@ fn realtime_config() -> Result<Option<RtConfig>, chatbotx_rt::RtConfigError> {
     RtConfig::from_env().map(Some)
 }
 
-/// Opens the database, the kv stores and the realtime hub.
-async fn start_realtime(config: &Config, rt_config: RtConfig) -> std::io::Result<Realtime> {
+/// The database and the kv stores every part of the server shares.
+struct Shared {
+    db: Arc<Db>,
+    kv: Arc<Kv>,
+    clock: Arc<dyn Clock>,
+}
+
+/// Opens (and migrates) the database under `DATA_DIR` and starts the kv stores.
+async fn open_shared(config: &Config) -> std::io::Result<Shared> {
     std::fs::create_dir_all(&config.data_dir)?;
     let db = Db::open(config.data_dir.join(DB_FILE)).map_err(std::io::Error::other)?;
     db.migrate().await.map_err(std::io::Error::other)?;
+    let db = Arc::new(db);
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let kv = Kv::start(Arc::new(db), Arc::clone(&clock), KvConfig::default());
-    Ok(Realtime::start(
-        Arc::clone(&kv),
-        clock,
+    let kv = Kv::start(Arc::clone(&db), Arc::clone(&clock), KvConfig::default());
+    Ok(Shared { db, kv, clock })
+}
+
+/// Starts the realtime hub on the shared kv stores.
+fn start_realtime(shared: &Shared, rt_config: RtConfig) -> Realtime {
+    Realtime::start(
+        Arc::clone(&shared.kv),
+        Arc::clone(&shared.clock),
         rt_config,
-        Arc::new(KvPresence::new(kv)),
+        Arc::new(KvPresence::new(Arc::clone(&shared.kv))),
         Arc::new(NoRevokeRetry),
-    ))
+    )
+}
+
+/// `isCloud()`: `NEXT_PUBLIC_EDITION=cloud`.
+fn is_cloud() -> bool {
+    std::env::var("NEXT_PUBLIC_EDITION").is_ok_and(|edition| edition == "cloud")
 }
 
 async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<()> {
+    let shared = open_shared(&config).await?;
     let realtime = match rt_config {
-        Some(rt_config) => Some(start_realtime(&config, rt_config).await?),
+        Some(rt_config) => Some(start_realtime(&shared, rt_config)),
         None => {
             tracing::info!("realtime gateway off: REALTIME_BROADCAST_SECRET is not set");
             None
         }
     };
-    let mut app = chatbotx_api::router();
+    let auth = Arc::new(LiveAuthDeps {
+        db: Arc::clone(&shared.db),
+        kv: Arc::clone(&shared.kv),
+        clock: Arc::clone(&shared.clock),
+        is_cloud: is_cloud(),
+    });
+    let mut app = chatbotx_api::router().merge(chatbotx_api::routes::public_api_router(auth));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
