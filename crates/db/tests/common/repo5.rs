@@ -42,7 +42,11 @@ pub fn make_message() -> CreateMessageInput {
 }
 
 /// An image attachment input of `message_id` (`/uploads/img.png`).
-pub fn make_attachment(id: Option<i64>, message_id: i64, message_created_at: i64) -> CreateAttachmentInput {
+pub fn make_attachment(
+    id: Option<i64>,
+    message_id: i64,
+    message_created_at: i64,
+) -> CreateAttachmentInput {
     CreateAttachmentInput {
         id,
         workspace_id: WS,
@@ -139,30 +143,38 @@ pub fn put_attachment(
 
 /// The `Message` row `id`, if any.
 pub async fn message_row(db: &Db, id: i64) -> Option<Message> {
-    repo::read(db, move |c| repo::find_one::<Message>(c, "\"id\" = ?1", &[&id]))
-        .await
-        .expect("read message")
+    repo::read(db, move |c| {
+        repo::find_one::<Message>(c, "\"id\" = ?1", &[&id])
+    })
+    .await
+    .expect("read message")
 }
 
 /// Every `Message` row, by id.
 pub async fn message_rows(db: &Db) -> Vec<Message> {
-    repo::read(db, |c| repo::find_many::<Message>(c, "ORDER BY \"id\"", &[]))
-        .await
-        .expect("read messages")
+    repo::read(db, |c| {
+        repo::find_many::<Message>(c, "ORDER BY \"id\"", &[])
+    })
+    .await
+    .expect("read messages")
 }
 
 /// The `Attachment` row `id`, if any.
 pub async fn attachment_row(db: &Db, id: i64) -> Option<Attachment> {
-    repo::read(db, move |c| repo::find_one::<Attachment>(c, "\"id\" = ?1", &[&id]))
-        .await
-        .expect("read attachment")
+    repo::read(db, move |c| {
+        repo::find_one::<Attachment>(c, "\"id\" = ?1", &[&id])
+    })
+    .await
+    .expect("read attachment")
 }
 
 /// Every `Attachment` row, by id.
 pub async fn attachment_rows(db: &Db) -> Vec<Attachment> {
-    repo::read(db, |c| repo::find_many::<Attachment>(c, "ORDER BY \"id\"", &[]))
-        .await
-        .expect("read attachments")
+    repo::read(db, |c| {
+        repo::find_many::<Attachment>(c, "ORDER BY \"id\"", &[])
+    })
+    .await
+    .expect("read attachments")
 }
 
 /// `Message::TABLE` (keeps the `Model` import used).

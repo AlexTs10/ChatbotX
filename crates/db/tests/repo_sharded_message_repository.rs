@@ -52,7 +52,10 @@ async fn sharded_message_repository_bulk_create_conflict_target_is_contact_inbox
         },
     ];
     let result = ok(repo::write(&db, move |tx| bulk_create(tx, &rows)).await);
-    assert_eq!(result.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 3, 4]);
+    assert_eq!(
+        result.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![1, 3, 4]
+    );
     assert_eq!(message_rows(&db).await.len(), 3);
 }
 
@@ -177,7 +180,10 @@ async fn sharded_message_repository_bulk_create_throws_when_messages_span_multip
         },
     ];
     let message = err_message(repo::write(&db, move |tx| bulk_create(tx, &rows)).await);
-    assert_eq!(message, "bulkCreate: all messages must belong to the same workspace");
+    assert_eq!(
+        message,
+        "bulkCreate: all messages must belong to the same workspace"
+    );
 }
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:233 "ShardedMessageRepository.bulkCreate > bulkCreateAttachments routes to shard db and passes messageCreatedAt"
@@ -212,7 +218,10 @@ async fn sharded_message_repository_bulk_create_bulk_create_attachments_stamps_c
     let after = now_ms();
     let first = attachment_row(&db, 11).await.expect("row 11");
     assert!(first.created_at >= before && first.created_at <= after);
-    assert_eq!(attachment_row(&db, 12).await.expect("row 12").created_at, given);
+    assert_eq!(
+        attachment_row(&db, 12).await.expect("row 12").created_at,
+        given
+    );
 }
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:284 "ShardedMessageRepository.bulkCreate > bulkCreateAttachments returns empty array for empty input without calling insert"
@@ -290,7 +299,10 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_fin
         since_time: Some(ms(SINCE)),
     };
     let result = ok(repo::read(&db, move |c| find_many_by_source_ids(c, &params)).await);
-    assert_eq!(result.iter().map(|r| r.id).collect::<Vec<_>>(), vec![11, 12]);
+    assert_eq!(
+        result.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![11, 12]
+    );
     assert_eq!(result[0].conversation_id, CONV);
     assert_eq!(result[0].contact_inbox_id, CI);
 }
@@ -336,11 +348,19 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_bul
     ok(repo::write(&db, move |tx| bulk_patch_content_attributes(tx, &params)).await);
     let patched = message_row(&db, 11).await.expect("row 11");
     assert_eq!(patched.text.as_deref(), Some("edited"));
-    assert_eq!(patched.content_attributes.map(|j| j.0), Some(json!({ "kept": 1, "edited": true })));
+    assert_eq!(
+        patched.content_attributes.map(|j| j.0),
+        Some(json!({ "kept": 1, "edited": true }))
+    );
     let other = message_row(&db, 12).await.expect("row 12");
     assert_eq!(other.text, None);
     assert_eq!(other.content_attributes, None);
-    let message = err_message(repo::write(&db, move |tx| bulk_patch_content_attributes(tx, &without_since)).await);
+    let message = err_message(
+        repo::write(&db, move |tx| {
+            bulk_patch_content_attributes(tx, &without_since)
+        })
+        .await,
+    );
     assert!(message.contains("sinceTime is required"), "{message}");
 }
 
@@ -350,7 +370,10 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_fin
  {
     let db = fresh_db().await;
     let at = ms("2026-01-03T00:00:00Z");
-    setup(&db, move |tx| put_attachment(tx, 21, 1, at, "wa-media:123", None)).await;
+    setup(&db, move |tx| {
+        put_attachment(tx, 21, 1, at, "wa-media:123", None)
+    })
+    .await;
     let params = FindAttachmentByIdParams {
         id: 21,
         workspace_id: WS,
@@ -375,7 +398,10 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_fin
             keep_original: None,
         })
     );
-    assert_eq!(ok(repo::read(&db, move |c| find_attachment_by_id(c, &other_ws)).await), None);
+    assert_eq!(
+        ok(repo::read(&db, move |c| find_attachment_by_id(c, &other_ws)).await),
+        None
+    );
 }
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:545 "ShardedMessageRepository direct message/attachment lookup helpers > findAttachmentById falls back to the recent-history scan when the hint window misses"
@@ -384,13 +410,17 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_fin
  {
     let db = fresh_db().await;
     let message_created_at = ms("2026-01-03T12:00:00Z");
-    setup(&db, move |tx| put_attachment(tx, 21, 1, message_created_at, "wa-media:123", None)).await;
+    setup(&db, move |tx| {
+        put_attachment(tx, 21, 1, message_created_at, "wa-media:123", None)
+    })
+    .await;
     let params = FindAttachmentByIdParams {
         id: 21,
         workspace_id: WS,
         message_created_at: Some(message_created_at - 30 * 24 * 60 * 60 * 1000),
     };
-    let result = ok(repo::read(&db, move |c| find_attachment_by_id(c, &params)).await).expect("found");
+    let result =
+        ok(repo::read(&db, move |c| find_attachment_by_id(c, &params)).await).expect("found");
     assert_eq!(result.id, 21);
     assert_eq!(result.message_created_at, message_created_at);
     assert_eq!(result.origin_path, "wa-media:123");
@@ -417,7 +447,10 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_upd
  {
     let db = fresh_db().await;
     let created_at = ms("2026-01-03T00:00:00Z");
-    setup(&db, move |tx| put_attachment(tx, 21, 1, created_at, "wa-media:123", None)).await;
+    setup(&db, move |tx| {
+        put_attachment(tx, 21, 1, created_at, "wa-media:123", None)
+    })
+    .await;
     let params = attachment_update(created_at, 21);
     ok(repo::write(&db, move |tx| update_attachment(tx, &params)).await);
     let row = attachment_row(&db, 21).await.expect("row");
@@ -433,7 +466,10 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_upd
  {
     let db = fresh_db().await;
     let created_at = ms("2026-01-03T00:00:00Z");
-    setup(&db, move |tx| put_attachment(tx, 21, 1, created_at, "wa-media:123", None)).await;
+    setup(&db, move |tx| {
+        put_attachment(tx, 21, 1, created_at, "wa-media:123", None)
+    })
+    .await;
     let mut params = attachment_update(created_at, 21);
     params.fields = UpdateAttachmentFields {
         origin_path: "public/a.jpg".to_owned(),
@@ -446,8 +482,14 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_upd
         id: 999,
         ..params.clone()
     };
-    assert_eq!(ok(repo::write(&db, move |tx| update_attachment(tx, &params)).await), 1);
-    assert_eq!(ok(repo::write(&db, move |tx| update_attachment(tx, &missing)).await), 0);
+    assert_eq!(
+        ok(repo::write(&db, move |tx| update_attachment(tx, &params)).await),
+        1
+    );
+    assert_eq!(
+        ok(repo::write(&db, move |tx| update_attachment(tx, &missing)).await),
+        0
+    );
 }
 
 const RICH_BUTTON_1: &str = r#"{"richResponse":{"executionId":"exec-1","buttonPayloads":{"button-1":{"executionId":"exec-1","buttonId":"button-1","payload":{"type":"text","text":"size_s"}}}}}"#;
@@ -517,7 +559,10 @@ async fn sharded_message_repository_direct_message_attachment_lookup_helpers_fin
     })
     .await;
     let params = rich_params(Some(11));
-    assert_eq!(ok(repo::read(&db, move |c| find_rich_response_by_button(c, &params)).await), None);
+    assert_eq!(
+        ok(repo::read(&db, move |c| find_rich_response_by_button(c, &params)).await),
+        None
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -531,9 +576,15 @@ async fn sharded_message_repository_update_source_id_routes_by_the_message_s_cre
     let db = fresh_db().await;
     let created_at = ms("2026-01-01T00:00:00Z");
     setup(&db, move |tx| put_message(tx, &MsgRow::new(1, created_at))).await;
-    let result = ok(repo::write(&db, move |tx| update_source_id(tx, 1, "prov-abc", WS, created_at)).await);
+    let result = ok(repo::write(&db, move |tx| {
+        update_source_id(tx, 1, "prov-abc", WS, created_at)
+    })
+    .await);
     assert_eq!(result, Some(1));
-    assert_eq!(message_row(&db, 1).await.expect("row").source_id.as_deref(), Some("prov-abc"));
+    assert_eq!(
+        message_row(&db, 1).await.expect("row").source_id.as_deref(),
+        Some("prov-abc")
+    );
 }
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:1128 "ShardedMessageRepository.mergeContentAttributesBySourceId > merges the overlay via a single jsonb UPDATE — never overwrites the whole column"
@@ -695,7 +746,10 @@ async fn sharded_message_repository_list_incoming_texts_by_contact_inbox_does_no
     let db = fresh_db().await;
     setup(&db, seed_me_loop).await;
     let params = incoming(Some(200));
-    let result = ok(repo::read(&db, move |c| list_incoming_texts_by_contact_inbox(c, &params)).await);
+    let result = ok(repo::read(&db, move |c| {
+        list_incoming_texts_by_contact_inbox(c, &params)
+    })
+    .await);
     assert_eq!(result, vec!["me".to_owned(), "loop".to_owned()]);
 }
 
@@ -763,7 +817,10 @@ async fn sharded_message_repository_list_incoming_texts_by_contact_inbox_reads_u
     })
     .await;
     let params = incoming(None);
-    let result = ok(repo::read(&db, move |c| list_incoming_texts_by_contact_inbox(c, &params)).await);
+    let result = ok(repo::read(&db, move |c| {
+        list_incoming_texts_by_contact_inbox(c, &params)
+    })
+    .await);
     assert_eq!(result.len(), 1002);
     assert_eq!(result[0], "new-0");
     assert_eq!(result[1000], "new-1000");
@@ -776,7 +833,8 @@ async fn sharded_message_repository_list_incoming_texts_by_contact_inbox_reads_u
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:1506 "ShardedMessageRepository.hardDeleteAllByContactInbox > scopes hard delete by contact inbox"
 #[tokio::test]
-async fn sharded_message_repository_hard_delete_all_by_contact_inbox_scopes_hard_delete_by_contact_inbox() {
+async fn sharded_message_repository_hard_delete_all_by_contact_inbox_scopes_hard_delete_by_contact_inbox()
+ {
     let db = fresh_db().await;
     let recent = ms("2026-06-02T00:00:00Z");
     let old = ms("2026-05-01T00:00:00Z");
@@ -800,10 +858,28 @@ async fn sharded_message_repository_hard_delete_all_by_contact_inbox_scopes_hard
         workspace_id: WS,
         since_time: ms("2026-06-01T00:00:00Z"),
     };
-    let result = ok(repo::write(&db, move |tx| hard_delete_all_by_contact_inbox(tx, &params)).await);
-    assert_eq!(result.attachment_paths, vec!["a/one.png".to_owned(), "a/one-thumb.png".to_owned()]);
-    assert_eq!(message_rows(&db).await.iter().map(|m| m.id).collect::<Vec<_>>(), vec![12, 13]);
-    assert_eq!(attachment_rows(&db).await.iter().map(|a| a.id).collect::<Vec<_>>(), vec![22, 23]);
+    let result =
+        ok(repo::write(&db, move |tx| hard_delete_all_by_contact_inbox(tx, &params)).await);
+    assert_eq!(
+        result.attachment_paths,
+        vec!["a/one.png".to_owned(), "a/one-thumb.png".to_owned()]
+    );
+    assert_eq!(
+        message_rows(&db)
+            .await
+            .iter()
+            .map(|m| m.id)
+            .collect::<Vec<_>>(),
+        vec![12, 13]
+    );
+    assert_eq!(
+        attachment_rows(&db)
+            .await
+            .iter()
+            .map(|a| a.id)
+            .collect::<Vec<_>>(),
+        vec![22, 23]
+    );
 }
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:1555 "ShardedMessageRepository.findById > scopes message lookup by workspaceId"
@@ -833,12 +909,16 @@ async fn sharded_message_repository_find_by_id_scopes_message_lookup_by_workspac
     };
     let found = ok(repo::read(&db, move |c| find_by_id(c, &params)).await).expect("found");
     assert_eq!(found.message.text.as_deref(), Some("scoped message"));
-    assert_eq!(ok(repo::read(&db, move |c| find_by_id(c, &other)).await), None);
+    assert_eq!(
+        ok(repo::read(&db, move |c| find_by_id(c, &other)).await),
+        None
+    );
 }
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:1604 "ShardedMessageRepository complete conversation reads > merges equal timestamps by numeric bigint id"
 #[tokio::test]
-async fn sharded_message_repository_complete_conversation_reads_merges_equal_timestamps_by_numeric_bigint_id() {
+async fn sharded_message_repository_complete_conversation_reads_merges_equal_timestamps_by_numeric_bigint_id()
+ {
     let db = fresh_db().await;
     let created_at = ms("2026-06-01T00:00:00Z");
     setup(&db, move |tx| {
@@ -871,7 +951,10 @@ fn ai_options() -> FindAiContextMessagesOptions {
     }
 }
 
-fn put_marker(tx: &chatbotx_db::rusqlite::Connection, conversation_id: i64) -> Result<usize, chatbotx_db::DbError> {
+fn put_marker(
+    tx: &chatbotx_db::rusqlite::Connection,
+    conversation_id: i64,
+) -> Result<usize, chatbotx_db::DbError> {
     put_message(
         tx,
         &MsgRow {
@@ -923,7 +1006,8 @@ async fn sharded_message_repository_find_ai_context_messages_finds_the_marker_be
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:1758 "ShardedMessageRepository.findAIContextMessages > returns empty history when the marker is latest"
 #[tokio::test]
-async fn sharded_message_repository_find_ai_context_messages_returns_empty_history_when_the_marker_is_latest() {
+async fn sharded_message_repository_find_ai_context_messages_returns_empty_history_when_the_marker_is_latest()
+ {
     let db = fresh_db().await;
     setup(&db, |tx| {
         put_message(
@@ -1048,7 +1132,10 @@ async fn sharded_message_repository_create_with_attachments_attachment_timestamp
     attachment.mime_type = "image/jpeg".to_owned();
     attachment.origin_path = "https://scontent.xx.fbcdn.net/a.jpg".to_owned();
     let before = now_ms();
-    let result = ok(repo::write(&db, move |tx| create_with_attachments(tx, &make_message(), &[attachment])).await);
+    let result = ok(repo::write(&db, move |tx| {
+        create_with_attachments(tx, &make_message(), &[attachment])
+    })
+    .await);
     let after = now_ms();
     let stored = &result.attachments[0];
     assert!(stored.created_at >= before && stored.created_at <= after);
@@ -1068,7 +1155,10 @@ async fn sharded_message_repository_create_or_update_with_attachments_idempotent
     })
     .await);
     assert!(first.is_new);
-    let second = ok(repo::write(&db, |tx| create_or_update_with_attachments(tx, &with_id(2), &[])).await);
+    let second = ok(repo::write(&db, |tx| {
+        create_or_update_with_attachments(tx, &with_id(2), &[])
+    })
+    .await);
     assert!(!second.is_new);
     assert_eq!(second.result, first.result);
     assert_eq!(message_rows(&db).await.len(), 1);
@@ -1081,7 +1171,10 @@ async fn sharded_message_repository_create_or_update_with_attachments_idempotent
  {
     let db = fresh_db().await;
     setup(&db, put_prior).await;
-    let result = ok(repo::write(&db, |tx| create_or_update_with_attachments(tx, &echo(), &[])).await);
+    let result = ok(repo::write(&db, |tx| {
+        create_or_update_with_attachments(tx, &echo(), &[])
+    })
+    .await);
     assert!(!result.is_new);
     assert_eq!(result.result.message.id, 5);
     assert!(result.result.attachments.is_empty());
@@ -1122,7 +1215,10 @@ async fn sharded_message_repository_delete_by_source_id_falls_back_to_a_full_his
     })
     .await;
     let stale_hint = ms("2026-06-15T00:00:00Z");
-    let mut result = ok(repo::write(&db, move |tx| delete_by_source_id(tx, "src-old", WS, stale_hint)).await);
+    let mut result = ok(repo::write(&db, move |tx| {
+        delete_by_source_id(tx, "src-old", WS, stale_hint)
+    })
+    .await);
     result.sort_by_key(|r| r.id);
     let r = |id| MessageRef {
         conversation_id: CONV,
@@ -1150,7 +1246,10 @@ async fn sharded_message_repository_delete_by_source_id_does_not_fall_back_when_
         )
     })
     .await;
-    let result = ok(repo::write(&db, move |tx| delete_by_source_id(tx, "src-1", WS, created_at)).await);
+    let result = ok(repo::write(&db, move |tx| {
+        delete_by_source_id(tx, "src-1", WS, created_at)
+    })
+    .await);
     assert_eq!(result.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1]);
     assert!(message_row(&db, 1).await.expect("row").deleted_at.is_some());
 }
@@ -1171,7 +1270,10 @@ async fn sharded_message_repository_delete_by_source_id_returns_conversation_i_d
         )
     })
     .await;
-    let result = ok(repo::write(&db, move |tx| delete_by_source_id(tx, "src-1", WS, created_at)).await);
+    let result = ok(repo::write(&db, move |tx| {
+        delete_by_source_id(tx, "src-1", WS, created_at)
+    })
+    .await);
     assert_eq!(
         result,
         vec![MessageRef {
@@ -1211,7 +1313,10 @@ async fn sharded_message_repository_primary_key_collision_safety_net_create_or_u
     assert!(result.message.id > 0);
     assert_eq!(Some(result.message.created_at), message.created_at);
     assert_eq!(result.message.source_id, message.source_id);
-    assert_eq!(message_row(&db, result.message.id).await, Some(result.message));
+    assert_eq!(
+        message_row(&db, result.message.id).await,
+        Some(result.message)
+    );
     assert_eq!(message_rows(&db).await.len(), 2);
 }
 
@@ -1240,9 +1345,18 @@ async fn sharded_message_repository_primary_key_collision_safety_net_create_or_u
     assert!(result.is_new);
     let id = result.result.message.id;
     assert_ne!(id, COLLIDING);
-    assert_eq!(Some(result.result.message.created_at), make_message().created_at);
+    assert_eq!(
+        Some(result.result.message.created_at),
+        make_message().created_at
+    );
     assert_eq!(result.result.attachments[0].message_id, id);
-    assert_eq!(attachment_row(&db, 21).await.expect("attachment").message_id, id);
+    assert_eq!(
+        attachment_row(&db, 21)
+            .await
+            .expect("attachment")
+            .message_id,
+        id
+    );
 }
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:2425 "ShardedMessageRepository.createWithAttachments primary-key collision safety net > regenerates the id and re-runs the transaction once on a primary-key collision"
@@ -1256,12 +1370,21 @@ async fn sharded_message_repository_create_with_attachments_primary_key_collisio
         ..with_id(COLLIDING)
     };
     let attachment = make_attachment(Some(21), 0, 0);
-    let result = ok(repo::write(&db, move |tx| create_with_attachments(tx, &message, &[attachment])).await);
+    let result = ok(repo::write(&db, move |tx| {
+        create_with_attachments(tx, &message, &[attachment])
+    })
+    .await);
     let id = result.message.id;
     assert_ne!(id, COLLIDING);
     assert_eq!(Some(result.message.created_at), make_message().created_at);
     assert_eq!(result.attachments[0].message_id, id);
-    assert_eq!(attachment_row(&db, 21).await.expect("attachment").message_id, id);
+    assert_eq!(
+        attachment_row(&db, 21)
+            .await
+            .expect("attachment")
+            .message_id,
+        id
+    );
 }
 
 /// Port of: packages/database/__tests__/sharded-message-repository.test.ts:2473 "ShardedMessageRepository.createWithAttachments primary-key collision safety net > surfaces any other insert error unchanged without re-running the transaction"
@@ -1280,10 +1403,23 @@ async fn sharded_message_repository_create_with_attachments_primary_key_collisio
     })
     .await;
     let attachment = make_attachment(Some(21), 0, 0);
-    let result = repo::write(&db, move |tx| create_with_attachments(tx, &with_id(6), &[attachment])).await;
+    let result = repo::write(&db, move |tx| {
+        create_with_attachments(tx, &with_id(6), &[attachment])
+    })
+    .await;
     let error = result.expect_err("dedup violation");
-    assert!(error.as_db().is_some_and(|e| e.is_unique_violation()), "{error}");
+    assert!(
+        error.as_db().is_some_and(|e| e.is_unique_violation()),
+        "{error}"
+    );
     assert!(!is_message_primary_key_violation(&error));
-    assert_eq!(message_rows(&db).await.iter().map(|m| m.id).collect::<Vec<_>>(), vec![5]);
+    assert_eq!(
+        message_rows(&db)
+            .await
+            .iter()
+            .map(|m| m.id)
+            .collect::<Vec<_>>(),
+        vec![5]
+    );
     assert!(attachment_rows(&db).await.is_empty());
 }

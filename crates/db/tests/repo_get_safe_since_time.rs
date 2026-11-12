@@ -12,7 +12,10 @@ use repo_common::ms;
 /// Port of: packages/database/__tests__/get-safe-since-time.test.ts:5 "getSafeSinceTime > accepts Date instances"
 #[test]
 fn get_safe_since_time_accepts_date_instances() {
-    let result = get_safe_since_time(Some(SinceTimeInput::Date(ms("2026-07-15T10:34:56.000Z"))), None);
+    let result = get_safe_since_time(
+        Some(SinceTimeInput::Date(ms("2026-07-15T10:34:56.000Z"))),
+        None,
+    );
     assert_eq!(result.map(iso).as_deref(), Some("2026-07-15T09:00:00.000Z"));
 }
 
@@ -34,7 +37,10 @@ fn get_safe_since_time_accepts_numeric_timestamps() {
 /// Port of: packages/database/__tests__/get-safe-since-time.test.ts:24 "getSafeSinceTime > returns undefined for invalid strings"
 #[test]
 fn get_safe_since_time_returns_undefined_for_invalid_strings() {
-    assert_eq!(get_safe_since_time(Some(SinceTimeInput::Text("not-a-date")), None), None);
+    assert_eq!(
+        get_safe_since_time(Some(SinceTimeInput::Text("not-a-date")), None),
+        None
+    );
 }
 
 /// Port of: packages/database/__tests__/get-safe-since-time.test.ts:28 "getSafeSinceTime > applies an explicit buffer before flooring to the hour"
