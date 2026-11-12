@@ -24,7 +24,14 @@ pub fn find_by_contact_inbox_id(
     conn: &Connection,
     contact_inbox_id: i64,
 ) -> Result<Option<WhatsappCallPermission>> {
-    todo!("P3.3")
+    Sql::new(
+        format!(
+            "{} WHERE \"contactInboxId\" = ?1 LIMIT 1",
+            WhatsappCallPermission::select_sql()
+        ),
+        vec![Value::Integer(contact_inbox_id)],
+    )
+    .model(conn)
 }
 
 /// `upsertForContactInbox`: the newer response wins (`DO UPDATE ... WHERE respondedAt <=
@@ -33,5 +40,26 @@ pub fn upsert_for_contact_inbox(
     conn: &Connection,
     input: &UpsertPermissionInput,
 ) -> Result<Option<WhatsappCallPermission>> {
-    todo!("P3.3")
+    Sql::new(
+        format!(
+            "INSERT INTO \"WhatsappCallPermission\" (\"id\", \"workspaceId\", \"contactInboxId\", \"response\", \
+             \"isPermanent\", \"expiresAt\", \"respondedAt\") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT (\"contactInboxId\") DO UPDATE SET \"response\" = excluded.\"response\", \
+             \"isPermanent\" = excluded.\"isPermanent\", \"expiresAt\" = excluded.\"expiresAt\", \
+             \"respondedAt\" = excluded.\"respondedAt\", \"updatedAt\" = ?8 \
+             WHERE \"WhatsappCallPermission\".\"respondedAt\" <= excluded.\"respondedAt\" RETURNING {}",
+            WhatsappCallPermission::columns_sql(None)
+        ),
+        vec![
+            Value::Integer(new_id()),
+            Value::Integer(input.workspace_id),
+            Value::Integer(input.contact_inbox_id),
+            Value::Text(input.response.clone()),
+            bool_val(input.is_permanent),
+            opt_int(input.expires_at),
+            Value::Integer(input.responded_at),
+            Value::Integer(now_ms()),
+        ],
+    )
+    .model(conn)
 }
