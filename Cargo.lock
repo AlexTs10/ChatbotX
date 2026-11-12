@@ -236,6 +236,7 @@ name = "chatbotx-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chatbotx-db",
  "serde_json",
  "tokio",
  "tower",

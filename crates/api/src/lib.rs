@@ -1,6 +1,9 @@
 //! HTTP API: the axum router and its handlers.
 
+pub mod auth;
+pub mod errors;
 pub mod iso8601;
+pub mod orpc;
 
 use axum::Router;
 use axum::http::header;
