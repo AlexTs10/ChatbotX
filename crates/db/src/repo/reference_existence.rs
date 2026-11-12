@@ -1,11 +1,4 @@
 //! Port of `repositories/reference-existence/repository.ts` (P3.3).
-#![allow(
-    unused_variables,
-    unused_imports,
-    dead_code,
-    unreachable_code,
-    clippy::all
-)]
 
 use std::collections::BTreeSet;
 
@@ -39,7 +32,7 @@ pub const VERIFIABLE_REFERENCE_KINDS: &[&str] = &[
 
 /// `isVerifiableReferenceKind`.
 pub fn is_verifiable_reference_kind(kind: &str) -> bool {
-    todo!("P3.3")
+    VERIFIABLE_REFERENCE_KINDS.contains(&kind)
 }
 
 /// The table of a kind whose rows carry `workspaceId` themselves.
@@ -82,5 +75,75 @@ pub fn find_existing_ids(
     kind: &str,
     ids: &[String],
 ) -> Result<BTreeSet<String>> {
-    todo!("P3.3")
+    if ids.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let list = text_list(ids);
+    if let Some(table) = direct_table(kind) {
+        let sql = format!(
+            "SELECT \"id\" FROM \"{table}\" WHERE \"workspaceId\" = ?1 \
+             AND CAST(\"id\" AS TEXT) IN (SELECT value FROM json_each(?2))"
+        );
+        return ids_of(conn, &sql, workspace_id, &list);
+    }
+    match kind {
+        "messengerTemplate" => ids_of(
+            conn,
+            "SELECT t.\"id\" FROM \"MessengerMessageTemplate\" t \
+             INNER JOIN \"IntegrationMessenger\" i ON t.\"integrationMessengerId\" = i.\"id\" \
+             WHERE i.\"workspaceId\" = ?1 AND CAST(t.\"id\" AS TEXT) IN (SELECT value FROM json_each(?2))",
+            workspace_id,
+            &list,
+        ),
+        "whatsappTemplate" => ids_of(
+            conn,
+            "SELECT t.\"id\" FROM \"WhatsappMessageTemplate\" t \
+             INNER JOIN \"IntegrationWhatsapp\" i ON t.\"integrationWhatsappId\" = i.\"id\" \
+             WHERE i.\"workspaceId\" = ?1 AND CAST(t.\"id\" AS TEXT) IN (SELECT value FROM json_each(?2))",
+            workspace_id,
+            &list,
+        ),
+        "whatsappFlow" => ids_of(
+            conn,
+            "SELECT t.\"id\" FROM \"WhatsappFlow\" t \
+             INNER JOIN \"IntegrationWhatsapp\" i ON t.\"integrationWhatsappId\" = i.\"id\" \
+             WHERE i.\"workspaceId\" = ?1 AND CAST(t.\"id\" AS TEXT) IN (SELECT value FROM json_each(?2))",
+            workspace_id,
+            &list,
+        ),
+        "messengerPersona" => {
+            let mut stmt = conn.prepare_cached(
+                "SELECT \"personas\" FROM \"IntegrationMessenger\" WHERE \"workspaceId\" = ?1",
+            )?;
+            let rows = stmt
+                .query_map([workspace_id], |row| row.get::<_, Json>(0))?
+                .collect::<rusqlite::Result<Vec<Json>>>()?;
+            let wanted: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
+            Ok(rows
+                .iter()
+                .filter_map(|j| j.as_array())
+                .flatten()
+                .filter_map(|p| p.get("id").and_then(|v| v.as_str()))
+                .filter(|id| wanted.contains(id))
+                .map(str::to_owned)
+                .collect())
+        }
+        "integration" => {
+            let mut found = BTreeSet::new();
+            for table in [
+                "Integration",
+                "IntegrationSmtp",
+                "IntegrationMessenger",
+                "IntegrationOpenaiCompatible",
+            ] {
+                let sql = format!(
+                    "SELECT \"id\" FROM \"{table}\" WHERE \"workspaceId\" = ?1 \
+                     AND CAST(\"id\" AS TEXT) IN (SELECT value FROM json_each(?2))"
+                );
+                found.extend(ids_of(conn, &sql, workspace_id, &list)?);
+            }
+            Ok(found)
+        }
+        _ => Ok(BTreeSet::new()),
+    }
 }

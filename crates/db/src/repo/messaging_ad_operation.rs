@@ -1,11 +1,4 @@
 //! Port of `repositories/messaging-ad-operation/repository.ts` (P3.3).
-#![allow(
-    unused_variables,
-    unused_imports,
-    dead_code,
-    unreachable_code,
-    clippy::all
-)]
 
 use rusqlite::Connection;
 
@@ -56,7 +49,29 @@ pub fn create(
     conn: &Connection,
     input: &CreateMessagingAdOperationInput,
 ) -> Result<MessagingAdOperation> {
-    todo!("P3.3")
+    let now = now_ms();
+    super::returning::<MessagingAdOperation>(
+        conn,
+        "INSERT INTO \"MessagingAdOperation\" (\"id\", \"createdAt\", \"updatedAt\", \"workspaceId\", \"channel\", \
+         \"integrationWhatsappId\", \"integrationMessengerId\", \"integrationInstagramId\", \"adAccountId\", \"name\", \
+         \"input\", \"createdBy\") VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        &[
+            &input.id,
+            &now,
+            &input.workspace_id,
+            &input.channel,
+            &input.integration_whatsapp_id,
+            &input.integration_messenger_id,
+            &input.integration_instagram_id,
+            &input.ad_account_id,
+            &input.name,
+            &input.input,
+            &input.created_by,
+        ],
+    )?
+    .into_iter()
+    .next()
+    .ok_or_else(|| Error::msg("Failed to create MessagingAdOperation"))
 }
 
 /// `findByIdForWorkspace`.
@@ -65,7 +80,11 @@ pub fn find_by_id_for_workspace(
     id: i64,
     workspace_id: i64,
 ) -> Result<Option<MessagingAdOperation>> {
-    todo!("P3.3")
+    super::find_one(
+        conn,
+        "\"id\" = ?1 AND \"workspaceId\" = ?2",
+        &[&id, &workspace_id],
+    )
 }
 
 /// `listByWorkspaceId`: newest first, optionally scoped to one channel + integration.
@@ -73,7 +92,26 @@ pub fn list_by_workspace_id(
     conn: &Connection,
     input: &ListOperationsInput,
 ) -> Result<Vec<MessagingAdOperation>> {
-    todo!("P3.3")
+    let mut q = Sql::raw(format!("{} WHERE ", MessagingAdOperation::select_sql()));
+    q.append(Sql::and([
+        Some(Sql::bind("\"workspaceId\" = ", input.workspace_id)),
+        input
+            .channel
+            .as_deref()
+            .filter(|c| !c.is_empty())
+            .map(|c| Sql::bind("\"channel\" = ", c.to_owned())),
+        input
+            .integration_whatsapp_id
+            .map(|id| Sql::bind("\"integrationWhatsappId\" = ", id)),
+        input
+            .integration_messenger_id
+            .map(|id| Sql::bind("\"integrationMessengerId\" = ", id)),
+        input
+            .integration_instagram_id
+            .map(|id| Sql::bind("\"integrationInstagramId\" = ", id)),
+    ]));
+    q.push(" ORDER BY \"createdAt\" DESC");
+    q.models(conn)
 }
 
 /// `claimForRetry`: CAS `failed` -> `pending` (clears `lastError`).
@@ -82,7 +120,14 @@ pub fn claim_for_retry(
     id: i64,
     workspace_id: i64,
 ) -> Result<Option<MessagingAdOperation>> {
-    todo!("P3.3")
+    Ok(super::returning::<MessagingAdOperation>(
+        conn,
+        "UPDATE \"MessagingAdOperation\" SET \"createState\" = 'pending', \"lastError\" = NULL, \"updatedAt\" = ?3 \
+         WHERE \"id\" = ?1 AND \"workspaceId\" = ?2 AND \"createState\" = 'failed'",
+        &[&id, &workspace_id, &now_ms()],
+    )?
+    .into_iter()
+    .next())
 }
 
 /// `updateCreateProgress`: writes the state, the given meta ids and `lastError`.
@@ -90,7 +135,34 @@ pub fn update_create_progress(
     conn: &Connection,
     input: &UpdateCreateProgressInput,
 ) -> Result<Option<MessagingAdOperation>> {
-    todo!("P3.3")
+    let mut q = Sql::bind(
+        "UPDATE \"MessagingAdOperation\" SET \"createState\" = ",
+        input.create_state.clone(),
+    );
+    for (col, value) in [
+        ("metaCampaignId", &input.meta_campaign_id),
+        ("metaAdSetId", &input.meta_ad_set_id),
+        ("metaAdCreativeId", &input.meta_ad_creative_id),
+        ("metaAdId", &input.meta_ad_id),
+    ] {
+        if let Some(v) = value.as_deref().filter(|v| !v.is_empty()) {
+            q.push(&format!(", \"{col}\" = "));
+            q.push_bind(v.to_owned());
+        }
+    }
+    q.push(", \"lastError\" = ");
+    q.push_bind(super::sql::opt_text(input.last_error.as_deref()));
+    q.push(", \"updatedAt\" = ");
+    q.push_bind(now_ms());
+    q.push(" WHERE \"id\" = ");
+    q.push_bind(input.id);
+    q.push(" AND \"workspaceId\" = ");
+    q.push_bind(input.workspace_id);
+    q.push(&format!(
+        " RETURNING {}",
+        MessagingAdOperation::columns_sql(None)
+    ));
+    q.model(conn)
 }
 
 /// `updatePublishState`.
@@ -101,7 +173,14 @@ pub fn update_publish_state(
     publish_state: &str,
     last_error: Option<&str>,
 ) -> Result<Option<MessagingAdOperation>> {
-    todo!("P3.3")
+    Ok(super::returning::<MessagingAdOperation>(
+        conn,
+        "UPDATE \"MessagingAdOperation\" SET \"publishState\" = ?3, \"lastError\" = ?4, \"updatedAt\" = ?5 \
+         WHERE \"id\" = ?1 AND \"workspaceId\" = ?2",
+        &[&id, &workspace_id, &publish_state, &last_error, &now_ms()],
+    )?
+    .into_iter()
+    .next())
 }
 
 /// `setCleanupError`.
@@ -111,5 +190,10 @@ pub fn set_cleanup_error(
     workspace_id: i64,
     cleanup_error: Option<&str>,
 ) -> Result<()> {
-    todo!("P3.3")
+    conn.execute(
+        "UPDATE \"MessagingAdOperation\" SET \"cleanupError\" = ?3, \"updatedAt\" = ?4 \
+         WHERE \"id\" = ?1 AND \"workspaceId\" = ?2",
+        rusqlite::params![id, workspace_id, cleanup_error, now_ms()],
+    )?;
+    Ok(())
 }

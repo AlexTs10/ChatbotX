@@ -1,11 +1,4 @@
 //! Port of `repositories/resource-deletion-log/repository.ts` (P3.3).
-#![allow(
-    unused_variables,
-    unused_imports,
-    dead_code,
-    unreachable_code,
-    clippy::all
-)]
 
 use rusqlite::{Connection, OptionalExtension};
 
@@ -41,18 +34,55 @@ pub struct ResourceKey {
 
 /// `insert`.
 pub fn insert(conn: &Connection, row: &ResourceDeletionLogInsert) -> Result<()> {
-    todo!("P3.3")
+    let now = now_ms();
+    conn.execute(
+        "INSERT INTO \"ResourceDeletionLog\" (\"id\", \"createdAt\", \"updatedAt\", \"workspaceId\", \"resourceType\", \
+         \"resourceId\", \"resourceSubtype\", \"resourceName\", \"status\", \"requestedByUserId\", \"requestSource\", \
+         \"ipAddress\", \"userAgent\", \"requestedAt\", \"completedAt\", \"canceledAt\") \
+         VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        rusqlite::params![
+            new_id(),
+            now,
+            row.workspace_id,
+            row.resource_type,
+            row.resource_id,
+            row.resource_subtype,
+            row.resource_name,
+            row.status,
+            row.requested_by_user_id,
+            row.request_source,
+            row.ip_address,
+            row.user_agent,
+            row.requested_at,
+            row.completed_at,
+            row.canceled_at
+        ],
+    )?;
+    Ok(())
 }
 
 /// `findPendingIdByResource`: the newest `pending` row of a resource.
 pub fn find_pending_id_by_resource(conn: &Connection, key: &ResourceKey) -> Result<Option<i64>> {
-    todo!("P3.3")
+    let mut stmt = conn.prepare_cached(
+        "SELECT \"id\" FROM \"ResourceDeletionLog\" WHERE \"workspaceId\" = ?1 AND \"resourceType\" = ?2 \
+         AND \"resourceId\" = ?3 AND \"status\" = 'pending' ORDER BY \"id\" DESC LIMIT 1",
+    )?;
+    Ok(stmt
+        .query_row(
+            rusqlite::params![key.workspace_id, key.resource_type, key.resource_id],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 /// `completePendingById`: `pending` -> `completed` for one still-pending row; returns the
 /// updated count.
 pub fn complete_pending_by_id(conn: &Connection, id: i64, completed_at: i64) -> Result<usize> {
-    todo!("P3.3")
+    Ok(conn.execute(
+        "UPDATE \"ResourceDeletionLog\" SET \"status\" = 'completed', \"completedAt\" = ?2, \"updatedAt\" = ?3 \
+         WHERE \"id\" = ?1 AND \"status\" = 'pending'",
+        rusqlite::params![id, completed_at, now_ms()],
+    )?)
 }
 
 /// `cancelPendingByResource`: `pending` -> `canceled` for every pending row of a
@@ -62,5 +92,9 @@ pub fn cancel_pending_by_resource(
     key: &ResourceKey,
     canceled_at: i64,
 ) -> Result<usize> {
-    todo!("P3.3")
+    Ok(conn.execute(
+        "UPDATE \"ResourceDeletionLog\" SET \"status\" = 'canceled', \"canceledAt\" = ?4, \"updatedAt\" = ?5 \
+         WHERE \"workspaceId\" = ?1 AND \"resourceType\" = ?2 AND \"resourceId\" = ?3 AND \"status\" = 'pending'",
+        rusqlite::params![key.workspace_id, key.resource_type, key.resource_id, canceled_at, now_ms()],
+    )?)
 }

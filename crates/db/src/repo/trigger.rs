@@ -1,11 +1,4 @@
 //! Port of `repositories/trigger/repository.ts` (P3.3).
-#![allow(
-    unused_variables,
-    unused_imports,
-    dead_code,
-    unreachable_code,
-    clippy::all
-)]
 
 use rusqlite::Connection;
 
@@ -66,7 +59,32 @@ pub fn list_paginated_with_conditions(
     conn: &Connection,
     input: &ListTriggersInput,
 ) -> Result<TriggerPage> {
-    todo!("P3.3")
+    let mut q = Sql::raw(format!(
+        "{} WHERE ",
+        <Trigger as super::Model>::select_sql()
+    ));
+    q.append(build_where(input));
+    q.push(" ORDER BY \"createdAt\" DESC, \"id\" DESC LIMIT ");
+    q.push_bind(input.limit);
+    q.push(" OFFSET ");
+    q.push_bind(input.offset);
+    let triggers = q.models::<Trigger>(conn)?;
+    let mut rows = Vec::with_capacity(triggers.len());
+    for trigger in triggers {
+        let conditions = conditions_of(conn, trigger.id)?;
+        rows.push(TriggerWithConditions {
+            trigger,
+            conditions,
+        });
+    }
+    let mut c = Sql::raw("SELECT count(*) FROM \"Trigger\" WHERE ");
+    c.append(build_where(input));
+    let total = c
+        .query_map(conn, |row| row.get::<_, i64>(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0);
+    Ok(TriggerPage { rows, total })
 }
 
 /// `findWithConditions`: by `id` and/or `workspace_id`; `None` when neither is given.
@@ -75,5 +93,24 @@ pub fn find_with_conditions(
     id: Option<i64>,
     workspace_id: Option<i64>,
 ) -> Result<Option<TriggerWithConditions>> {
-    todo!("P3.3")
+    if id.is_none() && workspace_id.is_none() {
+        return Ok(None);
+    }
+    let mut q = Sql::raw(format!(
+        "{} WHERE ",
+        <Trigger as super::Model>::select_sql()
+    ));
+    q.append(Sql::and([
+        id.map(|id| Sql::bind("\"id\" = ", id)),
+        workspace_id.map(|ws| Sql::bind("\"workspaceId\" = ", ws)),
+    ]));
+    q.push(" LIMIT 1");
+    let Some(trigger) = q.model::<Trigger>(conn)? else {
+        return Ok(None);
+    };
+    let conditions = conditions_of(conn, trigger.id)?;
+    Ok(Some(TriggerWithConditions {
+        trigger,
+        conditions,
+    }))
 }
