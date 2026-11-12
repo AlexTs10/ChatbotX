@@ -9,9 +9,7 @@ pub const PAID_AD_REFERRAL_SOURCE_META: &str = "ADS";
 /// `(<ci>.referral->>'adId' IS NOT NULL AND <ci>.referral->>'source' = ?)`.
 pub fn paid_ad_referral(ci: &str, source: &str) -> Sql {
     Sql::bind(
-        format!(
-            "({ci}.\"referral\"->>'adId' IS NOT NULL AND {ci}.\"referral\"->>'source' = "
-        ),
+        format!("({ci}.\"referral\"->>'adId' IS NOT NULL AND {ci}.\"referral\"->>'source' = "),
         source.to_owned(),
     )
     .closed(")")
@@ -43,4 +41,3 @@ pub fn any_channel_ad_conversation_predicate(ci: &str) -> Sql {
     out.push(")");
     out
 }
-

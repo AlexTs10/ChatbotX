@@ -2,7 +2,7 @@
 //! (one field per column in column order, `ALTER TABLE ... ADD COLUMN` columns last; `bool`
 //! for `IN (0, 1)` columns, [`Json`] for `json_valid` columns, `Option` for nullable columns).
 
-use super::{Json, table_row};
+use super::Json;
 
 table_row! {
     /// Row of `"AIAgent"`.

@@ -31,7 +31,11 @@ pub fn zoned_bucket_key(column_sql: &str, granularity: Granularity, timezone: &s
         ),
         Granularity::Month => format!("strftime('%Y-%m-01', {wall}, 'unixepoch')"),
     };
-    let binds = if granularity == Granularity::Week { 2 } else { 1 };
+    let binds = if granularity == Granularity::Week {
+        2
+    } else {
+        1
+    };
     Sql::new(text, vec![Value::Text(timezone.to_owned()); binds])
 }
 
@@ -43,4 +47,3 @@ pub fn zoned_hour_key(column_sql: &str, timezone: &str) -> Sql {
     )
     .closed(")) / 1000.0, 'unixepoch')")
 }
-

@@ -134,7 +134,6 @@ pub fn parse_order_by(
 /// `withIdTieBreak`: appends `id` in the direction of the first entry (`desc` without
 /// one) unless `id` is already there.
 pub fn with_id_tie_break(order_by: &[(String, SortDir)]) -> Vec<(String, SortDir)> {
-    todo!("P3.2");
     let mut out = order_by.to_vec();
     if !out.iter().any(|(c, _)| c == "id") {
         let dir = out.first().map_or(SortDir::Desc, |(_, d)| *d);

@@ -32,7 +32,6 @@ pub fn find_many_by_source(
     workspace_id: i64,
     limit: i64,
 ) -> Result<Vec<AiConversationEmbedding>> {
-    todo!("P3.2");
     super::find_many(
         conn,
         "WHERE \"sourceId\" = ?1 AND \"workspaceId\" = ?2 AND \"status\" = 'success' ORDER BY \"chunkIndex\" ASC LIMIT ?3",
@@ -50,7 +49,6 @@ pub fn vector_search(
     top_k: i64,
     workspace_id: i64,
 ) -> Result<Vec<VectorSearchRow>> {
-    todo!("P3.2");
     let mut stmt = conn.prepare_cached(
         "SELECT \"chunkIndex\", \"content\", 1 - vector_distance_cos(\"embedding\", vector32(?1)) AS similarity \
          FROM \"AIConversationEmbedding\" \
@@ -58,13 +56,16 @@ pub fn vector_search(
          ORDER BY vector_distance_cos(\"embedding\", vector32(?1)) LIMIT ?4",
     )?;
     let rows = stmt
-        .query_map(rusqlite::params![query_vector, source_id, workspace_id, top_k], |row| {
-            Ok((
-                row.get::<_, Option<i64>>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<f64>>(2)?,
-            ))
-        })?
+        .query_map(
+            rusqlite::params![query_vector, source_id, workspace_id, top_k],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<f64>>(2)?,
+                ))
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows
         .into_iter()

@@ -18,7 +18,6 @@ pub fn find_conversation_ai_context_state(
     conversation_id: i64,
     workspace_id: i64,
 ) -> Result<Option<ConversationAiContextState>> {
-    todo!("P3.2");
     let mut stmt = conn.prepare_cached(
         "SELECT \"aiContextLastMessageId\", \"lastActivityAt\" FROM \"Conversation\" WHERE \"id\" = ?1 AND \"workspaceId\" = ?2 LIMIT 1",
     )?;

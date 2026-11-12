@@ -201,3 +201,11 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
 - P2.8 user decisions: the 51 candidate cases of `conversion/specs/P2.8.md` §4.3 are not-applicable; the presence report HTTP hop is removed (in-process `PresenceSink`); `frame-reader.test.ts` and `realtime-socket.test.ts` (21 cases, browser client) move from class C to class B. Orchestrator: D1 crate order `db <- kv <- {jobs, rt} <- core <- {api, server}`; D5 no permessage-deflate; D6 `REALTIME_BROADCAST_SECRET` stays required.
 - P2.7: the ported test `crates/kv/tests/leaderboard_store.rs` got one file-level `#![allow(clippy::int_plus_one)]` line (lint only, same rule as the P2.6 gate); the crate keeps `[lints] workspace = true`.
 - Infra (P2.7 check): with the Dell at load ~78 and swap full (other projects' tsc runs), 2 db unit tests failed once in `Db::open` on a temp file; the rerun passed (808/808). Treat a `Db::open`/time-out failure under such load as infra and rerun; if it repeats at normal load, open a db unit.
+
+## 2026-11-12 — Speed rules 2 (user: "this goes way too slowly")
+
+- Orchestrator, recommended option (user standing rule 2026-11-12): agents commit their own stage 1 (named paths, check-manifest, `git commit -n`) and go on to stage 2 at once; no wait for an orchestrator handshake. The stage 1 commit SHA stays the lock point.
+- Verification of Phase 3 units is done by the orchestrator (not a separate agent): diff of the test files against the stage 1 commit, plus the full test, clippy and fmt gate on the Dell. Both agent slots are kept for implementation.
+- Lint-only `#![allow(clippy::...)]` lines in locked test files are allowed (orchestrator only), as in P2.7. P3.1: 6 files; P3.2: 1 file, plus one rustfmt whitespace fix.
+- P3.1 notes: JPEG pixels decode with `jpeg-decoder` (zune-jpeg misdecodes some 4:2:0 files). JSON object keys sort (no `preserve_order`). Invalid recurrence time zone falls back to UTC. Phone parity flake comes from `update-from-message.ts` digit scan of the message text; fix in the business port or the fixture.
+- P3.2: scope was too large for one batch; the rest goes to new unit P3.2b. Postgres row/advisory locks are no-ops under the single SQLite writer.

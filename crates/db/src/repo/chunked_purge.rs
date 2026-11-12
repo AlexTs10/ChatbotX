@@ -27,7 +27,10 @@ pub struct ChunkedPurgeOptions {
 
 /// `chunkedPurge`: returns `(deleted, stop reason)`. The deadline is checked after a full
 /// chunk (as the TypeScript).
-pub async fn chunked_purge(db: &Db, options: &ChunkedPurgeOptions) -> Result<(i64, ChunkedPurgeStopReason)> {
+pub async fn chunked_purge(
+    db: &Db,
+    options: &ChunkedPurgeOptions,
+) -> Result<(i64, ChunkedPurgeStopReason)> {
     let deadline = options.max_run_duration_ms.map(|ms| now_ms() + ms);
     let mut deleted = 0_i64;
     let mut chunk = 0_i64;
@@ -54,7 +57,10 @@ pub async fn chunked_purge(db: &Db, options: &ChunkedPurgeOptions) -> Result<(i6
             return Ok((deleted, ChunkedPurgeStopReason::Deadline));
         }
         if options.inter_chunk_delay_ms > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(options.inter_chunk_delay_ms)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(
+                options.inter_chunk_delay_ms,
+            ))
+            .await;
         }
     }
 }
@@ -67,7 +73,9 @@ mod tests {
     async fn deletes_in_chunks_until_drained_or_capped() {
         let db = Db::open_in_memory().expect("open");
         db.write(|tx| {
-            tx.execute_batch("CREATE TABLE \"T\" (\"id\" INTEGER PRIMARY KEY, \"k\" INTEGER) STRICT;")?;
+            tx.execute_batch(
+                "CREATE TABLE \"T\" (\"id\" INTEGER PRIMARY KEY, \"k\" INTEGER) STRICT;",
+            )?;
             for i in 1..=7 {
                 tx.execute("INSERT INTO \"T\" VALUES (?1, ?2)", [i, i % 2])?;
             }
@@ -84,8 +92,14 @@ mod tests {
             max_chunks: 1,
             max_run_duration_ms: None,
         };
-        assert_eq!(chunked_purge(&db, &options).await.expect("capped"), (2, ChunkedPurgeStopReason::ChunkCap));
+        assert_eq!(
+            chunked_purge(&db, &options).await.expect("capped"),
+            (2, ChunkedPurgeStopReason::ChunkCap)
+        );
         options.max_chunks = 10;
-        assert_eq!(chunked_purge(&db, &options).await.expect("drained"), (2, ChunkedPurgeStopReason::Drained));
+        assert_eq!(
+            chunked_purge(&db, &options).await.expect("drained"),
+            (2, ChunkedPurgeStopReason::Drained)
+        );
     }
 }

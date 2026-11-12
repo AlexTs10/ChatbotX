@@ -29,7 +29,6 @@ pub fn replace_reminders(
     calendar_id: i64,
     reminders: &[ReminderInput],
 ) -> Result<Vec<AppointmentCalendarReminder>> {
-    todo!("P3.2");
     let existing: Vec<AppointmentCalendarReminder> =
         super::find_many(conn, "WHERE \"calendarId\" = ?1", &[&calendar_id])?;
     let next: HashSet<String> = reminders
@@ -62,7 +61,13 @@ pub fn replace_reminders(
         let rows = super::returning::<AppointmentCalendarReminder>(
             conn,
             "INSERT INTO \"AppointmentCalendarReminder\" (\"id\", \"calendarId\", \"flowId\", \"timingValue\", \"timingUnit\") VALUES (?1, ?2, ?3, ?4, ?5)",
-            &[&new_id(), &calendar_id, &r.flow_id, &r.timing_value, &r.timing_unit],
+            &[
+                &new_id(),
+                &calendar_id,
+                &r.flow_id,
+                &r.timing_value,
+                &r.timing_unit,
+            ],
         )?;
         out.extend(rows);
     }

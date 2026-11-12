@@ -2,8 +2,8 @@
 //! [`crate::Db`]; `setLocalStatementTimeout` is [`crate::WriteTx::set_statement_timeout`];
 //! `liftDecompressionLimit` has no SQLite meaning).
 
-use rusqlite::types::ToSql;
 use rusqlite::Connection;
+use rusqlite::types::ToSql;
 
 use super::{Error, Result};
 
@@ -23,7 +23,6 @@ pub fn count_query_capped(
     query: &str,
     params: &[&dyn ToSql],
 ) -> Result<CappedCount> {
-    todo!("P3.2");
     let sql = format!(
         "SELECT COUNT(*) FROM (SELECT 1 FROM ({query}) LIMIT {}) AS \"cappedCount\"",
         cap + 1

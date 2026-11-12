@@ -79,13 +79,20 @@ pub struct RecurrencePatch {
 
 /// `selectDbNow`: the database clock (unix ms).
 pub fn select_db_now(conn: &Connection) -> Result<i64> {
-    todo!("P3.2");
-    Ok(conn.query_row("SELECT CAST(unixepoch('subsec') * 1000 AS INTEGER)", [], |row| row.get(0))?)
+    Ok(conn.query_row(
+        "SELECT CAST(unixepoch('subsec') * 1000 AS INTEGER)",
+        [],
+        |row| row.get(0),
+    )?)
 }
 
 /// `listDue`: series due at `now`, `(nextRunAt, id)` order, keyset after `cursor`.
-pub fn list_due(conn: &Connection, limit: i64, cursor: Option<DueRecurrenceCursor>, now: i64) -> Result<Vec<DueRecurrence>> {
-    todo!("P3.2");
+pub fn list_due(
+    conn: &Connection,
+    limit: i64,
+    cursor: Option<DueRecurrenceCursor>,
+    now: i64,
+) -> Result<Vec<DueRecurrence>> {
     let mut q = Sql::bind(
         "SELECT \"id\", \"workspaceId\", \"nextRunAt\" FROM \"BroadcastRecurrence\" WHERE \"nextRunAt\" IS NOT NULL AND \"nextRunAt\" <= ",
         now,
@@ -119,8 +126,11 @@ pub fn find_oldest_due_age_ms(conn: &Connection, now: i64) -> Result<Option<i64>
 
 /// `lockForWrite`: the series of `broadcast_ids` in the workspace, by id (no query for an
 /// empty list).
-pub fn lock_for_write(conn: &Connection, workspace_id: i64, broadcast_ids: &[i64]) -> Result<Vec<BroadcastRecurrence>> {
-    todo!("P3.2");
+pub fn lock_for_write(
+    conn: &Connection,
+    workspace_id: i64,
+    broadcast_ids: &[i64],
+) -> Result<Vec<BroadcastRecurrence>> {
     if broadcast_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -132,8 +142,15 @@ pub fn lock_for_write(conn: &Connection, workspace_id: i64, broadcast_ids: &[i64
 }
 
 /// `lockAllForWorkspace`.
-pub fn lock_all_for_workspace(conn: &Connection, workspace_id: i64) -> Result<Vec<BroadcastRecurrence>> {
-    super::find_many(conn, "WHERE \"workspaceId\" = ?1 ORDER BY \"id\" ASC", &[&workspace_id])
+pub fn lock_all_for_workspace(
+    conn: &Connection,
+    workspace_id: i64,
+) -> Result<Vec<BroadcastRecurrence>> {
+    super::find_many(
+        conn,
+        "WHERE \"workspaceId\" = ?1 ORDER BY \"id\" ASC",
+        &[&workspace_id],
+    )
 }
 
 /// `findForMaterialize`: the series of the workspace the job was enqueued for and its
@@ -143,7 +160,6 @@ pub fn find_for_materialize(
     recurrence_id: i64,
     workspace_id: i64,
 ) -> Result<Option<(BroadcastRecurrence, Broadcast)>> {
-    todo!("P3.2");
     let Some(recurrence) = super::find_one::<BroadcastRecurrence>(
         conn,
         "\"id\" = ?1 AND \"workspaceId\" = ?2",
@@ -157,12 +173,20 @@ pub fn find_for_materialize(
 }
 
 /// `findByBroadcastId`.
-pub fn find_by_broadcast_id(conn: &Connection, broadcast_id: i64) -> Result<Option<BroadcastRecurrence>> {
+pub fn find_by_broadcast_id(
+    conn: &Connection,
+    broadcast_id: i64,
+) -> Result<Option<BroadcastRecurrence>> {
     super::find_one(conn, "\"broadcastId\" = ?1", &[&broadcast_id])
 }
 
 /// `insertIfMissing`: the series of a broadcast (no-op when it exists).
-pub fn insert_if_missing(conn: &Connection, workspace_id: i64, broadcast_id: i64, rule: &Json) -> Result<()> {
+pub fn insert_if_missing(
+    conn: &Connection,
+    workspace_id: i64,
+    broadcast_id: i64,
+    rule: &Json,
+) -> Result<()> {
     let now = now_ms();
     conn.execute(
         "INSERT INTO \"BroadcastRecurrence\" (\"id\", \"createdAt\", \"updatedAt\", \"workspaceId\", \"broadcastId\", \"rule\") \
@@ -174,9 +198,16 @@ pub fn insert_if_missing(conn: &Connection, workspace_id: i64, broadcast_id: i64
 
 /// `update`: applies `patch`, compare-and-set on `nextRunAt` when `expected_next_run_at`
 /// is given. `true` when a row matched.
-pub fn update(conn: &Connection, id: i64, patch: &RecurrencePatch, expected_next_run_at: Option<i64>) -> Result<bool> {
-    todo!("P3.2");
-    let mut q = Sql::bind("UPDATE \"BroadcastRecurrence\" SET \"updatedAt\" = ", now_ms());
+pub fn update(
+    conn: &Connection,
+    id: i64,
+    patch: &RecurrencePatch,
+    expected_next_run_at: Option<i64>,
+) -> Result<bool> {
+    let mut q = Sql::bind(
+        "UPDATE \"BroadcastRecurrence\" SET \"updatedAt\" = ",
+        now_ms(),
+    );
     let opt = |v: Option<i64>| v.map_or(Value::Null, Value::Integer);
     if let Some(rule) = &patch.rule {
         q.push(", \"rule\" = ");
@@ -210,7 +241,6 @@ pub fn update(conn: &Connection, id: i64, patch: &RecurrencePatch, expected_next
 /// `insertLedgerRows`: idempotent on `(recurrenceId, localSlot, occurrenceAt)`; an empty
 /// batch writes nothing.
 pub fn insert_ledger_rows(conn: &Connection, rows: &[LedgerRowInput]) -> Result<()> {
-    todo!("P3.2");
     if rows.is_empty() {
         return Ok(());
     }
@@ -255,7 +285,6 @@ pub fn find_ledger_row(
 
 /// `countLedgerSlots`: the sum of `supersededCount` (0 without rows).
 pub fn count_ledger_slots(conn: &Connection, recurrence_id: i64) -> Result<i64> {
-    todo!("P3.2");
     Ok(conn.query_row(
         "SELECT coalesce(sum(\"supersededCount\"), 0) FROM \"BroadcastRecurrenceOccurrence\" WHERE \"recurrenceId\" = ?1",
         [recurrence_id],
@@ -273,7 +302,6 @@ pub fn list_ledger_bucket_keys(
     limit: i64,
     cursor: Option<&str>,
 ) -> Result<Vec<String>> {
-    todo!("P3.2");
     let bucket = zoned_bucket_key("\"occurrenceAt\"", granularity, timezone);
     let mut q = Sql::raw("SELECT ");
     q.append(bucket.clone());
@@ -299,7 +327,6 @@ pub fn list_ledger_bucket_cells(
     timezone: &str,
     buckets: &[String],
 ) -> Result<Vec<LedgerBucketCell>> {
-    todo!("P3.2");
     if buckets.is_empty() {
         return Ok(Vec::new());
     }
@@ -337,7 +364,6 @@ pub fn list_ledger_rows(
     cursor: Option<(i64, i64)>,
     limit: i64,
 ) -> Result<Vec<LedgerRowWithRun>> {
-    todo!("P3.2");
     let mut q = Sql::raw(format!(
         "SELECT {}, b.\"id\", b.\"status\", b.\"contactCount\" FROM \"BroadcastRecurrenceOccurrence\" AS o \
          LEFT JOIN \"Broadcast\" AS b ON b.\"id\" = o.\"childBroadcastId\" WHERE o.\"recurrenceId\" = ",

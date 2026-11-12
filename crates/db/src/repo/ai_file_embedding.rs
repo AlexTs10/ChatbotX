@@ -76,7 +76,6 @@ pub fn mark_chunked(
     workspace_id: i64,
     chunking: &JsonValue,
 ) -> Result<()> {
-    todo!("P3.2");
     conn.execute(
         "UPDATE \"AIFile\" SET \"chunking\" = ?1 WHERE \"id\" = ?2 AND \"workspaceId\" = ?3",
         rusqlite::params![chunking.to_string(), ai_file_id, workspace_id],
@@ -93,7 +92,6 @@ pub fn vector_search(
     query_vector: &[f32],
     limit: i64,
 ) -> Result<Vec<AiFileVectorSearchRow>> {
-    todo!("P3.2");
     if file_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -141,20 +139,28 @@ pub fn list_chunks(
     cursor: Option<AiFileChunkCursor>,
     from_chunk_index: Option<i64>,
 ) -> Result<Vec<AiFileChunkRow>> {
-    todo!("P3.2");
     let extra = match (cursor, from_chunk_index) {
-        (Some(AiFileChunkCursor {
-            chunk_index: None,
-            id,
-        }), _) => Some(Sql::bind("\"chunkIndex\" IS NULL AND \"id\" > ", id)),
-        (Some(AiFileChunkCursor {
-            chunk_index: Some(ci),
-            id,
-        }), _) => Some(Sql::new(
+        (
+            Some(AiFileChunkCursor {
+                chunk_index: None,
+                id,
+            }),
+            _,
+        ) => Some(Sql::bind("\"chunkIndex\" IS NULL AND \"id\" > ", id)),
+        (
+            Some(AiFileChunkCursor {
+                chunk_index: Some(ci),
+                id,
+            }),
+            _,
+        ) => Some(Sql::new(
             "\"chunkIndex\" > ? OR (\"chunkIndex\" = ? AND \"id\" > ?) OR \"chunkIndex\" IS NULL",
             vec![Value::Integer(ci), Value::Integer(ci), Value::Integer(id)],
         )),
-        (None, Some(from)) => Some(Sql::bind("\"chunkIndex\" IS NULL OR \"chunkIndex\" >= ", from)),
+        (None, Some(from)) => Some(Sql::bind(
+            "\"chunkIndex\" IS NULL OR \"chunkIndex\" >= ",
+            from,
+        )),
         (None, None) => None,
     };
     let mut q = Sql::raw(
@@ -188,7 +194,6 @@ pub fn find_chunks_containing(
     pattern: &str,
     limit: i64,
 ) -> Result<Vec<ChunkMatch>> {
-    todo!("P3.2");
     if file_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -226,13 +231,16 @@ pub fn count_by_status(
          WHERE \"workspaceId\" = ?1 AND \"aiFileId\" IN (SELECT value FROM json_each(?2)) GROUP BY \"aiFileId\", \"status\"",
     )?;
     let rows = stmt
-        .query_map(rusqlite::params![workspace_id, id_list(ai_file_ids)], |row| {
-            Ok(StatusCount {
-                ai_file_id: row.get(0)?,
-                status: row.get(1)?,
-                count: row.get(2)?,
-            })
-        })?
+        .query_map(
+            rusqlite::params![workspace_id, id_list(ai_file_ids)],
+            |row| {
+                Ok(StatusCount {
+                    ai_file_id: row.get(0)?,
+                    status: row.get(1)?,
+                    count: row.get(2)?,
+                })
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
@@ -257,8 +265,10 @@ pub fn claim_processing_run(
     stale_before_iso: &str,
     chunking_config: &ChunkingConfigUpdate,
 ) -> Result<bool> {
-    todo!("P3.2");
-    let mut q = Sql::bind("UPDATE \"AIFile\" SET \"processingRun\" = ", run.to_string());
+    let mut q = Sql::bind(
+        "UPDATE \"AIFile\" SET \"processingRun\" = ",
+        run.to_string(),
+    );
     match chunking_config {
         ChunkingConfigUpdate::Keep => {}
         ChunkingConfigUpdate::Reset => {
@@ -326,7 +336,6 @@ pub fn mark_processing_run_started(
     run_id: &str,
     now: &str,
 ) -> Result<bool> {
-    todo!("P3.2");
     update_processing_run(
         conn,
         ai_file_id,
@@ -348,7 +357,6 @@ pub fn refresh_processing_run_lease(
     run_id: &str,
     heartbeat_at: &str,
 ) -> Result<bool> {
-    todo!("P3.2");
     update_processing_run(
         conn,
         ai_file_id,
@@ -371,7 +379,6 @@ pub fn finish_processing_run(
     error: Option<&str>,
     finished_at: &str,
 ) -> Result<bool> {
-    todo!("P3.2");
     update_processing_run(
         conn,
         ai_file_id,
@@ -390,8 +397,11 @@ pub fn finish_processing_run(
 }
 
 /// `markEmbeddingFailed`: a pending chunk of the workspace becomes `error`.
-pub fn mark_embedding_failed(conn: &Connection, embedding_id: i64, workspace_id: i64) -> Result<bool> {
-    todo!("P3.2");
+pub fn mark_embedding_failed(
+    conn: &Connection,
+    embedding_id: i64,
+    workspace_id: i64,
+) -> Result<bool> {
     let n = conn.execute(
         "UPDATE \"AIEmbedding\" SET \"status\" = 'error', \"updatedAt\" = ?3 \
          WHERE \"id\" = ?1 AND \"workspaceId\" = ?2 AND \"status\" = 'pending'",
@@ -410,9 +420,10 @@ pub fn reconcile_pending_chunks(
     workspace_id: i64,
     chunks: &[AiFileEmbeddingChunk],
 ) -> Result<Vec<i64>> {
-    todo!("P3.2");
     if chunks.is_empty() {
-        return Err(Error::msg("reconcilePendingChunks requires at least one chunk"));
+        return Err(Error::msg(
+            "reconcilePendingChunks requires at least one chunk",
+        ));
     }
     let ids: Vec<i64> = chunks.iter().map(|c| c.id).collect();
     let ids_json = id_list(&ids);
@@ -448,7 +459,9 @@ pub fn reconcile_pending_chunks(
         "SELECT \"id\" FROM \"AIEmbedding\" WHERE \"aiFileId\" = ?1 AND \"workspaceId\" = ?2 AND \"status\" = 'pending'",
     )?;
     let pending = stmt
-        .query_map(rusqlite::params![ai_file_id, workspace_id], |row| row.get(0))?
+        .query_map(rusqlite::params![ai_file_id, workspace_id], |row| {
+            row.get(0)
+        })?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(pending)
 }

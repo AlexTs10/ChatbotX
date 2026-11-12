@@ -4,7 +4,9 @@ use rusqlite::Connection;
 use rusqlite::types::Value;
 
 use super::models::AdsConversionEvent;
-use super::queries::ad_referral::{ad_conversation_predicate, any_channel_ad_conversation_predicate};
+use super::queries::ad_referral::{
+    ad_conversation_predicate, any_channel_ad_conversation_predicate,
+};
 use super::queries::ctwa_retarget::{CtwaSegmentPredicateInput, build_ctwa_segment_predicate};
 use super::queries::date_bucket::zoned_date_key;
 use super::sql::Sql;
@@ -182,7 +184,6 @@ pub fn insert_ignore_duplicate(
     conn: &Connection,
     values: &AdsConversionEventCreate,
 ) -> Result<Option<AdsConversionEvent>> {
-    todo!("P3.2");
     let channel = values
         .channel
         .clone()
@@ -244,7 +245,10 @@ pub fn find_by_source_event_id(
     q.append(Sql::and([
         Some(Sql::bind("\"workspaceId\" = ", input.workspace_id)),
         Some(Sql::bind("\"source\" = ", input.source.clone())),
-        Some(Sql::bind("\"sourceEventId\" = ", input.source_event_id.clone())),
+        Some(Sql::bind(
+            "\"sourceEventId\" = ",
+            input.source_event_id.clone(),
+        )),
         input
             .integration_whatsapp_id
             .map(|id| Sql::bind("\"integrationWhatsappId\" = ", id)),
@@ -280,16 +284,15 @@ fn attribution_by_whatsapp(
     );
     q.append(filter);
     q.push(" LIMIT 1");
-    Ok(q
-        .query_map(conn, |row| {
-            Ok(Attribution {
-                id: row.get(0)?,
-                referral: row.get(1)?,
-                waba_id: row.get(2)?,
-            })
-        })?
-        .into_iter()
-        .next())
+    Ok(q.query_map(conn, |row| {
+        Ok(Attribution {
+            id: row.get(0)?,
+            referral: row.get(1)?,
+            waba_id: row.get(2)?,
+        })
+    })?
+    .into_iter()
+    .next())
 }
 
 /// `findAttributionByCtwaClid`.
@@ -348,7 +351,6 @@ pub fn find_attribution_by_ad_referral(
     conn: &Connection,
     input: &AdReferralInput,
 ) -> Result<Option<AdReferralAttribution>> {
-    todo!("P3.2");
     let Some(integration_id) = ad_referral_integration_id(
         &input.channel,
         input.integration_messenger_id,
@@ -373,15 +375,14 @@ pub fn find_attribution_by_ad_referral(
         Some(ad_conversation_predicate("ci", &input.channel)),
     ]));
     q.push(" LIMIT 1");
-    Ok(q
-        .query_map(conn, |row| {
-            Ok(AdReferralAttribution {
-                id: row.get(0)?,
-                referral: row.get(1)?,
-            })
-        })?
-        .into_iter()
-        .next())
+    Ok(q.query_map(conn, |row| {
+        Ok(AdReferralAttribution {
+            id: row.get(0)?,
+            referral: row.get(1)?,
+        })
+    })?
+    .into_iter()
+    .next())
 }
 
 /// `listPendingCapi`: `capiStatus = 'pending' AND capiSentAt IS NULL` (of one workspace
@@ -522,7 +523,6 @@ pub fn count_ctwa_conversations_by_ad(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<ConversationCount>> {
-    todo!("P3.2");
     let q = conversation_count_query(
         None,
         false,
@@ -537,7 +537,6 @@ pub fn count_ctwa_conversations_by_day_and_ad(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<ConversationCount>> {
-    todo!("P3.2");
     let tz = input.timezone.as_deref().unwrap_or("UTC");
     let q = conversation_count_query(
         Some(tz),
@@ -549,7 +548,10 @@ pub fn count_ctwa_conversations_by_day_and_ad(
 }
 
 fn ad_conversation_filters(input: &DateRangeInput) -> Sql {
-    let channel = input.channel.clone().unwrap_or_else(|| "messenger".to_owned());
+    let channel = input
+        .channel
+        .clone()
+        .unwrap_or_else(|| "messenger".to_owned());
     let scope = ad_referral_integration_id(
         &channel,
         input.integration_messenger_id,
@@ -580,7 +582,6 @@ pub fn count_ad_conversations_by_ad(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<ConversationCount>> {
-    todo!("P3.2");
     let q = conversation_count_query(None, false, Sql::default(), ad_conversation_filters(input));
     read_conversation_counts(conn, &q, false, false)
 }
@@ -590,7 +591,6 @@ pub fn count_ad_conversations_by_day_and_ad(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<ConversationCount>> {
-    todo!("P3.2");
     let tz = input.timezone.as_deref().unwrap_or("UTC");
     let q = conversation_count_query(
         Some(tz),
@@ -615,7 +615,6 @@ pub fn count_all_channel_conversations_by_ad(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<ConversationCount>> {
-    todo!("P3.2");
     let q = conversation_count_query(None, true, Sql::default(), all_channel_filters(input));
     read_conversation_counts(conn, &q, false, true)
 }
@@ -625,7 +624,6 @@ pub fn count_all_channel_conversations_by_day_and_ad(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<ConversationCount>> {
-    todo!("P3.2");
     let tz = input.timezone.as_deref().unwrap_or("UTC");
     let q = conversation_count_query(Some(tz), true, Sql::default(), all_channel_filters(input));
     read_conversation_counts(conn, &q, true, true)
@@ -665,7 +663,6 @@ pub fn count_conversion_events_by_ad(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<EventCount>> {
-    todo!("P3.2");
     let channel_col = if input.all_channels {
         ", \"channel\""
     } else {
@@ -716,7 +713,6 @@ pub fn count_conversion_events_by_day_and_ad(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<EventCount>> {
-    todo!("P3.2");
     let tz = input.timezone.as_deref().unwrap_or("UTC");
     let channel_col = if input.all_channels {
         ", \"channel\""
@@ -729,7 +725,9 @@ pub fn count_conversion_events_by_day_and_ad(
         ", \"adId\", \"eventType\"{channel_col}, count(\"id\") FROM \"AdsConversionEvent\" WHERE "
     ));
     q.append(date_range_event_filters(input));
-    q.push(&format!(" GROUP BY 1, \"adId\", \"eventType\"{channel_col}"));
+    q.push(&format!(
+        " GROUP BY 1, \"adId\", \"eventType\"{channel_col}"
+    ));
     let all = input.all_channels;
     q.query_map(conn, |row| {
         let channel = if all { Some(row.get(3)?) } else { None };
@@ -749,7 +747,6 @@ pub fn count_by_capi_status(
     conn: &Connection,
     input: &DateRangeInput,
 ) -> Result<Vec<CapiStatusCount>> {
-    todo!("P3.2");
     let mut q = Sql::raw("SELECT \"capiStatus\", count(\"id\") FROM \"AdsConversionEvent\" WHERE ");
     q.append(date_range_event_filters(input));
     q.push(" GROUP BY \"capiStatus\"");
@@ -767,7 +764,6 @@ pub fn list_export_segment_rows(
     conn: &Connection,
     input: &ExportSegmentInput,
 ) -> Result<ExportSegmentRows> {
-    todo!("P3.2");
     let fetch_limit = input.limit + 1;
     let r = &input.range;
     let predicate_input = CtwaSegmentPredicateInput {
@@ -891,7 +887,10 @@ fn parse_decimal(text: &str) -> Option<(i128, u32)> {
     } else {
         digits.parse().ok()?
     };
-    Some((if neg { -units } else { units }, u32::try_from(frac.len()).ok()?))
+    Some((
+        if neg { -units } else { units },
+        u32::try_from(frac.len()).ok()?,
+    ))
 }
 
 fn format_decimal(units: i128, scale: u32) -> String {

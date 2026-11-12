@@ -102,7 +102,7 @@ async fn contact_custom_field_repository_pair_locks_a_plain_set_racing_an_increm
 /// Port of: packages/database/__tests__/integration/contact-custom-field-pair-lock.test.ts:167 "contactCustomFieldRepository pair locks > opposite-order multi-pair locks never deadlock"
 #[tokio::test]
 async fn contact_custom_field_repository_pair_locks_opposite_order_multi_pair_locks_never_deadlock()
- {
+{
     let db = db().await;
     let pairs: Vec<(i64, i64)> = CONTACTS
         .iter()

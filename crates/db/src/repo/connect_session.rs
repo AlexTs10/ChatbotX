@@ -16,7 +16,8 @@ use super::{Error, Json, Model, Result, iso, new_id, parse_iso};
 use crate::Db;
 
 /// `ACTIVE_CONNECT_SESSION_STATUSES`.
-pub const ACTIVE_CONNECT_SESSION_STATUSES: &[&str] = &["pending", "authorized", "awaiting_selection"];
+pub const ACTIVE_CONNECT_SESSION_STATUSES: &[&str] =
+    &["pending", "authorized", "awaiting_selection"];
 
 fn zod(path: &str, message: &str) -> Error {
     Error::Coded {
@@ -60,8 +61,14 @@ fn check_claims(v: &J) -> Result<()> {
         return Err(zod("targetClaims", "Invalid input: expected record"));
     };
     for claim in map.values() {
-        let owner_ok = claim.get("ownerToken").and_then(J::as_str).is_some_and(|s| !s.is_empty());
-        let at_ok = claim.get("expiresAt").and_then(J::as_str).is_some_and(|s| parse_iso(s).is_some());
+        let owner_ok = claim
+            .get("ownerToken")
+            .and_then(J::as_str)
+            .is_some_and(|s| !s.is_empty());
+        let at_ok = claim
+            .get("expiresAt")
+            .and_then(J::as_str)
+            .is_some_and(|s| parse_iso(s).is_some());
         if !(owner_ok && at_ok) {
             return Err(zod("targetClaims", "Invalid target claim"));
         }
@@ -77,7 +84,9 @@ fn check_results(v: &J) -> Result<()> {
     };
     for r in items {
         let ok = r.get("targetId").is_some_and(J::is_string)
-            && r.get("status").and_then(J::as_str).is_some_and(|s| OUTCOME_STATUSES.contains(&s));
+            && r.get("status")
+                .and_then(J::as_str)
+                .is_some_and(|s| OUTCOME_STATUSES.contains(&s));
         if !ok {
             return Err(zod("results", "Invalid outcome"));
         }
@@ -87,7 +96,6 @@ fn check_results(v: &J) -> Result<()> {
 
 /// `parseConnectSession`: validates the JSON columns of a stored session.
 pub fn parse_connect_session(session: ConnectSession) -> Result<ConnectSession> {
-    todo!("P3.2");
     if let Some(next) = &session.next_action {
         check_next_action(next)?;
     }
@@ -102,21 +110,33 @@ fn parsed(row: Option<ConnectSession>) -> Result<Option<ConnectSession>> {
 }
 
 /// `findByIdForWorkspace`.
-pub fn find_by_id_for_workspace(conn: &Connection, id: i64, workspace_id: i64) -> Result<Option<ConnectSession>> {
-    todo!("P3.2");
-    parsed(super::find_one(conn, "\"id\" = ?1 AND \"workspaceId\" = ?2", &[&id, &workspace_id])?)
+pub fn find_by_id_for_workspace(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<ConnectSession>> {
+    parsed(super::find_one(
+        conn,
+        "\"id\" = ?1 AND \"workspaceId\" = ?2",
+        &[&id, &workspace_id],
+    )?)
 }
 
 /// `findById`.
 pub fn find_by_id(conn: &Connection, id: i64) -> Result<Option<ConnectSession>> {
-    todo!("P3.2");
     parsed(super::find_one(conn, "\"id\" = ?1", &[&id])?)
 }
 
 /// `findByStateNonceHash`.
-pub fn find_by_state_nonce_hash(conn: &Connection, state_nonce_hash: &str) -> Result<Option<ConnectSession>> {
-    todo!("P3.2");
-    parsed(super::find_one(conn, "\"stateNonceHash\" = ?1", &[&state_nonce_hash])?)
+pub fn find_by_state_nonce_hash(
+    conn: &Connection,
+    state_nonce_hash: &str,
+) -> Result<Option<ConnectSession>> {
+    parsed(super::find_one(
+        conn,
+        "\"stateNonceHash\" = ?1",
+        &[&state_nonce_hash],
+    )?)
 }
 
 /// `findLatestInFlightByProvider`: the newest active, unexpired session of the provider.
@@ -136,7 +156,6 @@ pub fn find_latest_in_flight_by_provider(
 
 /// `countActiveByWorkspaceId`: active, unexpired sessions of the workspace.
 pub fn count_active_by_workspace_id(conn: &Connection, workspace_id: i64, now: i64) -> Result<i64> {
-    todo!("P3.2");
     Ok(conn.query_row(
         "SELECT count(*) FROM \"ConnectSession\" WHERE \"workspaceId\" = ?1 \
          AND \"status\" IN ('pending', 'authorized', 'awaiting_selection') AND \"expiresAt\" > ?2",
@@ -197,7 +216,10 @@ pub fn insert(conn: &Connection, v: &ConnectSessionInsert) -> Result<ConnectSess
             &v.expires_at,
         ],
     )?;
-    let row = rows.into_iter().next().ok_or_else(|| Error::msg("insert returned no row"))?;
+    let row = rows
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::msg("insert returned no row"))?;
     parse_connect_session(row)
 }
 
@@ -226,9 +248,11 @@ pub fn update_where_status_in(
     require_unexpired: bool,
     now: i64,
 ) -> Result<Option<ConnectSession>> {
-    todo!("P3.2");
     let mut q = Sql::bind("UPDATE \"ConnectSession\" SET \"updatedAt\" = ", now);
-    let json_opt = |v: &Option<Json>| v.as_ref().map_or(Value::Null, |j| Value::Text(j.0.to_string()));
+    let json_opt = |v: &Option<Json>| {
+        v.as_ref()
+            .map_or(Value::Null, |j| Value::Text(j.0.to_string()))
+    };
     if let Some(v) = &values.encrypted_auth {
         q.push(", \"encryptedAuth\" = ");
         q.push_bind(json_opt(v));
@@ -282,8 +306,12 @@ pub fn update_where_status_in(
 
 /// `cancelPendingByProvider`: cancels (consumed, ciphertext cleared) the pending sessions
 /// of one workspace and provider; returns how many.
-pub fn cancel_pending_by_provider(conn: &Connection, workspace_id: i64, provider: &str, now: i64) -> Result<usize> {
-    todo!("P3.2");
+pub fn cancel_pending_by_provider(
+    conn: &Connection,
+    workspace_id: i64,
+    provider: &str,
+    now: i64,
+) -> Result<usize> {
     Ok(conn.execute(
         "UPDATE \"ConnectSession\" SET \"status\" = 'cancelled', \"consumedAt\" = ?3, \"encryptedAuth\" = NULL, \"updatedAt\" = ?3 \
          WHERE \"workspaceId\" = ?1 AND \"provider\" = ?2 AND \"status\" = 'pending'",
@@ -293,7 +321,6 @@ pub fn cancel_pending_by_provider(conn: &Connection, workspace_id: i64, provider
 
 /// `expireDue`: sessions in `statuses` whose `expiresAt <= before` become `expired`.
 pub fn expire_due(conn: &Connection, before: i64, statuses: &[&str], now: i64) -> Result<usize> {
-    todo!("P3.2");
     Ok(conn.execute(
         "UPDATE \"ConnectSession\" SET \"status\" = 'expired', \"consumedAt\" = ?3, \"encryptedAuth\" = NULL, \"updatedAt\" = ?3 \
          WHERE \"status\" IN (SELECT value FROM json_each(?1)) AND \"expiresAt\" <= ?2",
@@ -310,7 +337,6 @@ pub async fn purge_old_terminal(
     max_chunks: i64,
     max_run_duration_ms: Option<i64>,
 ) -> Result<(i64, ChunkedPurgeStopReason)> {
-    todo!("P3.2");
     let cutoff = super::now_ms() - retention_days * 86_400_000;
     chunked_purge(
         db,
@@ -329,7 +355,10 @@ pub async fn purge_old_terminal(
 
 /// The JSON path of one key of `targetClaims` (`$."<key>"`).
 fn claim_path(target_id: &str) -> String {
-    format!("$.\"{}\"", target_id.replace('\\', "\\\\").replace('"', "\\\""))
+    format!(
+        "$.\"{}\"",
+        target_id.replace('\\', "\\\\").replace('"', "\\\"")
+    )
 }
 
 /// `claimTarget`: takes the target's lease when it has none or an expired one (session of
@@ -343,7 +372,6 @@ pub fn claim_target(
     lease_expires_at: i64,
     now: i64,
 ) -> Result<bool> {
-    todo!("P3.2");
     let path = claim_path(target_id);
     let n = conn.execute(
         "UPDATE \"ConnectSession\" SET \"targetClaims\" = json_set(\"targetClaims\", ?1, json_object('ownerToken', ?2, 'expiresAt', ?3)) \
@@ -365,7 +393,6 @@ pub fn release_target(
     owner_token: &str,
     now: i64,
 ) -> Result<()> {
-    todo!("P3.2");
     let path = claim_path(target_id);
     conn.execute(
         "UPDATE \"ConnectSession\" SET \"targetClaims\" = json_remove(\"targetClaims\", ?1) \
@@ -382,7 +409,13 @@ fn append_ids(current: &J, ids: &[String]) -> J {
     J::Array(list)
 }
 
-fn guarded_session(conn: &Connection, id: i64, workspace_id: i64, status: &str, now: i64) -> Result<Option<ConnectSession>> {
+fn guarded_session(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    status: &str,
+    now: i64,
+) -> Result<Option<ConnectSession>> {
     super::find_one(
         conn,
         "\"id\" = ?1 AND \"workspaceId\" = ?2 AND \"status\" = ?3 AND \"expiresAt\" > ?4",
@@ -402,7 +435,6 @@ pub fn append_results(
     result_connection_ids: &[String],
     now: i64,
 ) -> Result<Option<ConnectSession>> {
-    todo!("P3.2");
     let Some(session) = guarded_session(conn, id, workspace_id, "awaiting_selection", now)? else {
         return Ok(None);
     };
@@ -421,7 +453,12 @@ pub fn append_results(
         .unwrap_or_default();
     let resolved: std::collections::HashSet<&str> = merged
         .iter()
-        .filter(|r| matches!(r.get("status").and_then(J::as_str), Some("connected" | "duplicated")))
+        .filter(|r| {
+            matches!(
+                r.get("status").and_then(J::as_str),
+                Some("connected" | "duplicated")
+            )
+        })
         .filter_map(|r| r.get("targetId").and_then(J::as_str))
         .filter(|t| selectable.iter().any(|s| s == t))
         .collect();
@@ -436,7 +473,11 @@ pub fn append_results(
         },
         ConnectSession::columns_sql(None)
     );
-    let rows = super::query_models::<ConnectSession>(conn, &sql, &[&J::Array(merged).to_string(), &ids.to_string(), &now, &id])?;
+    let rows = super::query_models::<ConnectSession>(
+        conn,
+        &sql,
+        &[&J::Array(merged).to_string(), &ids.to_string(), &now, &id],
+    )?;
     parsed(rows.into_iter().next())
 }
 
@@ -449,20 +490,27 @@ pub fn complete_reconnect(
     result: &J,
     now: i64,
 ) -> Result<Option<ConnectSession>> {
-    todo!("P3.2");
     let Some(session) = guarded_session(conn, id, workspace_id, "authorized", now)? else {
         return Ok(None);
     };
     let mut merged = session.results.0.as_array().cloned().unwrap_or_default();
     merged.push(result.clone());
-    let connection_id = result.get("connectionId").and_then(J::as_str).unwrap_or_default().to_owned();
+    let connection_id = result
+        .get("connectionId")
+        .and_then(J::as_str)
+        .unwrap_or_default()
+        .to_owned();
     let ids = append_ids(&session.result_connection_ids.0, &[connection_id]);
     let sql = format!(
         "UPDATE \"ConnectSession\" SET \"results\" = ?1, \"resultConnectionIds\" = ?2, \"status\" = 'completed', \"step\" = 'done', \
          \"consumedAt\" = ?3, \"encryptedAuth\" = NULL, \"updatedAt\" = ?3 WHERE \"id\" = ?4 RETURNING {}",
         ConnectSession::columns_sql(None)
     );
-    let rows = super::query_models::<ConnectSession>(conn, &sql, &[&J::Array(merged).to_string(), &ids.to_string(), &now, &id])?;
+    let rows = super::query_models::<ConnectSession>(
+        conn,
+        &sql,
+        &[&J::Array(merged).to_string(), &ids.to_string(), &now, &id],
+    )?;
     parsed(rows.into_iter().next())
 }
 

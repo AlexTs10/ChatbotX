@@ -1,6 +1,7 @@
 //! Port of `packages/database/__tests__/integration/connection-repository.test.ts` (P3.2).
 //! Runs against a migrated SQLite temp file (fresh file per test). The constraint checks
 //! insert rows directly, as the TS does through Drizzle.
+#![allow(clippy::too_many_arguments)] // P3.2 orchestrator: style lint in locked ported test
 
 mod common;
 #[macro_use]

@@ -30,20 +30,35 @@ pub struct ContactKeywordMessageRecord {
 
 /// `CONTACT_ACTIVITY_TABLE_KEYS`: each table's key columns after `workspaceId`.
 pub const CONTACT_ACTIVITY_TABLE_KEYS: &[(&str, &[&str])] = &[
-    ("ContactActivity", &["contactId", "activityType", "referenceType", "parentReferenceId", "referenceId"]),
+    (
+        "ContactActivity",
+        &[
+            "contactId",
+            "activityType",
+            "referenceType",
+            "parentReferenceId",
+            "referenceId",
+        ],
+    ),
     ("ContactKeywordMessage", &["contactId", "messageId"]),
     ("ContactState", &["contactId"]),
 ];
 
 fn keys(table: &str) -> Option<&'static [&'static str]> {
-    CONTACT_ACTIVITY_TABLE_KEYS.iter().find(|(t, _)| *t == table).map(|(_, k)| *k)
+    CONTACT_ACTIVITY_TABLE_KEYS
+        .iter()
+        .find(|(t, _)| *t == table)
+        .map(|(_, k)| *k)
 }
 
 /// `upsertActivities`: inserts the records of the workspace's contacts (others are
 /// skipped); an existing row only moves `firstOccurredAt` earlier. Returns the number of
 /// written rows.
-pub fn upsert_activities(conn: &Connection, workspace_id: i64, records: &[ContactActivityRecord]) -> Result<usize> {
-    todo!("P3.2");
+pub fn upsert_activities(
+    conn: &Connection,
+    workspace_id: i64,
+    records: &[ContactActivityRecord],
+) -> Result<usize> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO \"ContactActivity\" (\"workspaceId\", \"contactId\", \"activityType\", \"referenceType\", \"parentReferenceId\", \"referenceId\", \"firstOccurredAt\") \
          SELECT c.\"workspaceId\", c.\"id\", ?2, ?3, ?4, ?5, ?6 FROM \"Contact\" AS c WHERE c.\"id\" = ?1 AND c.\"workspaceId\" = ?7 \
@@ -67,8 +82,11 @@ pub fn upsert_activities(conn: &Connection, workspace_id: i64, records: &[Contac
 
 /// `insertKeywordMessage`: idempotent by `(workspace, contact, message)`; `false` for a
 /// duplicate or a contact of another workspace.
-pub fn insert_keyword_message(conn: &Connection, workspace_id: i64, r: &ContactKeywordMessageRecord) -> Result<bool> {
-    todo!("P3.2");
+pub fn insert_keyword_message(
+    conn: &Connection,
+    workspace_id: i64,
+    r: &ContactKeywordMessageRecord,
+) -> Result<bool> {
     let n = conn.execute(
         "INSERT INTO \"ContactKeywordMessage\" (\"workspaceId\", \"contactId\", \"messageId\", \"automatedResponseId\", \"text\", \"normalizedText\", \"occurredAt\") \
          SELECT c.\"workspaceId\", c.\"id\", ?2, ?3, ?4, ?5, ?6 FROM \"Contact\" AS c WHERE c.\"id\" = ?1 AND c.\"workspaceId\" = ?7 \
@@ -80,8 +98,11 @@ pub fn insert_keyword_message(conn: &Connection, workspace_id: i64, r: &ContactK
 
 /// `upsertLastDelivered`: `lastDeliveredAt` only moves forward. Records are
 /// `(contactId, deliveredAt)`.
-pub fn upsert_last_delivered(conn: &Connection, workspace_id: i64, records: &[(i64, i64)]) -> Result<usize> {
-    todo!("P3.2");
+pub fn upsert_last_delivered(
+    conn: &Connection,
+    workspace_id: i64,
+    records: &[(i64, i64)],
+) -> Result<usize> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO \"ContactState\" (\"workspaceId\", \"contactId\", \"lastDeliveredAt\") \
          SELECT c.\"workspaceId\", c.\"id\", ?2 FROM \"Contact\" AS c WHERE c.\"id\" = ?1 AND c.\"workspaceId\" = ?3 \
@@ -96,8 +117,11 @@ pub fn upsert_last_delivered(conn: &Connection, workspace_id: i64, records: &[(i
 }
 
 /// `deleteByContactIds`: removes the contacts' rows from the three tables.
-pub fn delete_by_contact_ids(conn: &Connection, workspace_id: i64, contact_ids: &[i64]) -> Result<usize> {
-    todo!("P3.2");
+pub fn delete_by_contact_ids(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_ids: &[i64],
+) -> Result<usize> {
     let mut ids = contact_ids.to_vec();
     ids.sort_unstable();
     ids.dedup();
@@ -115,10 +139,16 @@ pub fn delete_by_contact_ids(conn: &Connection, workspace_id: i64, contact_ids: 
 }
 
 /// `deleteWorkspaceBatch`: deletes up to `limit` rows (key order) of the workspace.
-pub async fn delete_workspace_batch(db: &Db, table: &'static str, workspace_id: i64, limit: i64) -> Result<usize> {
-    todo!("P3.2");
+pub async fn delete_workspace_batch(
+    db: &Db,
+    table: &'static str,
+    workspace_id: i64,
+    limit: i64,
+) -> Result<usize> {
     let Some(key) = keys(table) else {
-        return Err(super::Error::msg(format!("unknown contact activity table {table}")));
+        return Err(super::Error::msg(format!(
+            "unknown contact activity table {table}"
+        )));
     };
     let cols = std::iter::once("\"workspaceId\"".to_owned())
         .chain(key.iter().map(|c| format!("\"{c}\"")))
@@ -127,15 +157,21 @@ pub async fn delete_workspace_batch(db: &Db, table: &'static str, workspace_id: 
     let sql = format!(
         "DELETE FROM \"{table}\" WHERE \"workspaceId\" = ?1 AND ({cols}) IN (SELECT {cols} FROM \"{table}\" WHERE \"workspaceId\" = ?1 ORDER BY {cols} LIMIT ?2)"
     );
-    super::write(db, move |tx| Ok(tx.execute(&sql, rusqlite::params![workspace_id, limit])?)).await
+    super::write(db, move |tx| {
+        Ok(tx.execute(&sql, rusqlite::params![workspace_id, limit])?)
+    })
+    .await
 }
 
 /// `hasWorkspaceRows`.
 pub fn has_workspace_rows(conn: &Connection, table: &str, workspace_id: i64) -> Result<bool> {
-    todo!("P3.2");
     if keys(table).is_none() {
-        return Err(super::Error::msg(format!("unknown contact activity table {table}")));
+        return Err(super::Error::msg(format!(
+            "unknown contact activity table {table}"
+        )));
     }
-    let mut stmt = conn.prepare_cached(&format!("SELECT 1 FROM \"{table}\" WHERE \"workspaceId\" = ?1 LIMIT 1"))?;
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT 1 FROM \"{table}\" WHERE \"workspaceId\" = ?1 LIMIT 1"
+    ))?;
     Ok(stmt.exists([workspace_id])?)
 }

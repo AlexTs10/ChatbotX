@@ -21,14 +21,20 @@ pub struct ThrottleSubject {
 /// `ThrottleClaimOutcome`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThrottleClaimOutcome {
-    Won { claim_id: String, remaining_seconds: i64 },
-    Denied { remaining_seconds: i64 },
+    Won {
+        claim_id: String,
+        remaining_seconds: i64,
+    },
+    Denied {
+        remaining_seconds: i64,
+    },
 }
 
-/// `greatest(0, ceil((lastTriggeredAt + window - now) / 1s))`.
+/// `greatest(0, ceil((lastTriggeredAt + window - now) / 1s))` in integer math (the bundled
+/// SQLite has no `ceil`).
 fn remaining_sql(window_seconds: i64, now: i64) -> String {
     format!(
-        "max(0, CAST(ceil((\"lastTriggeredAt\" + {} - {now}) / 1000.0) AS INTEGER))",
+        "max(0, (\"lastTriggeredAt\" + {} - {now} + 999) / 1000)",
         window_seconds * 1000
     )
 }
@@ -43,7 +49,6 @@ pub fn claim_automation_throttle(
     claim_id: &str,
     now: i64,
 ) -> Result<ThrottleClaimOutcome> {
-    todo!("P3.2");
     let set_where = if window_seconds == 0 {
         String::new()
     } else {
@@ -100,7 +105,6 @@ pub fn release_automation_throttle(
     subject: &ThrottleSubject,
     claim_id: &str,
 ) -> Result<bool> {
-    todo!("P3.2");
     let n = conn.execute(
         "DELETE FROM \"AutomationThrottle\" WHERE \"workspaceId\" = ?1 AND \"contactInboxId\" = ?2 AND \"throttleType\" = ?3 AND \"subjectId\" = ?4 AND \"claimId\" = ?5",
         rusqlite::params![
@@ -116,8 +120,11 @@ pub fn release_automation_throttle(
 
 /// `purgeStaleAutomationThrottles`: deletes rows last triggered more than
 /// `older_than_hours` ago; returns the deleted count.
-pub fn purge_stale_automation_throttles(conn: &Connection, older_than_hours: i64, now: i64) -> Result<usize> {
-    todo!("P3.2");
+pub fn purge_stale_automation_throttles(
+    conn: &Connection,
+    older_than_hours: i64,
+    now: i64,
+) -> Result<usize> {
     let cutoff = now - older_than_hours * 3_600_000;
     Ok(conn.execute(
         "DELETE FROM \"AutomationThrottle\" WHERE \"lastTriggeredAt\" < ?1",

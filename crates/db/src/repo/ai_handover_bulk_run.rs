@@ -108,7 +108,6 @@ pub fn create_for_revision(
     conn: &Connection,
     input: &CreateAiHandoverBulkRunInput,
 ) -> Result<Option<AiHandoverBulkRun>> {
-    todo!("P3.2");
     let now = super::now_ms();
     let rows = super::returning::<AiHandoverBulkRun>(
         conn,
@@ -142,7 +141,6 @@ pub fn list_inboxes_awaiting_run(
     limit: i64,
     after_inbox_id: Option<i64>,
 ) -> Result<Vec<(i64, i64)>> {
-    todo!("P3.2");
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT s.\"workspaceId\", s.\"inboxId\" FROM \"AIHandoverSettings\" AS s \
          INNER JOIN \"Inbox\" AS i ON i.\"id\" = s.\"inboxId\" \
@@ -169,7 +167,6 @@ pub fn find_by_revision(
     inbox_id: i64,
     revision: i64,
 ) -> Result<Option<AiHandoverBulkRun>> {
-    todo!("P3.2");
     super::find_one(
         conn,
         "\"workspaceId\" = ?1 AND \"inboxId\" = ?2 AND \"revision\" = ?3",
@@ -195,19 +192,22 @@ pub fn list_history(
     let n = AiHandoverBulkRun::COLUMNS.len();
     let mut stmt = conn.prepare_cached(&sql)?;
     let data = stmt
-        .query_map(rusqlite::params![workspace_id, inbox_id, p.limit, p.offset], |row| {
-            let run = AiHandoverBulkRun::from_row(row)?;
-            let id: Option<i64> = row.get(n)?;
-            let requested_by = match id {
-                Some(id) => Some(RequestedBy {
-                    id,
-                    name: row.get(n + 1)?,
-                    email: row.get(n + 2)?,
-                }),
-                None => None,
-            };
-            Ok(HistoryRow { run, requested_by })
-        })?
+        .query_map(
+            rusqlite::params![workspace_id, inbox_id, p.limit, p.offset],
+            |row| {
+                let run = AiHandoverBulkRun::from_row(row)?;
+                let id: Option<i64> = row.get(n)?;
+                let requested_by = match id {
+                    Some(id) => Some(RequestedBy {
+                        id,
+                        name: row.get(n + 1)?,
+                        email: row.get(n + 2)?,
+                    }),
+                    None => None,
+                };
+                Ok(HistoryRow { run, requested_by })
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let total: i64 = conn.query_row(
         "SELECT count(*) FROM \"AIHandoverBulkRun\" WHERE \"workspaceId\" = ?1 AND \"inboxId\" = ?2",
@@ -230,7 +230,6 @@ pub fn claim(
     workspace_id: i64,
     now: i64,
 ) -> Result<Option<AiHandoverBulkRun>> {
-    todo!("P3.2");
     let mut q = Sql::new(
         "UPDATE \"AIHandoverBulkRun\" SET \"status\" = CASE WHEN \"status\" = 'pending' THEN 'running' ELSE \"status\" END, \
          \"claimToken\" = ?, \"pausedUntil\" = NULL, \"startedAt\" = COALESCE(\"startedAt\", ?), \"lastHeartbeatAt\" = ?, \
@@ -247,7 +246,10 @@ pub fn claim(
     q.append(pause_elapsed(now));
     q.push(") AND (\"status\" = 'pending' OR \"claimToken\" IS NULL OR \"lastHeartbeatAt\" < ");
     q.push_bind(now - LEASE_STALE_MS);
-    q.push(&format!(") RETURNING {}", AiHandoverBulkRun::columns_sql(None)));
+    q.push(&format!(
+        ") RETURNING {}",
+        AiHandoverBulkRun::columns_sql(None)
+    ));
     q.model(conn)
 }
 
@@ -261,7 +263,6 @@ pub fn record_progress(
     progress: &ProgressInput,
     now: i64,
 ) -> Result<Option<String>> {
-    todo!("P3.2");
     let processed = progress.add_processed.unwrap_or(0);
     let skipped = progress.add_skipped.unwrap_or(0);
     let failed = progress.add_failed.unwrap_or(0);
@@ -274,13 +275,17 @@ pub fn record_progress(
             Value::Integer(failed),
         ],
     );
-    let mut set_text = |q: &mut Sql, col: &str, v: &Option<Option<String>>| {
+    let set_text = |q: &mut Sql, col: &str, v: &Option<Option<String>>| {
         if let Some(v) = v {
             q.push(&format!(", \"{col}\" = "));
             q.push_bind(v.clone().map_or(Value::Null, Value::Text));
         }
     };
-    set_text(&mut q, "cursorContactInboxId", &progress.cursor_contact_inbox_id);
+    set_text(
+        &mut q,
+        "cursorContactInboxId",
+        &progress.cursor_contact_inbox_id,
+    );
     set_text(&mut q, "inFlightFromId", &progress.in_flight_from_id);
     set_text(&mut q, "inFlightToId", &progress.in_flight_to_id);
     if let Some(total) = progress.total_count {
@@ -301,7 +306,9 @@ pub fn record_progress(
     q.push(" WHERE ");
     q.append(guarded(run_id, claim_token));
     q.push(" RETURNING \"status\"");
-    Ok(q.query_map(conn, |row| row.get::<_, String>(0))?.into_iter().next())
+    Ok(q.query_map(conn, |row| row.get::<_, String>(0))?
+        .into_iter()
+        .next())
 }
 
 /// `yieldForContinuation`: releases the claim and bumps `chunkSeq`; a pause
@@ -314,7 +321,6 @@ pub fn yield_for_continuation(
     paused_until: Option<i64>,
     now: i64,
 ) -> Result<Option<i64>> {
-    todo!("P3.2");
     let mut q = Sql::bind(
         "UPDATE \"AIHandoverBulkRun\" SET \"claimToken\" = NULL, \"chunkSeq\" = \"chunkSeq\" + 1, \"pausedUntil\" = ",
         paused_until.map_or(Value::Null, Value::Integer),
@@ -329,7 +335,9 @@ pub fn yield_for_continuation(
     q.push(" WHERE ");
     q.append(guarded(run_id, claim_token));
     q.push(" RETURNING \"chunkSeq\"");
-    Ok(q.query_map(conn, |row| row.get::<_, i64>(0))?.into_iter().next())
+    Ok(q.query_map(conn, |row| row.get::<_, i64>(0))?
+        .into_iter()
+        .next())
 }
 
 /// `finish`: the terminal status; clears the lease, the pause and the in-flight markers.
@@ -341,8 +349,10 @@ pub fn finish(
     outcome: &FinishInput,
     now: i64,
 ) -> Result<usize> {
-    todo!("P3.2");
-    let mut q = Sql::bind("UPDATE \"AIHandoverBulkRun\" SET \"status\" = ", outcome.status.clone());
+    let mut q = Sql::bind(
+        "UPDATE \"AIHandoverBulkRun\" SET \"status\" = ",
+        outcome.status.clone(),
+    );
     if let Some(error) = &outcome.current_error {
         q.push(", \"currentError\" = ");
         q.push_bind(error.clone().map_or(Value::Null, Value::Text));
@@ -372,7 +382,6 @@ pub fn cancel_live(
     action: Option<&str>,
     now: i64,
 ) -> Result<Option<AiHandoverBulkRun>> {
-    todo!("P3.2");
     let mut q = Sql::new(
         "UPDATE \"AIHandoverBulkRun\" SET \
          \"status\" = CASE WHEN \"status\" = 'pending' OR \"claimToken\" IS NULL THEN 'cancelled' ELSE 'cancelling' END, \
@@ -390,13 +399,15 @@ pub fn cancel_live(
         q.push(" AND \"action\" = ");
         q.push_bind(action.to_owned());
     }
-    q.push(&format!(" RETURNING {}", AiHandoverBulkRun::columns_sql(None)));
+    q.push(&format!(
+        " RETURNING {}",
+        AiHandoverBulkRun::columns_sql(None)
+    ));
     q.model(conn)
 }
 
 /// `reopenReleased`: a running run with no token (and no pause) goes back to pending.
 pub fn reopen_released(conn: &Connection, run_id: i64, now: i64) -> Result<usize> {
-    todo!("P3.2");
     let mut q = Sql::new(
         "UPDATE \"AIHandoverBulkRun\" SET \"status\" = 'pending', \"updatedAt\" = ? \
          WHERE \"id\" = ? AND \"status\" = 'running' AND \"claimToken\" IS NULL AND (",
@@ -410,7 +421,6 @@ pub fn reopen_released(conn: &Connection, run_id: i64, now: i64) -> Result<usize
 /// `markMaxAttemptsFailed`: ends exhausted live runs whose lease is stale and whose last
 /// dispatch had a full lease to start (a cancelling run ends `cancelled`).
 pub fn mark_max_attempts_failed(conn: &Connection, max_attempts: i64, now: i64) -> Result<usize> {
-    todo!("P3.2");
     let stale = now - LEASE_STALE_MS;
     let mut q = Sql::new(
         "UPDATE \"AIHandoverBulkRun\" SET \"status\" = CASE WHEN \"status\" = 'cancelling' THEN 'cancelled' ELSE 'failed' END, \
@@ -433,8 +443,12 @@ pub fn mark_max_attempts_failed(conn: &Connection, max_attempts: i64, now: i64) 
 
 /// `refundDispatch`: undoes `pick_due`'s counters for exactly the picked values (never
 /// below zero).
-pub fn refund_dispatch(conn: &Connection, run_id: i64, attempts: i64, chunk_seq: i64) -> Result<bool> {
-    todo!("P3.2");
+pub fn refund_dispatch(
+    conn: &Connection,
+    run_id: i64,
+    attempts: i64,
+    chunk_seq: i64,
+) -> Result<bool> {
     let n = conn.execute(
         "UPDATE \"AIHandoverBulkRun\" SET \"attempts\" = \"attempts\" - 1, \"chunkSeq\" = \"chunkSeq\" - 1 \
          WHERE \"id\" = ?1 AND \"attempts\" = ?2 AND \"chunkSeq\" = ?3 AND \"attempts\" > 0 AND \"chunkSeq\" > 0",
@@ -446,8 +460,12 @@ pub fn refund_dispatch(conn: &Connection, run_id: i64, attempts: i64, chunk_seq:
 /// `pickDue`: burns an attempt and a revision on up to `batch_size` due live runs (oldest
 /// first): pending for 2 minutes, a claimed run with a stale lease, or a released run idle
 /// for a minute; pauses are respected (not for cancelling runs).
-pub fn pick_due(conn: &Connection, max_attempts: i64, batch_size: i64, now: i64) -> Result<Vec<PickedRun>> {
-    todo!("P3.2");
+pub fn pick_due(
+    conn: &Connection,
+    max_attempts: i64,
+    batch_size: i64,
+    now: i64,
+) -> Result<Vec<PickedRun>> {
     let mut stmt = conn.prepare_cached(
         "UPDATE \"AIHandoverBulkRun\" SET \"attempts\" = \"attempts\" + 1, \"chunkSeq\" = \"chunkSeq\" + 1, \
          \"status\" = CASE WHEN \"status\" = 'cancelling' THEN \"status\" ELSE 'pending' END, \"updatedAt\" = ?1 \

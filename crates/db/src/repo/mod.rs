@@ -57,7 +57,11 @@ pub trait Model: Sized {
     }
     /// `SELECT <columns> FROM "<table>"`.
     fn select_sql() -> String {
-        format!("SELECT {} FROM \"{}\"", Self::columns_sql(None), Self::TABLE)
+        format!(
+            "SELECT {} FROM \"{}\"",
+            Self::columns_sql(None),
+            Self::TABLE
+        )
     }
 }
 
@@ -93,7 +97,6 @@ macro_rules! table_row {
         }
     };
 }
-pub(crate) use table_row;
 
 /// One row of `M` by a SQL `WHERE` clause (`None` when there is none).
 pub fn find_one<M: Model>(
@@ -396,7 +399,9 @@ fn place_id() -> u64 {
 /// A new snowflake id (`createId()`): `ms since 2004-02-01 << 14 | place << 10 | seq`.
 /// Strictly increasing in this process.
 pub fn new_id() -> i64 {
-    let wall = u64::try_from(now_ms()).unwrap_or_default().saturating_sub(SNOWFLAKE_EPOCH_MS);
+    let wall = u64::try_from(now_ms())
+        .unwrap_or_default()
+        .saturating_sub(SNOWFLAKE_EPOCH_MS);
     let mut state = ID_STATE.lock().unwrap_or_else(PoisonError::into_inner);
     let now = match state.last {
         Some(last) if wall <= last => {
@@ -488,8 +493,13 @@ pub fn id_list(ids: &[i64]) -> String {
 
 /// JSON array text of strings for `IN (SELECT value FROM json_each(?))`.
 pub fn text_list<S: AsRef<str>>(items: &[S]) -> String {
-    serde_json::Value::from(items.iter().map(|s| s.as_ref().to_owned()).collect::<Vec<_>>())
-        .to_string()
+    serde_json::Value::from(
+        items
+            .iter()
+            .map(|s| s.as_ref().to_owned())
+            .collect::<Vec<_>>(),
+    )
+    .to_string()
 }
 
 pub mod client;
@@ -524,10 +534,10 @@ pub mod conversation_ai_context;
 pub mod inbox;
 
 pub use client::{
-    count_query_capped, is_foreign_key_violation_error, is_statement_timeout_error,
-    is_unique_violation_error, to_loggable_database_error, CappedCount,
+    CappedCount, count_query_capped, is_foreign_key_violation_error, is_statement_timeout_error,
+    is_unique_violation_error, to_loggable_database_error,
 };
 pub use utils::{
-    escape_like_pattern, get_pagination_with_defaults, is_bigint_id, like_contains,
-    parse_pagination, with_id_tie_break, Pagination, PaginationInput, SortItem,
+    Pagination, PaginationInput, SortItem, escape_like_pattern, get_pagination_with_defaults,
+    is_bigint_id, like_contains, parse_pagination, with_id_tie_break,
 };

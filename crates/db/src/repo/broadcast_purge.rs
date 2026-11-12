@@ -41,7 +41,6 @@ pub struct PurgeInput {
 
 /// `listPurgeableBroadcasts`: soft-deleted, non-sending broadcasts, oldest deleted first.
 pub fn list_purgeable_broadcasts(conn: &Connection, limit: i64) -> Result<Vec<i64>> {
-    todo!("P3.2");
     let mut stmt = conn.prepare_cached(
         "SELECT \"id\" FROM \"Broadcast\" WHERE \"deletedAt\" IS NOT NULL AND \"status\" <> 'sending' ORDER BY \"deletedAt\" ASC, \"id\" ASC LIMIT ?1",
     )?;
@@ -53,8 +52,12 @@ pub fn list_purgeable_broadcasts(conn: &Connection, limit: i64) -> Result<Vec<i6
 
 /// One chunk: deletes up to `chunk_size` recipients (by `contactId`) of the broadcast; with
 /// `only_while_draft` only while the broadcast is still a draft (same statement).
-pub fn delete_recipient_chunk(conn: &Connection, broadcast_id: i64, chunk_size: i64, only_while_draft: bool) -> Result<usize> {
-    todo!("P3.2");
+pub fn delete_recipient_chunk(
+    conn: &Connection,
+    broadcast_id: i64,
+    chunk_size: i64,
+    only_while_draft: bool,
+) -> Result<usize> {
     let guard = if only_while_draft {
         " AND EXISTS (SELECT 1 FROM \"Broadcast\" WHERE \"id\" = ?1 AND \"status\" = 'draft')"
     } else {
@@ -85,35 +88,45 @@ where
     F: FnMut(i64) -> Fut,
     Fut: Future<Output = Result<usize>>,
 {
-    todo!("P3.2");
     let deadline = clock() + max_run_duration_ms;
     let mut deleted: i64 = 0;
     for _ in 0..max_chunks {
         let remaining = deadline - clock();
         if remaining <= 0 {
-            return Ok(PurgeOutcome { deleted, stop_reason: PurgeStopReason::Deadline });
+            return Ok(PurgeOutcome {
+                deleted,
+                stop_reason: PurgeStopReason::Deadline,
+            });
         }
         let count = match chunk(remaining).await {
             Ok(n) => i64::try_from(n).unwrap_or(i64::MAX),
             Err(e) if is_statement_timeout_error(&e) => {
-                return Ok(PurgeOutcome { deleted, stop_reason: PurgeStopReason::Deadline });
+                return Ok(PurgeOutcome {
+                    deleted,
+                    stop_reason: PurgeStopReason::Deadline,
+                });
             }
             Err(e) => return Err(e),
         };
         deleted += count;
         if count < chunk_size {
-            return Ok(PurgeOutcome { deleted, stop_reason: PurgeStopReason::Drained });
+            return Ok(PurgeOutcome {
+                deleted,
+                stop_reason: PurgeStopReason::Drained,
+            });
         }
         if inter_chunk_delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(inter_chunk_delay_ms)).await;
         }
     }
-    Ok(PurgeOutcome { deleted, stop_reason: PurgeStopReason::ChunkCap })
+    Ok(PurgeOutcome {
+        deleted,
+        stop_reason: PurgeStopReason::ChunkCap,
+    })
 }
 
 /// `purgeBroadcastRecipients`.
 pub async fn purge_broadcast_recipients(db: &Db, input: &PurgeInput) -> Result<PurgeOutcome> {
-    todo!("P3.2");
     let (id, size, draft) = (input.broadcast_id, input.chunk_size, input.only_while_draft);
     run_purge_loop(
         input.chunk_size,
@@ -136,14 +149,14 @@ pub async fn purge_broadcast_recipients(db: &Db, input: &PurgeInput) -> Result<P
 
 /// `hasBroadcastRecipients`.
 pub fn has_broadcast_recipients(conn: &Connection, broadcast_id: i64) -> Result<bool> {
-    todo!("P3.2");
-    let mut stmt = conn.prepare_cached("SELECT 1 FROM \"ContactOnBroadcast\" WHERE \"broadcastId\" = ?1 LIMIT 1")?;
+    let mut stmt = conn.prepare_cached(
+        "SELECT 1 FROM \"ContactOnBroadcast\" WHERE \"broadcastId\" = ?1 LIMIT 1",
+    )?;
     Ok(stmt.exists([broadcast_id])?)
 }
 
 /// `hardDeleteBroadcast`: only a soft-deleted, non-sending broadcast.
 pub fn hard_delete_broadcast(conn: &Connection, broadcast_id: i64) -> Result<bool> {
-    todo!("P3.2");
     let n = conn.execute(
         "DELETE FROM \"Broadcast\" WHERE \"id\" = ?1 AND \"deletedAt\" IS NOT NULL AND \"status\" <> 'sending'",
         [broadcast_id],

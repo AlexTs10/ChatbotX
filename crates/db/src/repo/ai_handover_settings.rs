@@ -45,7 +45,6 @@ pub fn find_by_inbox(
     workspace_id: i64,
     inbox_id: i64,
 ) -> Result<Option<AiHandoverSettings>> {
-    todo!("P3.2");
     super::find_one(
         conn,
         "\"workspaceId\" = ?1 AND \"inboxId\" = ?2",
@@ -55,8 +54,10 @@ pub fn find_by_inbox(
 
 /// `upsert`: inserts every setting with the apply-to-all state off; on an existing row of
 /// the inbox it replaces only the settings.
-pub fn upsert(conn: &Connection, input: &UpsertAiHandoverSettingsInput) -> Result<AiHandoverSettings> {
-    todo!("P3.2");
+pub fn upsert(
+    conn: &Connection,
+    input: &UpsertAiHandoverSettingsInput,
+) -> Result<AiHandoverSettings> {
     let now = now_ms();
     let rows = super::returning::<AiHandoverSettings>(
         conn,
@@ -93,7 +94,6 @@ pub fn lock_existing(
     workspace_id: i64,
     inbox_id: i64,
 ) -> Result<Option<AiHandoverSettingsWithInbox>> {
-    todo!("P3.2");
     let Some(settings) = super::find_one::<AiHandoverSettings>(
         conn,
         "\"workspaceId\" = ?1 AND \"inboxId\" = ?2",
@@ -102,7 +102,8 @@ pub fn lock_existing(
     else {
         return Ok(None);
     };
-    let mut stmt = conn.prepare_cached("SELECT \"status\" FROM \"Inbox\" WHERE \"id\" = ?1 LIMIT 1")?;
+    let mut stmt =
+        conn.prepare_cached("SELECT \"status\" FROM \"Inbox\" WHERE \"id\" = ?1 LIMIT 1")?;
     let mut rows = stmt.query([inbox_id])?;
     let inbox_status = match rows.next()? {
         Some(row) => row.get(0)?,
@@ -123,7 +124,6 @@ pub fn lock_for_apply_to_all(
     inbox_id: i64,
     channel: &str,
 ) -> Result<AiHandoverSettingsWithInbox> {
-    todo!("P3.2");
     let now = now_ms();
     conn.execute(
         "INSERT INTO \"AIHandoverSettings\" (\"id\", \"createdAt\", \"updatedAt\", \"workspaceId\", \"inboxId\", \"channel\", \
@@ -138,8 +138,10 @@ pub fn lock_for_apply_to_all(
 
 /// `setApplyToAll`: records the new apply-to-all state with the next revision. Fails with
 /// `Failed to record the apply-to-all change` when the Page has no row.
-pub fn set_apply_to_all(conn: &Connection, input: &SetApplyToAllInput) -> Result<AiHandoverSettings> {
-    todo!("P3.2");
+pub fn set_apply_to_all(
+    conn: &Connection,
+    input: &SetApplyToAllInput,
+) -> Result<AiHandoverSettings> {
     let current = find_by_inbox(conn, input.workspace_id, input.inbox_id)?;
     let revision = current.map_or(0, |c| c.apply_to_all_revision) + 1;
     let rows = super::returning::<AiHandoverSettings>(

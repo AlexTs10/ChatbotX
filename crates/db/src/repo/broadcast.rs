@@ -5,7 +5,10 @@ use rusqlite::types::Value;
 
 use super::models::{Broadcast, BroadcastRecurrence, BroadcastTarget, Contact, ContactOnBroadcast};
 use super::sql::Sql;
-use super::utils::{PaginationInput, SortItem, get_pagination_with_defaults, like_contains, order_by_sql, parse_order_by};
+use super::utils::{
+    PaginationInput, SortItem, get_pagination_with_defaults, like_contains, order_by_sql,
+    parse_order_by,
+};
 use super::{Model, Result};
 
 /// `BroadcastListInput`.
@@ -82,12 +85,27 @@ fn build_where(input: &BroadcastListInput) -> Sql {
             .as_deref()
             .filter(|n| !n.is_empty())
             .map(|n| Sql::bind("ilike(b.\"name\", ", like_contains(n)).closed(")")),
-        input.status.clone().map(|s| Sql::bind("b.\"status\" = ", s)),
-        input.channel.clone().map(|c| Sql::bind("b.\"channel\" = ", c)),
-        input.scheduled_from.map(|f| Sql::bind("b.\"schedulesAt\" >= ", f)),
-        input.scheduled_to.map(|t| Sql::bind("b.\"schedulesAt\" <= ", t)),
-        input.schedules_type.clone().map(|t| Sql::bind("b.\"schedulesType\" = ", t)),
-        input.parent_broadcast_id.map(|p| Sql::bind("b.\"parentBroadcastId\" = ", p)),
+        input
+            .status
+            .clone()
+            .map(|s| Sql::bind("b.\"status\" = ", s)),
+        input
+            .channel
+            .clone()
+            .map(|c| Sql::bind("b.\"channel\" = ", c)),
+        input
+            .scheduled_from
+            .map(|f| Sql::bind("b.\"schedulesAt\" >= ", f)),
+        input
+            .scheduled_to
+            .map(|t| Sql::bind("b.\"schedulesAt\" <= ", t)),
+        input
+            .schedules_type
+            .clone()
+            .map(|t| Sql::bind("b.\"schedulesType\" = ", t)),
+        input
+            .parent_broadcast_id
+            .map(|p| Sql::bind("b.\"parentBroadcastId\" = ", p)),
     ];
     if input.include_runs == Some(false) {
         parts.push(Some(Sql::raw("b.\"occurrenceAt\" IS NULL")));
@@ -103,43 +121,67 @@ fn build_where(input: &BroadcastListInput) -> Sql {
 
 fn id_name(conn: &Connection, table: &str, id: Option<i64>) -> Result<Option<IdName>> {
     let Some(id) = id else { return Ok(None) };
-    let mut stmt = conn.prepare_cached(&format!("SELECT \"id\", \"name\" FROM \"{table}\" WHERE \"id\" = ?1"))?;
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT \"id\", \"name\" FROM \"{table}\" WHERE \"id\" = ?1"
+    ))?;
     let mut rows = stmt.query([id])?;
     Ok(match rows.next()? {
-        Some(row) => Some(IdName { id: row.get(0)?, name: row.get(1)? }),
+        Some(row) => Some(IdName {
+            id: row.get(0)?,
+            name: row.get(1)?,
+        }),
         None => None,
     })
 }
 
-fn load_relations(conn: &Connection, broadcast: Broadcast, with_integrations: bool) -> Result<BroadcastWithRelations> {
+fn load_relations(
+    conn: &Connection,
+    broadcast: Broadcast,
+    with_integrations: bool,
+) -> Result<BroadcastWithRelations> {
     let (flow, integration_whatsapp, integration_messenger) = if with_integrations {
         (
             id_name(conn, "Flow", broadcast.flow_id)?,
-            id_name(conn, "IntegrationWhatsapp", broadcast.integration_whatsapp_id)?,
-            id_name(conn, "IntegrationMessenger", broadcast.integration_messenger_id)?,
+            id_name(
+                conn,
+                "IntegrationWhatsapp",
+                broadcast.integration_whatsapp_id,
+            )?,
+            id_name(
+                conn,
+                "IntegrationMessenger",
+                broadcast.integration_messenger_id,
+            )?,
         )
     } else {
         (None, None, None)
     };
-    let raw_targets: Vec<BroadcastTarget> =
-        super::find_many(conn, "WHERE \"broadcastId\" = ?1 ORDER BY \"inboxId\"", &[&broadcast.id])?;
+    let raw_targets: Vec<BroadcastTarget> = super::find_many(
+        conn,
+        "WHERE \"broadcastId\" = ?1 ORDER BY \"inboxId\"",
+        &[&broadcast.id],
+    )?;
     let mut targets = Vec::with_capacity(raw_targets.len());
     for target in raw_targets {
         let inbox = id_name(conn, "Inbox", Some(target.inbox_id))?;
         let flow = id_name(conn, "Flow", target.flow_id)?;
-        targets.push(TargetWithNames { target, inbox, flow });
+        targets.push(TargetWithNames {
+            target,
+            inbox,
+            flow,
+        });
     }
-    let recurrence = super::find_one::<BroadcastRecurrence>(conn, "\"broadcastId\" = ?1", &[&broadcast.id])?.map(|r| {
-        RecurrenceSummary {
-            id: r.id,
-            rule: r.rule,
-            next_run_at: r.next_run_at,
-            occurrence_count: r.occurrence_count,
-            last_occurrence_at: r.last_occurrence_at,
-            paused_at: r.paused_at,
-            ended_at: r.ended_at,
-        }
-    });
+    let recurrence =
+        super::find_one::<BroadcastRecurrence>(conn, "\"broadcastId\" = ?1", &[&broadcast.id])?
+            .map(|r| RecurrenceSummary {
+                id: r.id,
+                rule: r.rule,
+                next_run_at: r.next_run_at,
+                occurrence_count: r.occurrence_count,
+                last_occurrence_at: r.last_occurrence_at,
+                paused_at: r.paused_at,
+                ended_at: r.ended_at,
+            });
     let parent = id_name(conn, "Broadcast", broadcast.parent_broadcast_id)?;
     Ok(BroadcastWithRelations {
         broadcast,
@@ -155,8 +197,10 @@ fn load_relations(conn: &Connection, broadcast: Broadcast, with_integrations: bo
 /// `listWithRelations`: one page of the workspace's live (not soft-deleted) broadcasts with
 /// flow, integrations, targets, recurrence summary and parent; requested sort, else newest
 /// first.
-pub fn list_with_relations(conn: &Connection, input: &BroadcastListInput) -> Result<Vec<BroadcastWithRelations>> {
-    todo!("P3.2");
+pub fn list_with_relations(
+    conn: &Connection,
+    input: &BroadcastListInput,
+) -> Result<Vec<BroadcastWithRelations>> {
     let pagination = get_pagination_with_defaults(PaginationInput {
         page: input.page,
         per_page: input.per_page,
@@ -167,21 +211,29 @@ pub fn list_with_relations(conn: &Connection, input: &BroadcastListInput) -> Res
     } else {
         order_by_sql(&requested, Some("b"))
     };
-    let mut q = Sql::raw(format!("SELECT {} FROM \"Broadcast\" AS b WHERE ", Broadcast::columns_sql(Some("b"))));
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"Broadcast\" AS b WHERE ",
+        Broadcast::columns_sql(Some("b"))
+    ));
     q.append(build_where(input));
     q.push(&format!(" {order} LIMIT "));
     q.push_bind(pagination.limit);
     q.push(" OFFSET ");
     q.push_bind(pagination.offset);
     let rows: Vec<Broadcast> = q.models(conn)?;
-    rows.into_iter().map(|b| load_relations(conn, b, true)).collect()
+    rows.into_iter()
+        .map(|b| load_relations(conn, b, true))
+        .collect()
 }
 
 /// `count`: the number of rows [`list_with_relations`] filters (all pages).
 pub fn count(conn: &Connection, input: &BroadcastListInput) -> Result<i64> {
     let mut q = Sql::raw("SELECT count(*) FROM \"Broadcast\" AS b WHERE ");
     q.append(build_where(input));
-    Ok(q.query_map(conn, |row| row.get(0))?.into_iter().next().unwrap_or(0))
+    Ok(q.query_map(conn, |row| row.get(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0))
 }
 
 /// `countActive`: live broadcasts of the workspace and channel in `statuses` (except
@@ -193,7 +245,6 @@ pub fn count_active(
     statuses: &[&str],
     exclude_id: Option<i64>,
 ) -> Result<i64> {
-    todo!("P3.2");
     let mut q = Sql::new(
         "SELECT count(*) FROM \"Broadcast\" WHERE \"workspaceId\" = ? AND \"channel\" = ? AND \"status\" IN (SELECT value FROM json_each(?)) AND \"deletedAt\" IS NULL",
         vec![
@@ -206,12 +257,19 @@ pub fn count_active(
         q.push(" AND \"id\" <> ");
         q.push_bind(id);
     }
-    Ok(q.query_map(conn, |row| row.get(0))?.into_iter().next().unwrap_or(0))
+    Ok(q.query_map(conn, |row| row.get(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0))
 }
 
 /// `listAudience`: audience rows of the broadcast with their contact.
-pub fn list_audience(conn: &Connection, broadcast_id: i64, limit: i64, offset: i64) -> Result<Vec<AudienceRow>> {
-    todo!("P3.2");
+pub fn list_audience(
+    conn: &Connection,
+    broadcast_id: i64,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<AudienceRow>> {
     let sql = format!(
         "SELECT {}, {} FROM \"ContactOnBroadcast\" AS cb INNER JOIN \"Contact\" AS c ON c.\"id\" = cb.\"contactId\" \
          WHERE cb.\"broadcastId\" = ?1 ORDER BY cb.\"contactId\" LIMIT ?2 OFFSET ?3",
@@ -233,7 +291,6 @@ pub fn list_audience(conn: &Connection, broadcast_id: i64, limit: i64, offset: i
 
 /// `countAudience`.
 pub fn count_audience(conn: &Connection, broadcast_id: i64) -> Result<i64> {
-    todo!("P3.2");
     Ok(conn.query_row(
         "SELECT count(*) FROM \"ContactOnBroadcast\" WHERE \"broadcastId\" = ?1",
         [broadcast_id],
@@ -243,8 +300,11 @@ pub fn count_audience(conn: &Connection, broadcast_id: i64) -> Result<i64> {
 
 /// `findByIdOrName`: by id when `id_or_name` is all digits, else by name; live rows of the
 /// workspace, with targets, recurrence summary and parent.
-pub fn find_by_id_or_name(conn: &Connection, workspace_id: i64, id_or_name: &str) -> Result<Option<BroadcastWithRelations>> {
-    todo!("P3.2");
+pub fn find_by_id_or_name(
+    conn: &Connection,
+    workspace_id: i64,
+    id_or_name: &str,
+) -> Result<Option<BroadcastWithRelations>> {
     let numeric = !id_or_name.is_empty() && id_or_name.bytes().all(|b| b.is_ascii_digit());
     let found: Option<Broadcast> = if numeric {
         let Ok(id) = id_or_name.parse::<i64>() else {

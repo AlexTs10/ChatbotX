@@ -26,20 +26,26 @@ fn build_where(input: &ConnectionListInput) -> Sql {
     Sql::and([
         Some(Sql::bind("\"workspaceId\" = ", input.workspace_id)),
         input.kind.clone().map(|k| Sql::bind("\"kind\" = ", k)),
-        input.provider.clone().map(|p| Sql::bind("\"provider\" = ", p)),
-        input.channel.clone().map(|c| Sql::bind("\"channel\" = ", c)),
         input
-            .status
-            .as_ref()
-            .filter(|s| !s.is_empty())
-            .map(|s| Sql::bind("\"status\" IN (SELECT value FROM json_each(", text_list(s)).closed("))")),
+            .provider
+            .clone()
+            .map(|p| Sql::bind("\"provider\" = ", p)),
+        input
+            .channel
+            .clone()
+            .map(|c| Sql::bind("\"channel\" = ", c)),
+        input.status.as_ref().filter(|s| !s.is_empty()).map(|s| {
+            Sql::bind("\"status\" IN (SELECT value FROM json_each(", text_list(s)).closed("))")
+        }),
     ])
 }
 
 /// `list`: one page, ordered by `(kind, provider, displayName, id)`.
 pub fn list(conn: &Conn, input: &ConnectionListInput) -> Result<Vec<Connection>> {
-    todo!("P3.2");
-    let p = get_pagination_with_defaults(PaginationInput { page: input.page, per_page: input.per_page });
+    let p = get_pagination_with_defaults(PaginationInput {
+        page: input.page,
+        per_page: input.per_page,
+    });
     let mut q = Sql::raw(format!("{} WHERE ", Connection::select_sql()));
     q.append(build_where(input));
     q.push(" ORDER BY \"kind\" ASC, \"provider\" ASC, \"displayName\" ASC, \"id\" ASC LIMIT ");
@@ -51,21 +57,34 @@ pub fn list(conn: &Conn, input: &ConnectionListInput) -> Result<Vec<Connection>>
 
 /// `count`.
 pub fn count(conn: &Conn, input: &ConnectionListInput) -> Result<i64> {
-    todo!("P3.2");
     let mut q = Sql::raw("SELECT count(*) FROM \"Connection\" WHERE ");
     q.append(build_where(input));
-    Ok(q.query_map(conn, |r| r.get(0))?.into_iter().next().unwrap_or(0))
+    Ok(q.query_map(conn, |r| r.get(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0))
 }
 
 /// `findByIdForWorkspace`.
-pub fn find_by_id_for_workspace(conn: &Conn, id: i64, workspace_id: i64) -> Result<Option<Connection>> {
-    todo!("P3.2");
-    super::find_one(conn, "\"id\" = ?1 AND \"workspaceId\" = ?2", &[&id, &workspace_id])
+pub fn find_by_id_for_workspace(
+    conn: &Conn,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<Connection>> {
+    super::find_one(
+        conn,
+        "\"id\" = ?1 AND \"workspaceId\" = ?2",
+        &[&id, &workspace_id],
+    )
 }
 
 /// `findByProviderSourceId`.
-pub fn find_by_provider_source_id(conn: &Conn, workspace_id: i64, provider: &str, source_id: &str) -> Result<Option<Connection>> {
-    todo!("P3.2");
+pub fn find_by_provider_source_id(
+    conn: &Conn,
+    workspace_id: i64,
+    provider: &str,
+    source_id: &str,
+) -> Result<Option<Connection>> {
     super::find_one(
         conn,
         "\"workspaceId\" = ?1 AND \"provider\" = ?2 AND \"sourceId\" = ?3",
@@ -74,8 +93,11 @@ pub fn find_by_provider_source_id(conn: &Conn, workspace_id: i64, provider: &str
 }
 
 /// `findByProviderAndSourceIdAnyWorkspace`: an active match first, then the newest.
-pub fn find_by_provider_and_source_id_any_workspace(conn: &Conn, provider: &str, source_id: &str) -> Result<Option<Connection>> {
-    todo!("P3.2");
+pub fn find_by_provider_and_source_id_any_workspace(
+    conn: &Conn,
+    provider: &str,
+    source_id: &str,
+) -> Result<Option<Connection>> {
     super::find_one(
         conn,
         "\"provider\" = ?1 AND \"sourceId\" = ?2 \
@@ -85,7 +107,11 @@ pub fn find_by_provider_and_source_id_any_workspace(conn: &Conn, provider: &str,
 }
 
 /// `findByProviderAndSourceIdsAnyWorkspace`: by `sourceId`, then active first, newest.
-pub fn find_by_provider_and_source_ids_any_workspace(conn: &Conn, provider: &str, source_ids: &[String]) -> Result<Vec<Connection>> {
+pub fn find_by_provider_and_source_ids_any_workspace(
+    conn: &Conn,
+    provider: &str,
+    source_ids: &[String],
+) -> Result<Vec<Connection>> {
     if source_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -99,7 +125,6 @@ pub fn find_by_provider_and_source_ids_any_workspace(conn: &Conn, provider: &str
 
 /// `findById` (also `findByIdForUpdateById`: no row locks in SQLite).
 pub fn find_by_id(conn: &Conn, id: i64) -> Result<Option<Connection>> {
-    todo!("P3.2");
     super::find_one(conn, "\"id\" = ?1", &[&id])
 }
 
@@ -128,10 +153,17 @@ pub struct ConnectionPatch {
 }
 
 /// `update`: scoped to the workspace; `None` outside it.
-pub fn update(conn: &Conn, id: i64, workspace_id: i64, values: &ConnectionPatch) -> Result<Option<Connection>> {
-    todo!("P3.2");
+pub fn update(
+    conn: &Conn,
+    id: i64,
+    workspace_id: i64,
+    values: &ConnectionPatch,
+) -> Result<Option<Connection>> {
     use rusqlite::types::Value;
-    let mut q = Sql::bind("UPDATE \"Connection\" SET \"updatedAt\" = ", super::now_ms());
+    let mut q = Sql::bind(
+        "UPDATE \"Connection\" SET \"updatedAt\" = ",
+        super::now_ms(),
+    );
     let text = |v: &Option<String>| v.clone().map_or(Value::Null, Value::Text);
     let int = |v: Option<i64>| v.map_or(Value::Null, Value::Integer);
     if let Some(v) = &values.display_name {
@@ -142,7 +174,11 @@ pub fn update(conn: &Conn, id: i64, workspace_id: i64, values: &ConnectionPatch)
         q.push(", \"status\" = ");
         q.push_bind(v.clone());
     }
-    for (col, v) in [("statusReason", &values.status_reason), ("lastError", &values.last_error), ("providerEventKind", &values.provider_event_kind)] {
+    for (col, v) in [
+        ("statusReason", &values.status_reason),
+        ("lastError", &values.last_error),
+        ("providerEventKind", &values.provider_event_kind),
+    ] {
         if let Some(v) = v {
             q.push(&format!(", \"{col}\" = "));
             q.push_bind(text(v));
@@ -168,19 +204,24 @@ pub fn update(conn: &Conn, id: i64, workspace_id: i64, values: &ConnectionPatch)
 }
 
 /// `distinctProvidersByStatus`.
-pub fn distinct_providers_by_status(conn: &Conn, workspace_id: i64, statuses: &[&str]) -> Result<Vec<String>> {
+pub fn distinct_providers_by_status(
+    conn: &Conn,
+    workspace_id: i64,
+    statuses: &[&str],
+) -> Result<Vec<String>> {
     let mut stmt = conn.prepare_cached(
         "SELECT DISTINCT \"provider\" FROM \"Connection\" WHERE \"workspaceId\" = ?1 AND \"status\" IN (SELECT value FROM json_each(?2))",
     )?;
     let rows = stmt
-        .query_map(rusqlite::params![workspace_id, text_list(statuses)], |r| r.get(0))?
+        .query_map(rusqlite::params![workspace_id, text_list(statuses)], |r| {
+            r.get(0)
+        })?
         .collect::<rusqlite::Result<Vec<String>>>()?;
     Ok(rows)
 }
 
 /// `listPausedByOwner`: paused connections across the owner's workspaces.
 pub fn list_paused_by_owner(conn: &Conn, owner_id: i64) -> Result<Vec<Connection>> {
-    todo!("P3.2");
     let sql = format!(
         "SELECT {} FROM \"Connection\" AS c INNER JOIN \"Workspace\" AS w ON c.\"workspaceId\" = w.\"id\" \
          WHERE w.\"ownerId\" = ?1 AND c.\"status\" = 'paused'",

@@ -32,7 +32,10 @@ pub fn transition(event: &str) -> Option<&'static str> {
 
 /// `eventsOutrankedBy`: the events that lose a same-time tie against `event`.
 pub fn events_outranked_by(event: &str) -> &'static [&'static str] {
-    let rank = THREAD_CONTROL_EVENT_PRECEDENCE.iter().position(|e| *e == event).unwrap_or(0);
+    let rank = THREAD_CONTROL_EVENT_PRECEDENCE
+        .iter()
+        .position(|e| *e == event)
+        .unwrap_or(0);
     &THREAD_CONTROL_EVENT_PRECEDENCE[..rank]
 }
 

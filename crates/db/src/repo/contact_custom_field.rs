@@ -10,14 +10,16 @@ use super::{Result, id_list};
 /// writer every write transaction is already serial, so this only validates the call
 /// (the advisory locks of Postgres are not needed). Kept so callers stay 1:1.
 pub fn lock_pairs(_conn: &Connection, pairs: &[(i64, i64)]) -> Result<()> {
-    todo!("P3.2");
     let _ = pairs;
     Ok(())
 }
 
 /// `listValuesForPairs`: `(contactId, customFieldId, value)` of every requested pair.
-pub fn list_values_for_pairs(conn: &Connection, contact_ids: &[i64], custom_field_ids: &[i64]) -> Result<Vec<(i64, i64, String)>> {
-    todo!("P3.2");
+pub fn list_values_for_pairs(
+    conn: &Connection,
+    contact_ids: &[i64],
+    custom_field_ids: &[i64],
+) -> Result<Vec<(i64, i64, String)>> {
     if contact_ids.is_empty() || custom_field_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -26,14 +28,20 @@ pub fn list_values_for_pairs(conn: &Connection, contact_ids: &[i64], custom_fiel
          WHERE \"contactId\" IN (SELECT value FROM json_each(?1)) AND \"customFieldId\" IN (SELECT value FROM json_each(?2))",
     )?;
     let rows = stmt
-        .query_map(rusqlite::params![id_list(contact_ids), id_list(custom_field_ids)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .query_map(
+            rusqlite::params![id_list(contact_ids), id_list(custom_field_ids)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
 /// `deleteValue`: deletes one value and returns what it held.
-pub fn delete_value(conn: &Connection, contact_id: i64, custom_field_id: i64) -> Result<Option<String>> {
-    todo!("P3.2");
+pub fn delete_value(
+    conn: &Connection,
+    contact_id: i64,
+    custom_field_id: i64,
+) -> Result<Option<String>> {
     let mut stmt = conn.prepare_cached(
         "DELETE FROM \"ContactCustomField\" WHERE \"contactId\" = ?1 AND \"customFieldId\" = ?2 RETURNING \"value\"",
     )?;

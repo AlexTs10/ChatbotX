@@ -17,8 +17,11 @@ pub struct PurgeOptions {
 
 /// `purgeFailedCommentAutomationEvents`: chunked delete of `failed` rows created more
 /// than `retention_days` before `now`, oldest first.
-pub async fn purge_failed_comment_automation_events(db: &Db, options: PurgeOptions, now: i64) -> Result<(i64, ChunkedPurgeStopReason)> {
-    todo!("P3.2");
+pub async fn purge_failed_comment_automation_events(
+    db: &Db,
+    options: PurgeOptions,
+    now: i64,
+) -> Result<(i64, ChunkedPurgeStopReason)> {
     let cutoff = now - options.retention_days * 86_400_000;
     chunked_purge(
         db,

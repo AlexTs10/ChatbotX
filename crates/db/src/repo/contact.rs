@@ -11,7 +11,6 @@ use super::{Model, Result, id_list};
 /// `backdateCreatedAt`: moves `createdAt` back (never forward) per `(contactId,
 /// workspaceId, createdAt)` row; returns the ids that changed. Workspace-scoped.
 pub fn backdate_created_at(conn: &Connection, rows: &[(i64, i64, i64)]) -> Result<Vec<i64>> {
-    todo!("P3.2");
     let mut changed = Vec::new();
     let mut stmt = conn.prepare_cached(
         "UPDATE \"Contact\" SET \"createdAt\" = min(\"createdAt\", ?3) \
@@ -19,7 +18,10 @@ pub fn backdate_created_at(conn: &Connection, rows: &[(i64, i64, i64)]) -> Resul
     )?;
     for (contact_id, workspace_id, created_at) in rows {
         let ids = stmt
-            .query_map(rusqlite::params![contact_id, workspace_id, created_at], |r| r.get::<_, i64>(0))?
+            .query_map(
+                rusqlite::params![contact_id, workspace_id, created_at],
+                |r| r.get::<_, i64>(0),
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         changed.extend(ids);
     }
@@ -28,7 +30,12 @@ pub fn backdate_created_at(conn: &Connection, rows: &[(i64, i64, i64)]) -> Resul
 
 /// `blockManyIfNotBlocked`: sets `blockedAt` on the not-yet-blocked contacts of the
 /// workspace; returns the ids that really transitioned.
-pub fn block_many_if_not_blocked(conn: &Connection, workspace_id: i64, ids: &[i64], now: i64) -> Result<Vec<i64>> {
+pub fn block_many_if_not_blocked(
+    conn: &Connection,
+    workspace_id: i64,
+    ids: &[i64],
+    now: i64,
+) -> Result<Vec<i64>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -37,7 +44,9 @@ pub fn block_many_if_not_blocked(conn: &Connection, workspace_id: i64, ids: &[i6
          AND \"blockedAt\" IS NULL RETURNING \"id\"",
     )?;
     let out = stmt
-        .query_map(rusqlite::params![workspace_id, id_list(ids), now], |r| r.get(0))?
+        .query_map(rusqlite::params![workspace_id, id_list(ids), now], |r| {
+            r.get(0)
+        })?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(out)
 }
@@ -72,9 +81,16 @@ pub struct ExportRow {
 }
 
 /// `listForExportPage`: one keyset page (`filter` over `c`, by id), with the relations.
-pub fn list_for_export_page(conn: &Connection, filter: &Sql, limit: i64, relations: &ExportRelations) -> Result<Vec<ExportRow>> {
-    todo!("P3.2");
-    let mut q = Sql::raw(format!("SELECT {} FROM \"Contact\" AS c WHERE ", Contact::columns_sql(Some("c"))));
+pub fn list_for_export_page(
+    conn: &Connection,
+    filter: &Sql,
+    limit: i64,
+    relations: &ExportRelations,
+) -> Result<Vec<ExportRow>> {
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"Contact\" AS c WHERE ",
+        Contact::columns_sql(Some("c"))
+    ));
     q.append(filter.clone());
     q.push(" ORDER BY c.\"id\" ASC LIMIT ");
     q.push_bind(limit);
@@ -89,7 +105,10 @@ pub fn list_for_export_page(conn: &Connection, filter: &Sql, limit: i64, relatio
                  AND \"customFieldId\" IN (SELECT value FROM json_each(?2)) ORDER BY \"customFieldId\"",
             )?;
             let rows = stmt
-                .query_map(rusqlite::params![contact.id, id_list(&relations.custom_field_ids)], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .query_map(
+                    rusqlite::params![contact.id, id_list(&relations.custom_field_ids)],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Some(rows)
         };
@@ -100,24 +119,38 @@ pub fn list_for_export_page(conn: &Connection, filter: &Sql, limit: i64, relatio
                 "SELECT \"tagId\" FROM \"ContactToTag\" WHERE \"contactId\" = ?1 AND \"tagId\" IN (SELECT value FROM json_each(?2)) ORDER BY \"tagId\"",
             )?;
             let rows = stmt
-                .query_map(rusqlite::params![contact.id, id_list(&relations.tag_ids)], |r| r.get(0))?
+                .query_map(
+                    rusqlite::params![contact.id, id_list(&relations.tag_ids)],
+                    |r| r.get(0),
+                )?
                 .collect::<rusqlite::Result<Vec<i64>>>()?;
             Some(rows)
         };
         let contact_inboxes = match relations.contact_inboxes {
             ExportInboxes::None => None,
             mode => {
-                let limit = if mode == ExportInboxes::Earliest { 1 } else { -1 };
+                let limit = if mode == ExportInboxes::Earliest {
+                    1
+                } else {
+                    -1
+                };
                 let mut stmt = conn.prepare_cached(
                     "SELECT \"sourceId\", \"sourceUserId\" FROM \"ContactInbox\" WHERE \"contactId\" = ?1 ORDER BY \"id\" ASC LIMIT ?2",
                 )?;
                 let rows = stmt
-                    .query_map(rusqlite::params![contact.id, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .query_map(rusqlite::params![contact.id, limit], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Some(rows)
             }
         };
-        out.push(ExportRow { contact, contact_custom_fields, tags, contact_inboxes });
+        out.push(ExportRow {
+            contact,
+            contact_custom_fields,
+            tags,
+            contact_inboxes,
+        });
     }
     Ok(out)
 }

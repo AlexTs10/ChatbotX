@@ -46,8 +46,11 @@ impl AiWorkspaceScope {
 
 /// `AiWorkspaceScopeRepository.findWorkspaceId`: a primary-key read of only
 /// `workspaceId`; `None` when the record no longer exists.
-pub fn find_workspace_id(conn: &Connection, id: i64, scope: AiWorkspaceScope) -> Result<Option<i64>> {
-    todo!("P3.2");
+pub fn find_workspace_id(
+    conn: &Connection,
+    id: i64,
+    scope: AiWorkspaceScope,
+) -> Result<Option<i64>> {
     let sql = format!(
         "SELECT \"workspaceId\" FROM \"{}\" WHERE \"id\" = ?1 LIMIT 1",
         scope.table()

@@ -59,7 +59,6 @@ pub fn update_identity_guarded(
     set: &IdentityFields,
     append: Option<&IdentityHistoryAppend>,
 ) -> Result<Option<ContactInbox>> {
-    todo!("P3.2");
     let guards = guard.entries();
     if guards.is_empty() {
         return Err(Error::msg("ContactInbox identity update requires a guard"));
@@ -95,7 +94,9 @@ pub fn update_identity_guarded(
             "changedAt": append.changed_at,
             "reason": append.reason,
         }));
-        let skip = history.len().saturating_sub(CONTACT_INBOX_IDENTITY_HISTORY_LIMIT);
+        let skip = history
+            .len()
+            .saturating_sub(CONTACT_INBOX_IDENTITY_HISTORY_LIMIT);
         let kept: Vec<J> = history.into_iter().skip(skip).collect();
         q.push(", \"sourceIdentityHistory\" = ");
         q.push_bind(J::Array(kept).to_string());
@@ -116,26 +117,40 @@ pub struct WorkspaceRow {
 }
 
 /// `findByIdForWorkspace`: the row when its inbox belongs to the workspace.
-pub fn find_by_id_for_workspace(conn: &Connection, id: i64, workspace_id: i64) -> Result<Option<WorkspaceRow>> {
-    todo!("P3.2");
+pub fn find_by_id_for_workspace(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<WorkspaceRow>> {
     let mut stmt = conn.prepare_cached(
         "SELECT ci.\"id\", ci.\"channel\", ci.\"inboxId\", ci.\"sourceId\" FROM \"ContactInbox\" AS ci \
          INNER JOIN \"Inbox\" AS i ON i.\"id\" = ci.\"inboxId\" AND i.\"workspaceId\" = ?2 WHERE ci.\"id\" = ?1 LIMIT 1",
     )?;
     let mut rows = stmt.query([id, workspace_id])?;
     Ok(match rows.next()? {
-        Some(r) => Some(WorkspaceRow { id: r.get(0)?, channel: r.get(1)?, inbox_id: r.get(2)?, source_id: r.get(3)? }),
+        Some(r) => Some(WorkspaceRow {
+            id: r.get(0)?,
+            channel: r.get(1)?,
+            inbox_id: r.get(2)?,
+            source_id: r.get(3)?,
+        }),
         None => None,
     })
 }
 
 /// `findModelByIdForWorkspace`.
-pub fn find_model_by_id_for_workspace(conn: &Connection, id: i64, workspace_id: i64) -> Result<Option<ContactInbox>> {
+pub fn find_model_by_id_for_workspace(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<ContactInbox>> {
     let sql = format!(
         "SELECT {} FROM \"ContactInbox\" AS ci INNER JOIN \"Inbox\" AS i ON i.\"id\" = ci.\"inboxId\" AND i.\"workspaceId\" = ?2 WHERE ci.\"id\" = ?1 LIMIT 1",
         ContactInbox::columns_sql(Some("ci"))
     );
-    Ok(super::query_models(conn, &sql, &[&id, &workspace_id])?.into_iter().next())
+    Ok(super::query_models(conn, &sql, &[&id, &workspace_id])?
+        .into_iter()
+        .next())
 }
 
 /// One row of [`list_whatsapp_ctwa_inboxes_by_contacts`].
@@ -148,8 +163,11 @@ pub struct CtwaInboxRow {
 
 /// `listWhatsappCtwaInboxesByContacts` (and `...ByContact` with one id): the contact's
 /// WhatsApp inboxes with a CTWA click id, with the workspace's integration.
-pub fn list_whatsapp_ctwa_inboxes_by_contacts(conn: &Connection, workspace_id: i64, contact_ids: &[i64]) -> Result<Vec<CtwaInboxRow>> {
-    todo!("P3.2");
+pub fn list_whatsapp_ctwa_inboxes_by_contacts(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_ids: &[i64],
+) -> Result<Vec<CtwaInboxRow>> {
     if contact_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -161,19 +179,28 @@ pub fn list_whatsapp_ctwa_inboxes_by_contacts(conn: &Connection, workspace_id: i
     )?;
     let rows = stmt
         .query_map(rusqlite::params![workspace_id, id_list(contact_ids)], |r| {
-            Ok(CtwaInboxRow { contact_id: r.get(0)?, contact_inbox_id: r.get(1)?, integration_whatsapp_id: r.get(2)? })
+            Ok(CtwaInboxRow {
+                contact_id: r.get(0)?,
+                contact_inbox_id: r.get(1)?,
+                integration_whatsapp_id: r.get(2)?,
+            })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
 /// `listWhatsappCtwaInboxesByContact`: `(contactInboxId, integrationWhatsappId)`.
-pub fn list_whatsapp_ctwa_inboxes_by_contact(conn: &Connection, workspace_id: i64, contact_id: i64) -> Result<Vec<(i64, i64)>> {
-    todo!("P3.2");
-    Ok(list_whatsapp_ctwa_inboxes_by_contacts(conn, workspace_id, &[contact_id])?
-        .into_iter()
-        .map(|r| (r.contact_inbox_id, r.integration_whatsapp_id))
-        .collect())
+pub fn list_whatsapp_ctwa_inboxes_by_contact(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<Vec<(i64, i64)>> {
+    Ok(
+        list_whatsapp_ctwa_inboxes_by_contacts(conn, workspace_id, &[contact_id])?
+            .into_iter()
+            .map(|r| (r.contact_inbox_id, r.integration_whatsapp_id))
+            .collect(),
+    )
 }
 
 /// `AdEligibleInboxByContactRow`.
@@ -187,13 +214,20 @@ pub struct AdEligibleRow {
 
 /// `listAdEligibleInboxesByContacts`: per ads-eligible channel (whatsapp: CTWA click id;
 /// messenger / instagram: paid ad referral), tagged with the channel; channel order.
-pub fn list_ad_eligible_inboxes_by_contacts(conn: &Connection, workspace_id: i64, contact_ids: &[i64]) -> Result<Vec<AdEligibleRow>> {
-    todo!("P3.2");
+pub fn list_ad_eligible_inboxes_by_contacts(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_ids: &[i64],
+) -> Result<Vec<AdEligibleRow>> {
     if contact_ids.is_empty() {
         return Ok(Vec::new());
     }
     let mut out = Vec::new();
-    for (channel, table) in [("whatsapp", "IntegrationWhatsapp"), ("messenger", "IntegrationMessenger"), ("instagram", "IntegrationInstagram")] {
+    for (channel, table) in [
+        ("whatsapp", "IntegrationWhatsapp"),
+        ("messenger", "IntegrationMessenger"),
+        ("instagram", "IntegrationInstagram"),
+    ] {
         let referral = if channel == "whatsapp" {
             Sql::raw("ci.\"referral\"->>'ctwaClid' IS NOT NULL")
         } else {
@@ -205,12 +239,21 @@ pub fn list_ad_eligible_inboxes_by_contacts(conn: &Connection, workspace_id: i64
                  INNER JOIN \"{table}\" AS i ON ci.\"inboxId\" = i.\"inboxId\" AND i.\"workspaceId\" = ? \
                  WHERE ci.\"contactId\" IN (SELECT value FROM json_each(?)) AND ci.\"channel\" = ? AND "
             ),
-            vec![Value::Integer(workspace_id), Value::Text(id_list(contact_ids)), Value::Text(channel.to_owned())],
+            vec![
+                Value::Integer(workspace_id),
+                Value::Text(id_list(contact_ids)),
+                Value::Text(channel.to_owned()),
+            ],
         );
         q.append(referral);
         q.push(" ORDER BY ci.\"id\"");
         out.extend(q.query_map(conn, |r| {
-            Ok(AdEligibleRow { contact_id: r.get(0)?, contact_inbox_id: r.get(1)?, channel: channel.to_owned(), integration_id: r.get(2)? })
+            Ok(AdEligibleRow {
+                contact_id: r.get(0)?,
+                contact_inbox_id: r.get(1)?,
+                channel: channel.to_owned(),
+                integration_id: r.get(2)?,
+            })
         })?);
     }
     Ok(out)
@@ -227,8 +270,11 @@ pub struct BySourceIdRow {
 
 /// `findByInboxAndSourceIds`: rows of the inbox with one of `source_ids` (deduplicated;
 /// no query for an empty list; rows without a source id are dropped).
-pub fn find_by_inbox_and_source_ids(conn: &Connection, inbox_id: i64, source_ids: &[String]) -> Result<Vec<BySourceIdRow>> {
-    todo!("P3.2");
+pub fn find_by_inbox_and_source_ids(
+    conn: &Connection,
+    inbox_id: i64,
+    source_ids: &[String],
+) -> Result<Vec<BySourceIdRow>> {
     let mut ids: Vec<String> = source_ids.to_vec();
     ids.sort();
     ids.dedup();
@@ -241,17 +287,28 @@ pub fn find_by_inbox_and_source_ids(conn: &Connection, inbox_id: i64, source_ids
     )?;
     let rows = stmt
         .query_map(rusqlite::params![inbox_id, text_list(&ids)], |r| {
-            Ok(BySourceIdRow { id: r.get(0)?, source_id: r.get(1)?, last_incoming_message_at: r.get(2)?, created_at: r.get(3)? })
+            Ok(BySourceIdRow {
+                id: r.get(0)?,
+                source_id: r.get(1)?,
+                last_incoming_message_at: r.get(2)?,
+                created_at: r.get(3)?,
+            })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows.into_iter().filter(|r| !r.source_id.is_empty()).collect())
+    Ok(rows
+        .into_iter()
+        .filter(|r| !r.source_id.is_empty())
+        .collect())
 }
 
 /// `listLatestAnalyticsAttribution`: per contact of the workspace, the most recently
 /// active connection `(contactId, inboxId, channel)` (`lastMessageAt DESC NULLS LAST, id
 /// DESC`).
-pub fn list_latest_analytics_attribution(conn: &Connection, workspace_id: i64, contact_ids: &[i64]) -> Result<Vec<(i64, i64, String)>> {
-    todo!("P3.2");
+pub fn list_latest_analytics_attribution(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_ids: &[i64],
+) -> Result<Vec<(i64, i64, String)>> {
     if contact_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -264,7 +321,9 @@ pub fn list_latest_analytics_attribution(conn: &Connection, workspace_id: i64, c
          WHERE rn = 1 ORDER BY \"contactId\"",
     )?;
     let rows = stmt
-        .query_map(rusqlite::params![id_list(contact_ids), workspace_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .query_map(rusqlite::params![id_list(contact_ids), workspace_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
@@ -279,14 +338,24 @@ pub struct AttributionRow {
 }
 
 /// `listAnalyticsAttributionByContact`: every connection of the contact in the workspace.
-pub fn list_analytics_attribution_by_contact(conn: &Connection, workspace_id: i64, contact_id: i64) -> Result<Vec<AttributionRow>> {
-    todo!("P3.2");
+pub fn list_analytics_attribution_by_contact(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<Vec<AttributionRow>> {
     let mut stmt = conn.prepare_cached(
         "SELECT ci.\"inboxId\", ci.\"channel\", ci.\"source\", ci.\"sourceId\" FROM \"ContactInbox\" AS ci \
          INNER JOIN \"Contact\" AS c ON c.\"id\" = ci.\"contactId\" WHERE ci.\"contactId\" = ?1 AND c.\"workspaceId\" = ?2 ORDER BY ci.\"id\"",
     )?;
     let rows = stmt
-        .query_map([contact_id, workspace_id], |r| Ok(AttributionRow { inbox_id: r.get(0)?, channel: r.get(1)?, source: r.get(2)?, source_id: r.get(3)? }))?
+        .query_map([contact_id, workspace_id], |r| {
+            Ok(AttributionRow {
+                inbox_id: r.get(0)?,
+                channel: r.get(1)?,
+                source: r.get(2)?,
+                source_id: r.get(3)?,
+            })
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
@@ -322,10 +391,15 @@ fn set_expires(q: &mut Sql, v: Option<Option<i64>>) {
 /// `applyThreadControlTransition`: writes the event's state when it is newer than the
 /// stored transition, or ties and outranks it, or is an exact redelivery (same event,
 /// state, role and owner app). Workspace-scoped; `None` when rejected.
-pub fn apply_thread_control_transition(conn: &Connection, input: &ThreadControlTransition) -> Result<Option<ContactInbox>> {
-    todo!("P3.2");
+pub fn apply_thread_control_transition(
+    conn: &Connection,
+    input: &ThreadControlTransition,
+) -> Result<Option<ContactInbox>> {
     let Some(state) = transition(&input.event) else {
-        return Err(Error::msg(format!("unknown thread control event {}", input.event)));
+        return Err(Error::msg(format!(
+            "unknown thread control event {}",
+            input.event
+        )));
     };
     let mut q = Sql::new(
         "UPDATE \"ContactInbox\" SET \"threadControlState\" = ?, \"threadOwnerRole\" = ?, \"threadOwnerAppId\" = ?, \
@@ -334,7 +408,10 @@ pub fn apply_thread_control_transition(conn: &Connection, input: &ThreadControlT
             Value::Text(state.to_owned()),
             input.owner_role.clone().map_or(Value::Null, Value::Text),
             input.owner_app_id.clone().map_or(Value::Null, Value::Text),
-            input.previous_owner_app_id.clone().map_or(Value::Null, Value::Text),
+            input
+                .previous_owner_app_id
+                .clone()
+                .map_or(Value::Null, Value::Text),
             Value::Integer(input.occurred_at),
             Value::Text(input.event.clone()),
         ],
@@ -379,7 +456,6 @@ pub fn promote_standby_to_owner_delivery(
     thread_owner_expires_at: Option<Option<i64>>,
     occurred_at: i64,
 ) -> Result<Option<ContactInbox>> {
-    todo!("P3.2");
     let mut q = Sql::new(
         "UPDATE \"ContactInbox\" SET \"threadControlState\" = 'owned', \"threadOwnerRole\" = ?, \"threadOwnerAppId\" = NULL, \
          \"threadPreviousOwnerAppId\" = ?, \"threadControlUpdatedAt\" = ?, \"threadControlLastEvent\" = 'inboundReceived'",
@@ -410,7 +486,6 @@ pub fn set_standby_thread_owner_expires_at(
     observed_updated_at: Option<i64>,
     thread_owner_expires_at: Option<i64>,
 ) -> Result<Option<ContactInbox>> {
-    todo!("P3.2");
     let mut q = Sql::bind(
         "UPDATE \"ContactInbox\" SET \"threadOwnerExpiresAt\" = ",
         thread_owner_expires_at.map_or(Value::Null, Value::Integer),
@@ -448,8 +523,11 @@ pub struct ThreadControlledRow {
 }
 
 /// `listThreadControlledByContactIds`: the `owned` rows of the workspace's contacts.
-pub fn list_thread_controlled_by_contact_ids(conn: &Connection, workspace_id: i64, contact_ids: &[i64]) -> Result<Vec<ThreadControlledRow>> {
-    todo!("P3.2");
+pub fn list_thread_controlled_by_contact_ids(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_ids: &[i64],
+) -> Result<Vec<ThreadControlledRow>> {
     if contact_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -478,5 +556,7 @@ pub fn list_thread_controlled_by_contact_ids(conn: &Connection, workspace_id: i6
 
 /// The stored identity history as JSON (`[]` when NULL).
 pub fn identity_history(row: &ContactInbox) -> J {
-    row.source_identity_history.clone().map_or_else(|| J::Array(Vec::new()), |Json(v)| v)
+    row.source_identity_history
+        .clone()
+        .map_or_else(|| J::Array(Vec::new()), |Json(v)| v)
 }
