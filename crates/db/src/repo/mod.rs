@@ -578,6 +578,8 @@ pub mod user;
 pub mod vendor;
 pub mod webhook;
 pub mod whatsapp_business_account;
+pub mod whatsapp_call;
+pub mod whatsapp_call_permission;
 pub mod whatsapp_coexist_staging;
 pub mod working_hours;
 pub mod workspace;
