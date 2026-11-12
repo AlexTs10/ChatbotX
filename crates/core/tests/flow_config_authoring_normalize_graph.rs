@@ -30,11 +30,11 @@ fn normalizeauthoredgraph_lays_out_a_chain_with_no_positions_like_the_compiler_w
     assert_eq!(result.nodes[0]["position"], json!({ "x": 100, "y": 100 }));
     assert_eq!(
         result.nodes[1]["position"],
-        json!({ "x": 100.0 + w, "y": 100 })
+        json!({ "x": (100.0 + w) as i64, "y": 100 })
     );
     assert_eq!(
         result.nodes[2]["position"],
-        json!({ "x": 100.0 + w * 2.0, "y": 100 })
+        json!({ "x": (100.0 + w * 2.0) as i64, "y": 100 })
     );
     for node in &result.nodes {
         assert_eq!(&node["measured"], fc::default_node_measured());
