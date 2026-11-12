@@ -36,6 +36,21 @@ tokio = { version = "1", default-features = false }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
+# P3.1 core: same versions as crates/files (already in the tree).
+futures = { version = "0.3", default-features = false, features = ["std"] }
+http = "1"
+url = "2"
+# P3.1 core: NFD for accent folding (`normalize("NFD")`); already in the tree through url -> idna.
+icu_normalizer = "2"
+# P3.1 core: AES-256-GCM, HMAC-SHA256, SHA-256 and OS randomness for packages/encryption and utils/crypto;
+# already in the tree through rustls.
+ring = "0.17"
+# P3.1 core: stored-image re-encoding (packages/utils image-optimize; sharp/libvips in the original).
+# Decode JPEG/PNG/WebP + EXIF orientation + Lanczos3 resize; JPEG 4:4:4 encode; lossy WebP for avatars (libwebp, C).
+bytes = "1"
+image = { version = "0.25.6", default-features = false, features = ["jpeg", "png", "webp"] }
+jpeg-encoder = "0.7"
+webp = { version = "0.3", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

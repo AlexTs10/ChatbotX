@@ -1,0 +1,21 @@
+P2.8 stage 1 (porter) — 2026-11-12
+
+Ported tests: crates/rt/tests/*.rs (15 files, 164 tests) + crates/rt/tests/support/{mod.rs,gateway.rs}.
+Map: conversion/specs/P2.8-test-map.tsv (236 rows: 141 ported, 23 adapted, 51 not-applicable, 21 class-B).
+Crate API declared with todo!() bodies (crates/rt/src/*).
+
+Run on the PC (dell-5570), from the repo root:
+  chatbotx-dell bash -c 'cargo test -p chatbotx-rt --no-fail-fast 2>&1 | tail -30'
+Result: compiles; 2 passed, 162 failed (all failures are todo!() panics).
+  The 2 passing tests check constants only:
+    auth::keeps_a_revocation_marker_valid_for_every_still_tolerated_token (MEMBER_REVOKED_TTL_SECS == 65)
+    presence::presence_config_invariant_keeps_the_report_interval_at_most_half_the_ttl_one_slow_lost_report_must_never_flap_a_member_offline_high_1
+cargo fmt -p chatbotx-rt -- --check: OK (formatted with rustfmt --edition 2024 in an isolated copy on the PC).
+cargo clippy -p chatbotx-rt --all-targets: no warning in crates/rt/tests/** (the lib has dead-code warnings until stage 2).
+
+Per target (failed/total): auth 25/26, delivery 21/21, gateway 31/31, gateway_socket 3/3, main 1/1,
+presence 2/3, presence_report 3/3, presence_reporter 11/11, realtime_broadcast 10/10,
+realtime_relay_metrics 2/2, realtime_stream_publisher 2/2, replay 6/6, schemas 37/37, stream 5/5,
+stream_reader 3/3.
+
+From here on crates/rt/tests/** is locked.
