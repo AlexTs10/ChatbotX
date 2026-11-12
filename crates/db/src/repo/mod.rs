@@ -579,6 +579,8 @@ pub mod sequence_dispatch;
 pub mod small_repos;
 pub mod store_integration;
 pub mod tag_channel;
+pub mod template_installation_sync;
+pub mod template_installed_resource;
 pub mod template_resource_backup;
 pub mod template_selectable_resource;
 pub mod template_version;
