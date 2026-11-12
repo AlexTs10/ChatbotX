@@ -1,11 +1,4 @@
 //! Port of `repositories/media-library-file/repository.ts` (P3.3).
-#![allow(
-    unused_variables,
-    unused_imports,
-    dead_code,
-    unreachable_code,
-    clippy::all
-)]
 
 use rusqlite::Connection;
 
@@ -59,7 +52,11 @@ pub fn find_by_path(
     workspace_id: i64,
     path: &str,
 ) -> Result<Option<MediaLibraryFile>> {
-    todo!("P3.3")
+    super::find_one(
+        conn,
+        "\"workspaceId\" = ?1 AND \"path\" = ?2",
+        &[&workspace_id, &path],
+    )
 }
 
 /// `findById`.
@@ -68,7 +65,11 @@ pub fn find_by_id(
     workspace_id: i64,
     id: i64,
 ) -> Result<Option<MediaLibraryFile>> {
-    todo!("P3.3")
+    super::find_one(
+        conn,
+        "\"workspaceId\" = ?1 AND \"id\" = ?2",
+        &[&workspace_id, &id],
+    )
 }
 
 /// `findByIds` (no statement for an empty list).
@@ -77,7 +78,14 @@ pub fn find_by_ids(
     workspace_id: i64,
     ids: &[i64],
 ) -> Result<Vec<MediaLibraryFile>> {
-    todo!("P3.3")
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    super::find_many(
+        conn,
+        "WHERE \"workspaceId\" = ?1 AND \"id\" IN (SELECT value FROM json_each(?2))",
+        &[&workspace_id, &id_list(ids)],
+    )
 }
 
 fn list_where(input: &ListFilesInput) -> Sql {
@@ -108,12 +116,43 @@ fn list_where(input: &ListFilesInput) -> Sql {
 /// `list`: one page and the total of the same filter. `recent` sorts by
 /// `lastAccessedAt` (newest first; NULLs first, as Postgres `DESC`), the rest by `createdAt`.
 pub fn list(conn: &Connection, input: &ListFilesInput) -> Result<FilePage> {
-    todo!("P3.3")
+    let order = if input.filter.as_deref() == Some("recent") {
+        "\"lastAccessedAt\" IS NOT NULL, \"lastAccessedAt\" DESC"
+    } else {
+        "\"createdAt\" DESC"
+    };
+    let page = input.page.unwrap_or(1);
+    let mut q = Sql::raw(format!("{} WHERE ", MediaLibraryFile::select_sql()));
+    q.append(list_where(input));
+    q.push(&format!(" ORDER BY {order} LIMIT "));
+    q.push_bind(input.per_page);
+    q.push(" OFFSET ");
+    q.push_bind((page - 1) * input.per_page);
+    let data = q.models::<MediaLibraryFile>(conn)?;
+    let mut c = Sql::raw("SELECT count(*) FROM \"MediaLibraryFile\" WHERE ");
+    c.append(list_where(input));
+    let total = c
+        .query_map(conn, |r| r.get::<_, i64>(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0);
+    Ok(FilePage { data, total })
 }
 
 /// `countByFolder`.
 pub fn count_by_folder(conn: &Connection, workspace_id: i64) -> Result<Vec<FolderCount>> {
-    todo!("P3.3")
+    let mut stmt = conn.prepare_cached(
+        "SELECT \"folderId\", count(*) FROM \"MediaLibraryFile\" WHERE \"workspaceId\" = ?1 GROUP BY \"folderId\"",
+    )?;
+    let rows = stmt
+        .query_map([workspace_id], |row| {
+            Ok(FolderCount {
+                folder_id: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 /// `listByFolder`: `(id, path)` of the folder's files.
@@ -122,22 +161,57 @@ pub fn list_by_folder(
     workspace_id: i64,
     folder_id: i64,
 ) -> Result<Vec<(i64, String)>> {
-    todo!("P3.3")
+    let mut stmt = conn.prepare_cached(
+        "SELECT \"id\", \"path\" FROM \"MediaLibraryFile\" WHERE \"folderId\" = ?1 AND \"workspaceId\" = ?2",
+    )?;
+    let rows = stmt
+        .query_map(rusqlite::params![folder_id, workspace_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 /// `create`.
 pub fn create(conn: &Connection, values: &NewMediaLibraryFile) -> Result<MediaLibraryFile> {
-    todo!("P3.3")
+    let now = now_ms();
+    super::returning::<MediaLibraryFile>(
+        conn,
+        "INSERT INTO \"MediaLibraryFile\" (\"id\", \"createdAt\", \"updatedAt\", \"name\", \"path\", \"mimeType\", \
+         \"size\", \"isFavourite\", \"workspaceId\", \"folderId\") VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        &[
+            &values.id.unwrap_or_else(new_id),
+            &now,
+            &values.name,
+            &values.path,
+            &values.mime_type,
+            &values.size,
+            &values.is_favourite,
+            &values.workspace_id,
+            &values.folder_id,
+        ],
+    )?
+    .into_iter()
+    .next()
+    .ok_or_else(|| super::Error::msg("Failed to create media library file"))
 }
 
 /// `deleteById`.
 pub fn delete_by_id(conn: &Connection, workspace_id: i64, id: i64) -> Result<()> {
-    todo!("P3.3")
+    conn.execute(
+        "DELETE FROM \"MediaLibraryFile\" WHERE \"id\" = ?1 AND \"workspaceId\" = ?2",
+        rusqlite::params![id, workspace_id],
+    )?;
+    Ok(())
 }
 
 /// `deleteByFolder`.
 pub fn delete_by_folder(conn: &Connection, workspace_id: i64, folder_id: i64) -> Result<()> {
-    todo!("P3.3")
+    conn.execute(
+        "DELETE FROM \"MediaLibraryFile\" WHERE \"folderId\" = ?1 AND \"workspaceId\" = ?2",
+        rusqlite::params![folder_id, workspace_id],
+    )?;
+    Ok(())
 }
 
 /// `moveToFolder` (`None` = root).
@@ -147,7 +221,12 @@ pub fn move_to_folder(
     file_ids: &[i64],
     folder_id: Option<i64>,
 ) -> Result<()> {
-    todo!("P3.3")
+    conn.execute(
+        "UPDATE \"MediaLibraryFile\" SET \"folderId\" = ?3, \"updatedAt\" = ?4 \
+         WHERE \"workspaceId\" = ?1 AND \"id\" IN (SELECT value FROM json_each(?2))",
+        rusqlite::params![workspace_id, id_list(file_ids), folder_id, now_ms()],
+    )?;
+    Ok(())
 }
 
 /// `setFavourite`.
@@ -157,10 +236,19 @@ pub fn set_favourite(
     id: i64,
     is_favourite: bool,
 ) -> Result<()> {
-    todo!("P3.3")
+    conn.execute(
+        "UPDATE \"MediaLibraryFile\" SET \"isFavourite\" = ?3, \"updatedAt\" = ?4 WHERE \"id\" = ?1 AND \"workspaceId\" = ?2",
+        rusqlite::params![id, workspace_id, is_favourite, now_ms()],
+    )?;
+    Ok(())
 }
 
 /// `touchLastAccessedAt` (wall clock, as `CURRENT_TIMESTAMP`).
 pub fn touch_last_accessed_at(conn: &Connection, workspace_id: i64, file_id: i64) -> Result<()> {
-    todo!("P3.3")
+    let now = now_ms();
+    conn.execute(
+        "UPDATE \"MediaLibraryFile\" SET \"lastAccessedAt\" = ?3, \"updatedAt\" = ?3 WHERE \"id\" = ?1 AND \"workspaceId\" = ?2",
+        rusqlite::params![file_id, workspace_id, now],
+    )?;
+    Ok(())
 }
