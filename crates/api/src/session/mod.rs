@@ -5,9 +5,11 @@
 mod claim;
 mod email_password;
 mod gate;
+mod mcp_config;
 mod oauth_path;
 
 pub use claim::*;
 pub use email_password::*;
 pub use gate::*;
+pub use mcp_config::*;
 pub use oauth_path::*;
