@@ -6,6 +6,36 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Image bytes shared without copies (an unchanged image is the same buffer).
+bytes = { workspace = true }
+# `Clock` / `TestClock` (token expiry, ids, "now" in date helpers).
+chatbotx-kv = { workspace = true }
+chrono = { workspace = true, features = ["std"] }
+# IANA zones for the date/time helpers (date-fns-tz / Intl in the original).
+chrono-tz = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true }
+icu_normalizer = { workspace = true }
+image = { workspace = true }
+jpeg-encoder = { workspace = true }
+regex = { workspace = true }
+ring = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tracing = { workspace = true }
+url = { workspace = true }
+webp = { workspace = true }
+
+[dev-dependencies]
+# The cache inspection helpers (`contains_key`, `keys_for_tag`) for the
+# `withCache` call assertions.
+chatbotx-kv = { workspace = true, features = ["test-util"] }
+# GIF fixtures (an animated image the optimizer must leave alone).
+image = { workspace = true, features = ["gif"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "test-util", "time"] }
+# `RecordingLog` in tests/support: a layer that keeps message + fields.
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true
