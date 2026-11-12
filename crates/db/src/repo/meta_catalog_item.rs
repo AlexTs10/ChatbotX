@@ -133,7 +133,7 @@ fn sendable(r: &rusqlite::Row<'_>) -> rusqlite::Result<SendableProduct> {
 
 /// `lockCatalogAssignments`: no-op (one SQLite writer).
 pub fn lock_catalog_assignments(_conn: &Connection, _scope: &CatalogScope) -> Result<()> {
-    todo!("P3.3")
+    Ok(())
 }
 
 /// `findLatestByProductId`: last synced first (NULLs last), then newest.
@@ -141,7 +141,21 @@ pub fn find_latest_by_product_id(
     conn: &Connection,
     product_id: i64,
 ) -> Result<Option<LatestCatalogLink>> {
-    todo!("P3.3")
+    Ok(Sql::bind(
+        "SELECT \"catalogId\", \"retailerId\", \"direction\", \"lastSyncedAt\" FROM \"MetaCatalogItem\" WHERE \"productId\" = ",
+        product_id,
+    )
+    .closed(" ORDER BY \"lastSyncedAt\" IS NULL, \"lastSyncedAt\" DESC, \"createdAt\" DESC LIMIT 1")
+    .query_map(conn, |r| {
+        Ok(LatestCatalogLink {
+            catalog_id: r.get(0)?,
+            retailer_id: r.get(1)?,
+            direction: r.get(2)?,
+            last_synced_at: r.get(3)?,
+        })
+    })?
+    .into_iter()
+    .next())
 }
 
 fn items_where(
@@ -169,7 +183,10 @@ pub fn find_by_retailer_ids(
     scope: &CatalogScope,
     retailer_ids: &[&str],
 ) -> Result<Vec<MetaCatalogItem>> {
-    todo!("P3.3")
+    if retailer_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    items_where(conn, scope, "retailerId", text_list(retailer_ids))
 }
 
 /// `searchWithProductInfo`: by product name; `limit` defaults to 20.
@@ -180,7 +197,27 @@ pub fn search_with_product_info(
     retailer_id: Option<&str>,
     limit: Option<i64>,
 ) -> Result<Vec<CatalogSearchRow>> {
-    todo!("P3.3")
+    let mut q = Sql::raw(
+        "SELECT i.\"retailerId\", p.\"name\", p.\"images\" FROM \"MetaCatalogItem\" i JOIN \"Product\" p ON i.\"productId\" = p.\"id\" WHERE ",
+    );
+    q.append(Sql::and([
+        Some(in_catalog(scope)),
+        keyword
+            .filter(|k| !k.is_empty())
+            .map(|k| Sql::bind("ilike(p.\"name\", ", like_contains(k)).closed(")")),
+        retailer_id
+            .filter(|r| !r.is_empty())
+            .map(|r| Sql::bind("i.\"retailerId\" = ", r.to_owned())),
+    ]));
+    q.push(" ORDER BY p.\"name\" ASC LIMIT ");
+    q.push_bind(limit.unwrap_or(DEFAULT_SEARCH_LIMIT));
+    q.query_map(conn, |r| {
+        Ok(CatalogSearchRow {
+            retailer_id: r.get(0)?,
+            name: r.get(1)?,
+            images: r.get(2)?,
+        })
+    })
 }
 
 /// `listSendableProducts`: active linked products by name, id; an empty `productIds` list
@@ -189,7 +226,42 @@ pub fn list_sendable_products(
     conn: &Connection,
     input: &SendableListInput,
 ) -> Result<SendablePage> {
-    todo!("P3.3")
+    if input.product_ids.as_ref().is_some_and(Vec::is_empty) {
+        return Ok(SendablePage {
+            data: Vec::new(),
+            page_count: 0,
+        });
+    }
+    let p = get_pagination_with_defaults(PaginationInput {
+        page: input.page,
+        per_page: input.per_page,
+    });
+    let w = || {
+        sendable_where(
+            &input.scope,
+            input.workspace_id,
+            input.keyword.as_deref(),
+            input.product_ids.as_deref(),
+        )
+    };
+    let mut q = Sql::raw(format!("{SENDABLE_COLUMNS}{LINKED_FROM}"));
+    q.append(w());
+    q.push(" ORDER BY p.\"name\" ASC, p.\"id\" ASC LIMIT ");
+    q.push_bind(p.limit);
+    q.push(" OFFSET ");
+    q.push_bind(p.offset);
+    let data = q.query_map(conn, sendable)?;
+    let mut c = Sql::raw(format!("SELECT count(*) {LINKED_FROM}"));
+    c.append(w());
+    let total: i64 = c
+        .query_map(conn, |r| r.get(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0);
+    Ok(SendablePage {
+        data,
+        page_count: (total + p.limit - 1) / p.limit,
+    })
 }
 
 /// `findSendableByProductIds`.
@@ -199,7 +271,12 @@ pub fn find_sendable_by_product_ids(
     workspace_id: i64,
     product_ids: &[i64],
 ) -> Result<Vec<SendableProduct>> {
-    todo!("P3.3")
+    if product_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut q = Sql::raw(format!("{SENDABLE_COLUMNS}{LINKED_FROM}"));
+    q.append(sendable_where(scope, workspace_id, None, Some(product_ids)));
+    q.query_map(conn, sendable)
 }
 
 /// `findLinkedProductsByRetailerIds` (inactive products too).
@@ -209,7 +286,15 @@ pub fn find_linked_products_by_retailer_ids(
     workspace_id: i64,
     retailer_ids: &[&str],
 ) -> Result<Vec<SendableProduct>> {
-    todo!("P3.3")
+    if retailer_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut q = Sql::raw(format!("{SENDABLE_COLUMNS}{LINKED_FROM}"));
+    q.append(linked_where(scope, workspace_id));
+    q.push(" AND i.\"retailerId\" IN (SELECT value FROM json_each(");
+    q.push_bind(text_list(retailer_ids));
+    q.push("))");
+    q.query_map(conn, sendable)
 }
 
 /// `findByProductIds`.
@@ -218,7 +303,10 @@ pub fn find_by_product_ids(
     scope: &CatalogScope,
     product_ids: &[i64],
 ) -> Result<Vec<MetaCatalogItem>> {
-    todo!("P3.3")
+    if product_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    items_where(conn, scope, "productId", id_list(product_ids))
 }
 
 fn clear_stale_product_links(
@@ -298,7 +386,7 @@ pub fn link_imported(
     scope: &CatalogScope,
     items: &[CatalogLinkItem],
 ) -> Result<()> {
-    todo!("P3.3")
+    upsert_links(conn, scope, items, false)
 }
 
 /// `markSucceeded`: `push` links with the synced fingerprint and time.
@@ -307,5 +395,5 @@ pub fn mark_succeeded(
     scope: &CatalogScope,
     items: &[CatalogLinkItem],
 ) -> Result<()> {
-    todo!("P3.3")
+    upsert_links(conn, scope, items, true)
 }

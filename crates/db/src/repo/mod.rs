@@ -536,6 +536,9 @@ pub mod inbox;
 // P3.3 (second half of the repositories).
 pub mod auth_account;
 pub mod invitation;
+pub mod leaderboard;
+pub mod leaderboard_history;
+pub mod leaderboard_participant;
 pub mod license;
 pub mod mac_partitions;
 pub mod media_library_file;
@@ -544,6 +547,7 @@ pub mod messaging_ad_operation;
 pub mod messaging_ads_connection;
 pub mod messenger_welcome_message_flow;
 pub mod meta_capi_event;
+pub mod meta_catalog_item;
 pub mod mini_app;
 pub mod mobile_refresh_token;
 pub mod oauth_access_token;
@@ -553,6 +557,8 @@ pub mod oauth_refresh_token;
 pub mod patch;
 pub mod place;
 pub mod platform_admin;
+pub mod poll;
+pub mod product;
 pub mod reference_existence;
 pub mod reflink;
 pub mod resource_deletion_log;
@@ -572,18 +578,12 @@ pub mod vendor;
 pub mod webhook;
 pub mod whatsapp_business_account;
 pub mod whatsapp_coexist_staging;
+pub mod working_hours;
 pub mod workspace;
 pub mod workspace_api_token;
 pub mod workspace_deletion_record;
 pub mod workspace_member;
 pub mod workspace_purge;
-pub mod leaderboard;
-pub mod leaderboard_history;
-pub mod leaderboard_participant;
-pub mod meta_catalog_item;
-pub mod poll;
-pub mod product;
-pub mod working_hours;
 
 pub use client::{
     CappedCount, count_query_capped, is_foreign_key_violation_error, is_statement_timeout_error,

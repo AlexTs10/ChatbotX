@@ -196,12 +196,76 @@ fn variants_of(conn: &Connection, product_id: i64) -> Result<Vec<ProductVariant>
 
 /// `list`: with category / subcategory / vendor names and the enabled-variant stock summary.
 pub fn list(conn: &Connection, input: &ProductListInput) -> Result<ProductPage> {
-    todo!("P3.3")
+    let pagination = parse_pagination(PaginationInput {
+        page: input.page,
+        per_page: input.per_page,
+    });
+    let order = parse_order_by(Product::COLUMNS, input.sort.as_deref(), None);
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"Product\" p WHERE ",
+        Product::columns_sql(Some("p"))
+    ));
+    q.append(list_where(input));
+    q.push(&format!(" {}", order_by_sql(&order, Some("p"))));
+    if let Some(p) = pagination {
+        q.push(" LIMIT ");
+        q.push_bind(p.limit);
+        q.push(" OFFSET ");
+        q.push_bind(p.offset);
+    }
+    let rows: Vec<Product> = q.models(conn)?;
+    let mut c = Sql::raw("SELECT count(*) FROM \"Product\" p WHERE ");
+    c.append(list_where(input));
+    let total: i64 = c
+        .query_map(conn, |r| r.get(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0);
+    let mut data = Vec::with_capacity(rows.len());
+    for product in rows {
+        let enabled: Vec<ProductVariant> = variants_of(conn, product.id)?
+            .into_iter()
+            .filter(|v| v.is_enabled)
+            .collect();
+        let stocked: Vec<i64> = enabled
+            .iter()
+            .filter_map(|v| v.inventory_quantity)
+            .collect();
+        data.push(ProductListRow {
+            category: category_name(conn, product.category_id)?,
+            subcategory: category_name(conn, product.subcategory_id)?,
+            vendor: vendor_name(conn, product.vendor_id)?,
+            variant_count: enabled.len() as i64,
+            variant_inventory_total: (!stocked.is_empty())
+                .then(|| stocked.iter().map(|q| (*q).max(0)).sum()),
+            product,
+        });
+    }
+    Ok(ProductPage {
+        data,
+        page_count: pagination.map_or(1, |p| (total + p.limit - 1) / p.limit),
+    })
 }
 
 /// `findDetail`.
 pub fn find_detail(conn: &Connection, id: i64, workspace_id: i64) -> Result<Option<ProductDetail>> {
-    todo!("P3.3")
+    let row: Option<Product> = super::find_one(
+        conn,
+        "\"id\" = ?1 AND \"workspaceId\" = ?2",
+        &[&id, &workspace_id],
+    )?;
+    let Some(product) = row else {
+        return Ok(None);
+    };
+    Ok(Some(ProductDetail {
+        category: category_name(conn, product.category_id)?,
+        subcategory: category_name(conn, product.subcategory_id)?,
+        vendor: vendor_name(conn, product.vendor_id)?,
+        variant_options: super::find_many(conn, "WHERE \"productId\" = ?1", &[&product.id])?,
+        variants: variants_of(conn, product.id)?,
+        addons: super::find_many(conn, "WHERE \"productId\" = ?1", &[&product.id])?,
+        product,
+    }))
 }
 
 /// `createFromImport`.
@@ -210,7 +274,67 @@ pub fn create_from_import(
     workspace_id: i64,
     products: &[ProductImportInsert],
 ) -> Result<Vec<Product>> {
-    todo!("P3.3")
+    let now = now_ms();
+    let mut out = Vec::with_capacity(products.len());
+    for p in products {
+        let mut patch: Patch = vec![
+            ("id", Value::Integer(new_id())),
+            ("createdAt", Value::Integer(now)),
+            ("updatedAt", Value::Integer(now)),
+            ("workspaceId", Value::Integer(workspace_id)),
+            ("name", Value::Text(p.name.clone())),
+            ("sku", super::sql::opt_text(p.sku.as_deref())),
+            ("price", Value::Real(p.price.unwrap_or(0.0))),
+            ("discount", Value::Real(p.discount.unwrap_or(0.0))),
+            ("productUrl", super::sql::opt_text(p.product_url.as_deref())),
+            (
+                "shortDescription",
+                super::sql::opt_text(p.short_description.as_deref()),
+            ),
+            (
+                "longDescription",
+                super::sql::opt_text(p.long_description.as_deref()),
+            ),
+            ("categoryId", super::sql::opt_int(p.category_id)),
+            ("subcategoryId", super::sql::opt_int(p.subcategory_id)),
+            ("tags", Value::Text(text_list(&p.tags))),
+            ("vendorId", super::sql::opt_int(p.vendor_id)),
+            (
+                "inventoryQuantity",
+                Value::Integer(p.inventory_quantity.unwrap_or(0)),
+            ),
+            (
+                "inventoryPolicy",
+                Value::Text(
+                    p.inventory_policy
+                        .clone()
+                        .unwrap_or_else(|| "dont_track".to_owned()),
+                ),
+            ),
+            (
+                "allowOutOfStockPurchase",
+                super::sql::bool_val(p.allow_out_of_stock_purchase.unwrap_or(false)),
+            ),
+            (
+                "images",
+                Value::Text(
+                    p.images
+                        .clone()
+                        .unwrap_or_else(|| serde_json::json!([]))
+                        .to_string(),
+                ),
+            ),
+            (
+                "status",
+                Value::Text(p.status.clone().unwrap_or_else(|| "active".to_owned())),
+            ),
+        ];
+        if let Some(c) = p.currency.as_deref().filter(|c| !c.is_empty()) {
+            patch.push(("currency", Value::Text(c.to_owned())));
+        }
+        out.push(insert_returning(conn, &patch)?);
+    }
+    Ok(out)
 }
 
 fn insert_returning(conn: &Connection, patch: &Patch) -> Result<Product> {
@@ -221,13 +345,26 @@ fn insert_returning(conn: &Connection, patch: &Patch) -> Result<Product> {
         .ok_or_else(|| super::Error::msg("Failed to insert product"))
 }
 
+/// `(id, name)` options of products and vendors.
+pub type FormOptions = (Vec<(i64, String)>, Vec<(i64, String)>);
+
 /// `listFormOptions`: `(products (id, name), vendors (id, name))`.
 pub fn list_form_options(
     conn: &Connection,
     workspace_id: i64,
     source: Option<&str>,
-) -> Result<(Vec<(i64, String)>, Vec<(i64, String)>)> {
-    todo!("P3.3")
+) -> Result<FormOptions> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT \"id\", \"name\" FROM \"Product\" WHERE \"workspaceId\" = ?1 AND \"source\" = ?2 ORDER BY \"name\" ASC, \"id\" ASC",
+    )?;
+    let products = stmt
+        .query_map(
+            rusqlite::params![workspace_id, source.unwrap_or(DEFAULT_SOURCE)],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let vendors = super::vendor::list_options(conn, workspace_id, source)?;
+    Ok((products, vendors))
 }
 
 /// `listForCatalogSync`: by id.
@@ -237,12 +374,46 @@ pub fn list_for_catalog_sync(
     category_id: Option<i64>,
     product_ids: Option<&[i64]>,
 ) -> Result<Vec<CatalogSyncProduct>> {
-    todo!("P3.3")
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"Product\" p WHERE ",
+        Product::columns_sql(Some("p"))
+    ));
+    q.append(Sql::and([
+        Some(Sql::bind("p.\"workspaceId\" = ", workspace_id)),
+        in_category(category_id, "p."),
+        ids_in("p.\"id\"", product_ids),
+    ]));
+    q.push(" ORDER BY p.\"id\" ASC");
+    let rows: Vec<Product> = q.models(conn)?;
+    rows.into_iter()
+        .map(|product| {
+            let cat = |id: Option<i64>| -> Result<Option<ProductCategory>> {
+                match id {
+                    Some(id) => super::find_one(conn, "\"id\" = ?1", &[&id]),
+                    None => Ok(None),
+                }
+            };
+            Ok(CatalogSyncProduct {
+                category: cat(product.category_id)?,
+                subcategory: cat(product.subcategory_id)?,
+                vendor: vendor_name(conn, product.vendor_id)?,
+                variants: variants_of(conn, product.id)?,
+                product,
+            })
+        })
+        .collect()
 }
 
 /// `create` (new snowflake id).
 pub fn create(conn: &Connection, values: &Patch) -> Result<Product> {
-    todo!("P3.3")
+    let now = now_ms();
+    let mut all: Patch = vec![
+        ("id", Value::Integer(new_id())),
+        ("createdAt", Value::Integer(now)),
+        ("updatedAt", Value::Integer(now)),
+    ];
+    all.extend(values.iter().cloned());
+    insert_returning(conn, &all)
 }
 
 /// `update`: returns the id when the product is in the workspace.
@@ -252,7 +423,16 @@ pub fn update(
     product_id: i64,
     values: &Patch,
 ) -> Result<Option<i64>> {
-    todo!("P3.3")
+    let mut all = values.clone();
+    all.push(("updatedAt", Value::Integer(now_ms())));
+    let mut q = Sql::raw("UPDATE \"Product\" SET ");
+    q.append(set_clause(Product::COLUMNS, &all)?);
+    q.push(" WHERE \"id\" = ");
+    q.push_bind(product_id);
+    q.push(" AND \"workspaceId\" = ");
+    q.push_bind(workspace_id);
+    q.push(" RETURNING \"id\"");
+    Ok(q.query_map(conn, |r| r.get(0))?.into_iter().next())
 }
 
 /// `deleteByIds`: the deleted ids.
@@ -261,12 +441,23 @@ pub fn delete_by_ids(
     workspace_id: i64,
     product_ids: &[i64],
 ) -> Result<Vec<i64>> {
-    todo!("P3.3")
+    if product_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Sql::new(
+        "DELETE FROM \"Product\" WHERE \"workspaceId\" = ? AND \"id\" IN (SELECT value FROM json_each(?)) RETURNING \"id\"",
+        vec![Value::Integer(workspace_id), Value::Text(id_list(product_ids))],
+    )
+    .query_map(conn, |r| r.get(0))
 }
 
 /// `find`.
 pub fn find(conn: &Connection, workspace_id: i64, product_id: i64) -> Result<Option<Product>> {
-    todo!("P3.3")
+    super::find_one(
+        conn,
+        "\"id\" = ?1 AND \"workspaceId\" = ?2",
+        &[&product_id, &workspace_id],
+    )
 }
 
 /// `findByIds`.
@@ -275,7 +466,14 @@ pub fn find_by_ids(
     workspace_id: i64,
     product_ids: &[i64],
 ) -> Result<Vec<Product>> {
-    todo!("P3.3")
+    if product_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    super::find_many(
+        conn,
+        "WHERE \"workspaceId\" = ?1 AND \"id\" IN (SELECT value FROM json_each(?2))",
+        &[&workspace_id, &id_list(product_ids)],
+    )
 }
 
 fn is_product_id(s: &str) -> bool {
@@ -288,7 +486,20 @@ pub fn find_by_import_identifiers(
     workspace_id: i64,
     retailer_ids: &[&str],
 ) -> Result<Vec<Product>> {
-    todo!("P3.3")
+    if retailer_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<i64> = retailer_ids
+        .iter()
+        .filter(|r| is_product_id(r))
+        .filter_map(|r| r.parse().ok())
+        .collect();
+    super::find_many(
+        conn,
+        "WHERE \"workspaceId\" = ?1 AND (\"id\" IN (SELECT value FROM json_each(?2)) \
+         OR trim(\"sku\") IN (SELECT value FROM json_each(?3)))",
+        &[&workspace_id, &id_list(&ids), &text_list(retailer_ids)],
+    )
 }
 
 const SHOP_FROM: &str = "FROM \"Product\" p LEFT JOIN \"ProductCategory\" cat ON cat.\"id\" = p.\"categoryId\" \
@@ -349,7 +560,52 @@ pub fn list_related_for_shop(
     product: &RelatedTo,
     limit: i64,
 ) -> Result<Vec<ShopProduct>> {
-    todo!("P3.3")
+    let category_ids: Vec<i64> = [product.category_id, product.subcategory_id]
+        .into_iter()
+        .flatten()
+        .collect();
+    let tags: Vec<&str> = product
+        .tags
+        .iter()
+        .map(String::as_str)
+        .filter(|t| !t.trim().is_empty())
+        .collect();
+    if category_ids.is_empty() && tags.is_empty() {
+        return Ok(Vec::new());
+    }
+    let same_sub = product
+        .subcategory_id
+        .map(|id| Sql::bind("p.\"subcategoryId\" = ", id));
+    let same_cat = (!category_ids.is_empty()).then(|| {
+        let mut s = Sql::bind(
+            "p.\"categoryId\" IN (SELECT value FROM json_each(",
+            id_list(&category_ids),
+        );
+        s.push(")) OR p.\"subcategoryId\" IN (SELECT value FROM json_each(");
+        s.push_bind(id_list(&category_ids));
+        s.push("))");
+        s
+    });
+    let shares_tag = (!tags.is_empty()).then(|| {
+        Sql::bind(
+            "EXISTS (SELECT 1 FROM json_each(p.\"tags\") t WHERE t.value IN (SELECT value FROM json_each(",
+            text_list(&tags),
+        )
+        .closed(")))")
+    });
+    let mut q = Sql::raw(format!("{}{SHOP_FROM}", shop_select()));
+    q.append(shop_visible(workspace_id, source));
+    q.push(" AND p.\"id\" <> ");
+    q.push_bind(product.id);
+    q.push(" AND ");
+    q.append(Sql::or([same_cat.clone(), shares_tag]));
+    q.push(" ORDER BY CASE WHEN ");
+    q.append(same_sub.unwrap_or_else(|| Sql::raw("0")));
+    q.push(" THEN 0 WHEN ");
+    q.append(same_cat.unwrap_or_else(|| Sql::raw("0")));
+    q.push(" THEN 1 ELSE 2 END, p.\"rank\" ASC, p.\"name\" ASC LIMIT ");
+    q.push_bind(limit);
+    q.query_map(conn, shop_row)
 }
 
 fn shop_where(input: &ShopListInput) -> Sql {
@@ -375,7 +631,31 @@ fn shop_where(input: &ShopListInput) -> Sql {
 
 /// `listForShop`: by rank, name; every row when no pagination is given.
 pub fn list_for_shop(conn: &Connection, input: &ShopListInput) -> Result<ShopPage> {
-    todo!("P3.3")
+    let pagination = parse_pagination(PaginationInput {
+        page: input.page,
+        per_page: input.per_page,
+    });
+    let mut q = Sql::raw(format!("{}{SHOP_FROM}", shop_select()));
+    q.append(shop_where(input));
+    q.push(" ORDER BY p.\"rank\" ASC, p.\"name\" ASC");
+    if let Some(p) = pagination {
+        q.push(" LIMIT ");
+        q.push_bind(p.limit);
+        q.push(" OFFSET ");
+        q.push_bind(p.offset);
+    }
+    let data = q.query_map(conn, shop_row)?;
+    let mut c = Sql::raw(format!("SELECT count(*) {SHOP_FROM}"));
+    c.append(shop_where(input));
+    let total: i64 = c
+        .query_map(conn, |r| r.get(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0);
+    Ok(ShopPage {
+        data,
+        page_count: pagination.map_or(1, |p| (total + p.limit - 1) / p.limit),
+    })
 }
 
 /// `listSearchableNames`: `(id, name)`.
@@ -385,7 +665,11 @@ pub fn list_searchable_names(
     limit: i64,
     source: Option<&str>,
 ) -> Result<Vec<(i64, String)>> {
-    todo!("P3.3")
+    let mut q = Sql::raw(format!("SELECT p.\"id\", p.\"name\" {SHOP_FROM}"));
+    q.append(shop_visible(workspace_id, source));
+    q.push(" AND p.\"isSearchable\" = 1 ORDER BY p.\"rank\" ASC, p.\"name\" ASC LIMIT ");
+    q.push_bind(limit);
+    q.query_map(conn, |r| Ok((r.get(0)?, r.get(1)?)))
 }
 
 /// `findForOrder` (`source` filters only when given).
@@ -395,7 +679,41 @@ pub fn find_for_order(
     product_ids: &[i64],
     source: Option<&str>,
 ) -> Result<Vec<OrderProduct>> {
-    todo!("P3.3")
+    if product_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut q = Sql::raw(format!("{} WHERE ", Product::select_sql()));
+    q.append(Sql::and([
+        Some(Sql::bind("\"workspaceId\" = ", workspace_id)),
+        ids_in("\"id\"", Some(product_ids)),
+        source.map(|s| Sql::bind("\"source\" = ", s.to_owned())),
+    ]));
+    let rows: Vec<Product> = q.models(conn)?;
+    rows.into_iter()
+        .map(|product| {
+            let vendor = match product.vendor_id {
+                Some(id) => {
+                    let v: Option<super::models::Vendor> =
+                        super::find_one(conn, "\"id\" = ?1", &[&id])?;
+                    v.map(|v| {
+                        (
+                            v.name,
+                            v.is_active,
+                            v.discount_percent,
+                            v.minimum_order_value,
+                            v.open_hours_id,
+                        )
+                    })
+                }
+                None => None,
+            };
+            Ok(OrderProduct {
+                variants: variants_of(conn, product.id)?,
+                vendor,
+                product,
+            })
+        })
+        .collect()
 }
 
 /// `lockForStock`: by id (no row lock needed under the one writer).
@@ -404,7 +722,24 @@ pub fn lock_for_stock(
     workspace_id: i64,
     product_ids: &[i64],
 ) -> Result<Vec<StockRow>> {
-    todo!("P3.3")
+    if product_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT \"id\", \"inventoryPolicy\", \"inventoryQuantity\", \"allowOutOfStockPurchase\" FROM \"Product\" \
+         WHERE \"workspaceId\" = ?1 AND \"id\" IN (SELECT value FROM json_each(?2)) ORDER BY \"id\" ASC",
+    )?;
+    let rows = stmt
+        .query_map(rusqlite::params![workspace_id, id_list(product_ids)], |r| {
+            Ok(StockRow {
+                id: r.get(0)?,
+                inventory_policy: r.get(1)?,
+                inventory_quantity: r.get(2)?,
+                allow_out_of_stock_purchase: r.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 /// `takeInventory`: takes up to `quantity` of a tracked product; returns the taken amount.
@@ -414,7 +749,21 @@ pub fn take_inventory(
     product_id: i64,
     quantity: i64,
 ) -> Result<i64> {
-    todo!("P3.3")
+    let row: Option<Product> = super::find_one(
+        conn,
+        "\"id\" = ?1 AND \"workspaceId\" = ?2 AND \"inventoryPolicy\" = 'track'",
+        &[&product_id, &workspace_id],
+    )?;
+    let Some(row) = row else { return Ok(0) };
+    let taken = quantity.min(row.inventory_quantity).max(0);
+    if taken > 0 {
+        conn.execute(
+            "UPDATE \"Product\" SET \"inventoryQuantity\" = \"inventoryQuantity\" - ?3, \"updatedAt\" = ?4 \
+             WHERE \"id\" = ?1 AND \"workspaceId\" = ?2",
+            rusqlite::params![product_id, workspace_id, taken, now_ms()],
+        )?;
+    }
+    Ok(taken)
 }
 
 /// `restoreInventory`.
@@ -424,5 +773,13 @@ pub fn restore_inventory(
     product_id: i64,
     quantity: i64,
 ) -> Result<()> {
-    todo!("P3.3")
+    if quantity <= 0 {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE \"Product\" SET \"inventoryQuantity\" = \"inventoryQuantity\" + ?3, \"updatedAt\" = ?4 \
+         WHERE \"id\" = ?1 AND \"workspaceId\" = ?2",
+        rusqlite::params![product_id, workspace_id, quantity, now_ms()],
+    )?;
+    Ok(())
 }
