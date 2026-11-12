@@ -1,0 +1,4904 @@
+[
+{
+"id": "ads.referralStats",
+"method": "GET",
+"path": "/v1/ads/referral-stats",
+"scope": "ads"
+},
+{
+"id": "ads.listReferralAds",
+"method": "GET",
+"path": "/v1/ads/referral-ads",
+"scope": "ads"
+},
+{
+"id": "ads.listRules",
+"method": "GET",
+"path": "/v1/ads/conversion-rules",
+"scope": "ads"
+},
+{
+"id": "ads.createRule",
+"method": "POST",
+"path": "/v1/ads/conversion-rules",
+"scope": "ads"
+},
+{
+"id": "ads.getRule",
+"method": "GET",
+"path": "/v1/ads/conversion-rules/{id}",
+"scope": "ads"
+},
+{
+"id": "ads.updateRule",
+"method": "PATCH",
+"path": "/v1/ads/conversion-rules/{id}",
+"scope": "ads"
+},
+{
+"id": "ads.updateRuleLegacy",
+"method": "PUT",
+"path": "/v1/ads/conversion-rules/{id}",
+"scope": "ads"
+},
+{
+"id": "ads.deleteRule",
+"method": "DELETE",
+"path": "/v1/ads/conversion-rules/{id}",
+"scope": "ads"
+},
+{
+"id": "ads.toggleRuleStatus",
+"method": "PATCH",
+"path": "/v1/ads/conversion-rules/{id}/status",
+"scope": "ads"
+},
+{
+"id": "ads.getFunnel",
+"method": "GET",
+"path": "/v1/ads/funnel",
+"scope": "ads"
+},
+{
+"id": "ads.getFunnelTimeseries",
+"method": "GET",
+"path": "/v1/ads/funnel/timeseries",
+"scope": "ads"
+},
+{
+"id": "ads.getCapiDelivery",
+"method": "GET",
+"path": "/v1/ads/capi-delivery",
+"scope": "ads"
+},
+{
+"id": "ads.listConversionExportRows",
+"method": "GET",
+"path": "/v1/ads/conversions/export",
+"scope": "ads"
+},
+{
+"id": "ads.listChannelAdAccounts",
+"method": "GET",
+"path": "/v1/ads/{channel}/ad-accounts",
+"scope": "ads"
+},
+{
+"id": "ads.getAnalyticsOverview",
+"method": "GET",
+"path": "/v1/ads/analytics/overview",
+"scope": "ads"
+},
+{
+"id": "ads.getAnalyticsTimeseries",
+"method": "GET",
+"path": "/v1/ads/analytics/timeseries",
+"scope": "ads"
+},
+{
+"id": "ads.getConversion",
+"method": "GET",
+"path": "/v1/ads/conversions/{id}",
+"scope": "ads"
+},
+{
+"id": "ads.listCustomAudiences",
+"method": "GET",
+"path": "/v1/ads/custom-audiences",
+"scope": "ads"
+},
+{
+"id": "ads.startRetargetAudienceSync",
+"method": "POST",
+"path": "/v1/ads/retarget-audiences",
+"scope": "ads"
+},
+{
+"id": "ads.createCampaign",
+"method": "POST",
+"path": "/v1/ads/campaigns",
+"scope": "ads"
+},
+{
+"id": "ads.listCampaigns",
+"method": "GET",
+"path": "/v1/ads/campaigns",
+"scope": "ads"
+},
+{
+"id": "ads.retryCampaign",
+"method": "POST",
+"path": "/v1/ads/campaigns/{id}/retry",
+"scope": "ads"
+},
+{
+"id": "ads.publishCampaign",
+"method": "POST",
+"path": "/v1/ads/campaigns/{id}/publish",
+"scope": "ads"
+},
+{
+"id": "ads.pauseCampaign",
+"method": "POST",
+"path": "/v1/ads/campaigns/{id}/pause",
+"scope": "ads"
+},
+{
+"id": "ads.deleteCampaign",
+"method": "DELETE",
+"path": "/v1/ads/campaigns/{id}",
+"scope": "ads"
+},
+{
+"id": "ads.getCampaignsInsights",
+"method": "POST",
+"path": "/v1/ads/campaigns/insights",
+"scope": "ads"
+},
+{
+"id": "ads.listCampaignAdAccounts",
+"method": "GET",
+"path": "/v1/ads/campaigns/{channel}/{integrationId}/ad-accounts",
+"scope": "ads"
+},
+{
+"id": "ads.getCampaignAdAccountDetails",
+"method": "GET",
+"path": "/v1/ads/campaigns/ad-accounts/{adAccountId}",
+"scope": "ads"
+},
+{
+"id": "ads.createCampaignImageUpload",
+"method": "POST",
+"path": "/v1/ads/campaigns/upload-image",
+"scope": "ads"
+},
+{
+"id": "ads.uploadCampaignVideo",
+"method": "POST",
+"path": "/v1/ads/campaigns/upload-video",
+"scope": "ads"
+},
+{
+"id": "ads.getCampaignVideoStatus",
+"method": "GET",
+"path": "/v1/ads/campaigns/videos/{videoId}/status",
+"scope": "ads"
+},
+{
+"id": "ads.listCampaignMessengerPages",
+"method": "GET",
+"path": "/v1/ads/campaigns/messenger-pages",
+"scope": "ads"
+},
+{
+"id": "ads.checkCampaignPrerequisites",
+"method": "GET",
+"path": "/v1/ads/campaigns/prerequisites",
+"scope": "ads"
+},
+{
+"id": "ads.listConnections",
+"method": "GET",
+"path": "/v1/ads/connections",
+"scope": "ads"
+},
+{
+"id": "ads.disconnectConnection",
+"method": "DELETE",
+"path": "/v1/ads/connections/{channel}/{integrationId}",
+"scope": "ads"
+},
+{
+"id": "aiAgents.list",
+"method": "GET",
+"path": "/v1/ai-agents",
+"scope": "automation"
+},
+{
+"id": "aiAgents.create",
+"method": "POST",
+"path": "/v1/ai-agents",
+"scope": "automation"
+},
+{
+"id": "aiAgents.get",
+"method": "GET",
+"path": "/v1/ai-agents/{id}",
+"scope": "automation"
+},
+{
+"id": "aiAgents.update",
+"method": "PATCH",
+"path": "/v1/ai-agents/{id}",
+"scope": "automation"
+},
+{
+"id": "aiAgents.delete",
+"method": "DELETE",
+"path": "/v1/ai-agents/{id}",
+"scope": "automation"
+},
+{
+"id": "aiFiles.list",
+"method": "GET",
+"path": "/v1/ai-files",
+"scope": "automation"
+},
+{
+"id": "aiFiles.create",
+"method": "POST",
+"path": "/v1/ai-files",
+"scope": "automation"
+},
+{
+"id": "aiFiles.get",
+"method": "GET",
+"path": "/v1/ai-files/{id}",
+"scope": "automation"
+},
+{
+"id": "aiFiles.delete",
+"method": "DELETE",
+"path": "/v1/ai-files/{id}",
+"scope": "automation"
+},
+{
+"id": "aiFiles.search",
+"method": "POST",
+"path": "/v1/ai-files/search",
+"scope": "automation"
+},
+{
+"id": "aiFiles.listChunks",
+"method": "GET",
+"path": "/v1/ai-files/{id}/chunks",
+"scope": "automation"
+},
+{
+"id": "aiFiles.reindex",
+"method": "POST",
+"path": "/v1/ai-files/{id}/reindex",
+"scope": "automation"
+},
+{
+"id": "aiHandover.getSettings",
+"method": "GET",
+"path": "/v1/inboxes/{inboxId}/ai-handover/settings",
+"scope": "integrations"
+},
+{
+"id": "aiHandover.saveSettings",
+"method": "PUT",
+"path": "/v1/inboxes/{inboxId}/ai-handover/settings",
+"scope": "integrations"
+},
+{
+"id": "aiHandover.patchSettings",
+"method": "PATCH",
+"path": "/v1/inboxes/{inboxId}/ai-handover/settings",
+"scope": "integrations"
+},
+{
+"id": "aiHandover.setApplyToAll",
+"method": "POST",
+"path": "/v1/inboxes/{inboxId}/ai-handover/apply-to-all",
+"scope": "integrations"
+},
+{
+"id": "aiHandover.retryApplyToAll",
+"method": "POST",
+"path": "/v1/inboxes/{inboxId}/ai-handover/apply-to-all/retry",
+"scope": "integrations"
+},
+{
+"id": "aiHandover.listHistory",
+"method": "GET",
+"path": "/v1/inboxes/{inboxId}/ai-handover/history",
+"scope": "integrations"
+},
+{
+"id": "aiFunctions.list",
+"method": "GET",
+"path": "/v1/ai-functions",
+"scope": "automation"
+},
+{
+"id": "aiFunctions.create",
+"method": "POST",
+"path": "/v1/ai-functions",
+"scope": "automation"
+},
+{
+"id": "aiFunctions.get",
+"method": "GET",
+"path": "/v1/ai-functions/{id}",
+"scope": "automation"
+},
+{
+"id": "aiFunctions.update",
+"method": "PUT",
+"path": "/v1/ai-functions/{id}",
+"scope": "automation"
+},
+{
+"id": "aiFunctions.delete",
+"method": "DELETE",
+"path": "/v1/ai-functions/{id}",
+"scope": "automation"
+},
+{
+"id": "aiMcpServers.list",
+"method": "GET",
+"path": "/v1/ai-mcp-servers",
+"scope": "automation"
+},
+{
+"id": "aiMcpServers.create",
+"method": "POST",
+"path": "/v1/ai-mcp-servers",
+"scope": "automation"
+},
+{
+"id": "aiMcpServers.get",
+"method": "GET",
+"path": "/v1/ai-mcp-servers/{id}",
+"scope": "automation"
+},
+{
+"id": "aiMcpServers.update",
+"method": "PUT",
+"path": "/v1/ai-mcp-servers/{id}",
+"scope": "automation"
+},
+{
+"id": "aiMcpServers.delete",
+"method": "DELETE",
+"path": "/v1/ai-mcp-servers/{id}",
+"scope": "automation"
+},
+{
+"id": "analytics.filterOptions",
+"method": "GET",
+"path": "/v1/analytics/filter-options",
+"scope": "analytics"
+},
+{
+"id": "analytics.contactCountsPerDay",
+"method": "GET",
+"path": "/v1/analytics/contact-counts-per-day",
+"scope": "analytics"
+},
+{
+"id": "analytics.newContactCountsPerDay",
+"method": "GET",
+"path": "/v1/analytics/new-contact-counts-per-day",
+"scope": "analytics"
+},
+{
+"id": "analytics.blockedContactsPerDay",
+"method": "GET",
+"path": "/v1/analytics/blocked-contacts-per-day",
+"scope": "analytics"
+},
+{
+"id": "analytics.blockedContactsCount",
+"method": "GET",
+"path": "/v1/analytics/blocked-contacts-count",
+"scope": "analytics"
+},
+{
+"id": "analytics.newContactsCount",
+"method": "GET",
+"path": "/v1/analytics/new-contacts-count",
+"scope": "analytics"
+},
+{
+"id": "analytics.contactsCount",
+"method": "GET",
+"path": "/v1/analytics/contacts-count",
+"scope": "analytics"
+},
+{
+"id": "analytics.activeContactsCount",
+"method": "GET",
+"path": "/v1/analytics/active-contacts-count",
+"scope": "analytics"
+},
+{
+"id": "analytics.contactsByDimension",
+"method": "GET",
+"path": "/v1/analytics/contacts-by-dimension",
+"scope": "analytics"
+},
+{
+"id": "analytics.messagesByAdmin",
+"method": "GET",
+"path": "/v1/analytics/messages-by-admin",
+"scope": "analytics"
+},
+{
+"id": "analytics.humanAgentStats",
+"method": "GET",
+"path": "/v1/analytics/human-agent-stats",
+"scope": "analytics"
+},
+{
+"id": "analytics.agentResponseSeries",
+"method": "GET",
+"path": "/v1/analytics/agent-response-series",
+"scope": "analytics"
+},
+{
+"id": "analytics.conversationHandoffs",
+"method": "GET",
+"path": "/v1/analytics/conversation-handoffs",
+"scope": "analytics"
+},
+{
+"id": "analytics.conversationFollowUps",
+"method": "GET",
+"path": "/v1/analytics/conversation-followups",
+"scope": "analytics"
+},
+{
+"id": "analytics.conversationArchived",
+"method": "GET",
+"path": "/v1/analytics/conversation-archived",
+"scope": "analytics"
+},
+{
+"id": "analytics.conversationAssigned",
+"method": "GET",
+"path": "/v1/analytics/conversation-assigned",
+"scope": "analytics"
+},
+{
+"id": "analytics.conversationAssignedByAdmin",
+"method": "GET",
+"path": "/v1/analytics/conversation-assigned-by-admin",
+"scope": "analytics"
+},
+{
+"id": "analytics.uniqueConversationsByAdmin",
+"method": "GET",
+"path": "/v1/analytics/unique-conversations-by-admin",
+"scope": "analytics"
+},
+{
+"id": "analytics.botMessagesByResult",
+"method": "GET",
+"path": "/v1/analytics/bot-messages-by-result",
+"scope": "analytics"
+},
+{
+"id": "analytics.botMessagesWithResponse",
+"method": "GET",
+"path": "/v1/analytics/bot-messages-with-response",
+"scope": "analytics"
+},
+{
+"id": "analytics.botMessagesNoResponse",
+"method": "GET",
+"path": "/v1/analytics/bot-messages-no-response",
+"scope": "analytics"
+},
+{
+"id": "analytics.botMessagesAiProviders",
+"method": "GET",
+"path": "/v1/analytics/bot-messages-ai-providers",
+"scope": "analytics"
+},
+{
+"id": "analytics.messagesBySender",
+"method": "GET",
+"path": "/v1/analytics/messages-by-sender",
+"scope": "analytics"
+},
+{
+"id": "analytics.broadcastStats",
+"method": "GET",
+"path": "/v1/analytics/broadcasts/{broadcastId}/stats",
+"scope": "analytics"
+},
+{
+"id": "analytics.sequenceStepStats",
+"method": "GET",
+"path": "/v1/analytics/sequences/{sequenceId}/steps/{stepId}/stats",
+"scope": "analytics"
+},
+{
+"id": "analytics.macActiveContactCount",
+"method": "GET",
+"path": "/v1/analytics/mac/active-count",
+"scope": "analytics"
+},
+{
+"id": "analytics.flowStats",
+"method": "GET",
+"path": "/v1/analytics/flows/{flowId}/stats",
+"scope": "analytics"
+},
+{
+"id": "analytics.resetFlowStats",
+"method": "DELETE",
+"path": "/v1/analytics/flows/{flowId}/stats",
+"scope": "analytics"
+},
+{
+"id": "analytics.flowSmartDelayStats",
+"method": "GET",
+"path": "/v1/analytics/flows/{flowId}/smart-delay-stats",
+"scope": "analytics"
+},
+{
+"id": "analytics.commentAutomationReplyStats",
+"method": "GET",
+"path": "/v1/analytics/comment-automation/replies",
+"scope": "analytics"
+},
+{
+"id": "analytics.commentAutomationUserComments",
+"method": "GET",
+"path": "/v1/analytics/comment-automation/user-comments",
+"scope": "analytics"
+},
+{
+"id": "analytics.commentAutomationBotReplies",
+"method": "GET",
+"path": "/v1/analytics/comment-automation/bot-replies",
+"scope": "analytics"
+},
+{
+"id": "analytics.commentAutomationErrors",
+"method": "GET",
+"path": "/v1/analytics/comment-automation/errors",
+"scope": "analytics"
+},
+{
+"id": "analytics.magicLinkStats",
+"method": "GET",
+"path": "/v1/analytics/magic-links/stats",
+"scope": "analytics"
+},
+{
+"id": "analytics.magicLinkContacts",
+"method": "GET",
+"path": "/v1/analytics/magic-links/contacts",
+"scope": "analytics"
+},
+{
+"id": "analytics.refLinkStats",
+"method": "GET",
+"path": "/v1/analytics/ref-links/stats",
+"scope": "analytics"
+},
+{
+"id": "analytics.refLinkContacts",
+"method": "GET",
+"path": "/v1/analytics/ref-links/contacts",
+"scope": "analytics"
+},
+{
+"id": "analytics.commentAutomationContacts",
+"method": "GET",
+"path": "/v1/analytics/comment-automation/contacts",
+"scope": "analytics"
+},
+{
+"id": "appointmentCalendars.list",
+"method": "GET",
+"path": "/v1/appointment-calendars",
+"scope": "appointments"
+},
+{
+"id": "appointmentCalendars.create",
+"method": "POST",
+"path": "/v1/appointment-calendars",
+"scope": "appointments"
+},
+{
+"id": "appointmentCalendars.get",
+"method": "GET",
+"path": "/v1/appointment-calendars/{id}",
+"scope": "appointments"
+},
+{
+"id": "appointmentCalendars.update",
+"method": "PUT",
+"path": "/v1/appointment-calendars/{id}",
+"scope": "appointments"
+},
+{
+"id": "appointmentCalendars.delete",
+"method": "DELETE",
+"path": "/v1/appointment-calendars/{id}",
+"scope": "appointments"
+},
+{
+"id": "appointmentCalendars.setActive",
+"method": "PATCH",
+"path": "/v1/appointment-calendars/{id}/active",
+"scope": "appointments"
+},
+{
+"id": "appointmentCalendars.duplicate",
+"method": "POST",
+"path": "/v1/appointment-calendars/{id}/duplicate",
+"scope": "appointments"
+},
+{
+"id": "appointmentCalendars.getAvailability",
+"method": "GET",
+"path": "/v1/appointment-calendars/{id}/availability",
+"scope": "appointments"
+},
+{
+"id": "appointmentExternalCalendars.list",
+"method": "GET",
+"path": "/v1/appointment-external-calendars",
+"scope": "appointments"
+},
+{
+"id": "appointmentExternalCalendars.disconnect",
+"method": "DELETE",
+"path": "/v1/appointment-external-calendars/{integrationId}",
+"scope": "appointments"
+},
+{
+"id": "appointmentReminders.list",
+"method": "GET",
+"path": "/v1/appointment-reminders",
+"scope": "appointments"
+},
+{
+"id": "appointments.list",
+"method": "GET",
+"path": "/v1/appointments",
+"scope": "appointments"
+},
+{
+"id": "appointments.book",
+"method": "POST",
+"path": "/v1/appointments",
+"scope": "appointments"
+},
+{
+"id": "appointments.get",
+"method": "GET",
+"path": "/v1/appointments/{id}",
+"scope": "appointments"
+},
+{
+"id": "appointments.delete",
+"method": "DELETE",
+"path": "/v1/appointments/{id}",
+"scope": "appointments"
+},
+{
+"id": "appointments.createBookingLink",
+"method": "POST",
+"path": "/v1/conversations/{conversationId}/appointment-booking-link",
+"scope": "appointments"
+},
+{
+"id": "appointments.cancel",
+"method": "POST",
+"path": "/v1/appointments/{id}/cancel",
+"scope": "appointments"
+},
+{
+"id": "botFields.list",
+"method": "GET",
+"path": "/v1/bot-fields",
+"scope": "automation"
+},
+{
+"id": "botFields.create",
+"method": "POST",
+"path": "/v1/bot-fields",
+"scope": "automation"
+},
+{
+"id": "botFields.setMany",
+"method": "PUT",
+"path": "/v1/bot-fields",
+"scope": "automation"
+},
+{
+"id": "botFields.get",
+"method": "GET",
+"path": "/v1/bot-fields/{idOrName}",
+"scope": "automation"
+},
+{
+"id": "botFields.set",
+"method": "PUT",
+"path": "/v1/bot-fields/{idOrName}",
+"scope": "automation"
+},
+{
+"id": "botFields.update",
+"method": "PATCH",
+"path": "/v1/bot-fields/{idOrName}",
+"scope": "automation"
+},
+{
+"id": "botFields.delete",
+"method": "DELETE",
+"path": "/v1/bot-fields/{idOrName}",
+"scope": "automation"
+},
+{
+"id": "botFields.bulkUpdate",
+"method": "PUT",
+"path": "/v1/bot-fields/bulk-update",
+"scope": "automation"
+},
+{
+"id": "botFields.applyOperation",
+"method": "POST",
+"path": "/v1/bot-fields/{idOrName}/operations",
+"scope": "automation"
+},
+{
+"id": "botFields.reset",
+"method": "POST",
+"path": "/v1/bot-fields/{idOrName}/reset",
+"scope": "automation"
+},
+{
+"id": "botFields.resetMany",
+"method": "POST",
+"path": "/v1/bot-fields/bulk-reset",
+"scope": "automation"
+},
+{
+"id": "botSimulator.getLink",
+"method": "GET",
+"path": "/v1/bot-simulator/link",
+"scope": "channels"
+},
+{
+"id": "broadcasts.previewRecurrence",
+"method": "POST",
+"path": "/v1/broadcasts/preview-recurrence",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.skipOccurrence",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/skip-occurrence",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.restoreOccurrence",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/restore-occurrence",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.listRunGroups",
+"method": "GET",
+"path": "/v1/broadcasts/{idOrName}/run-groups",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.listOccurrences",
+"method": "GET",
+"path": "/v1/broadcasts/{idOrName}/occurrences",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.list",
+"method": "GET",
+"path": "/v1/broadcasts",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.create",
+"method": "POST",
+"path": "/v1/broadcasts",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.get",
+"method": "GET",
+"path": "/v1/broadcasts/{idOrName}",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.getAudience",
+"method": "GET",
+"path": "/v1/broadcasts/{idOrName}/audience",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.previewAudience",
+"method": "POST",
+"path": "/v1/broadcasts/audience/preview",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.listContacts",
+"method": "GET",
+"path": "/v1/broadcasts/{id}/contacts",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.update",
+"method": "PUT",
+"path": "/v1/broadcasts/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.delete",
+"method": "DELETE",
+"path": "/v1/broadcasts/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.updateDraft",
+"method": "PUT",
+"path": "/v1/broadcasts/{id}/draft",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.schedule",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/schedule",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.moveToDraft",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/move-to-draft",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.stop",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/stop",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.resume",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/resume",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.resend",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/resend",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.duplicate",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/duplicate",
+"scope": "broadcasts"
+},
+{
+"id": "broadcasts.clone",
+"method": "POST",
+"path": "/v1/broadcasts/{id}/clone",
+"scope": "broadcasts"
+},
+{
+"id": "capabilities.get",
+"method": "GET",
+"path": "/v1/capabilities",
+"scope": "contacts"
+},
+{
+"id": "channelPosts.list",
+"method": "GET",
+"path": "/v1/channel-posts",
+"scope": "contacts"
+},
+{
+"id": "channelPosts.listSelected",
+"method": "GET",
+"path": "/v1/channel-posts/options/by-ids",
+"scope": "contacts"
+},
+{
+"id": "carts.get",
+"method": "GET",
+"path": "/v1/carts/{identifier}",
+"scope": "ecommerce"
+},
+{
+"id": "channels.sendMessage",
+"method": "POST",
+"path": "/v1/channels/api/messages",
+"scope": null
+},
+{
+"id": "channels.typing",
+"method": "POST",
+"path": "/v1/channels/api/typing",
+"scope": null
+},
+{
+"id": "channels.markRead",
+"method": "POST",
+"path": "/v1/channels/api/read",
+"scope": null
+},
+{
+"id": "channels.deliveryStatus",
+"method": "POST",
+"path": "/v1/channels/api/delivery-status",
+"scope": null
+},
+{
+"id": "channels.me",
+"method": "GET",
+"path": "/v1/channels/api/me",
+"scope": null
+},
+{
+"id": "commentAutomations.listAccounts",
+"method": "GET",
+"path": "/v1/comment-automations/accounts",
+"scope": "automation"
+},
+{
+"id": "commentAutomations.processMissedComments",
+"method": "POST",
+"path": "/v1/comment-automations/{id}/missed-comment-runs",
+"scope": "automation"
+},
+{
+"id": "commentAutomations.getMissedCommentRun",
+"method": "GET",
+"path": "/v1/comment-automations/{id}/missed-comment-runs",
+"scope": "automation"
+},
+{
+"id": "commentAutomations.listModerationLogs",
+"method": "GET",
+"path": "/v1/comment-automations/{id}/moderation-logs",
+"scope": "automation"
+},
+{
+"id": "commentAutomations.getModerationSummary",
+"method": "GET",
+"path": "/v1/comment-automations/{id}/moderation-summary",
+"scope": "automation"
+},
+{
+"id": "connectionProviders.list",
+"method": "GET",
+"path": "/v1/connection-providers",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connections.list",
+"method": "GET",
+"path": "/v1/connections",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connections.create",
+"method": "POST",
+"path": "/v1/connections",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connections.get",
+"method": "GET",
+"path": "/v1/connections/{id}",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connections.update",
+"method": "PUT",
+"path": "/v1/connections/{id}",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connections.disconnect",
+"method": "DELETE",
+"path": "/v1/connections/{id}",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connections.reconnect",
+"method": "POST",
+"path": "/v1/connections/{id}/reconnect",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connections.refresh",
+"method": "POST",
+"path": "/v1/connections/{id}/refresh",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connections.verify",
+"method": "POST",
+"path": "/v1/connections/{id}/verify",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connectSessions.get",
+"method": "GET",
+"path": "/v1/connect-sessions/{id}",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connectSessions.cancel",
+"method": "DELETE",
+"path": "/v1/connect-sessions/{id}",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "connectSessions.connectTargets",
+"method": "POST",
+"path": "/v1/connect-sessions/{id}/targets",
+"scope": [
+"channels",
+"integrations"
+]
+},
+{
+"id": "contactScans.getStatus",
+"method": "GET",
+"path": "/v1/contact-scans/status",
+"scope": "contacts"
+},
+{
+"id": "contactScans.list",
+"method": "GET",
+"path": "/v1/contact-scans",
+"scope": "contacts"
+},
+{
+"id": "contactScans.create",
+"method": "POST",
+"path": "/v1/contact-scans",
+"scope": "contacts"
+},
+{
+"id": "contacts.list",
+"method": "GET",
+"path": "/v1/contacts",
+"scope": "contacts"
+},
+{
+"id": "contacts.create",
+"method": "POST",
+"path": "/v1/contacts",
+"scope": "contacts"
+},
+{
+"id": "contacts.search",
+"method": "POST",
+"path": "/v1/contacts/search",
+"scope": "contacts"
+},
+{
+"id": "contacts.count",
+"method": "GET",
+"path": "/v1/contacts/count",
+"scope": "contacts"
+},
+{
+"id": "contacts.get",
+"method": "GET",
+"path": "/v1/contacts/{identifier}",
+"scope": "contacts"
+},
+{
+"id": "contacts.update",
+"method": "PATCH",
+"path": "/v1/contacts/{identifier}",
+"scope": "contacts"
+},
+{
+"id": "contacts.updateLegacy",
+"method": "PUT",
+"path": "/v1/contacts/{identifier}",
+"scope": "contacts"
+},
+{
+"id": "contacts.delete",
+"method": "DELETE",
+"path": "/v1/contacts/{identifier}",
+"scope": "contacts"
+},
+{
+"id": "contacts.findByCustomField",
+"method": "GET",
+"path": "/v1/contacts/find-by-custom-field",
+"scope": "contacts"
+},
+{
+"id": "contacts.import",
+"method": "POST",
+"path": "/v1/contacts/import",
+"scope": "contacts"
+},
+{
+"id": "contacts.block",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/block",
+"scope": "contacts"
+},
+{
+"id": "contacts.unblock",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/unblock",
+"scope": "contacts"
+},
+{
+"id": "contacts.upsert",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/upsert",
+"scope": "contacts"
+},
+{
+"id": "contacts.listTags",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/tags",
+"scope": "contacts"
+},
+{
+"id": "contacts.addTags",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/tags",
+"scope": "contacts"
+},
+{
+"id": "contacts.removeTags",
+"method": "DELETE",
+"path": "/v1/contacts/{identifier}/tags",
+"scope": "contacts"
+},
+{
+"id": "contacts.setTags",
+"method": "PUT",
+"path": "/v1/contacts/{identifier}/tags",
+"scope": "contacts"
+},
+{
+"id": "contacts.addTagsByName",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/tags/by-name",
+"scope": "contacts"
+},
+{
+"id": "contacts.removeTagsByName",
+"method": "DELETE",
+"path": "/v1/contacts/{identifier}/tags/by-name",
+"scope": "contacts"
+},
+{
+"id": "contacts.listAdReferrals",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/ad-referrals",
+"scope": "contacts"
+},
+{
+"id": "contacts.listCustomFields",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/custom-fields",
+"scope": "contacts"
+},
+{
+"id": "contacts.applyCustomFieldOperations",
+"method": "PATCH",
+"path": "/v1/contacts/{identifier}/custom-fields",
+"scope": "contacts"
+},
+{
+"id": "contacts.clearCustomFields",
+"method": "DELETE",
+"path": "/v1/contacts/{identifier}/custom-fields",
+"scope": "contacts"
+},
+{
+"id": "contacts.getCustomField",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/custom-fields/{idOrName}",
+"scope": "contacts"
+},
+{
+"id": "contacts.setCustomField",
+"method": "PUT",
+"path": "/v1/contacts/{identifier}/custom-fields/{idOrName}",
+"scope": "contacts"
+},
+{
+"id": "contacts.clearCustomField",
+"method": "DELETE",
+"path": "/v1/contacts/{identifier}/custom-fields/{idOrName}",
+"scope": "contacts"
+},
+{
+"id": "contacts.setCustomFieldLegacy",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/custom-fields/{customFieldId}",
+"scope": "contacts"
+},
+{
+"id": "contacts.sendMessage",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/messages",
+"scope": "inbox"
+},
+{
+"id": "contacts.listMessages",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/messages",
+"scope": "inbox"
+},
+{
+"id": "contacts.getMessage",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/messages/{messageId}",
+"scope": "inbox"
+},
+{
+"id": "contacts.triggerAutoReply",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/auto-replies",
+"scope": "automation"
+},
+{
+"id": "contacts.sendFlow",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/flows",
+"scope": "automation"
+},
+{
+"id": "contacts.listNotes",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/notes",
+"scope": "contacts"
+},
+{
+"id": "contacts.createNote",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/notes",
+"scope": "contacts"
+},
+{
+"id": "contacts.updateNote",
+"method": "PUT",
+"path": "/v1/contacts/{identifier}/notes/{noteId}",
+"scope": "contacts"
+},
+{
+"id": "contacts.deleteNote",
+"method": "DELETE",
+"path": "/v1/contacts/{identifier}/notes/{noteId}",
+"scope": "contacts"
+},
+{
+"id": "contacts.listSequences",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/sequences",
+"scope": "contacts"
+},
+{
+"id": "contacts.subscribeSequences",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/sequences",
+"scope": "contacts"
+},
+{
+"id": "contacts.unsubscribeSequences",
+"method": "DELETE",
+"path": "/v1/contacts/{identifier}/sequences",
+"scope": "contacts"
+},
+{
+"id": "contacts.setSequences",
+"method": "PUT",
+"path": "/v1/contacts/{identifier}/sequences",
+"scope": "contacts"
+},
+{
+"id": "contacts.listInboxes",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/inboxes",
+"scope": "contacts"
+},
+{
+"id": "contacts.createImportUpload",
+"method": "POST",
+"path": "/v1/contacts/imports/upload-url",
+"scope": "contacts"
+},
+{
+"id": "contacts.getImportTemplate",
+"method": "GET",
+"path": "/v1/contacts/import-template",
+"scope": "contacts"
+},
+{
+"id": "contacts.peekImportHeaders",
+"method": "GET",
+"path": "/v1/contacts/imports/files/{fileId}/headers",
+"scope": "contacts"
+},
+{
+"id": "contacts.listImports",
+"method": "GET",
+"path": "/v1/contacts/imports",
+"scope": "contacts"
+},
+{
+"id": "contacts.getImport",
+"method": "GET",
+"path": "/v1/contacts/imports/{id}",
+"scope": "contacts"
+},
+{
+"id": "contacts.listFilterFields",
+"method": "GET",
+"path": "/v1/contacts/filter-fields",
+"scope": "contacts"
+},
+{
+"id": "contacts.resolveFilterValueLabels",
+"method": "POST",
+"path": "/v1/contacts/filter-value-labels",
+"scope": "contacts"
+},
+{
+"id": "contacts.bulkAddTags",
+"method": "POST",
+"path": "/v1/contacts/bulk/tags",
+"scope": "contacts"
+},
+{
+"id": "contacts.bulkRemoveTags",
+"method": "POST",
+"path": "/v1/contacts/bulk/tags/remove",
+"scope": "contacts"
+},
+{
+"id": "contacts.bulkTagByStats",
+"method": "POST",
+"path": "/v1/contacts/bulk/tags/by-stats",
+"scope": "contacts"
+},
+{
+"id": "contacts.bulkDelete",
+"method": "POST",
+"path": "/v1/contacts/bulk/delete",
+"scope": "contacts"
+},
+{
+"id": "contacts.bulkSubscribeSequences",
+"method": "POST",
+"path": "/v1/contacts/bulk/sequences",
+"scope": "contacts"
+},
+{
+"id": "contacts.bulkUnsubscribeSequences",
+"method": "POST",
+"path": "/v1/contacts/bulk/sequences/remove",
+"scope": "contacts"
+},
+{
+"id": "contacts.export",
+"method": "POST",
+"path": "/v1/contacts/export",
+"scope": "contacts"
+},
+{
+"id": "contacts.getExportFile",
+"method": "GET",
+"path": "/v1/contacts/export-files/{fileId}",
+"scope": "contacts"
+},
+{
+"id": "contacts.listExportFiles",
+"method": "GET",
+"path": "/v1/contacts/export-files",
+"scope": "contacts"
+},
+{
+"id": "contacts.refreshProfile",
+"method": "POST",
+"path": "/v1/contacts/{identifier}/refresh-profile",
+"scope": "contacts"
+},
+{
+"id": "conversations.list",
+"method": "GET",
+"path": "/v1/conversations",
+"scope": "inbox"
+},
+{
+"id": "conversations.get",
+"method": "GET",
+"path": "/v1/conversations/{id}",
+"scope": "inbox"
+},
+{
+"id": "conversations.assign",
+"method": "POST",
+"path": "/v1/conversations/{id}/assign",
+"scope": "inbox"
+},
+{
+"id": "conversations.archive",
+"method": "POST",
+"path": "/v1/conversations/{id}/archive",
+"scope": "inbox"
+},
+{
+"id": "conversations.unarchive",
+"method": "POST",
+"path": "/v1/conversations/{id}/unarchive",
+"scope": "inbox"
+},
+{
+"id": "conversations.read",
+"method": "POST",
+"path": "/v1/conversations/{id}/read",
+"scope": "inbox"
+},
+{
+"id": "conversations.unread",
+"method": "POST",
+"path": "/v1/conversations/{id}/unread",
+"scope": "inbox"
+},
+{
+"id": "conversations.follow",
+"method": "POST",
+"path": "/v1/conversations/{id}/follow",
+"scope": "inbox"
+},
+{
+"id": "conversations.unfollow",
+"method": "POST",
+"path": "/v1/conversations/{id}/unfollow",
+"scope": "inbox"
+},
+{
+"id": "conversations.enableBot",
+"method": "POST",
+"path": "/v1/conversations/{id}/enable-bot",
+"scope": "inbox"
+},
+{
+"id": "conversations.disableBot",
+"method": "POST",
+"path": "/v1/conversations/{id}/disable-bot",
+"scope": "inbox"
+},
+{
+"id": "conversations.threadControl",
+"method": "POST",
+"path": "/v1/conversations/{id}/thread-control",
+"scope": "inbox"
+},
+{
+"id": "coupons.listTopics",
+"method": "GET",
+"path": "/v1/coupon-topics",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.createTopic",
+"method": "POST",
+"path": "/v1/coupon-topics",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.getTopic",
+"method": "GET",
+"path": "/v1/coupon-topics/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.updateTopic",
+"method": "PUT",
+"path": "/v1/coupon-topics/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.deleteTopic",
+"method": "DELETE",
+"path": "/v1/coupon-topics/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.archiveTopic",
+"method": "POST",
+"path": "/v1/coupon-topics/{id}/archive",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.unarchiveTopic",
+"method": "POST",
+"path": "/v1/coupon-topics/{id}/unarchive",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.listCoupons",
+"method": "GET",
+"path": "/v1/coupons",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.issueCoupon",
+"method": "POST",
+"path": "/v1/coupon-topics/{id}/issue",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.markCouponUsed",
+"method": "POST",
+"path": "/v1/coupon-topics/{id}/mark-used",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.listContactCoupons",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/coupons",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.bulkCreate",
+"method": "POST",
+"path": "/v1/coupon-topics/{topicId}/coupons/bulk",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.createImportUploadUrl",
+"method": "POST",
+"path": "/v1/coupon-imports/upload-url",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.import",
+"method": "POST",
+"path": "/v1/coupon-imports",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.export",
+"method": "POST",
+"path": "/v1/coupon-exports",
+"scope": "ecommerce"
+},
+{
+"id": "coupons.getExport",
+"method": "GET",
+"path": "/v1/coupon-exports/{fileId}",
+"scope": "ecommerce"
+},
+{
+"id": "customFields.list",
+"method": "GET",
+"path": "/v1/custom-fields",
+"scope": "contacts"
+},
+{
+"id": "customFields.create",
+"method": "POST",
+"path": "/v1/custom-fields",
+"scope": "contacts"
+},
+{
+"id": "customFields.get",
+"method": "GET",
+"path": "/v1/custom-fields/{idOrName}",
+"scope": "contacts"
+},
+{
+"id": "customFields.update",
+"method": "PUT",
+"path": "/v1/custom-fields/{id}",
+"scope": "contacts"
+},
+{
+"id": "customFields.delete",
+"method": "DELETE",
+"path": "/v1/custom-fields/{id}",
+"scope": "contacts"
+},
+{
+"id": "decisionConnections.list",
+"method": "GET",
+"path": "/v1/decision-connections",
+"scope": "automation"
+},
+{
+"id": "decisionConnections.create",
+"method": "POST",
+"path": "/v1/decision-connections",
+"scope": "automation"
+},
+{
+"id": "decisionConnections.update",
+"method": "PUT",
+"path": "/v1/decision-connections/{id}",
+"scope": "automation"
+},
+{
+"id": "decisionConnections.setEnabled",
+"method": "PATCH",
+"path": "/v1/decision-connections/{id}/status",
+"scope": "automation"
+},
+{
+"id": "decisionConnections.test",
+"method": "POST",
+"path": "/v1/decision-connections/{id}/test",
+"scope": "automation"
+},
+{
+"id": "decisionProfiles.list",
+"method": "GET",
+"path": "/v1/decision-profiles",
+"scope": "automation"
+},
+{
+"id": "decisionProfiles.create",
+"method": "POST",
+"path": "/v1/decision-profiles",
+"scope": "automation"
+},
+{
+"id": "decisionProfiles.deleteMany",
+"method": "DELETE",
+"path": "/v1/decision-profiles",
+"scope": "automation"
+},
+{
+"id": "decisionProfiles.get",
+"method": "GET",
+"path": "/v1/decision-profiles/{id}",
+"scope": "automation"
+},
+{
+"id": "decisionProfiles.update",
+"method": "PUT",
+"path": "/v1/decision-profiles/{id}",
+"scope": "automation"
+},
+{
+"id": "decisionProfiles.setEnabled",
+"method": "PATCH",
+"path": "/v1/decision-profiles/{id}/status",
+"scope": "automation"
+},
+{
+"id": "decisionProfiles.listGlobalRouterDestinations",
+"method": "GET",
+"path": "/v1/decision-profiles/global-router-destinations",
+"scope": "automation"
+},
+{
+"id": "discountCodes.list",
+"method": "GET",
+"path": "/v1/discount-codes",
+"scope": "ecommerce"
+},
+{
+"id": "discountCodes.create",
+"method": "POST",
+"path": "/v1/discount-codes",
+"scope": "ecommerce"
+},
+{
+"id": "discountCodes.get",
+"method": "GET",
+"path": "/v1/discount-codes/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "discountCodes.update",
+"method": "PATCH",
+"path": "/v1/discount-codes/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "discountCodes.delete",
+"method": "DELETE",
+"path": "/v1/discount-codes/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "discountCodes.generateCode",
+"method": "GET",
+"path": "/v1/discount-codes/generate-code",
+"scope": "ecommerce"
+},
+{
+"id": "discountCodes.setActive",
+"method": "PATCH",
+"path": "/v1/discount-codes/{id}/active",
+"scope": "ecommerce"
+},
+{
+"id": "discountCodes.validate",
+"method": "POST",
+"path": "/v1/discount-codes/validate",
+"scope": "ecommerce"
+},
+{
+"id": "dynamicImages.list",
+"method": "GET",
+"path": "/v1/dynamic-images",
+"scope": "media"
+},
+{
+"id": "dynamicImages.create",
+"method": "POST",
+"path": "/v1/dynamic-images",
+"scope": "media"
+},
+{
+"id": "dynamicImages.get",
+"method": "GET",
+"path": "/v1/dynamic-images/{id}",
+"scope": "media"
+},
+{
+"id": "dynamicImages.update",
+"method": "PUT",
+"path": "/v1/dynamic-images/{id}",
+"scope": "media"
+},
+{
+"id": "dynamicImages.delete",
+"method": "DELETE",
+"path": "/v1/dynamic-images/{id}",
+"scope": "media"
+},
+{
+"id": "dynamicImages.setEnabled",
+"method": "PATCH",
+"path": "/v1/dynamic-images/{id}/enabled",
+"scope": "media"
+},
+{
+"id": "ecommerceAnalytics.get",
+"method": "GET",
+"path": "/v1/ecommerce/analytics",
+"scope": "ecommerce"
+},
+{
+"id": "ecommerceSettings.get",
+"method": "GET",
+"path": "/v1/ecommerce/settings",
+"scope": "ecommerce"
+},
+{
+"id": "ecommerceSettings.update",
+"method": "PATCH",
+"path": "/v1/ecommerce/settings",
+"scope": "ecommerce"
+},
+{
+"id": "emailTopics.list",
+"method": "GET",
+"path": "/v1/email-topics",
+"scope": "broadcasts"
+},
+{
+"id": "emailTopics.create",
+"method": "POST",
+"path": "/v1/email-topics",
+"scope": "broadcasts"
+},
+{
+"id": "emailTopics.get",
+"method": "GET",
+"path": "/v1/email-topics/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "emailTopics.update",
+"method": "PUT",
+"path": "/v1/email-topics/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "emailTopics.delete",
+"method": "DELETE",
+"path": "/v1/email-topics/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "errorLogs.list",
+"method": "GET",
+"path": "/v1/error-logs",
+"scope": "analytics"
+},
+{
+"id": "externalWebhooks.list",
+"method": "GET",
+"path": "/v1/external-webhooks",
+"scope": "integrations"
+},
+{
+"id": "externalWebhooks.create",
+"method": "POST",
+"path": "/v1/external-webhooks",
+"scope": "integrations"
+},
+{
+"id": "externalWebhooks.delete",
+"method": "DELETE",
+"path": "/v1/external-webhooks/{id}",
+"scope": "integrations"
+},
+{
+"id": "facebookLeadAds.list",
+"method": "GET",
+"path": "/v1/facebook-lead-ads",
+"scope": "automation"
+},
+{
+"id": "facebookLeadAds.create",
+"method": "POST",
+"path": "/v1/facebook-lead-ads",
+"scope": "automation"
+},
+{
+"id": "facebookLeadAds.get",
+"method": "GET",
+"path": "/v1/facebook-lead-ads/{id}",
+"scope": "automation"
+},
+{
+"id": "facebookLeadAds.update",
+"method": "PATCH",
+"path": "/v1/facebook-lead-ads/{id}",
+"scope": "automation"
+},
+{
+"id": "facebookLeadAds.delete",
+"method": "DELETE",
+"path": "/v1/facebook-lead-ads/{id}",
+"scope": "automation"
+},
+{
+"id": "facebookLeadAds.listPages",
+"method": "GET",
+"path": "/v1/facebook-lead-ads/pages",
+"scope": "automation"
+},
+{
+"id": "facebookLeadAds.listForms",
+"method": "GET",
+"path": "/v1/facebook-lead-ads/forms",
+"scope": "automation"
+},
+{
+"id": "facebookMarketingMessages.pages.list",
+"method": "GET",
+"path": "/v1/marketing-messages/pages",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.adAccounts.list",
+"method": "GET",
+"path": "/v1/marketing-messages/ad-accounts",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.campaigns.list",
+"method": "GET",
+"path": "/v1/marketing-messages/campaigns",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.campaigns.create",
+"method": "POST",
+"path": "/v1/marketing-messages/campaigns",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.campaigns.get",
+"method": "GET",
+"path": "/v1/marketing-messages/campaigns/{id}",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.campaigns.update",
+"method": "PUT",
+"path": "/v1/marketing-messages/campaigns/{id}",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.campaigns.delete",
+"method": "DELETE",
+"path": "/v1/marketing-messages/campaigns/{id}",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.campaigns.stop",
+"method": "POST",
+"path": "/v1/marketing-messages/campaigns/{id}/stop",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.campaigns.resume",
+"method": "POST",
+"path": "/v1/marketing-messages/campaigns/{id}/resume",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.campaigns.send",
+"method": "POST",
+"path": "/v1/marketing-messages/campaigns/{id}/send",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.audiences.list",
+"method": "GET",
+"path": "/v1/marketing-messages/audiences",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.audiences.create",
+"method": "POST",
+"path": "/v1/marketing-messages/audiences",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.audiences.liveStatus",
+"method": "GET",
+"path": "/v1/marketing-messages/audiences/live",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.audiences.uploadMore",
+"method": "POST",
+"path": "/v1/marketing-messages/audiences/{id}/rows",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.audiences.delete",
+"method": "DELETE",
+"path": "/v1/marketing-messages/audiences/{id}",
+"scope": "ads"
+},
+{
+"id": "facebookMarketingMessages.statistics.get",
+"method": "GET",
+"path": "/v1/marketing-messages/statistics",
+"scope": "ads"
+},
+{
+"id": "fbComments.list",
+"method": "GET",
+"path": "/v1/fb-comments",
+"scope": "automation"
+},
+{
+"id": "fbComments.create",
+"method": "POST",
+"path": "/v1/fb-comments",
+"scope": "automation"
+},
+{
+"id": "fbComments.get",
+"method": "GET",
+"path": "/v1/fb-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "fbComments.update",
+"method": "PATCH",
+"path": "/v1/fb-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "fbComments.delete",
+"method": "DELETE",
+"path": "/v1/fb-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "fbComments.listPosts",
+"method": "GET",
+"path": "/v1/fb-comments/facebook-posts",
+"scope": "automation"
+},
+{
+"id": "fbComments.deleteMany",
+"method": "POST",
+"path": "/v1/fb-comments/bulk-delete",
+"scope": "automation"
+},
+{
+"id": "flows.list",
+"method": "GET",
+"path": "/v1/flows",
+"scope": "automation"
+},
+{
+"id": "flows.create",
+"method": "POST",
+"path": "/v1/flows",
+"scope": "automation"
+},
+{
+"id": "flows.get",
+"method": "GET",
+"path": "/v1/flows/{id}",
+"scope": "automation"
+},
+{
+"id": "flows.update",
+"method": "PATCH",
+"path": "/v1/flows/{id}",
+"scope": "automation"
+},
+{
+"id": "flows.delete",
+"method": "DELETE",
+"path": "/v1/flows/{id}",
+"scope": "automation"
+},
+{
+"id": "flows.listNodes",
+"method": "GET",
+"path": "/v1/flows/{id}/nodes",
+"scope": "automation"
+},
+{
+"id": "flows.duplicate",
+"method": "POST",
+"path": "/v1/flows/{id}/duplicate",
+"scope": "automation"
+},
+{
+"id": "flows.publish",
+"method": "POST",
+"path": "/v1/flows/{id}/publish",
+"scope": "automation"
+},
+{
+"id": "flows.validate",
+"method": "POST",
+"path": "/v1/flows/validate",
+"scope": "automation"
+},
+{
+"id": "flows.updateDraft",
+"method": "PUT",
+"path": "/v1/flows/{id}/draft",
+"scope": "automation"
+},
+{
+"id": "flows.versions",
+"method": "GET",
+"path": "/v1/flows/{id}/versions",
+"scope": "automation"
+},
+{
+"id": "flows.export",
+"method": "GET",
+"path": "/v1/flows/{id}/export",
+"scope": "automation"
+},
+{
+"id": "flows.import",
+"method": "POST",
+"path": "/v1/flows/import",
+"scope": "automation"
+},
+{
+"id": "folders.list",
+"method": "GET",
+"path": "/v1/folders",
+"scope": "contacts"
+},
+{
+"id": "folders.create",
+"method": "POST",
+"path": "/v1/folders",
+"scope": "contacts"
+},
+{
+"id": "folders.update",
+"method": "PUT",
+"path": "/v1/folders/{id}",
+"scope": "contacts"
+},
+{
+"id": "folders.delete",
+"method": "DELETE",
+"path": "/v1/folders/{id}",
+"scope": "contacts"
+},
+{
+"id": "googleAds.getStats",
+"method": "GET",
+"path": "/v1/google-ads/stats",
+"scope": "ads"
+},
+{
+"id": "googleAds.listEvents",
+"method": "GET",
+"path": "/v1/google-ads/events",
+"scope": "ads"
+},
+{
+"id": "googleAds.getConnection",
+"method": "GET",
+"path": "/v1/google-ads/connection",
+"scope": "ads"
+},
+{
+"id": "igComments.list",
+"method": "GET",
+"path": "/v1/ig-comments",
+"scope": "automation"
+},
+{
+"id": "igComments.create",
+"method": "POST",
+"path": "/v1/ig-comments",
+"scope": "automation"
+},
+{
+"id": "igComments.get",
+"method": "GET",
+"path": "/v1/ig-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "igComments.update",
+"method": "PATCH",
+"path": "/v1/ig-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "igComments.delete",
+"method": "DELETE",
+"path": "/v1/ig-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "igComments.listMedia",
+"method": "GET",
+"path": "/v1/ig-comments/instagram-media",
+"scope": "automation"
+},
+{
+"id": "igComments.deleteMany",
+"method": "POST",
+"path": "/v1/ig-comments/bulk-delete",
+"scope": "automation"
+},
+{
+"id": "igStories.list",
+"method": "GET",
+"path": "/v1/ig-stories",
+"scope": "automation"
+},
+{
+"id": "igStories.create",
+"method": "POST",
+"path": "/v1/ig-stories",
+"scope": "automation"
+},
+{
+"id": "igStories.get",
+"method": "GET",
+"path": "/v1/ig-stories/{id}",
+"scope": "automation"
+},
+{
+"id": "igStories.update",
+"method": "PATCH",
+"path": "/v1/ig-stories/{id}",
+"scope": "automation"
+},
+{
+"id": "igStories.delete",
+"method": "DELETE",
+"path": "/v1/ig-stories/{id}",
+"scope": "automation"
+},
+{
+"id": "igStories.listStories",
+"method": "GET",
+"path": "/v1/ig-stories/instagram-stories",
+"scope": "automation"
+},
+{
+"id": "igStories.deleteMany",
+"method": "POST",
+"path": "/v1/ig-stories/bulk-delete",
+"scope": "automation"
+},
+{
+"id": "channelIntegrations.list",
+"method": "GET",
+"path": "/v1/channel-integrations",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.list",
+"method": "GET",
+"path": "/v1/instagram-channels",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.get",
+"method": "GET",
+"path": "/v1/instagram-channels/{id}",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.disconnect",
+"method": "DELETE",
+"path": "/v1/instagram-channels/{id}",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.getCoexistStatus",
+"method": "GET",
+"path": "/v1/instagram-channels/{id}/coexist",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.setCoexist",
+"method": "PUT",
+"path": "/v1/instagram-channels/{id}/coexist",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.setCapiDataset",
+"method": "PUT",
+"path": "/v1/instagram-channels/{id}/capi/dataset",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.disconnectCapi",
+"method": "DELETE",
+"path": "/v1/instagram-channels/{id}/capi",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.setCapiTestEventCode",
+"method": "PUT",
+"path": "/v1/instagram-channels/{id}/capi/test-event-code",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.sendCapiTestEvent",
+"method": "POST",
+"path": "/v1/instagram-channels/{id}/capi/test-event",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.getSettings",
+"method": "GET",
+"path": "/v1/instagram-channels/{id}/settings",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.updateSettings",
+"method": "PUT",
+"path": "/v1/instagram-channels/{id}/settings",
+"scope": "channels"
+},
+{
+"id": "instagramChannels.patchSettings",
+"method": "PATCH",
+"path": "/v1/instagram-channels/{id}/settings",
+"scope": "channels"
+},
+{
+"id": "inboundWebhookChannels.list",
+"method": "GET",
+"path": "/v1/inbound-webhook-channels",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.list",
+"method": "GET",
+"path": "/v1/inbound-webhooks",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.create",
+"method": "POST",
+"path": "/v1/inbound-webhooks",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.get",
+"method": "GET",
+"path": "/v1/inbound-webhooks/{id}",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.update",
+"method": "PUT",
+"path": "/v1/inbound-webhooks/{id}",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.delete",
+"method": "DELETE",
+"path": "/v1/inbound-webhooks/{id}",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.updateSettings",
+"method": "PATCH",
+"path": "/v1/inbound-webhooks/{id}/settings",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.regenerateToken",
+"method": "POST",
+"path": "/v1/inbound-webhooks/{id}/regenerate-token",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.previewMapping",
+"method": "POST",
+"path": "/v1/inbound-webhooks/preview-mapping",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.listRequests",
+"method": "GET",
+"path": "/v1/inbound-webhooks/{id}/requests",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.getRequest",
+"method": "GET",
+"path": "/v1/inbound-webhooks/{id}/requests/{requestId}",
+"scope": "integrations"
+},
+{
+"id": "inboundWebhooks.deleteMany",
+"method": "POST",
+"path": "/v1/inbound-webhooks/bulk-delete",
+"scope": "integrations"
+},
+{
+"id": "inboxTeams.list",
+"method": "GET",
+"path": "/v1/teams",
+"scope": "inbox"
+},
+{
+"id": "inboxTeams.create",
+"method": "POST",
+"path": "/v1/teams",
+"scope": "inbox"
+},
+{
+"id": "inboxTeams.get",
+"method": "GET",
+"path": "/v1/teams/{id}",
+"scope": "inbox"
+},
+{
+"id": "inboxTeams.update",
+"method": "PATCH",
+"path": "/v1/teams/{id}",
+"scope": "inbox"
+},
+{
+"id": "inboxTeams.delete",
+"method": "DELETE",
+"path": "/v1/teams/{id}",
+"scope": "inbox"
+},
+{
+"id": "inboxTeams.addMembers",
+"method": "POST",
+"path": "/v1/teams/{id}/members",
+"scope": "inbox"
+},
+{
+"id": "inboxTeams.removeMembers",
+"method": "DELETE",
+"path": "/v1/teams/{id}/members",
+"scope": "inbox"
+},
+{
+"id": "inboxes.list",
+"method": "GET",
+"path": "/v1/inboxes",
+"scope": "inbox"
+},
+{
+"id": "inboxes.update",
+"method": "PATCH",
+"path": "/v1/inboxes/{id}",
+"scope": "inbox"
+},
+{
+"id": "inboxes.listChannels",
+"method": "GET",
+"path": "/v1/channels",
+"scope": "inbox"
+},
+{
+"id": "integrations.list",
+"method": "GET",
+"path": "/v1/integrations",
+"scope": "integrations"
+},
+{
+"id": "integrations.get",
+"method": "GET",
+"path": "/v1/integrations/{id}",
+"scope": "integrations"
+},
+{
+"id": "integrations.tokenErrors",
+"method": "GET",
+"path": "/v1/integrations/status/token-errors",
+"scope": "integrations"
+},
+{
+"id": "integrations.getAiProvider",
+"method": "GET",
+"path": "/v1/integrations/ai/{provider}",
+"scope": "integrations"
+},
+{
+"id": "integrations.connectAiProvider",
+"method": "PUT",
+"path": "/v1/integrations/ai/{provider}",
+"scope": "integrations"
+},
+{
+"id": "integrations.updateAiProvider",
+"method": "PATCH",
+"path": "/v1/integrations/ai/{provider}",
+"scope": "integrations"
+},
+{
+"id": "integrations.disconnectAiProvider",
+"method": "DELETE",
+"path": "/v1/integrations/ai/{provider}",
+"scope": "integrations"
+},
+{
+"id": "keywords.list",
+"method": "GET",
+"path": "/v1/keywords",
+"scope": "automation"
+},
+{
+"id": "keywords.create",
+"method": "POST",
+"path": "/v1/keywords",
+"scope": "automation"
+},
+{
+"id": "keywords.get",
+"method": "GET",
+"path": "/v1/keywords/{id}",
+"scope": "automation"
+},
+{
+"id": "keywords.update",
+"method": "PATCH",
+"path": "/v1/keywords/{id}",
+"scope": "automation"
+},
+{
+"id": "keywords.delete",
+"method": "DELETE",
+"path": "/v1/keywords/{id}",
+"scope": "automation"
+},
+{
+"id": "keywords.updateStatus",
+"method": "PATCH",
+"path": "/v1/keywords/{id}/status",
+"scope": "automation"
+},
+{
+"id": "magicLinks.list",
+"method": "GET",
+"path": "/v1/magic-links",
+"scope": "automation"
+},
+{
+"id": "magicLinks.create",
+"method": "POST",
+"path": "/v1/magic-links",
+"scope": "automation"
+},
+{
+"id": "magicLinks.get",
+"method": "GET",
+"path": "/v1/magic-links/{id}",
+"scope": "automation"
+},
+{
+"id": "magicLinks.update",
+"method": "PATCH",
+"path": "/v1/magic-links/{id}",
+"scope": "automation"
+},
+{
+"id": "magicLinks.delete",
+"method": "DELETE",
+"path": "/v1/magic-links/{id}",
+"scope": "automation"
+},
+{
+"id": "me.get",
+"method": "GET",
+"path": "/v1/me",
+"scope": null
+},
+{
+"id": "me.listWorkspaces",
+"method": "GET",
+"path": "/v1/me/workspaces",
+"scope": null
+},
+{
+"id": "me.registerDeviceToken",
+"method": "PUT",
+"path": "/v1/me/device-tokens",
+"scope": null
+},
+{
+"id": "me.unregisterDeviceToken",
+"method": "DELETE",
+"path": "/v1/me/device-tokens",
+"scope": null
+},
+{
+"id": "me.changePassword",
+"method": "POST",
+"path": "/v1/me/password",
+"scope": null
+},
+{
+"id": "mediaLibrary.listFolders",
+"method": "GET",
+"path": "/v1/media-library/folders",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.createFolder",
+"method": "POST",
+"path": "/v1/media-library/folders",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.renameFolder",
+"method": "PUT",
+"path": "/v1/media-library/folders/{folderId}",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.deleteFolder",
+"method": "DELETE",
+"path": "/v1/media-library/folders/{folderId}",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.createUploadUrl",
+"method": "POST",
+"path": "/v1/media-library/files/upload-url",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.listFiles",
+"method": "GET",
+"path": "/v1/media-library/files",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.createFile",
+"method": "POST",
+"path": "/v1/media-library/files",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.getFile",
+"method": "GET",
+"path": "/v1/media-library/files/{fileId}",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.deleteFile",
+"method": "DELETE",
+"path": "/v1/media-library/files/{fileId}",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.setFavourite",
+"method": "PUT",
+"path": "/v1/media-library/files/{fileId}/favourite",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.recordAccess",
+"method": "POST",
+"path": "/v1/media-library/files/{fileId}/access",
+"scope": "media"
+},
+{
+"id": "mediaLibrary.moveFiles",
+"method": "PATCH",
+"path": "/v1/media-library/files/move",
+"scope": "media"
+},
+{
+"id": "messages.requestWhatsappCallPermission",
+"method": "POST",
+"path": "/v1/conversations/{conversationId}/whatsapp-call-permission",
+"scope": "inbox"
+},
+{
+"id": "messages.sendWhatsappTemplate",
+"method": "POST",
+"path": "/v1/conversations/{conversationId}/whatsapp-template",
+"scope": "inbox"
+},
+{
+"id": "messages.list",
+"method": "GET",
+"path": "/v1/conversations/{conversationId}/messages",
+"scope": "inbox"
+},
+{
+"id": "messages.create",
+"method": "POST",
+"path": "/v1/conversations/{conversationId}/messages",
+"scope": "inbox"
+},
+{
+"id": "messages.get",
+"method": "GET",
+"path": "/v1/conversations/{conversationId}/messages/{messageId}",
+"scope": "inbox"
+},
+{
+"id": "messages.update",
+"method": "PUT",
+"path": "/v1/conversations/{conversationId}/messages/{messageId}",
+"scope": "inbox"
+},
+{
+"id": "messages.delete",
+"method": "DELETE",
+"path": "/v1/conversations/{conversationId}/messages/{messageId}",
+"scope": "inbox"
+},
+{
+"id": "messages.getFlowResponse",
+"method": "GET",
+"path": "/v1/conversations/{conversationId}/messages/{messageId}/flow-response",
+"scope": "inbox"
+},
+{
+"id": "messages.changeAttributes",
+"method": "POST",
+"path": "/v1/conversations/{conversationId}/messages/{messageId}/attributes",
+"scope": "inbox"
+},
+{
+"id": "messengerChannels.list",
+"method": "GET",
+"path": "/v1/messenger-channels",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.get",
+"method": "GET",
+"path": "/v1/messenger-channels/{id}",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.disconnect",
+"method": "DELETE",
+"path": "/v1/messenger-channels/{id}",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.updateHandoverResumeFlow",
+"method": "PATCH",
+"path": "/v1/messenger-channels/{id}/handover-resume-flow",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.getCoexistStatus",
+"method": "GET",
+"path": "/v1/messenger-channels/{id}/coexist",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.setCoexist",
+"method": "PUT",
+"path": "/v1/messenger-channels/{id}/coexist",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.setCapiDataset",
+"method": "PUT",
+"path": "/v1/messenger-channels/{id}/capi/dataset",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.disconnectCapi",
+"method": "DELETE",
+"path": "/v1/messenger-channels/{id}/capi",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.setCapiTestEventCode",
+"method": "PUT",
+"path": "/v1/messenger-channels/{id}/capi/test-event-code",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.sendCapiTestEvent",
+"method": "POST",
+"path": "/v1/messenger-channels/{id}/capi/test-event",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.updateTagSync",
+"method": "PATCH",
+"path": "/v1/messenger-channels/{id}/tag-sync",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.getSettings",
+"method": "GET",
+"path": "/v1/messenger-channels/{id}/settings",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.updateSettings",
+"method": "PUT",
+"path": "/v1/messenger-channels/{id}/settings",
+"scope": "channels"
+},
+{
+"id": "messengerChannels.patchSettings",
+"method": "PATCH",
+"path": "/v1/messenger-channels/{id}/settings",
+"scope": "channels"
+},
+{
+"id": "messengerPersonas.list",
+"method": "GET",
+"path": "/v1/messenger-personas",
+"scope": "channels"
+},
+{
+"id": "messengerTemplates.list",
+"method": "GET",
+"path": "/v1/messenger/templates",
+"scope": "broadcasts"
+},
+{
+"id": "messengerTemplates.get",
+"method": "GET",
+"path": "/v1/messenger/templates/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "messengerTemplates.delete",
+"method": "DELETE",
+"path": "/v1/messenger/templates/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "messengerTemplates.create",
+"method": "POST",
+"path": "/v1/messenger-channels/{id}/templates",
+"scope": "broadcasts"
+},
+{
+"id": "messengerTemplates.clone",
+"method": "POST",
+"path": "/v1/messenger/templates/{id}/clone",
+"scope": "broadcasts"
+},
+{
+"id": "messengerTemplates.sync",
+"method": "POST",
+"path": "/v1/messenger-channels/{id}/templates/sync",
+"scope": "broadcasts"
+},
+{
+"id": "miniApps.list",
+"method": "GET",
+"path": "/v1/mini-apps",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.create",
+"method": "POST",
+"path": "/v1/mini-apps",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.get",
+"method": "GET",
+"path": "/v1/mini-apps/{id}",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.update",
+"method": "PATCH",
+"path": "/v1/mini-apps/{id}",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.delete",
+"method": "DELETE",
+"path": "/v1/mini-apps/{id}",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.validate",
+"method": "POST",
+"path": "/v1/mini-apps/validate",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.duplicate",
+"method": "POST",
+"path": "/v1/mini-apps/{id}/duplicate",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.deleteMany",
+"method": "POST",
+"path": "/v1/mini-apps/bulk-delete",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.getFlowJson",
+"method": "GET",
+"path": "/v1/mini-apps/{id}/flow-json",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.publishWhatsapp",
+"method": "POST",
+"path": "/v1/mini-apps/{id}/publish-whatsapp",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.pushWhatsappDraft",
+"method": "POST",
+"path": "/v1/mini-apps/{id}/whatsapp-draft",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.publishWhatsappDraft",
+"method": "POST",
+"path": "/v1/mini-apps/{id}/whatsapp-draft/publish",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.getWhatsappPreview",
+"method": "GET",
+"path": "/v1/mini-apps/{id}/whatsapp-preview",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.deleteWhatsappDraft",
+"method": "DELETE",
+"path": "/v1/mini-apps/{id}/whatsapp-draft/{integrationWhatsappId}",
+"scope": "mini-apps"
+},
+{
+"id": "miniApps.listSubmissions",
+"method": "GET",
+"path": "/v1/mini-apps/{id}/submissions",
+"scope": "mini-apps"
+},
+{
+"id": "minigames.list",
+"method": "GET",
+"path": "/v1/minigames",
+"scope": "minigames"
+},
+{
+"id": "minigames.create",
+"method": "POST",
+"path": "/v1/minigames",
+"scope": "minigames"
+},
+{
+"id": "minigames.get",
+"method": "GET",
+"path": "/v1/minigames/{id}",
+"scope": "minigames"
+},
+{
+"id": "minigames.update",
+"method": "PUT",
+"path": "/v1/minigames/{id}",
+"scope": "minigames"
+},
+{
+"id": "minigames.updatePartial",
+"method": "PATCH",
+"path": "/v1/minigames/{id}",
+"scope": "minigames"
+},
+{
+"id": "minigames.delete",
+"method": "DELETE",
+"path": "/v1/minigames/{id}",
+"scope": "minigames"
+},
+{
+"id": "minigames.deleteMany",
+"method": "POST",
+"path": "/v1/minigames/bulk-delete",
+"scope": "minigames"
+},
+{
+"id": "minigames.setEnabled",
+"method": "PATCH",
+"path": "/v1/minigames/{id}/enabled",
+"scope": "minigames"
+},
+{
+"id": "minigames.listPlays",
+"method": "GET",
+"path": "/v1/minigames/{id}/plays",
+"scope": "minigames"
+},
+{
+"id": "minigames.listPlayers",
+"method": "GET",
+"path": "/v1/minigames/{id}/players",
+"scope": "minigames"
+},
+{
+"id": "leaderboards.list",
+"method": "GET",
+"path": "/v1/leaderboards",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.create",
+"method": "POST",
+"path": "/v1/leaderboards",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.get",
+"method": "GET",
+"path": "/v1/leaderboards/{id}",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.update",
+"method": "PUT",
+"path": "/v1/leaderboards/{id}",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.delete",
+"method": "DELETE",
+"path": "/v1/leaderboards/{id}",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.defaultRules",
+"method": "GET",
+"path": "/v1/leaderboards/default-rules",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.telegramChats",
+"method": "GET",
+"path": "/v1/leaderboards/telegram-chats",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.publish",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/publish",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.pause",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/pause",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.start",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/start",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.finish",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/finish",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.resetPoints",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/reset-points",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.top",
+"method": "GET",
+"path": "/v1/leaderboards/{id}/top",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.getViewLink",
+"method": "GET",
+"path": "/v1/leaderboards/{id}/view-link",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.export",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/export",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.getExport",
+"method": "GET",
+"path": "/v1/leaderboards/exports/{fileId}",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.triggerRewards",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/trigger-rewards",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.participants.list",
+"method": "GET",
+"path": "/v1/leaderboards/{id}/participants",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.participants.adjust",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/participants/{contactId}/adjust",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.participants.ban",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/participants/{contactId}/ban",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.participants.unban",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/participants/{contactId}/unban",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.participants.reset",
+"method": "POST",
+"path": "/v1/leaderboards/{id}/participants/{contactId}/reset",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.participants.history",
+"method": "GET",
+"path": "/v1/leaderboards/{id}/participants/{contactId}/history",
+"scope": "leaderboards"
+},
+{
+"id": "leaderboards.auditLog.list",
+"method": "GET",
+"path": "/v1/leaderboards/{id}/audit-log",
+"scope": "leaderboards"
+},
+{
+"id": "pipelines.list",
+"method": "GET",
+"path": "/v1/pipelines",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.create",
+"method": "POST",
+"path": "/v1/pipelines",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.get",
+"method": "GET",
+"path": "/v1/pipelines/{id}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.update",
+"method": "PATCH",
+"path": "/v1/pipelines/{id}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.delete",
+"method": "DELETE",
+"path": "/v1/pipelines/{id}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.duplicate",
+"method": "POST",
+"path": "/v1/pipelines/{id}/duplicate",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.createStage",
+"method": "POST",
+"path": "/v1/pipelines/{id}/stages",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.updateStage",
+"method": "PATCH",
+"path": "/v1/pipelines/{id}/stages/{stageId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.deleteStage",
+"method": "DELETE",
+"path": "/v1/pipelines/{id}/stages/{stageId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.reorderStages",
+"method": "POST",
+"path": "/v1/pipelines/{id}/stages/reorder",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.listFields",
+"method": "GET",
+"path": "/v1/pipelines/{id}/fields",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.createField",
+"method": "POST",
+"path": "/v1/pipelines/{id}/fields",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.updateField",
+"method": "PATCH",
+"path": "/v1/pipelines/{id}/fields/{fieldId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.deleteField",
+"method": "DELETE",
+"path": "/v1/pipelines/{id}/fields/{fieldId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.listMembers",
+"method": "GET",
+"path": "/v1/pipelines/{id}/members",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.setMember",
+"method": "PUT",
+"path": "/v1/pipelines/{id}/members/{workspaceMemberId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.removeMember",
+"method": "DELETE",
+"path": "/v1/pipelines/{id}/members/{workspaceMemberId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.getStats",
+"method": "GET",
+"path": "/v1/pipelines/{id}/stats",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.listContactItems",
+"method": "GET",
+"path": "/v1/contacts/{identifier}/pipeline-items",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.listItems",
+"method": "GET",
+"path": "/v1/pipelines/{id}/items",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.createItem",
+"method": "POST",
+"path": "/v1/pipelines/{id}/items",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.stageTotals",
+"method": "GET",
+"path": "/v1/pipelines/{id}/stage-totals",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.getItem",
+"method": "GET",
+"path": "/v1/pipelines/{id}/items/{itemId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.updateItem",
+"method": "PATCH",
+"path": "/v1/pipelines/{id}/items/{itemId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.deleteItem",
+"method": "DELETE",
+"path": "/v1/pipelines/{id}/items/{itemId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.moveItem",
+"method": "POST",
+"path": "/v1/pipelines/{id}/items/{itemId}/move",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.transferItem",
+"method": "POST",
+"path": "/v1/pipelines/{id}/items/{itemId}/transfer",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.listComments",
+"method": "GET",
+"path": "/v1/pipelines/{id}/items/{itemId}/comments",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.addComment",
+"method": "POST",
+"path": "/v1/pipelines/{id}/items/{itemId}/comments",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.deleteComment",
+"method": "DELETE",
+"path": "/v1/pipelines/{id}/items/{itemId}/comments/{commentId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.addAttachment",
+"method": "POST",
+"path": "/v1/pipelines/{id}/items/{itemId}/attachments",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.removeAttachment",
+"method": "DELETE",
+"path": "/v1/pipelines/{id}/items/{itemId}/attachments/{mediaLibraryFileId}",
+"scope": "pipelines"
+},
+{
+"id": "pipelines.listActivity",
+"method": "GET",
+"path": "/v1/pipelines/{id}/items/{itemId}/activity",
+"scope": "pipelines"
+},
+{
+"id": "templateInstallations.list",
+"method": "GET",
+"path": "/v1/template-installations",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.install",
+"method": "POST",
+"path": "/v1/template-installations",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.get",
+"method": "GET",
+"path": "/v1/template-installations/{id}",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.update",
+"method": "PATCH",
+"path": "/v1/template-installations/{id}",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.retry",
+"method": "POST",
+"path": "/v1/template-installations/{id}/retry",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.listResources",
+"method": "GET",
+"path": "/v1/template-installations/{id}/resources",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.sync",
+"method": "POST",
+"path": "/v1/template-installations/{id}/sync",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.listSyncs",
+"method": "GET",
+"path": "/v1/template-installations/{id}/syncs",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.getSync",
+"method": "GET",
+"path": "/v1/template-installations/{id}/syncs/{syncId}",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.previewUninstall",
+"method": "GET",
+"path": "/v1/template-installations/{id}/uninstall-preview",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.uninstall",
+"method": "POST",
+"path": "/v1/template-installations/{id}/uninstall",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.cancelUninstall",
+"method": "POST",
+"path": "/v1/template-installations/{id}/uninstall/cancel",
+"scope": "templates"
+},
+{
+"id": "templateInstallations.restoreBackup",
+"method": "POST",
+"path": "/v1/template-installations/{id}/backups/{backupId}/restore",
+"scope": "templates"
+},
+{
+"id": "templatePreviews.get",
+"method": "GET",
+"path": "/v1/template-previews/{id}",
+"scope": "templates"
+},
+{
+"id": "templates.list",
+"method": "GET",
+"path": "/v1/templates",
+"scope": "templates"
+},
+{
+"id": "templates.create",
+"method": "POST",
+"path": "/v1/templates",
+"scope": "templates"
+},
+{
+"id": "templates.get",
+"method": "GET",
+"path": "/v1/templates/{id}",
+"scope": "templates"
+},
+{
+"id": "templates.update",
+"method": "PUT",
+"path": "/v1/templates/{id}",
+"scope": "templates"
+},
+{
+"id": "templates.delete",
+"method": "DELETE",
+"path": "/v1/templates/{id}",
+"scope": "templates"
+},
+{
+"id": "templates.listSelectableResources",
+"method": "GET",
+"path": "/v1/templates/selectable-resources",
+"scope": "templates"
+},
+{
+"id": "templates.previewDependencies",
+"method": "POST",
+"path": "/v1/templates/dependencies-preview",
+"scope": "templates"
+},
+{
+"id": "templates.listLockedResources",
+"method": "POST",
+"path": "/v1/templates/locked-resources",
+"scope": "templates"
+},
+{
+"id": "templates.getLink",
+"method": "GET",
+"path": "/v1/templates/{id}/link",
+"scope": "templates"
+},
+{
+"id": "templates.updateShare",
+"method": "PUT",
+"path": "/v1/templates/{id}/share",
+"scope": "templates"
+},
+{
+"id": "templates.rotateShare",
+"method": "POST",
+"path": "/v1/templates/{id}/share/rotate",
+"scope": "templates"
+},
+{
+"id": "templates.listVersions",
+"method": "GET",
+"path": "/v1/templates/{id}/versions",
+"scope": "templates"
+},
+{
+"id": "templates.listInstallers",
+"method": "GET",
+"path": "/v1/templates/{id}/installers",
+"scope": "templates"
+},
+{
+"id": "templates.getInstallerIssues",
+"method": "GET",
+"path": "/v1/templates/{id}/installers/{installerId}/issues",
+"scope": "templates"
+},
+{
+"id": "templates.previewUninstallInstaller",
+"method": "GET",
+"path": "/v1/templates/{id}/installers/{installerId}/uninstall-preview",
+"scope": "templates"
+},
+{
+"id": "templates.uninstallInstaller",
+"method": "POST",
+"path": "/v1/templates/{id}/installers/{installerId}/uninstall",
+"scope": "templates"
+},
+{
+"id": "templates.getAnalytics",
+"method": "GET",
+"path": "/v1/templates/{id}/analytics",
+"scope": "templates"
+},
+{
+"id": "openHours.list",
+"method": "GET",
+"path": "/v1/open-hours",
+"scope": "ecommerce"
+},
+{
+"id": "openHours.create",
+"method": "POST",
+"path": "/v1/open-hours",
+"scope": "ecommerce"
+},
+{
+"id": "openHours.update",
+"method": "PATCH",
+"path": "/v1/open-hours/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "openHours.delete",
+"method": "DELETE",
+"path": "/v1/open-hours/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "orders.list",
+"method": "GET",
+"path": "/v1/orders",
+"scope": "ecommerce"
+},
+{
+"id": "orders.create",
+"method": "POST",
+"path": "/v1/orders",
+"scope": "ecommerce"
+},
+{
+"id": "orders.export",
+"method": "GET",
+"path": "/v1/orders/export",
+"scope": "ecommerce"
+},
+{
+"id": "orders.get",
+"method": "GET",
+"path": "/v1/orders/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "orders.delete",
+"method": "DELETE",
+"path": "/v1/orders/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "orders.getPaymentLink",
+"method": "POST",
+"path": "/v1/orders/{id}/payment-link",
+"scope": "ecommerce"
+},
+{
+"id": "orders.accept",
+"method": "POST",
+"path": "/v1/orders/{id}/accept",
+"scope": "ecommerce"
+},
+{
+"id": "orders.ship",
+"method": "POST",
+"path": "/v1/orders/{id}/ship",
+"scope": "ecommerce"
+},
+{
+"id": "orders.conclude",
+"method": "POST",
+"path": "/v1/orders/{id}/conclude",
+"scope": "ecommerce"
+},
+{
+"id": "orders.cancel",
+"method": "POST",
+"path": "/v1/orders/{id}/cancel",
+"scope": "ecommerce"
+},
+{
+"id": "paymentProviders.list",
+"method": "GET",
+"path": "/v1/payment-providers",
+"scope": "ecommerce"
+},
+{
+"id": "paymentProviders.getConnectLink",
+"method": "GET",
+"path": "/v1/payment-providers/{provider}/connect-link",
+"scope": "ecommerce"
+},
+{
+"id": "paymentProviders.connectStripeKey",
+"method": "POST",
+"path": "/v1/payment-providers/stripe/api-key",
+"scope": "ecommerce"
+},
+{
+"id": "paymentProviders.disconnect",
+"method": "DELETE",
+"path": "/v1/payment-providers/{provider}",
+"scope": "ecommerce"
+},
+{
+"id": "placeCategories.list",
+"method": "GET",
+"path": "/v1/place-categories",
+"scope": "places"
+},
+{
+"id": "placeCategories.create",
+"method": "POST",
+"path": "/v1/place-categories",
+"scope": "places"
+},
+{
+"id": "placeCategories.get",
+"method": "GET",
+"path": "/v1/place-categories/{id}",
+"scope": "places"
+},
+{
+"id": "placeCategories.update",
+"method": "PATCH",
+"path": "/v1/place-categories/{id}",
+"scope": "places"
+},
+{
+"id": "placeCategories.delete",
+"method": "DELETE",
+"path": "/v1/place-categories/{id}",
+"scope": "places"
+},
+{
+"id": "placeLocations.list",
+"method": "GET",
+"path": "/v1/place-locations",
+"scope": "places"
+},
+{
+"id": "placeLocations.create",
+"method": "POST",
+"path": "/v1/place-locations",
+"scope": "places"
+},
+{
+"id": "placeLocations.get",
+"method": "GET",
+"path": "/v1/place-locations/{id}",
+"scope": "places"
+},
+{
+"id": "placeLocations.update",
+"method": "PATCH",
+"path": "/v1/place-locations/{id}",
+"scope": "places"
+},
+{
+"id": "placeLocations.delete",
+"method": "DELETE",
+"path": "/v1/place-locations/{id}",
+"scope": "places"
+},
+{
+"id": "polls.list",
+"method": "GET",
+"path": "/v1/polls",
+"scope": "polls"
+},
+{
+"id": "polls.create",
+"method": "POST",
+"path": "/v1/polls",
+"scope": "polls"
+},
+{
+"id": "polls.get",
+"method": "GET",
+"path": "/v1/polls/{id}",
+"scope": "polls"
+},
+{
+"id": "polls.update",
+"method": "PATCH",
+"path": "/v1/polls/{id}",
+"scope": "polls"
+},
+{
+"id": "polls.delete",
+"method": "DELETE",
+"path": "/v1/polls/{id}",
+"scope": "polls"
+},
+{
+"id": "polls.bulkDelete",
+"method": "POST",
+"path": "/v1/polls/bulk-delete",
+"scope": "polls"
+},
+{
+"id": "polls.getLinks",
+"method": "GET",
+"path": "/v1/polls/{id}/links",
+"scope": "polls"
+},
+{
+"id": "polls.getAnalytics",
+"method": "GET",
+"path": "/v1/polls/{id}/analytics",
+"scope": "polls"
+},
+{
+"id": "productCategories.list",
+"method": "GET",
+"path": "/v1/product-categories",
+"scope": "ecommerce"
+},
+{
+"id": "productCategories.create",
+"method": "POST",
+"path": "/v1/product-categories",
+"scope": "ecommerce"
+},
+{
+"id": "productCategories.setVisible",
+"method": "PATCH",
+"path": "/v1/product-categories/{id}/visible",
+"scope": "ecommerce"
+},
+{
+"id": "productCategories.update",
+"method": "PUT",
+"path": "/v1/product-categories/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "productCategories.delete",
+"method": "DELETE",
+"path": "/v1/product-categories/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "products.getMetaCatalog",
+"method": "GET",
+"path": "/v1/products/meta-catalog",
+"scope": "ecommerce"
+},
+{
+"id": "products.disconnectMetaCatalog",
+"method": "DELETE",
+"path": "/v1/products/meta-catalog",
+"scope": "ecommerce"
+},
+{
+"id": "products.createMetaCatalog",
+"method": "POST",
+"path": "/v1/products/meta-catalog",
+"scope": "ecommerce"
+},
+{
+"id": "products.searchMetaCatalogItems",
+"method": "GET",
+"path": "/v1/products/meta-catalog/items",
+"scope": "ecommerce"
+},
+{
+"id": "products.listMetaCatalogBusinesses",
+"method": "GET",
+"path": "/v1/products/meta-catalog/businesses",
+"scope": "ecommerce"
+},
+{
+"id": "products.selectMetaCatalog",
+"method": "POST",
+"path": "/v1/products/meta-catalog/select",
+"scope": "ecommerce"
+},
+{
+"id": "products.syncMetaCatalog",
+"method": "POST",
+"path": "/v1/products/meta-catalog/sync",
+"scope": "ecommerce"
+},
+{
+"id": "products.getImportTemplate",
+"method": "GET",
+"path": "/v1/products/import-template",
+"scope": "ecommerce"
+},
+{
+"id": "products.peekImportHeaders",
+"method": "GET",
+"path": "/v1/products/imports/files/{fileId}/headers",
+"scope": "ecommerce"
+},
+{
+"id": "products.createImportUpload",
+"method": "POST",
+"path": "/v1/products/imports/upload-url",
+"scope": "ecommerce"
+},
+{
+"id": "products.startImport",
+"method": "POST",
+"path": "/v1/products/imports",
+"scope": "ecommerce"
+},
+{
+"id": "products.listImports",
+"method": "GET",
+"path": "/v1/products/imports",
+"scope": "ecommerce"
+},
+{
+"id": "products.getImport",
+"method": "GET",
+"path": "/v1/products/imports/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "products.list",
+"method": "GET",
+"path": "/v1/products",
+"scope": "ecommerce"
+},
+{
+"id": "products.create",
+"method": "POST",
+"path": "/v1/products",
+"scope": "ecommerce"
+},
+{
+"id": "products.listSendable",
+"method": "GET",
+"path": "/v1/products/sendable",
+"scope": "ecommerce"
+},
+{
+"id": "products.get",
+"method": "GET",
+"path": "/v1/products/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "products.update",
+"method": "PUT",
+"path": "/v1/products/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "products.delete",
+"method": "DELETE",
+"path": "/v1/products/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "products.setActive",
+"method": "PATCH",
+"path": "/v1/products/{id}/active",
+"scope": "ecommerce"
+},
+{
+"id": "products.deleteMany",
+"method": "POST",
+"path": "/v1/products/bulk-delete",
+"scope": "ecommerce"
+},
+{
+"id": "productVendors.list",
+"method": "GET",
+"path": "/v1/product-vendors",
+"scope": "ecommerce"
+},
+{
+"id": "productVendors.create",
+"method": "POST",
+"path": "/v1/product-vendors",
+"scope": "ecommerce"
+},
+{
+"id": "productVendors.update",
+"method": "PATCH",
+"path": "/v1/product-vendors/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "productVendors.delete",
+"method": "DELETE",
+"path": "/v1/product-vendors/{id}",
+"scope": "ecommerce"
+},
+{
+"id": "qrCodes.list",
+"method": "GET",
+"path": "/v1/qr-codes",
+"scope": "automation"
+},
+{
+"id": "qrCodes.create",
+"method": "POST",
+"path": "/v1/qr-codes",
+"scope": "automation"
+},
+{
+"id": "qrCodes.get",
+"method": "GET",
+"path": "/v1/qr-codes/{id}",
+"scope": "automation"
+},
+{
+"id": "qrCodes.update",
+"method": "PATCH",
+"path": "/v1/qr-codes/{id}",
+"scope": "automation"
+},
+{
+"id": "qrCodes.delete",
+"method": "DELETE",
+"path": "/v1/qr-codes/{id}",
+"scope": "automation"
+},
+{
+"id": "questionnaires.list",
+"method": "GET",
+"path": "/v1/questionnaires",
+"scope": "automation"
+},
+{
+"id": "questionnaires.create",
+"method": "POST",
+"path": "/v1/questionnaires",
+"scope": "automation"
+},
+{
+"id": "questionnaires.get",
+"method": "GET",
+"path": "/v1/questionnaires/{id}",
+"scope": "automation"
+},
+{
+"id": "questionnaires.update",
+"method": "PUT",
+"path": "/v1/questionnaires/{id}",
+"scope": "automation"
+},
+{
+"id": "questionnaires.delete",
+"method": "DELETE",
+"path": "/v1/questionnaires/{id}",
+"scope": "automation"
+},
+{
+"id": "questionnaires.rename",
+"method": "PATCH",
+"path": "/v1/questionnaires/{id}/rename",
+"scope": "automation"
+},
+{
+"id": "questionnaires.duplicate",
+"method": "POST",
+"path": "/v1/questionnaires/{id}/duplicate",
+"scope": "automation"
+},
+{
+"id": "questionnaires.listSubmissions",
+"method": "GET",
+"path": "/v1/questionnaires/{id}/submissions",
+"scope": "automation"
+},
+{
+"id": "questionnaires.getSubmission",
+"method": "GET",
+"path": "/v1/questionnaires/{id}/submissions/{submissionId}",
+"scope": "automation"
+},
+{
+"id": "questionnaires.deleteSubmission",
+"method": "DELETE",
+"path": "/v1/questionnaires/{id}/submissions/{submissionId}",
+"scope": "automation"
+},
+{
+"id": "questionnaires.getSubmissionStats",
+"method": "GET",
+"path": "/v1/questionnaires/{id}/submissions/stats",
+"scope": "automation"
+},
+{
+"id": "realtime.getConnectToken",
+"method": "GET",
+"path": "/v1/realtime/connect-token",
+"scope": "inbox"
+},
+{
+"id": "reflinks.list",
+"method": "GET",
+"path": "/v1/ref-links",
+"scope": "automation"
+},
+{
+"id": "reflinks.create",
+"method": "POST",
+"path": "/v1/ref-links",
+"scope": "automation"
+},
+{
+"id": "reflinks.get",
+"method": "GET",
+"path": "/v1/ref-links/{id}",
+"scope": "automation"
+},
+{
+"id": "reflinks.update",
+"method": "PATCH",
+"path": "/v1/ref-links/{id}",
+"scope": "automation"
+},
+{
+"id": "reflinks.delete",
+"method": "DELETE",
+"path": "/v1/ref-links/{id}",
+"scope": "automation"
+},
+{
+"id": "reflinks.getChatWidget",
+"method": "GET",
+"path": "/v1/ref-links/{id}/chat-widget",
+"scope": "automation"
+},
+{
+"id": "reflinks.updateChatWidget",
+"method": "PUT",
+"path": "/v1/ref-links/{id}/chat-widget",
+"scope": "automation"
+},
+{
+"id": "savedReplies.list",
+"method": "GET",
+"path": "/v1/saved-replies",
+"scope": "inbox"
+},
+{
+"id": "savedReplies.create",
+"method": "POST",
+"path": "/v1/saved-replies",
+"scope": "inbox"
+},
+{
+"id": "savedReplies.get",
+"method": "GET",
+"path": "/v1/saved-replies/{id}",
+"scope": "inbox"
+},
+{
+"id": "savedReplies.update",
+"method": "PUT",
+"path": "/v1/saved-replies/{id}",
+"scope": "inbox"
+},
+{
+"id": "savedReplies.delete",
+"method": "DELETE",
+"path": "/v1/saved-replies/{id}",
+"scope": "inbox"
+},
+{
+"id": "schemas.flowSpec",
+"method": "GET",
+"path": "/v1/schemas/flow-spec",
+"scope": "contacts"
+},
+{
+"id": "sequences.list",
+"method": "GET",
+"path": "/v1/sequences",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.create",
+"method": "POST",
+"path": "/v1/sequences",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.get",
+"method": "GET",
+"path": "/v1/sequences/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.update",
+"method": "PATCH",
+"path": "/v1/sequences/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.delete",
+"method": "DELETE",
+"path": "/v1/sequences/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.upsertStep",
+"method": "PUT",
+"path": "/v1/sequences/{id}/steps",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.deleteStep",
+"method": "DELETE",
+"path": "/v1/sequences/{id}/steps/{stepId}",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.listStepContacts",
+"method": "GET",
+"path": "/v1/sequences/{id}/steps/{stepId}/contacts",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.listFolders",
+"method": "GET",
+"path": "/v1/sequence-folders",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.createFolder",
+"method": "POST",
+"path": "/v1/sequence-folders",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.updateFolder",
+"method": "PUT",
+"path": "/v1/sequence-folders/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "sequences.deleteFolder",
+"method": "DELETE",
+"path": "/v1/sequence-folders/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "shopify.getStatus",
+"method": "GET",
+"path": "/v1/shopify",
+"scope": "ecommerce"
+},
+{
+"id": "shopify.connect",
+"method": "POST",
+"path": "/v1/shopify",
+"scope": "ecommerce"
+},
+{
+"id": "shopify.disconnect",
+"method": "DELETE",
+"path": "/v1/shopify",
+"scope": "ecommerce"
+},
+{
+"id": "shopify.sync",
+"method": "POST",
+"path": "/v1/shopify/sync",
+"scope": "ecommerce"
+},
+{
+"id": "smtpIntegrations.list",
+"method": "GET",
+"path": "/v1/smtp-integrations",
+"scope": "channels"
+},
+{
+"id": "smtpIntegrations.create",
+"method": "POST",
+"path": "/v1/smtp-integrations",
+"scope": "channels"
+},
+{
+"id": "smtpIntegrations.get",
+"method": "GET",
+"path": "/v1/smtp-integrations/{id}",
+"scope": "channels"
+},
+{
+"id": "smtpIntegrations.update",
+"method": "PUT",
+"path": "/v1/smtp-integrations/{id}",
+"scope": "channels"
+},
+{
+"id": "smtpIntegrations.delete",
+"method": "DELETE",
+"path": "/v1/smtp-integrations/{id}",
+"scope": "channels"
+},
+{
+"id": "spreadsheets.list",
+"method": "GET",
+"path": "/v1/spreadsheets",
+"scope": "automation"
+},
+{
+"id": "spreadsheets.create",
+"method": "POST",
+"path": "/v1/spreadsheets",
+"scope": "automation"
+},
+{
+"id": "spreadsheets.get",
+"method": "GET",
+"path": "/v1/spreadsheets/{id}",
+"scope": "automation"
+},
+{
+"id": "spreadsheets.update",
+"method": "PUT",
+"path": "/v1/spreadsheets/{id}",
+"scope": "automation"
+},
+{
+"id": "spreadsheets.delete",
+"method": "DELETE",
+"path": "/v1/spreadsheets/{id}",
+"scope": "automation"
+},
+{
+"id": "spreadsheets.listWorksheets",
+"method": "GET",
+"path": "/v1/spreadsheets/{id}/worksheets",
+"scope": "automation"
+},
+{
+"id": "spreadsheets.listWorksheetHeaders",
+"method": "GET",
+"path": "/v1/spreadsheets/{id}/worksheets/{worksheetName}/headers",
+"scope": "automation"
+},
+{
+"id": "tags.list",
+"method": "GET",
+"path": "/v1/tags",
+"scope": "contacts"
+},
+{
+"id": "tags.create",
+"method": "POST",
+"path": "/v1/tags",
+"scope": "contacts"
+},
+{
+"id": "tags.get",
+"method": "GET",
+"path": "/v1/tags/{idOrName}",
+"scope": "contacts"
+},
+{
+"id": "tags.update",
+"method": "PUT",
+"path": "/v1/tags/{id}",
+"scope": "contacts"
+},
+{
+"id": "tags.delete",
+"method": "DELETE",
+"path": "/v1/tags/{id}",
+"scope": "contacts"
+},
+{
+"id": "templateMessages.list",
+"method": "GET",
+"path": "/v1/template-messages",
+"scope": "broadcasts"
+},
+{
+"id": "threadsComments.list",
+"method": "GET",
+"path": "/v1/threads-comments",
+"scope": "automation"
+},
+{
+"id": "threadsComments.create",
+"method": "POST",
+"path": "/v1/threads-comments",
+"scope": "automation"
+},
+{
+"id": "threadsComments.get",
+"method": "GET",
+"path": "/v1/threads-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "threadsComments.update",
+"method": "PATCH",
+"path": "/v1/threads-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "threadsComments.delete",
+"method": "DELETE",
+"path": "/v1/threads-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "threadsComments.listPosts",
+"method": "GET",
+"path": "/v1/threads-comments/threads-posts",
+"scope": "automation"
+},
+{
+"id": "threadsComments.deleteMany",
+"method": "POST",
+"path": "/v1/threads-comments/bulk-delete",
+"scope": "automation"
+},
+{
+"id": "tiktokComments.list",
+"method": "GET",
+"path": "/v1/tiktok-comments",
+"scope": "automation"
+},
+{
+"id": "tiktokComments.create",
+"method": "POST",
+"path": "/v1/tiktok-comments",
+"scope": "automation"
+},
+{
+"id": "tiktokComments.get",
+"method": "GET",
+"path": "/v1/tiktok-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "tiktokComments.update",
+"method": "PATCH",
+"path": "/v1/tiktok-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "tiktokComments.delete",
+"method": "DELETE",
+"path": "/v1/tiktok-comments/{id}",
+"scope": "automation"
+},
+{
+"id": "tiktokComments.deleteMany",
+"method": "POST",
+"path": "/v1/tiktok-comments/bulk-delete",
+"scope": "automation"
+},
+{
+"id": "token.get",
+"method": "GET",
+"path": "/v1/token",
+"scope": "contacts"
+},
+{
+"id": "tiktokChannels.list",
+"method": "GET",
+"path": "/v1/tiktok-channels",
+"scope": "channels"
+},
+{
+"id": "tiktokChannels.get",
+"method": "GET",
+"path": "/v1/tiktok-channels/{id}",
+"scope": "channels"
+},
+{
+"id": "tiktokChannels.getCommentToMessage",
+"method": "GET",
+"path": "/v1/tiktok-channels/{id}/comment-to-message",
+"scope": "channels"
+},
+{
+"id": "tiktokChannels.updateCommentToMessage",
+"method": "PATCH",
+"path": "/v1/tiktok-channels/{id}/comment-to-message",
+"scope": "channels"
+},
+{
+"id": "triggers.list",
+"method": "GET",
+"path": "/v1/triggers",
+"scope": "automation"
+},
+{
+"id": "triggers.create",
+"method": "POST",
+"path": "/v1/triggers",
+"scope": "automation"
+},
+{
+"id": "triggers.get",
+"method": "GET",
+"path": "/v1/triggers/{id}",
+"scope": "automation"
+},
+{
+"id": "triggers.update",
+"method": "PUT",
+"path": "/v1/triggers/{id}",
+"scope": "automation"
+},
+{
+"id": "triggers.delete",
+"method": "DELETE",
+"path": "/v1/triggers/{id}",
+"scope": "automation"
+},
+{
+"id": "triggers.updateSettings",
+"method": "PATCH",
+"path": "/v1/triggers/{id}/settings",
+"scope": "automation"
+},
+{
+"id": "userPersistentMenus.list",
+"method": "GET",
+"path": "/v1/user-persistent-menus",
+"scope": "channels"
+},
+{
+"id": "userPersistentMenus.create",
+"method": "POST",
+"path": "/v1/user-persistent-menus",
+"scope": "channels"
+},
+{
+"id": "userPersistentMenus.get",
+"method": "GET",
+"path": "/v1/user-persistent-menus/{id}",
+"scope": "channels"
+},
+{
+"id": "userPersistentMenus.update",
+"method": "PUT",
+"path": "/v1/user-persistent-menus/{id}",
+"scope": "channels"
+},
+{
+"id": "userPersistentMenus.delete",
+"method": "DELETE",
+"path": "/v1/user-persistent-menus/{id}",
+"scope": "channels"
+},
+{
+"id": "webchats.list",
+"method": "GET",
+"path": "/v1/webchats",
+"scope": "channels"
+},
+{
+"id": "webchats.create",
+"method": "POST",
+"path": "/v1/webchats",
+"scope": "channels"
+},
+{
+"id": "webchats.get",
+"method": "GET",
+"path": "/v1/webchats/{id}",
+"scope": "channels"
+},
+{
+"id": "webchats.update",
+"method": "PATCH",
+"path": "/v1/webchats/{id}",
+"scope": "channels"
+},
+{
+"id": "webchats.delete",
+"method": "DELETE",
+"path": "/v1/webchats/{id}",
+"scope": "channels"
+},
+{
+"id": "webshop.getLink",
+"method": "GET",
+"path": "/v1/webshop/link",
+"scope": "ecommerce"
+},
+{
+"id": "webhooks.list",
+"method": "GET",
+"path": "/v1/webhooks",
+"scope": "integrations"
+},
+{
+"id": "webhooks.create",
+"method": "POST",
+"path": "/v1/webhooks",
+"scope": "integrations"
+},
+{
+"id": "webhooks.get",
+"method": "GET",
+"path": "/v1/webhooks/{id}",
+"scope": "integrations"
+},
+{
+"id": "webhooks.update",
+"method": "PUT",
+"path": "/v1/webhooks/{id}",
+"scope": "integrations"
+},
+{
+"id": "webhooks.delete",
+"method": "DELETE",
+"path": "/v1/webhooks/{id}",
+"scope": "integrations"
+},
+{
+"id": "webhooks.updateSettings",
+"method": "PATCH",
+"path": "/v1/webhooks/{id}/settings",
+"scope": "integrations"
+},
+{
+"id": "webhooks.deleteMany",
+"method": "POST",
+"path": "/v1/webhooks/bulk-delete",
+"scope": "integrations"
+},
+{
+"id": "whatsappCalls.list",
+"method": "GET",
+"path": "/v1/whatsapp/calls",
+"scope": "integrations"
+},
+{
+"id": "whatsappCalls.getRecording",
+"method": "GET",
+"path": "/v1/whatsapp/calls/{id}/recording",
+"scope": "integrations"
+},
+{
+"id": "whatsappCalls.getTranscript",
+"method": "GET",
+"path": "/v1/whatsapp/calls/{id}/transcript",
+"scope": "integrations"
+},
+{
+"id": "whatsappCalls.getSummary",
+"method": "GET",
+"path": "/v1/whatsapp/calls/{id}/summary",
+"scope": "integrations"
+},
+{
+"id": "whatsappCalls.listSummaryProviders",
+"method": "GET",
+"path": "/v1/whatsapp/calls/summary-providers",
+"scope": "integrations"
+},
+{
+"id": "whatsappCalls.generateSummary",
+"method": "POST",
+"path": "/v1/whatsapp/calls/{id}/summary/generate",
+"scope": "integrations"
+},
+{
+"id": "whatsappFlows.list",
+"method": "GET",
+"path": "/v1/whatsapp/flows",
+"scope": "broadcasts"
+},
+{
+"id": "whatsappFlows.getScreens",
+"method": "GET",
+"path": "/v1/whatsapp/flows/{flowId}/screens",
+"scope": "broadcasts"
+},
+{
+"id": "whatsappFlows.sync",
+"method": "POST",
+"path": "/v1/whatsapp-channels/{id}/sync-flows",
+"scope": "broadcasts"
+},
+{
+"id": "whatsappChannels.list",
+"method": "GET",
+"path": "/v1/whatsapp-channels",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.get",
+"method": "GET",
+"path": "/v1/whatsapp-channels/{id}",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.updateHandoverResumeFlow",
+"method": "PATCH",
+"path": "/v1/whatsapp-channels/{id}/handover-resume-flow",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.getRoutingRoles",
+"method": "GET",
+"path": "/v1/whatsapp-channels/{id}/routing-roles",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.syncRoutingRoles",
+"method": "POST",
+"path": "/v1/whatsapp-channels/{id}/routing-roles/sync",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.getCoexistStatus",
+"method": "GET",
+"path": "/v1/whatsapp-channels/{id}/coexist",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.setCoexist",
+"method": "PUT",
+"path": "/v1/whatsapp-channels/{id}/coexist",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.setCapiDataset",
+"method": "PUT",
+"path": "/v1/whatsapp-channels/{id}/capi/dataset",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.disconnectCapi",
+"method": "DELETE",
+"path": "/v1/whatsapp-channels/{id}/capi",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.setCapiTestEventCode",
+"method": "PUT",
+"path": "/v1/whatsapp-channels/{id}/capi/test-event-code",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.sendCapiTestEvent",
+"method": "POST",
+"path": "/v1/whatsapp-channels/{id}/capi/test-event",
+"scope": "channels"
+},
+{
+"id": "whatsappChannels.getCallingSettings",
+"method": "GET",
+"path": "/v1/whatsapp-channels/{id}/calling",
+"scope": "integrations"
+},
+{
+"id": "whatsappChannels.updateCallingSettings",
+"method": "PATCH",
+"path": "/v1/whatsapp-channels/{id}/calling",
+"scope": "integrations"
+},
+{
+"id": "whatsappChannels.updateCallHours",
+"method": "PUT",
+"path": "/v1/whatsapp-channels/{id}/calling/hours",
+"scope": "integrations"
+},
+{
+"id": "whatsappChannels.getPaymentSettings",
+"method": "GET",
+"path": "/v1/whatsapp-channels/{id}/payment-settings",
+"scope": "integrations"
+},
+{
+"id": "whatsappChannels.updatePaymentSettings",
+"method": "PUT",
+"path": "/v1/whatsapp-channels/{id}/payment-settings",
+"scope": "integrations"
+},
+{
+"id": "whatsappTemplates.get",
+"method": "GET",
+"path": "/v1/whatsapp/templates/{id}",
+"scope": "broadcasts"
+},
+{
+"id": "whatsappTemplates.sync",
+"method": "POST",
+"path": "/v1/whatsapp-channels/{id}/templates/sync",
+"scope": "broadcasts"
+},
+{
+"id": "whatsappTemplates.searchCatalogProducts",
+"method": "GET",
+"path": "/v1/whatsapp/templates/catalog-products",
+"scope": "broadcasts"
+},
+{
+"id": "whatsappTemplates.list",
+"method": "GET",
+"path": "/v1/whatsapp/templates",
+"scope": "broadcasts"
+},
+{
+"id": "woocommerce.getStatus",
+"method": "GET",
+"path": "/v1/woocommerce",
+"scope": "ecommerce"
+},
+{
+"id": "woocommerce.connect",
+"method": "POST",
+"path": "/v1/woocommerce",
+"scope": "ecommerce"
+},
+{
+"id": "woocommerce.disconnect",
+"method": "DELETE",
+"path": "/v1/woocommerce",
+"scope": "ecommerce"
+},
+{
+"id": "woocommerce.sync",
+"method": "POST",
+"path": "/v1/woocommerce/sync",
+"scope": "ecommerce"
+},
+{
+"id": "responseSla.get",
+"method": "GET",
+"path": "/v1/response-sla",
+"scope": "inbox"
+},
+{
+"id": "responseSla.update",
+"method": "PUT",
+"path": "/v1/response-sla",
+"scope": "inbox"
+},
+{
+"id": "responseSla.delete",
+"method": "DELETE",
+"path": "/v1/response-sla",
+"scope": "inbox"
+},
+{
+"id": "workingHours.list",
+"method": "GET",
+"path": "/v1/working-hours",
+"scope": "inbox"
+},
+{
+"id": "workingHours.create",
+"method": "POST",
+"path": "/v1/working-hours",
+"scope": "inbox"
+},
+{
+"id": "workingHours.get",
+"method": "GET",
+"path": "/v1/working-hours/{id}",
+"scope": "inbox"
+},
+{
+"id": "workingHours.update",
+"method": "PATCH",
+"path": "/v1/working-hours/{id}",
+"scope": "inbox"
+},
+{
+"id": "workingHours.delete",
+"method": "DELETE",
+"path": "/v1/working-hours/{id}",
+"scope": "inbox"
+},
+{
+"id": "workingHours.setMembers",
+"method": "PUT",
+"path": "/v1/working-hours/{id}/members",
+"scope": "inbox"
+},
+{
+"id": "workingHours.listHolidays",
+"method": "GET",
+"path": "/v1/working-hours-holidays",
+"scope": "inbox"
+},
+{
+"id": "workingHours.createHoliday",
+"method": "POST",
+"path": "/v1/working-hours-holidays",
+"scope": "inbox"
+},
+{
+"id": "workingHours.updateHoliday",
+"method": "PATCH",
+"path": "/v1/working-hours-holidays/{id}",
+"scope": "inbox"
+},
+{
+"id": "workingHours.deleteHoliday",
+"method": "DELETE",
+"path": "/v1/working-hours-holidays/{id}",
+"scope": "inbox"
+},
+{
+"id": "workspaceMembers.list",
+"method": "GET",
+"path": "/v1/members",
+"scope": "inbox"
+},
+{
+"id": "workspaceMembers.get",
+"method": "GET",
+"path": "/v1/members/{memberId}",
+"scope": "inbox"
+},
+{
+"id": "workspaceSettings.get",
+"method": "GET",
+"path": "/v1/workspace/settings",
+"scope": "settings"
+},
+{
+"id": "workspaceSettings.update",
+"method": "PATCH",
+"path": "/v1/workspace/settings",
+"scope": "settings"
+},
+{
+"id": "zaloChannels.list",
+"method": "GET",
+"path": "/v1/zalo-channels",
+"scope": "channels"
+},
+{
+"id": "zaloChannels.get",
+"method": "GET",
+"path": "/v1/zalo-channels/{id}",
+"scope": "channels"
+},
+{
+"id": "zaloChannels.updateTagSync",
+"method": "PATCH",
+"path": "/v1/zalo-channels/{id}/tag-sync",
+"scope": "channels"
+}
+]

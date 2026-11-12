@@ -236,10 +236,14 @@ name = "chatbotx-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chatbotx-db",
+ "chatbotx-kv",
  "serde_json",
+ "sha2",
  "tokio",
  "tower",
+ "tracing",
 ]
 
 [[package]]

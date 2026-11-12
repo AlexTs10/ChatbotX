@@ -4,6 +4,7 @@ pub mod auth;
 pub mod errors;
 pub mod iso8601;
 pub mod orpc;
+pub mod routes;
 
 use axum::Router;
 use axum::http::header;
