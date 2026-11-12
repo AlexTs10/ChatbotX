@@ -537,6 +537,9 @@ pub mod inbox;
 pub mod auth_account;
 pub mod invitation;
 pub mod license;
+pub mod mac_partitions;
+pub mod media_library_file;
+pub mod media_library_folder;
 pub mod messaging_ad_operation;
 pub mod messaging_ads_connection;
 pub mod messenger_welcome_message_flow;
@@ -549,6 +552,9 @@ pub mod platform_admin;
 pub mod reference_existence;
 pub mod reflink;
 pub mod resource_deletion_log;
+pub mod sequence_dispatch;
+pub mod template_selectable_resource;
+pub mod template_version;
 pub mod tenant;
 pub mod trigger;
 pub mod user;
@@ -556,6 +562,7 @@ pub mod whatsapp_business_account;
 pub mod workspace;
 pub mod workspace_api_token;
 pub mod workspace_member;
+pub mod workspace_purge;
 
 pub use client::{
     CappedCount, count_query_capped, is_foreign_key_violation_error, is_statement_timeout_error,
