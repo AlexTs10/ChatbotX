@@ -25,6 +25,7 @@ pub use rusqlite;
 mod error;
 pub mod functions;
 mod migrate;
+pub mod repo;
 #[cfg(test)]
 mod query_plan_tests;
 #[cfg(test)]

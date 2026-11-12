@@ -9,10 +9,13 @@ publish.workspace = true
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
 regex = { workspace = true }
+# P3.2 repositories: JSON columns and typed JSON payloads.
+serde = { workspace = true }
+serde_json = { workspace = true }
 # `functions` = app SQL functions (spec 3); `hooks` = progress handler for the statement timeout (spec 2.3).
 rusqlite = { workspace = true, features = ["functions", "hooks"] }
 sha2 = { workspace = true }
-tokio = { workspace = true, features = ["rt", "sync"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]

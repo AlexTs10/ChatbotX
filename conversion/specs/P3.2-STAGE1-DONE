@@ -1,0 +1,14 @@
+P3.2 stage 1 done (2026-11-12).
+
+Ported test files: 33 (crates/db/tests/repo_*.rs) + helpers crates/db/tests/common/repo.rs.
+Test map: conversion/specs/P3.2-test-map.tsv — 363 rows: 110 ported, 215 adapted, 38 not-applicable.
+Rust tests: 325.
+
+cargo test -p chatbotx-db --no-fail-fast (Dell):
+- new repo_* tests: 316 failed (todo!("P3.2") bodies), 9 passed (schema-constraint cases that call no repository function).
+- existing db tests (lib + other integration files): 214 passed, 0 failed (209 before + 5 own src unit tests).
+
+Not ported in this batch (listed in conversion/specs/P3.2.md section 5): the partials/zod tests, the contact-filter family, and the
+repositories coexist-sync-run, contact-referral-event, conversation, facebook-marketing-messages, file, flow, google-ads-*,
+inbound-webhook, inbox (integration), inbox-team-member, integration-google-ads, integration-messenger, integration-whatsapp
+(+ signup-session), thread-control-repository.
