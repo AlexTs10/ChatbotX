@@ -1,0 +1,17 @@
+P3.4b stage 1 (porter) — 2026-11-13
+
+Ported tests: 13 files crates/core/tests/flow_config_{remap,import_export,messenger_template,
+template_parameter_values,reference_registry_completeness,authoring_spec_schema,authoring_compile,
+authoring_pipeline_spec,authoring_set_custom_field_operations,copy_text_button,call_phone_number_button,
+routable_handle,unresolved_references}.rs + crates/core/tests/flow_config_authoring_support/mod.rs.
+Map: conversion/specs/P3.4-test-map.tsv rows 633-982 (350 rows over 13 frozen files: 335 ported, 15 adapted).
+350 Rust tests.
+Crate API: slice b stubs are todo!("P3.4b"); spec-schema closures stay todo!("P3.4"); new real module
+flow_config::step_schema_registry (exported_step_schemas, generated list).
+
+Run on the PC (dell-5570): cargo test -p chatbotx-core --test <each of the 13>
+Result: 154 passed, 196 failed. Every failure is a todo!() panic (8 of them reach the test through the
+1 GiB-stack thread join). Passing at stage 1: messenger-template 72, routable-handle 20, registry 5,
+copy/call button 37 (functions ported in P3.4a), import-export envelope 10, others 10 (schema-only cases).
+cargo fmt -p chatbotx-core --check and cargo clippy -p chatbotx-core --all-targets --no-deps -D warnings: OK.
+From here on these 13 test files and crates/core/tests/flow_config_authoring_support/** are locked.

@@ -2513,3 +2513,9 @@ pub fn truthy(v: Option<&Value>) -> bool {
         Some(_) => true,
     }
 }
+
+/// `z.toJSONSchema(schema)` (draft 2020-12, zod 4.6.7 output conventions).
+pub fn to_json_schema(schema: &Schema) -> Value {
+    let _ = schema;
+    todo!("P3.4b")
+}

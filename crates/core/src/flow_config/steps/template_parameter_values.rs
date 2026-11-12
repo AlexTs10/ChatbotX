@@ -18,3 +18,53 @@ schema!(pub fn template_parameter_kinds = z::enum_(&["text", "image", "video", "
 
 // HAND-PORT applyMessengerTemplateParameterValues:
 // function applyMessengerTemplateParameterValues(components,parameterFormat,values){return applySlots({skeleton:extractMessengerTemplateParams(components,parameterFormat),slots:collectMessengerSlots(components),unsupported:[],values})}
+
+/// `TemplateParameterSpec`: one value the caller has to fill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateParameterSpec {
+    pub key: String,
+    pub component: String,
+    pub kind: String,
+    pub required: bool,
+    pub placeholder: Option<String>,
+}
+
+/// `AppliedTemplateParameters`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppliedTemplateParameters {
+    pub params: Value,
+    pub missing: Vec<String>,
+    pub unknown: Vec<String>,
+    pub invalid: Vec<String>,
+    pub unsupported: Vec<String>,
+}
+
+/// `TemplateParameterValues`.
+pub type TemplateParameterValues = std::collections::BTreeMap<String, String>;
+
+/// `describeWaTemplateParameters(components)`.
+pub fn describe_wa_template_parameters(components: &[Value]) -> Vec<TemplateParameterSpec> {
+    todo!("P3.4b")
+}
+
+/// `applyWaTemplateParameterValues(components, values)`.
+pub fn apply_wa_template_parameter_values(
+    components: &[Value],
+    values: &TemplateParameterValues,
+) -> AppliedTemplateParameters {
+    todo!("P3.4b")
+}
+
+/// `describeMessengerTemplateParameters(components)`.
+pub fn describe_messenger_template_parameters(components: &[Value]) -> Vec<TemplateParameterSpec> {
+    todo!("P3.4b")
+}
+
+/// `applyMessengerTemplateParameterValues(components, parameterFormat, values)`.
+pub fn apply_messenger_template_parameter_values(
+    components: &[Value],
+    parameter_format: &str,
+    values: &TemplateParameterValues,
+) -> AppliedTemplateParameters {
+    todo!("P3.4b")
+}

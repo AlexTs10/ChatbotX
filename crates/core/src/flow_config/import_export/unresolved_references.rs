@@ -10,3 +10,29 @@ use crate::flow_config::prelude::*;
 
 // HAND-PORT removeUnresolvedReferences:
 // (value,references)=>removeUnresolvedReferencesDetailed(value,references,"clear").value
+
+/// `RemoveUnresolvedResult`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoveUnresolvedResult {
+    pub value: Value,
+    /// Paths whose slot was cleared or removed in place.
+    pub removed: Vec<String>,
+    /// Paths of array elements dropped because a required slot inside them was unresolved.
+    pub dropped_elements: Vec<String>,
+    /// Paths of required slots outside any droppable element: the flow cannot be kept.
+    pub blocked: Vec<String>,
+}
+
+/// `removeUnresolvedReferencesDetailed(value, references)` (repair mode): each
+/// reported reference removed the way its slot allows. Never mutates the input.
+pub fn remove_unresolved_references_detailed(
+    value: &Value,
+    references: &[&str],
+) -> RemoveUnresolvedResult {
+    todo!("P3.4b")
+}
+
+/// `removeUnresolvedReferences(value, references)` (clear mode).
+pub fn remove_unresolved_references(value: &Value, references: &[&str]) -> Value {
+    todo!("P3.4b")
+}
