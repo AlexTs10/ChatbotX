@@ -12,13 +12,13 @@ use rusqlite::types::Value;
 
 use super::models::{PipelineItem, PipelineItemAssignee};
 use super::patch::{self, Patch};
+use super::pipeline_item_cursor::bind1;
 use super::pipeline_item_cursor::{
     PipelineItemSort, clamp_page_limit, cursor_for, decode_pipeline_item_cursor,
     pipeline_item_after_cursor, pipeline_item_order_by, pipeline_item_sort_value_sql,
     sort_value_text,
 };
 use super::pipeline_item_filter::{PipelineItemFilter, build_pipeline_item_where};
-use super::pipeline_item_cursor::bind1;
 use super::sql::{Sql, opt_int};
 use super::{Error, Json, Model, Result, find_one, id_list, new_id, now_ms, returning};
 
@@ -119,7 +119,11 @@ pub fn find_by_id(
     id: i64,
     pipeline_id: Option<i64>,
 ) -> Result<Option<PipelineItem>> {
-    todo!("P3.3")
+    find_one(
+        conn,
+        "\"workspaceId\" = ?1 AND \"id\" = ?2 AND (?3 IS NULL OR \"pipelineId\" = ?3)",
+        &[&workspace_id, &id, &pipeline_id],
+    )
 }
 
 /// `findByIdempotencyKey`.
@@ -129,21 +133,88 @@ pub fn find_by_idempotency_key(
     pipeline_id: i64,
     idempotency_key: &str,
 ) -> Result<Option<PipelineItem>> {
-    todo!("P3.3")
+    find_one(
+        conn,
+        "\"workspaceId\" = ?1 AND \"pipelineId\" = ?2 AND \"idempotencyKey\" = ?3",
+        &[&workspace_id, &pipeline_id, &idempotency_key],
+    )
 }
 
 /// `lockForUpdate`: the item row (the write job is the lock).
-pub fn lock_for_update(conn: &Connection, workspace_id: i64, id: i64) -> Result<Option<PipelineItem>> {
-    todo!("P3.3")
+pub fn lock_for_update(
+    conn: &Connection,
+    workspace_id: i64,
+    id: i64,
+) -> Result<Option<PipelineItem>> {
+    find_one(
+        conn,
+        "\"workspaceId\" = ?1 AND \"id\" = ?2",
+        &[&workspace_id, &id],
+    )
 }
 
 /// `insertIdempotent`: inserts the item, or returns the one an earlier call with the same
 /// idempotency key stored. Only that key's conflict is absorbed.
 pub fn insert_idempotent(conn: &Connection, values: &PipelineItemInsert) -> Result<InsertedItem> {
-    todo!("P3.3")
+    let conflict = if values.idempotency_key.is_some() {
+        " ON CONFLICT (\"workspaceId\", \"pipelineId\", \"idempotencyKey\") WHERE \"idempotencyKey\" IS NOT NULL DO NOTHING"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "INSERT INTO \"PipelineItem\" (\"id\", \"workspaceId\", \"pipelineId\", \"stageId\", \"contactId\", \"number\", \"title\", \"description\", \"value\", \"status\", \"priority\", \"dueDate\", \"fieldValues\", \"createdById\", \"closedById\", \"stageEnteredAt\", \"statusChangedAt\", \"closedAt\", \"lastCommentAt\", \"idempotencyKey\") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20){conflict}"
+    );
+    let row = returning::<PipelineItem>(
+        conn,
+        &sql,
+        &[
+            &new_id(),
+            &values.workspace_id,
+            &values.pipeline_id,
+            &values.stage_id,
+            &values.contact_id,
+            &values.number,
+            &values.title,
+            &values.description,
+            &values.value,
+            &values.status,
+            &values.priority,
+            &values.due_date,
+            &values.field_values,
+            &values.created_by_id,
+            &values.closed_by_id,
+            &values.stage_entered_at,
+            &values.status_changed_at,
+            &values.closed_at,
+            &values.last_comment_at,
+            &values.idempotency_key,
+        ],
+    )?
+    .into_iter()
+    .next();
+    if let Some(row) = row {
+        return Ok(InsertedItem {
+            row,
+            inserted: true,
+        });
+    }
+    let Some(key) = values.idempotency_key.as_deref() else {
+        return Err(Error::msg("Failed to insert pipeline item"));
+    };
+    let existing = find_by_idempotency_key(conn, values.workspace_id, values.pipeline_id, key)?
+        .ok_or_else(|| Error::msg("Pipeline item idempotency conflict without a row"))?;
+    Ok(InsertedItem {
+        row: existing,
+        inserted: false,
+    })
 }
 
-fn update_where(conn: &Connection, set: &Patch, workspace_id: i64, id: i64) -> Result<Option<PipelineItem>> {
+fn update_where(
+    conn: &Connection,
+    set: &Patch,
+    workspace_id: i64,
+    id: i64,
+) -> Result<Option<PipelineItem>> {
     let mut sql = Sql::raw("UPDATE \"PipelineItem\" SET ");
     sql.append(patch::set_clause(PipelineItem::COLUMNS, set)?);
     sql.append(Sql::new(
@@ -157,18 +228,35 @@ fn update_where(conn: &Connection, set: &Patch, workspace_id: i64, id: i64) -> R
 }
 
 /// `update`: sets the patch columns (and `updatedAt`).
-pub fn update(conn: &Connection, workspace_id: i64, id: i64, values: &Patch) -> Result<Option<PipelineItem>> {
-    todo!("P3.3")
+pub fn update(
+    conn: &Connection,
+    workspace_id: i64,
+    id: i64,
+    values: &Patch,
+) -> Result<Option<PipelineItem>> {
+    let mut set = values.clone();
+    if !set.iter().any(|(c, _)| *c == "updatedAt") {
+        set.push(("updatedAt", Value::Integer(now_ms())));
+    }
+    update_where(conn, &set, workspace_id, id)
 }
 
 /// `touch`: marks the item as changed without touching other columns.
 pub fn touch(conn: &Connection, workspace_id: i64, id: i64) -> Result<Option<PipelineItem>> {
-    todo!("P3.3")
+    update_where(
+        conn,
+        &vec![("updatedAt", Value::Integer(now_ms()))],
+        workspace_id,
+        id,
+    )
 }
 
 /// `delete`.
 pub fn delete(conn: &Connection, workspace_id: i64, id: i64) -> Result<bool> {
-    todo!("P3.3")
+    Ok(conn.execute(
+        "DELETE FROM \"PipelineItem\" WHERE \"workspaceId\" = ?1 AND \"id\" = ?2",
+        (workspace_id, id),
+    )? > 0)
 }
 
 /// `findLatestOpenForContact`: the contact's most recently created open item.
@@ -178,7 +266,11 @@ pub fn find_latest_open_for_contact(
     pipeline_id: i64,
     contact_id: i64,
 ) -> Result<Option<PipelineItem>> {
-    todo!("P3.3")
+    find_one(
+        conn,
+        "\"workspaceId\" = ?1 AND \"pipelineId\" = ?2 AND \"contactId\" = ?3 AND \"status\" = 'open' ORDER BY \"createdAt\" DESC, \"id\" DESC",
+        &[&workspace_id, &pipeline_id, &contact_id],
+    )
 }
 
 /// `countOpenForContact`: a contact's open items in a pipeline, optionally leaving one out.
@@ -189,7 +281,11 @@ pub fn count_open_for_contact(
     contact_id: i64,
     except_item_id: Option<i64>,
 ) -> Result<i64> {
-    todo!("P3.3")
+    Ok(conn.query_row(
+        "SELECT count(*) FROM \"PipelineItem\" WHERE \"workspaceId\" = ?1 AND \"pipelineId\" = ?2 AND \"contactId\" = ?3 AND \"status\" = 'open' AND (?4 IS NULL OR \"id\" <> ?4)",
+        (workspace_id, pipeline_id, contact_id, except_item_id),
+        |row| row.get(0),
+    )?)
 }
 
 /// `listForContact`: every pipeline's items of one contact, newest first.
@@ -200,7 +296,23 @@ pub fn list_for_contact(
     pipeline_ids: Option<&[i64]>,
     limit: i64,
 ) -> Result<Vec<PipelineItem>> {
-    todo!("P3.3")
+    Sql::new(
+        format!(
+            "{} WHERE \"workspaceId\" = ? AND \"contactId\" = ? AND (? IS NULL OR \"pipelineId\" IN (SELECT value FROM json_each(?))) ORDER BY \"createdAt\" DESC LIMIT ?",
+            PipelineItem::select_sql()
+        ),
+        {
+            let ids = pipeline_ids.map_or(Value::Null, |ids| Value::Text(id_list(ids)));
+            vec![
+                Value::Integer(workspace_id),
+                Value::Integer(contact_id),
+                ids.clone(),
+                ids,
+                Value::Integer(limit),
+            ]
+        },
+    )
+    .models::<PipelineItem>(conn)
 }
 
 /// One page query: items matching `where_sql`, sorted, at most `fetch` rows, with the
@@ -249,7 +361,26 @@ fn cut_page(
 /// `listStagePage`: one keyset page of a stage, or of the whole pipeline when `stage_id`
 /// is `None`. A malformed cursor fails with `InvalidPipelineCursorError`.
 pub fn list_stage_page(conn: &Connection, input: &ListStagePageInput) -> Result<PipelineItemPage> {
-    todo!("P3.3")
+    let limit = clamp_page_limit(input.limit);
+    let cursor = match input.cursor.as_deref() {
+        Some(raw) => Some(decode_pipeline_item_cursor(raw, input.sort)?),
+        None => None,
+    };
+    let mut filter = input.filter.clone();
+    if let Some(stage_id) = input.stage_id {
+        filter.stage_ids = vec![stage_id];
+    }
+    let where_sql = Sql::and([
+        Some(build_pipeline_item_where(
+            input.workspace_id,
+            Some(input.pipeline_id),
+            &filter,
+        )),
+        cursor.map(|c| pipeline_item_after_cursor(input.sort, &c)),
+    ]);
+    let rows = page_query(conn, where_sql, input.sort, limit + 1)?;
+    let (items, next_cursor) = cut_page(rows, limit, input.sort);
+    Ok(PipelineItemPage { items, next_cursor })
 }
 
 /// `listBoardFirstPage`: the first page of every stage of a pipeline (at most
@@ -258,7 +389,37 @@ pub fn list_board_first_page(
     conn: &Connection,
     input: &BoardFirstPageInput,
 ) -> Result<Vec<PipelineBoardStagePage>> {
-    todo!("P3.3")
+    let limit = clamp_page_limit(input.per_stage_limit);
+    let stage_ids: Vec<i64> = Sql::new(
+        "SELECT \"id\" FROM \"PipelineStage\" WHERE \"workspaceId\" = ? AND \"pipelineId\" = ? ORDER BY \"id\"",
+        vec![
+            Value::Integer(input.workspace_id),
+            Value::Integer(input.pipeline_id),
+        ],
+    )
+    .query_map(conn, |row| row.get(0))?;
+    let mut out = Vec::new();
+    for stage_id in stage_ids {
+        let where_sql = Sql::and([
+            Some(bind1("\"PipelineItem\".\"stageId\" = ?", stage_id)),
+            Some(build_pipeline_item_where(
+                input.workspace_id,
+                Some(input.pipeline_id),
+                &input.filter,
+            )),
+        ]);
+        let rows = page_query(conn, where_sql, input.sort, limit + 1)?;
+        if rows.is_empty() {
+            continue;
+        }
+        let (items, next_cursor) = cut_page(rows, limit, input.sort);
+        out.push(PipelineBoardStagePage {
+            stage_id,
+            items,
+            next_cursor,
+        });
+    }
+    Ok(out)
 }
 
 /// `listStageTotals`: count and summed value per stage.
@@ -268,24 +429,69 @@ pub fn list_stage_totals(
     pipeline_id: i64,
     filter: &PipelineItemFilter,
 ) -> Result<Vec<PipelineStageTotals>> {
-    todo!("P3.3")
+    let mut sql = Sql::raw(
+        "SELECT \"PipelineItem\".\"stageId\", count(*), coalesce(sum(\"PipelineItem\".\"value\"), 0) FROM \"PipelineItem\" WHERE ",
+    );
+    sql.append(build_pipeline_item_where(
+        workspace_id,
+        Some(pipeline_id),
+        filter,
+    ));
+    sql.push(" GROUP BY \"PipelineItem\".\"stageId\"");
+    sql.query_map(conn, |row| {
+        Ok(PipelineStageTotals {
+            stage_id: row.get(0)?,
+            count: row.get(1)?,
+            total_value: row.get(2)?,
+        })
+    })
 }
 
 /// `countByStage`.
-pub fn count_by_stage(conn: &Connection, workspace_id: i64, pipeline_id: i64, stage_id: i64) -> Result<i64> {
-    todo!("P3.3")
+pub fn count_by_stage(
+    conn: &Connection,
+    workspace_id: i64,
+    pipeline_id: i64,
+    stage_id: i64,
+) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM \"PipelineItem\" WHERE \"workspaceId\" = ?1 AND \"pipelineId\" = ?2 AND \"stageId\" = ?3",
+        (workspace_id, pipeline_id, stage_id),
+        |row| row.get(0),
+    )?)
 }
 
 const BATCH_SCOPE: &str =
     "\"workspaceId\" = ?1 AND \"pipelineId\" = ?2 AND (?3 IS NULL OR \"stageId\" = ?3)";
 
 fn batch_ids_sql() -> String {
-    format!("\"id\" IN (SELECT \"id\" FROM \"PipelineItem\" WHERE {BATCH_SCOPE} LIMIT ?4) AND {BATCH_SCOPE}")
+    format!(
+        "\"id\" IN (SELECT \"id\" FROM \"PipelineItem\" WHERE {BATCH_SCOPE} LIMIT ?4) AND {BATCH_SCOPE}"
+    )
 }
 
 /// `moveStageItemsBatch`: moves up to `limit` items of a stage to another; returns them.
-pub fn move_stage_items_batch(conn: &Connection, input: &MoveStageItemsInput) -> Result<Vec<PipelineItem>> {
-    todo!("P3.3")
+pub fn move_stage_items_batch(
+    conn: &Connection,
+    input: &MoveStageItemsInput,
+) -> Result<Vec<PipelineItem>> {
+    let sql = format!(
+        "UPDATE \"PipelineItem\" SET \"stageId\" = ?5, \"stageEnteredAt\" = ?6, \"updatedAt\" = ?7 WHERE {}",
+        batch_ids_sql()
+    );
+    returning::<PipelineItem>(
+        conn,
+        &sql,
+        &[
+            &input.workspace_id,
+            &input.pipeline_id,
+            &Some(input.from_stage_id),
+            &input.limit,
+            &input.to_stage_id,
+            &input.now,
+            &now_ms(),
+        ],
+    )
 }
 
 /// `deleteStageItemsBatch`: deletes up to `limit` items of a stage; returns them.
@@ -296,7 +502,12 @@ pub fn delete_stage_items_batch(
     stage_id: i64,
     limit: i64,
 ) -> Result<Vec<PipelineItem>> {
-    todo!("P3.3")
+    let sql = format!("DELETE FROM \"PipelineItem\" WHERE {}", batch_ids_sql());
+    returning::<PipelineItem>(
+        conn,
+        &sql,
+        &[&workspace_id, &pipeline_id, &Some(stage_id), &limit],
+    )
 }
 
 /// `deletePipelineItemsBatch`: deletes up to `limit` items of a pipeline; returns how many.
@@ -306,7 +517,8 @@ pub fn delete_pipeline_items_batch(
     pipeline_id: i64,
     limit: i64,
 ) -> Result<usize> {
-    todo!("P3.3")
+    let sql = format!("DELETE FROM \"PipelineItem\" WHERE {}", batch_ids_sql());
+    Ok(conn.execute(&sql, (workspace_id, pipeline_id, None::<i64>, limit))?)
 }
 
 /// `listAssigneesForItems`: oldest first.
@@ -315,7 +527,14 @@ pub fn list_assignees_for_items(
     workspace_id: i64,
     item_ids: &[i64],
 ) -> Result<Vec<PipelineItemAssignee>> {
-    todo!("P3.3")
+    if item_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    super::find_many(
+        conn,
+        "WHERE \"workspaceId\" = ?1 AND \"itemId\" IN (SELECT value FROM json_each(?2)) ORDER BY \"createdAt\", \"id\"",
+        &[&workspace_id, &id_list(item_ids)],
+    )
 }
 
 /// `replaceAssignees`: makes the assignee set exactly the given targets; rows that stay
@@ -327,5 +546,48 @@ pub fn replace_assignees(
     workspace_member_ids: &[i64],
     inbox_team_ids: &[i64],
 ) -> Result<()> {
-    todo!("P3.3")
+    let current: Vec<PipelineItemAssignee> = super::find_many(
+        conn,
+        "WHERE \"workspaceId\" = ?1 AND \"itemId\" = ?2",
+        &[&workspace_id, &item_id],
+    )?;
+    let wanted_members: HashSet<i64> = workspace_member_ids.iter().copied().collect();
+    let wanted_teams: HashSet<i64> = inbox_team_ids.iter().copied().collect();
+    let mut kept_members = HashSet::new();
+    let mut kept_teams = HashSet::new();
+    let mut removed = Vec::new();
+    for row in &current {
+        match (row.workspace_member_id, row.inbox_team_id) {
+            (Some(m), _) if wanted_members.contains(&m) => {
+                kept_members.insert(m);
+            }
+            (_, Some(t)) if wanted_teams.contains(&t) => {
+                kept_teams.insert(t);
+            }
+            _ => removed.push(row.id),
+        }
+    }
+    if !removed.is_empty() {
+        conn.execute(
+            "DELETE FROM \"PipelineItemAssignee\" WHERE \"id\" IN (SELECT value FROM json_each(?1))",
+            [id_list(&removed)],
+        )?;
+    }
+    let added = workspace_member_ids
+        .iter()
+        .filter(|id| !kept_members.contains(*id))
+        .map(|id| (Some(*id), None))
+        .chain(
+            inbox_team_ids
+                .iter()
+                .filter(|id| !kept_teams.contains(*id))
+                .map(|id| (None, Some(*id))),
+        );
+    for (member, team) in added {
+        conn.execute(
+            "INSERT INTO \"PipelineItemAssignee\" (\"id\", \"workspaceId\", \"itemId\", \"workspaceMemberId\", \"inboxTeamId\") VALUES (?1, ?2, ?3, ?4, ?5)",
+            (new_id(), workspace_id, item_id, opt_int(member), opt_int(team)),
+        )?;
+    }
+    Ok(())
 }

@@ -44,17 +44,29 @@ pub struct PipelineFieldCondition {
 impl PipelineFieldCondition {
     /// A condition with only an operator.
     pub fn op(operator: PipelineFieldOperator) -> PipelineFieldCondition {
-        todo!("P3.3")
+        PipelineFieldCondition {
+            operator,
+            value: None,
+            value_to: None,
+        }
     }
 
     /// A condition with an operator and one operand.
     pub fn with(operator: PipelineFieldOperator, value: &str) -> PipelineFieldCondition {
-        todo!("P3.3")
+        PipelineFieldCondition {
+            operator,
+            value: Some(value.to_owned()),
+            value_to: None,
+        }
     }
 
     /// A `between` condition (either bound may be absent).
     pub fn between(value: Option<&str>, value_to: Option<&str>) -> PipelineFieldCondition {
-        todo!("P3.3")
+        PipelineFieldCondition {
+            operator: PipelineFieldOperator::Between,
+            value: value.map(str::to_owned),
+            value_to: value_to.map(str::to_owned),
+        }
     }
 }
 
@@ -116,12 +128,22 @@ static DAY_OPERAND_PATTERN: LazyLock<Regex> =
 
 /// `isPipelineFilterDay`: a real calendar day written `YYYY-MM-DD` (year >= 1).
 pub fn is_pipeline_filter_day(text: Option<&str>) -> bool {
-    todo!("P3.3")
+    let Some(caps) = text.and_then(|t| DAY_OPERAND_PATTERN.captures(t)) else {
+        return false;
+    };
+    let n = |i: usize| caps[i].parse::<i32>().unwrap_or(0);
+    let (y, m, d) = (n(1), n(2), n(3));
+    y >= 1
+        && u32::try_from(m)
+            .ok()
+            .zip(u32::try_from(d).ok())
+            .and_then(|(m, d)| chrono::NaiveDate::from_ymd_opt(y, m, d))
+            .is_some()
 }
 
 /// `isPipelineFilterNumber`: a plain decimal number string.
 pub fn is_pipeline_filter_number(text: Option<&str>) -> bool {
-    todo!("P3.3")
+    text.is_some_and(|t| NUMERIC_OPERAND_PATTERN.is_match(t))
 }
 
 /// `isKnownTimezone`, else `UTC`.
@@ -141,12 +163,19 @@ fn known_timezone(timezone: Option<&str>) -> String {
 /// The JSON path `$."<key>"` of a field id; `None` for a key the path syntax cannot hold
 /// (such a key reads as absent).
 pub fn field_key_path(key: &str) -> Option<String> {
-    todo!("P3.3")
+    (!key.contains('"') && !key.contains('\\')).then(|| format!("$.\"{key}\""))
 }
 
 /// The stored value as text (`fieldValues ->> id`), with its bound path.
 pub fn stored_sql(field_id: &str) -> Sql {
-    todo!("P3.3")
+    let path = field_key_path(field_id).map_or(Value::Null, Value::Text);
+    let fv = "\"PipelineItem\".\"fieldValues\"";
+    Sql::new(
+        format!(
+            "(CASE json_type({fv}, ?) WHEN 'text' THEN {fv} ->> ? WHEN 'null' THEN NULL ELSE {fv} -> ? END)"
+        ),
+        vec![path.clone(), path.clone(), path],
+    )
 }
 
 fn cat(parts: Vec<Sql>, texts: &[&str]) -> Sql {
@@ -204,7 +233,8 @@ fn guarded(stored: &Sql, pattern: &str, then: &str) -> Sql {
 fn number_strategy(stored: &Sql, condition: &PipelineFieldCondition) -> Option<Sql> {
     let subject = guarded(stored, NUMERIC_STORED_PATTERN, "CAST({S} AS REAL)");
     ordered(condition, &subject, &|text| {
-        is_pipeline_filter_number(text).then(|| bind1("CAST(? AS REAL)", text.unwrap_or_default().to_owned()))
+        is_pipeline_filter_number(text)
+            .then(|| bind1("CAST(? AS REAL)", text.unwrap_or_default().to_owned()))
     })
 }
 
@@ -217,7 +247,11 @@ fn date_strategy(stored: &Sql, condition: &PipelineFieldCondition) -> Option<Sql
     ordered(condition, &subject, &day_operand)
 }
 
-fn datetime_strategy(stored: &Sql, condition: &PipelineFieldCondition, timezone: &str) -> Option<Sql> {
+fn datetime_strategy(
+    stored: &Sql,
+    condition: &PipelineFieldCondition,
+    timezone: &str,
+) -> Option<Sql> {
     // The instant's calendar day in `timezone` ("at time zone").
     let instant = guarded(
         stored,
@@ -255,7 +289,13 @@ fn text_strategy(stored: &Sql, condition: &PipelineFieldCondition) -> Option<Sql
             let p = bind1("?", like_operand(condition.operator, value));
             Some(cat(
                 vec![s(), s(), s(), p],
-                &["(", " is not null and ", " <> '' and not ilike(", ", ", "))"],
+                &[
+                    "(",
+                    " is not null and ",
+                    " <> '' and not ilike(",
+                    ", ",
+                    "))",
+                ],
             ))
         }
         PipelineFieldOperator::Contains
@@ -293,5 +333,27 @@ pub fn field_condition_sql(
     condition: &PipelineFieldCondition,
     timezone: Option<&str>,
 ) -> Option<Sql> {
-    todo!("P3.3")
+    let stored = stored_sql(field_id);
+    match condition.operator {
+        PipelineFieldOperator::HasValue => {
+            return Some(cat(
+                vec![stored.clone(), stored],
+                &["(", " is not null and ", " <> '')"],
+            ));
+        }
+        PipelineFieldOperator::NoValue => {
+            return Some(cat(
+                vec![stored.clone(), stored],
+                &["(", " is null or ", " = '')"],
+            ));
+        }
+        _ => {}
+    }
+    match comparison_kind(field_type) {
+        Kind::Text => text_strategy(&stored, condition),
+        Kind::Number => number_strategy(&stored, condition),
+        Kind::Date => date_strategy(&stored, condition),
+        Kind::Datetime => datetime_strategy(&stored, condition, &known_timezone(timezone)),
+        Kind::Boolean => boolean_strategy(&stored, condition),
+    }
 }

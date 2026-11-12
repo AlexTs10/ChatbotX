@@ -18,7 +18,7 @@ use super::{Error, iso};
 
 /// A fragment whose `text` holds its one `?` (unlike [`Sql::bind`], which appends it).
 pub fn bind1(text: impl Into<String>, value: impl Into<Value>) -> Sql {
-    todo!("P3.3")
+    Sql::new(text, vec![value.into()])
 }
 
 /// `pipelineItemSortKeys`.
@@ -34,7 +34,13 @@ pub enum PipelineItemSortKey {
 impl PipelineItemSortKey {
     /// The key as written in a cursor.
     pub fn as_str(self) -> &'static str {
-        todo!("P3.3")
+        match self {
+            PipelineItemSortKey::CreatedAt => "createdAt",
+            PipelineItemSortKey::UpdatedAt => "updatedAt",
+            PipelineItemSortKey::Value => "value",
+            PipelineItemSortKey::DueDate => "dueDate",
+            PipelineItemSortKey::Priority => "priority",
+        }
     }
 }
 
@@ -64,12 +70,22 @@ pub struct PipelineItemCursor {
 
 /// `InvalidPipelineCursorError("Invalid cursor")`.
 pub fn invalid_cursor() -> Error {
-    todo!("P3.3")
+    Error::Coded {
+        kind: "InvalidPipelineCursorError",
+        code: "INVALID_CURSOR".to_owned(),
+        message: "Invalid cursor".to_owned(),
+    }
 }
 
 /// Whether `err` is an [`invalid_cursor`] error.
 pub fn is_invalid_cursor(err: &Error) -> bool {
-    todo!("P3.3")
+    matches!(
+        err,
+        Error::Coded {
+            kind: "InvalidPipelineCursorError",
+            ..
+        }
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -86,7 +102,8 @@ struct SortSpec {
 }
 
 /// Priority ordering: high > medium > low.
-const PRIORITY_RANK: &str = "case \"PipelineItem\".\"priority\" when 'high' then 3 when 'medium' then 2 else 1 end";
+const PRIORITY_RANK: &str =
+    "case \"PipelineItem\".\"priority\" when 'high' then 3 when 'medium' then 2 else 1 end";
 
 fn sort_spec(key: PipelineItemSortKey) -> SortSpec {
     match key {
@@ -229,7 +246,10 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 
 /// Unix ms of a cursor timestamp text (fraction truncated to ms; no offset = UTC).
 pub fn timestamp_text_ms(text: &str) -> Option<i64> {
-    todo!("P3.3")
+    let p = timestamp_parts(text)?;
+    let days = days_from_civil(p.year, p.month, p.day);
+    let seconds = days * 86_400 + p.hour * 3600 + p.minute * 60 + p.second - p.offset_seconds;
+    Some(seconds * 1000 + p.millis)
 }
 
 fn is_numeric_sane(text: &str) -> bool {
@@ -255,7 +275,7 @@ fn is_sort_value_valid(key: PipelineItemSortKey, null_rank: u8, sort_value: Opti
 
 /// `clampPageLimit`: a requested page size kept within 1..100.
 pub fn clamp_page_limit(limit: i64) -> i64 {
-    todo!("P3.3")
+    limit.clamp(1, PAGE_SIZE_MAX)
 }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -312,12 +332,27 @@ fn dir_str(dir: SortDir) -> &'static str {
 
 /// `encodePipelineItemCursor`: base64url of the cursor JSON.
 pub fn encode_pipeline_item_cursor(cursor: &PipelineItemCursor) -> String {
-    todo!("P3.3")
+    let json = serde_json::json!({
+        "v": cursor.v,
+        "sort": cursor.sort.as_str(),
+        "dir": dir_str(cursor.dir),
+        "nullRank": cursor.null_rank,
+        "sortValue": cursor.sort_value,
+        "id": cursor.id,
+    });
+    base64url_encode(json.to_string().as_bytes())
 }
 
 /// `cursorFor`: keyset cursor resuming right after the row (`sort_value` read as text).
 pub fn cursor_for(sort: PipelineItemSort, sort_value: Option<&str>, id: i64) -> String {
-    todo!("P3.3")
+    encode_pipeline_item_cursor(&PipelineItemCursor {
+        v: 1,
+        sort: sort.key,
+        dir: sort.direction,
+        null_rank: u8::from(sort_value.is_none()),
+        sort_value: sort_value.map(str::to_owned),
+        id: id.to_string(),
+    })
 }
 
 /// `decodePipelineItemCursor`: fails with [`invalid_cursor`] on any malformed cursor or
@@ -326,18 +361,67 @@ pub fn decode_pipeline_item_cursor(
     raw: &str,
     sort: PipelineItemSort,
 ) -> Result<PipelineItemCursor, Error> {
-    todo!("P3.3")
+    let bytes = base64url_decode(raw);
+    let text = String::from_utf8_lossy(&bytes);
+    let parsed: serde_json::Value = serde_json::from_str(&text).map_err(|_| invalid_cursor())?;
+    let obj = parsed.as_object().ok_or_else(invalid_cursor)?;
+    let v_ok = obj.get("v").and_then(serde_json::Value::as_f64) == Some(1.0);
+    let sort_ok = obj.get("sort").and_then(serde_json::Value::as_str) == Some(sort.key.as_str());
+    let dir_ok =
+        obj.get("dir").and_then(serde_json::Value::as_str) == Some(dir_str(sort.direction));
+    let rank = obj.get("nullRank").and_then(serde_json::Value::as_f64);
+    let null_rank = if rank == Some(0.0) {
+        Some(0u8)
+    } else if rank == Some(1.0) {
+        Some(1u8)
+    } else {
+        None
+    };
+    let id = obj.get("id").and_then(serde_json::Value::as_str);
+    let sort_value = match obj.get("sortValue") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok(Some(s.clone())),
+        Some(_) => Err(()),
+    };
+    let (Some(null_rank), Some(id), Ok(sort_value)) = (null_rank, id, sort_value) else {
+        return Err(invalid_cursor());
+    };
+    let valid = v_ok
+        && sort_ok
+        && dir_ok
+        && is_bigint_id(id)
+        && is_sort_value_valid(sort.key, null_rank, sort_value.as_deref());
+    if !valid {
+        return Err(invalid_cursor());
+    }
+    Ok(PipelineItemCursor {
+        v: 1,
+        sort: sort.key,
+        dir: sort.direction,
+        null_rank,
+        sort_value,
+        id: id.to_owned(),
+    })
 }
 
 /// `decodeTimestampCursor`: a newest-first cursor over a NOT NULL timestamp; a null-ranked
 /// one is rejected. Returns `(unix ms, id)`.
 pub fn decode_timestamp_cursor(raw: &str, sort: PipelineItemSort) -> Result<(i64, i64), Error> {
-    todo!("P3.3")
+    let cursor = decode_pipeline_item_cursor(raw, sort)?;
+    let (0, Some(text)) = (cursor.null_rank, cursor.sort_value.as_deref()) else {
+        return Err(invalid_cursor());
+    };
+    let ms = timestamp_text_ms(text).ok_or_else(invalid_cursor)?;
+    let id = cursor.id.parse::<i64>().map_err(|_| invalid_cursor())?;
+    Ok((ms, id))
 }
 
 /// The money text of a stored `value` (x 10,000): `12.5000`.
 pub fn money_text(scaled: i64) -> String {
-    todo!("P3.3")
+    let sign = if scaled < 0 { "-" } else { "" };
+    let abs = scaled.unsigned_abs();
+    let scale = MONEY_SCALE.unsigned_abs();
+    format!("{sign}{}.{:04}", abs / scale, abs % scale)
 }
 
 /// The bind value of a numeric cursor text (x 10,000, truncated; a REAL beyond i64).
@@ -372,23 +456,62 @@ fn sort_value_bind(key: PipelineItemSortKey, text: &str) -> Value {
 /// `pipelineItemOrderBy`: the `(nullRank, sortValue, id)` sort terms; NULLS LAST in both
 /// directions. The null-rank term is only emitted for keys that can be NULL.
 pub fn pipeline_item_order_by(sort: PipelineItemSort) -> Vec<String> {
-    todo!("P3.3")
+    let spec = sort_spec(sort.key);
+    let dir = dir_str(sort.direction);
+    let mut parts = Vec::with_capacity(3);
+    if spec.nullable {
+        parts.push(format!("({} is null) asc", spec.expression));
+    }
+    parts.push(format!("{} {dir}", spec.expression));
+    parts.push(format!("\"PipelineItem\".\"id\" {dir}"));
+    parts
 }
 
 /// `pipelineItemAfterCursor`: the strictly-after predicate of the keyset page following
 /// `cursor`.
 pub fn pipeline_item_after_cursor(sort: PipelineItemSort, cursor: &PipelineItemCursor) -> Sql {
-    todo!("P3.3")
+    let spec = sort_spec(sort.key);
+    let op = match sort.direction {
+        SortDir::Asc => ">",
+        SortDir::Desc => "<",
+    };
+    let e = spec.expression;
+    let id = Value::Integer(cursor.id.parse::<i64>().unwrap_or(0));
+    let text = match (cursor.null_rank, cursor.sort_value.as_deref()) {
+        (0, Some(text)) => text,
+        _ => {
+            return Sql::new(
+                format!("(({e} is null) and \"PipelineItem\".\"id\" {op} ?)"),
+                vec![id],
+            );
+        }
+    };
+    let value = sort_value_bind(sort.key, text);
+    if !spec.nullable {
+        return Sql::new(
+            format!("(({e}, \"PipelineItem\".\"id\") {op} (?, ?))"),
+            vec![value, id],
+        );
+    }
+    Sql::new(
+        format!("({e} is null or {e} {op} ? or ({e} = ? and \"PipelineItem\".\"id\" {op} ?))"),
+        vec![value.clone(), value, id],
+    )
 }
 
 /// `pipelineItemSortValueText`: the SQL of the sort value as cursor text (`NULL` stays).
 pub fn pipeline_item_sort_value_sql(sort: PipelineItemSort) -> String {
-    todo!("P3.3")
+    sort_spec(sort.key).expression.to_owned()
 }
 
 /// The cursor text of a sort value read with [`pipeline_item_sort_value_sql`].
 pub fn sort_value_text(key: PipelineItemSortKey, value: Option<i64>) -> Option<String> {
-    todo!("P3.3")
+    let v = value?;
+    Some(match sort_spec(key).cast {
+        Cast::Timestamp => iso(v),
+        Cast::Numeric => money_text(v),
+        Cast::Int => v.to_string(),
+    })
 }
 
 /// `newestFirstKeyset`: one newest-first keyset page over a NOT NULL timestamp column.
@@ -402,26 +525,52 @@ pub struct NewestFirstKeyset {
 impl NewestFirstKeyset {
     /// Clamps the limit and decodes the cursor ([`invalid_cursor`] when malformed).
     pub fn new(limit: i64, cursor: Option<&str>) -> Result<NewestFirstKeyset, Error> {
-        todo!("P3.3")
+        let cursor = match cursor {
+            Some(raw) => Some(decode_timestamp_cursor(raw, NEWEST_FIRST_SORT)?),
+            None => None,
+        };
+        Ok(NewestFirstKeyset {
+            limit: clamp_page_limit(limit),
+            cursor,
+        })
     }
 
     /// `limit + 1` (the extra row proves a next page).
     pub fn fetch_limit(&self) -> i64 {
-        todo!("P3.3")
+        self.limit + 1
     }
 
     /// `(timestamp, id) < (cursor)` over the given columns.
     pub fn after(&self, timestamp_col: &str, id_col: &str) -> Option<Sql> {
-        todo!("P3.3")
+        self.cursor.map(|(ms, id)| {
+            Sql::new(
+                format!("({timestamp_col}, {id_col}) < (?, ?)"),
+                vec![Value::Integer(ms), Value::Integer(id)],
+            )
+        })
     }
 
     /// `ORDER BY` terms.
     pub fn order_by(timestamp_col: &str, id_col: &str) -> String {
-        todo!("P3.3")
+        format!("{timestamp_col} desc, {id_col} desc")
     }
 
     /// Cuts the fetched rows to the page and builds the next cursor.
-    pub fn page<R>(&self, mut rows: Vec<R>, key_of: impl Fn(&R) -> (i64, i64)) -> (Vec<R>, Option<String>) {
-        todo!("P3.3")
+    pub fn page<R>(
+        &self,
+        mut rows: Vec<R>,
+        key_of: impl Fn(&R) -> (i64, i64),
+    ) -> (Vec<R>, Option<String>) {
+        let limit = usize::try_from(self.limit).unwrap_or(0);
+        let more = rows.len() > limit;
+        rows.truncate(limit);
+        let next = match rows.last() {
+            Some(last) if more => {
+                let (ms, id) = key_of(last);
+                Some(cursor_for(NEWEST_FIRST_SORT, Some(&iso(ms)), id))
+            }
+            _ => None,
+        };
+        (rows, next)
     }
 }

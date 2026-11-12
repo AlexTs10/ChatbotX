@@ -6,12 +6,14 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use regex::Regex;
-use super::pipeline_field_condition::{CustomFieldType, PipelineFieldCondition, field_condition_sql};
+use super::pipeline_field_condition::{
+    CustomFieldType, PipelineFieldCondition, field_condition_sql,
+};
 use super::pipeline_item_cursor::bind1;
 use super::sql::Sql;
 use super::utils::{is_bigint_id, like_contains};
 use super::{id_list, text_list};
+use regex::Regex;
 
 static NUMERIC_SEARCH_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^#?\d+$").expect("numeric search"));
@@ -20,7 +22,8 @@ static PHONE_SEARCH_PATTERN: LazyLock<Regex> =
 const MIN_PHONE_SEARCH_DIGITS: usize = 6;
 
 /// `PIPELINE_AUTOMATION_ACTOR_KINDS`.
-pub const PIPELINE_AUTOMATION_ACTOR_KINDS: [&str; 4] = ["workspaceToken", "flow", "trigger", "system"];
+pub const PIPELINE_AUTOMATION_ACTOR_KINDS: [&str; 4] =
+    ["workspaceToken", "flow", "trigger", "system"];
 
 /// `pipelineActivityKinds` (in declaration order).
 pub const PIPELINE_ACTIVITY_KINDS: [&str; 16] = [
@@ -150,7 +153,10 @@ fn closed_as_condition(closed_as: Option<&ClosedAs>) -> Option<Sql> {
         .into_iter()
         .filter_map(|(status, range)| {
             range.map(|range| {
-                let mut parts = vec![Some(bind1(format!("{} = ?", col("status")), status.to_owned()))];
+                let mut parts = vec![Some(bind1(
+                    format!("{} = ?", col("status")),
+                    status.to_owned(),
+                ))];
                 parts.extend(range_conditions(&col("closedAt"), Some(&range)));
                 Some(Sql::and(parts))
             })
@@ -194,10 +200,16 @@ const ACTIVITY: &str = "\"PipelineItemActivity\"";
 
 fn activity_scope() -> Vec<Option<Sql>> {
     vec![
-        Some(Sql::raw(format!("{ACTIVITY}.\"workspaceId\" = {}", col("workspaceId")))),
+        Some(Sql::raw(format!(
+            "{ACTIVITY}.\"workspaceId\" = {}",
+            col("workspaceId")
+        ))),
         Some(Sql::raw(format!("{ACTIVITY}.\"itemId\" = {}", col("id")))),
         // Only history recorded in the item's current pipeline.
-        Some(Sql::raw(format!("{ACTIVITY}.\"pipelineId\" = {}", col("pipelineId")))),
+        Some(Sql::raw(format!(
+            "{ACTIVITY}.\"pipelineId\" = {}",
+            col("pipelineId")
+        ))),
     ]
 }
 
@@ -210,8 +222,14 @@ fn exists(table: &str, cond: Sql) -> Sql {
 
 fn activity_exists(kind: &str, range: &DateRange) -> Sql {
     let mut parts = activity_scope();
-    parts.push(Some(bind1(format!("{ACTIVITY}.\"kind\" = ?"), kind.to_owned())));
-    parts.extend(range_conditions(&format!("{ACTIVITY}.\"occurredAt\""), Some(range)));
+    parts.push(Some(bind1(
+        format!("{ACTIVITY}.\"kind\" = ?"),
+        kind.to_owned(),
+    )));
+    parts.extend(range_conditions(
+        &format!("{ACTIVITY}.\"occurredAt\""),
+        Some(range),
+    ));
     exists(ACTIVITY, Sql::and(parts))
 }
 
@@ -220,7 +238,10 @@ fn activity_actor_condition(m: &PipelineActivityMatch) -> Option<Sql> {
     if !m.actor_user_ids.is_empty() {
         branches.push(Some(Sql::and([
             Some(Sql::raw(format!("{ACTIVITY}.\"actorKind\" = 'user'"))),
-            Some(in_ids(&format!("{ACTIVITY}.\"actorUserId\""), &m.actor_user_ids)),
+            Some(in_ids(
+                &format!("{ACTIVITY}.\"actorUserId\""),
+                &m.actor_user_ids,
+            )),
         ])));
     }
     if m.automation {
@@ -249,7 +270,8 @@ fn has_activity_match(m: &PipelineActivityMatch) -> bool {
     !m.kinds.is_empty()
         || !m.actor_user_ids.is_empty()
         || m.automation
-        || m.occurred_at.is_some_and(|r| r.from.is_some() || r.to.is_some())
+        || m.occurred_at
+            .is_some_and(|r| r.from.is_some() || r.to.is_some())
 }
 
 /// Contact columns a board search looks at, by what the input looks like.
@@ -286,18 +308,27 @@ fn contact_search_conditions(search: &str, include_email_and_phone: bool) -> Vec
 fn search_condition(search: &str, include_email_and_phone: bool) -> Sql {
     // "#12", "12" and "0012" all mean item 12, compared as a number.
     let digits = if NUMERIC_SEARCH_PATTERN.is_match(search) {
-        search.replacen('#', "", 1).trim_start_matches('0').to_owned()
+        search
+            .replacen('#', "", 1)
+            .trim_start_matches('0')
+            .to_owned()
     } else {
         String::new()
     };
     let item_number = is_bigint_id(&digits).then(|| digits.parse::<i64>().unwrap_or(0));
     let contact = Sql::and([
-        Some(Sql::raw(format!("\"Contact\".\"id\" = {}", col("contactId")))),
+        Some(Sql::raw(format!(
+            "\"Contact\".\"id\" = {}",
+            col("contactId")
+        ))),
         Some(Sql::raw(format!(
             "\"Contact\".\"workspaceId\" = {}",
             col("workspaceId")
         ))),
-        Some(Sql::or(contact_search_conditions(search, include_email_and_phone))),
+        Some(Sql::or(contact_search_conditions(
+            search,
+            include_email_and_phone,
+        ))),
     ]);
     Sql::or([
         Some(bind1(
@@ -316,5 +347,103 @@ pub fn build_pipeline_item_where(
     pipeline_id: Option<i64>,
     filter: &PipelineItemFilter,
 ) -> Sql {
-    todo!("P3.3")
+    let mut conditions: Vec<Option<Sql>> = vec![
+        Some(bind1(format!("{} = ?", col("workspaceId")), workspace_id)),
+        pipeline_id.map(|p| bind1(format!("{} = ?", col("pipelineId")), p)),
+        (!filter.stage_ids.is_empty()).then(|| in_ids(&col("stageId"), &filter.stage_ids)),
+        (!filter.statuses.is_empty()).then(|| in_texts(&col("status"), &filter.statuses)),
+        (!filter.priorities.is_empty()).then(|| in_texts(&col("priority"), &filter.priorities)),
+        filter
+            .contact_id
+            .map(|c| bind1(format!("{} = ?", col("contactId")), c)),
+    ];
+    conditions.extend(value_conditions(filter.value.as_ref()));
+    conditions.extend(range_conditions(&col("dueDate"), filter.due_date.as_ref()));
+    conditions.extend(range_conditions(
+        &col("createdAt"),
+        filter.created_at.as_ref(),
+    ));
+    conditions.extend(range_conditions(
+        &col("updatedAt"),
+        filter.updated_at.as_ref(),
+    ));
+    conditions.extend(range_conditions(
+        &col("closedAt"),
+        filter.closed_at.as_ref(),
+    ));
+    conditions.push(closed_as_condition(filter.closed_as.as_ref()));
+    conditions.extend(range_conditions(
+        &col("lastCommentAt"),
+        filter.last_comment_at.as_ref(),
+    ));
+    conditions.extend(range_conditions(
+        &col("statusChangedAt"),
+        filter.status_changed_at.as_ref(),
+    ));
+    conditions.extend(range_conditions(
+        &col("stageEnteredAt"),
+        filter.stage_entered_at.as_ref(),
+    ));
+
+    let mut assignee = Vec::new();
+    if !filter.assignee_member_ids.is_empty() {
+        assignee.push(Some(in_ids(
+            "\"PipelineItemAssignee\".\"workspaceMemberId\"",
+            &filter.assignee_member_ids,
+        )));
+    }
+    if !filter.assignee_team_ids.is_empty() {
+        assignee.push(Some(in_ids(
+            "\"PipelineItemAssignee\".\"inboxTeamId\"",
+            &filter.assignee_team_ids,
+        )));
+    }
+    if !assignee.is_empty() {
+        conditions.push(Some(exists(
+            "\"PipelineItemAssignee\"",
+            Sql::and([
+                Some(Sql::raw(format!(
+                    "\"PipelineItemAssignee\".\"itemId\" = {}",
+                    col("id")
+                ))),
+                Some(Sql::or(assignee)),
+            ]),
+        )));
+    }
+
+    if let Some(search) = filter
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        conditions.push(Some(search_condition(
+            search,
+            filter.search_contact_email_and_phone != Some(false),
+        )));
+    }
+
+    for (field_id, condition) in &filter.field_conditions {
+        if let Some(field_type) = filter.field_types.get(field_id) {
+            conditions.push(field_condition_sql(
+                field_id,
+                *field_type,
+                condition,
+                filter.timezone.as_deref(),
+            ));
+        }
+    }
+    if let Some(m) = filter
+        .activity_match
+        .as_ref()
+        .filter(|m| has_activity_match(m))
+    {
+        conditions.push(Some(activity_match_exists(m)));
+    }
+    for kind in PIPELINE_ACTIVITY_KINDS {
+        if let Some(range) = filter.activity.get(kind) {
+            conditions.push(Some(activity_exists(kind, range)));
+        }
+    }
+    Sql::and(conditions)
 }
