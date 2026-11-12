@@ -6,7 +6,6 @@ mod layout;
 mod normalize_graph;
 mod spec_schema;
 
-#[allow(unused_imports)]
 pub use compile::*;
 pub use errors::*;
 pub use layout::*;

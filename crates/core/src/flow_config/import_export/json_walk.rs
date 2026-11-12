@@ -1,15 +1,60 @@
-// Slice P3.4b: still being ported.
-#![allow(unused_variables, dead_code)]
 //! Port of `packages/flow-config/src/import-export/json-walk.ts`.
 
-#[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
-// HAND-PORT forEachStringLeaf:
-// (value,visit,depth=0)=>{if(depth>MAX_WALK_DEPTH){return}if(typeof value==="string"){visit(value);return}if(Array.isArray(value)){for(const item of value){forEachStringLeaf(item,visit,depth+1)}return}if(typeof value==="object"&&value!==null){for(const child of Object.values(value)){forEachStringLeaf(child,visit,depth+1)}}}
+/// `forEachStringLeaf`: calls `visit` with every string leaf; past
+/// `MAX_WALK_DEPTH` the rest of the subtree is skipped.
+pub fn for_each_string_leaf(value: &Value, visit: &mut dyn FnMut(&str)) {
+    walk_leaves(value, visit, 0);
+}
 
-// HAND-PORT mapStringLeaves:
-// (value,rewrite,depth=0)=>{if(depth>MAX_WALK_DEPTH){return value}if(typeof value==="string"){return rewrite(value)}if(Array.isArray(value)){return value.map(item=>mapStringLeaves(item,rewrite,depth+1))}if(typeof value==="object"&&value!==null){return Object.fromEntries(Object.entries(value).map(([key,child])=>[key,mapStringLeaves(child,rewrite,depth+1)]))}return value}
+fn walk_leaves(value: &Value, visit: &mut dyn FnMut(&str), depth: usize) {
+    if depth > MAX_WALK_DEPTH {
+        return;
+    }
+    match value {
+        Value::String(text) => visit(text),
+        Value::Array(items) => items
+            .iter()
+            .for_each(|item| walk_leaves(item, visit, depth + 1)),
+        Value::Object(map) => map
+            .values()
+            .for_each(|child| walk_leaves(child, visit, depth + 1)),
+        _ => {}
+    }
+}
 
-// HAND-PORT splitPrefixedToken:
-// token=>{const separatorIndex=token.indexOf(":");if(separatorIndex<=0){return null}return{prefix:token.slice(0,separatorIndex),id:token.slice(separatorIndex+1)}}
+/// `mapStringLeaves`: a copy with every string leaf rewritten; past
+/// `MAX_WALK_DEPTH` the subtree is returned unchanged.
+pub fn map_string_leaves(value: &Value, rewrite: &dyn Fn(&str) -> String) -> Value {
+    map_leaves(value, rewrite, 0)
+}
+
+fn map_leaves(value: &Value, rewrite: &dyn Fn(&str) -> String, depth: usize) -> Value {
+    if depth > MAX_WALK_DEPTH {
+        return value.clone();
+    }
+    match value {
+        Value::String(text) => Value::String(rewrite(text)),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| map_leaves(item, rewrite, depth + 1))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, child)| (key.clone(), map_leaves(child, rewrite, depth + 1)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// `splitPrefixedToken`: `prefix:id` split at the first colon; `None` without a prefix.
+pub fn split_prefixed_token(token: &str) -> Option<(&str, &str)> {
+    match token.find(':') {
+        Some(index) if index > 0 => Some((&token[..index], &token[index + 1..])),
+        _ => None,
+    }
+}

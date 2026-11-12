@@ -1,8 +1,5 @@
-// Slice P3.4b: still being ported.
-#![allow(unused_variables, dead_code)]
 //! Port of `packages/flow-config/src/import-export/reference-fields.ts`.
 
-#[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
 pub fn reference_field_entity_kind() -> &'static Value {
@@ -23,13 +20,35 @@ pub fn reference_array_field_entity_kind() -> &'static Value {
     &V
 }
 
-// HAND-PORT STRIP_UNRESOLVED_ARRAY_REFERENCE_KINDS (object): {}
+/// `STRIP_UNRESOLVED_ARRAY_REFERENCE_KINDS`: array kinds whose unresolved
+/// elements are removed instead of left in place.
+pub const STRIP_UNRESOLVED_ARRAY_REFERENCE_KINDS: &[&str] = &["workspaceMember", "inboxTeam"];
 
-// HAND-PORT isWorkspaceBoundReferenceValue:
-// (kind,value)=>STRIP_UNRESOLVED_ARRAY_REFERENCE_KINDS.has(kind)?value.length>0&&!ASSIGNEE_SENTINELS.has(value):NUMERIC_ID_PATTERN.test(value)
+/// Values a member / team slot can hold that name nobody.
+const ASSIGNEE_SENTINELS: &[&str] = &["unassigned"];
 
-// HAND-PORT referenceKindsWithPolicy:
-// policy=>Object.entries(REFERENCE_KIND_POLICY).filter(([,kindPolicy])=>kindPolicy===policy).map(([kind])=>kind)
+/// `isWorkspaceBoundReferenceValue`: a workspace-bound id of `kind`.
+pub fn is_workspace_bound_reference_value(kind: &str, value: &str) -> bool {
+    if STRIP_UNRESOLVED_ARRAY_REFERENCE_KINDS.contains(&kind) {
+        !value.is_empty() && !ASSIGNEE_SENTINELS.contains(&value)
+    } else {
+        !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
+    }
+}
+
+/// `referenceKindsWithPolicy(policy)`.
+pub fn reference_kinds_with_policy(policy: &str) -> Vec<String> {
+    reference_kind_policy()
+        .as_object()
+        .map(|kinds| {
+            kinds
+                .iter()
+                .filter(|(_, kind_policy)| kind_policy.as_str() == Some(policy))
+                .map(|(kind, _)| kind.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 pub fn discriminated_reference_fields() -> &'static Value {
     static V: LazyLock<Value> = LazyLock::new(|| {
@@ -48,7 +67,8 @@ pub fn prefixed_reference_entity_kind() -> &'static Value {
     &V
 }
 
-// HAND-PORT PREFIXED_REFERENCE_FIELDS (object): {}
+/// `PREFIXED_REFERENCE_FIELDS`: keys whose values may hold `prefix:id` tokens.
+pub const PREFIXED_REFERENCE_FIELDS: &[&str] = &["tools"];
 
 pub fn reference_kind_policy() -> &'static Value {
     static V: LazyLock<Value> = LazyLock::new(|| {
@@ -66,8 +86,10 @@ pub fn step_reference_overrides() -> &'static Value {
 
 pub const MAX_WALK_DEPTH: usize = 512;
 
-// HAND-PORT isPlainObject:
-// value=>typeof value==="object"&&value!==null&&!Array.isArray(value)
+/// `isPlainObject`.
+pub fn is_plain_object(value: &Value) -> bool {
+    value.is_object()
+}
 
 pub fn reference_slot_shape_by_key() -> &'static Value {
     static V: LazyLock<Value> = LazyLock::new(|| {

@@ -12,14 +12,10 @@ mod unresolved_references;
 
 pub use contact_filter_references::*;
 pub use external_reference_kind::*;
-#[allow(unused_imports)]
 pub use json_walk::*;
 pub use reference_fields::*;
-#[allow(unused_imports)]
 pub use references::*;
-#[allow(unused_imports)]
 pub use remap::*;
 pub use schema::*;
 pub use template_schema::*;
-#[allow(unused_imports)]
 pub use unresolved_references::*;

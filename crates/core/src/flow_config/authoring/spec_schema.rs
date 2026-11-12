@@ -1,9 +1,9 @@
-// Slice P3.4b: still being ported.
-#![allow(unused_variables, dead_code)]
 //! Port of `packages/flow-config/src/authoring/spec-schema.ts`.
 
-#[allow(unused_imports)]
 use crate::flow_config::prelude::*;
+use crate::utils::custom_field_operation::{FieldOperationType, field_operation_by_api_name};
+
+const MAX_SPEC_TEXT_LENGTH: usize = 1000;
 
 pub fn flow_spec_step_types() -> &'static Value {
     static V: LazyLock<Value> = LazyLock::new(|| {
@@ -102,42 +102,53 @@ z::object(vec![("type", z::literal(json!("goto")).describe("Step type: \"goto\".
 
 // value=>countMessageCharacters(value)<=MAX_SPEC_TEXT_LENGTH
 fn flow_spec_schema_steps_rec_0_text_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    value
+        .as_str()
+        .is_some_and(|s| count_message_characters(Some(s)) <= MAX_SPEC_TEXT_LENGTH)
 }
 
 // value=>countMessageCharacters(value)<=BUTTON_LABEL_MAX
 fn flow_spec_schema_steps_rec_0_buttons_text_refine(value: &Value) -> bool {
-    todo!("P3.4")
-}
-
-// value=>containsVariablePlaceholder(value)?value.length<=PHONE_NUMBER_EXPRESSION_MAX:isE164PhoneNumber(value)
-fn is_valid_authored_phone_number(value: &Value) -> bool {
-    todo!("P3.4")
-}
-
-// value=>containsVariablePlaceholder(value)?value.length<=COPY_TEXT_EXPRESSION_MAX:countMessageCharacters(value)<=COPY_TEXT_MAX
-fn is_valid_authored_copy_text(value: &Value) -> bool {
-    todo!("P3.4")
+    value
+        .as_str()
+        .is_some_and(|s| count_message_characters(Some(s)) <= BUTTON_LABEL_MAX)
 }
 
 // button=>button.call===void 0||!button.then?.length
 fn flow_spec_schema_steps_rec_0_buttons_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    value.get("call").is_none()
+        || !value
+            .get("then")
+            .and_then(Value::as_array)
+            .is_some_and(|t| !t.is_empty())
 }
 
 // button=>button.copy===void 0||!button.then?.length
 fn flow_spec_schema_steps_rec_0_buttons_refine_2(value: &Value) -> bool {
-    todo!("P3.4")
+    value.get("copy").is_none()
+        || !value
+            .get("then")
+            .and_then(Value::as_array)
+            .is_some_and(|t| !t.is_empty())
 }
 
 // button=>button.copy===void 0||button.call===void 0
 fn flow_spec_schema_steps_rec_0_buttons_refine_3(value: &Value) -> bool {
-    todo!("P3.4")
+    value.get("copy").is_none() || value.get("call").is_none()
 }
 
 // (data,ctx)=>{const kinds=[data.text,data.imageUrl,data.fileUrl].filter(value=>value!==void 0);if(kinds.length!==1){ctx.addIssue({code:"custom",message:"Exactly one of text, imageUrl, or fileUrl is required.",path:[]})}}
 fn flow_spec_schema_steps_rec_0_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+    let kinds = ["text", "imageUrl", "fileUrl"]
+        .iter()
+        .filter(|k| value.get(**k).is_some())
+        .count();
+    if kinds != 1 {
+        ctx.issue(
+            path![],
+            "Exactly one of text, imageUrl, or fileUrl is required.",
+        );
+    }
 }
 
 fn flow_spec_schema_steps_rec_3_text_refine(value: &Value) -> bool {
@@ -154,15 +165,159 @@ fn flow_spec_schema_steps_rec_3_footer_refine(value: &Value) -> bool {
 
 // (data,ctx)=>{if((data.action==="addTags"||data.action==="removeTags")&&(!data.tagNames||data.tagNames.length===0)){ctx.addIssue({code:"custom",message:`action "${data.action}" requires a non-empty tagNames`,path:["tagNames"]})}if(data.action==="setCustomField"){if(!data.customFieldName){ctx.addIssue({code:"custom",message:'action "setCustomField" requires customFieldName',path:["customFieldName"]})}const operation=data.operation?fieldOperationByApiName(data.operation):void 0;const valueMissing=!operation||operation===FieldOperationType.set?data.value===void 0:isOperandBlank(operation,data.value);if(valueMissing){ctx.addIssue({code:"custom",message:'action "setCustomField" requires value',path:["value"]})}}}
 fn flow_spec_schema_steps_rec_6_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+    let action = str_field(value, "action");
+    if (action == "addTags" || action == "removeTags")
+        && !value
+            .get("tagNames")
+            .and_then(Value::as_array)
+            .is_some_and(|t| !t.is_empty())
+    {
+        ctx.issue(
+            path!["tagNames"],
+            format!("action \"{action}\" requires a non-empty tagNames"),
+        );
+    }
+    if action == "setCustomField" {
+        if !truthy(value.get("customFieldName")) {
+            ctx.issue(
+                path!["customFieldName"],
+                "action \"setCustomField\" requires customFieldName",
+            );
+        }
+        let operation = value
+            .get("operation")
+            .and_then(Value::as_str)
+            .filter(|o| !o.is_empty())
+            .and_then(field_operation_by_api_name);
+        let value_missing = match operation {
+            None | Some(FieldOperationType::Set) => value.get("value").is_none(),
+            Some(operation) => {
+                is_operand_blank(operation, value.get("value").and_then(Value::as_str))
+            }
+        };
+        if value_missing {
+            ctx.issue(path!["value"], "action \"setCustomField\" requires value");
+        }
+    }
 }
 
 // (data,ctx)=>{const rules=PIPELINE_ACTION_FIELDS[data.action];const allowed=new Set([...rules.required,...rules.optional]);for(const key of PIPELINE_ACTION_SPECIFIC_FIELDS){if(data[key]!==void 0&&!allowed.has(key)){ctx.addIssue({code:"custom",message:`action "${data.action}" does not accept ${key}`,path:[key]})}}for(const key of rules.required){const value=data[key];const isEmptyList=Array.isArray(value)&&value.length===0;if(value===void 0||isEmptyList){ctx.addIssue({code:"custom",message:`action "${data.action}" requires ${key}${isEmptyList?" to be non-empty":""}`,path:[key]})}}const oneOf="requireOneOf"in rules?rules.requireOneOf:[];const hasValue=__name(key=>{const value=data[key];return Array.isArray(value)?value.length>0:value!==void 0},"hasValue");if(oneOf.length>0&&!oneOf.some(hasValue)){ctx.addIssue({code:"custom",message:`action "${data.action}" requires at least one of ${oneOf.join(", ")}`,path:[oneOf[0]??"action"]})}if(data.onSkip!==void 0&&!pipelineActionCanSkip(data.action)){ctx.addIssue({code:"custom",message:`action "${data.action}" never skips, so onSkip would never run`,path:["onSkip"]})}}
 fn flow_spec_schema_steps_rec_7_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+    let action = str_field(value, "action");
+    let Some((required, optional, one_of)) = pipeline_action_fields(action) else {
+        return;
+    };
+    for key in PIPELINE_ACTION_SPECIFIC_FIELDS {
+        if value.get(*key).is_some() && !required.contains(key) && !optional.contains(key) {
+            ctx.issue(
+                path![*key],
+                format!("action \"{action}\" does not accept {key}"),
+            );
+        }
+    }
+    for key in required {
+        let field = value.get(*key);
+        let is_empty_list = field.and_then(Value::as_array).is_some_and(Vec::is_empty);
+        if field.is_none() || is_empty_list {
+            let suffix = if is_empty_list {
+                " to be non-empty"
+            } else {
+                ""
+            };
+            ctx.issue(
+                path![*key],
+                format!("action \"{action}\" requires {key}{suffix}"),
+            );
+        }
+    }
+    let has_value = |key: &&str| match value.get(*key) {
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(_) => true,
+        None => false,
+    };
+    if !one_of.is_empty() && !one_of.iter().any(has_value) {
+        ctx.issue(
+            path![one_of[0]],
+            format!(
+                "action \"{action}\" requires at least one of {}",
+                one_of.join(", ")
+            ),
+        );
+    }
+    if value.get("onSkip").is_some() && !pipeline_action_can_skip(action) {
+        ctx.issue(
+            path!["onSkip"],
+            format!("action \"{action}\" never skips, so onSkip would never run"),
+        );
+    }
 }
 
 // value=>countMessageCharacters(value)<=MAX_SPEC_TEXT_LENGTH
 fn flow_spec_schema_steps_rec_9_note_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    value
+        .as_str()
+        .is_some_and(|s| count_message_characters(Some(s)) <= MAX_SPEC_TEXT_LENGTH)
 }
+
+/// Spec fields each pipeline action accepts: `(required, optional, requireOneOf)`.
+fn pipeline_action_fields(
+    action: &str,
+) -> Option<(
+    &'static [&'static str],
+    &'static [&'static str],
+    &'static [&'static str],
+)> {
+    Some(match action {
+        "addToPipeline" => (
+            &[],
+            &[
+                "title",
+                "description",
+                "status",
+                "stage",
+                "assigneeMemberIds",
+                "assigneeInboxTeamIds",
+                "dueDate",
+                "fieldValues",
+            ],
+            &[],
+        ),
+        "moveToStage" => (&["stage"], &[], &[]),
+        "changeValue" => (&["value"], &[], &[]),
+        // The runtime rejects an assign with nobody to assign.
+        "assign" => (
+            &[],
+            &["assigneeMemberIds", "assigneeInboxTeamIds"],
+            &["assigneeMemberIds", "assigneeInboxTeamIds"],
+        ),
+        "changeStatus" => (&["status"], &[], &[]),
+        "changePriority" => (&["priority"], &[], &[]),
+        "changeDueDate" => (&["dueDate"], &[], &[]),
+        "changeTitle" => (&["title"], &[], &[]),
+        "setCustomField" => (&["field", "value"], &[], &[]),
+        "clearCustomField" => (&["fields"], &[], &[]),
+        "changeDescription" => (&["description"], &[], &[]),
+        "removeFromPipeline" => (&[], &[], &[]),
+        "addComment" => (&["text"], &[], &[]),
+        "transfer" => (&["destinationPipeline"], &["destinationStage"], &[]),
+        _ => return None,
+    })
+}
+
+const PIPELINE_ACTION_SPECIFIC_FIELDS: &[&str] = &[
+    "title",
+    "description",
+    "status",
+    "priority",
+    "stage",
+    "assigneeMemberIds",
+    "assigneeInboxTeamIds",
+    "dueDate",
+    "fieldValues",
+    "value",
+    "field",
+    "fields",
+    "text",
+    "destinationPipeline",
+    "destinationStage",
+];

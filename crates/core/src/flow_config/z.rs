@@ -2514,8 +2514,280 @@ pub fn truthy(v: Option<&Value>) -> bool {
     }
 }
 
-/// `z.toJSONSchema(schema)` (draft 2020-12, zod 4.6.7 output conventions).
+/// `z.toJSONSchema(schema)` (draft 2020-12, output mode, zod 4.6.7
+/// conventions): descriptions and `.meta()` are kept, length/size checks
+/// become `minLength`/`maxLength`/`minItems`/…, unions are `anyOf`, objects
+/// list `required` keys, and every `z.lazy` target goes to `$defs` (so a
+/// recursive schema serializes). Refinements and transforms carry no schema.
 pub fn to_json_schema(schema: &Schema) -> Value {
-    let _ = schema;
-    todo!("P3.4b")
+    let mut ctx = JsonSchemaCtx::default();
+    let mut root = ctx.process(schema);
+    let mut out = Map::new();
+    out.insert(
+        "$schema".into(),
+        json!("https://json-schema.org/draft/2020-12/schema"),
+    );
+    if let Value::Object(map) = &mut root {
+        out.append(map);
+    }
+    if !ctx.defs.is_empty() {
+        let defs: Map<String, Value> = ctx
+            .defs
+            .into_iter()
+            .filter_map(|(name, def)| def.map(|d| (name, d)))
+            .collect();
+        out.insert("$defs".into(), Value::Object(defs));
+    }
+    Value::Object(out)
+}
+
+#[derive(Default)]
+struct JsonSchemaCtx {
+    /// Lazy targets: `(Arc pointer, $defs name)`.
+    lazy_names: Vec<(usize, String)>,
+    /// `$defs` entries in creation order (`None` while being built).
+    defs: Vec<(String, Option<Value>)>,
+}
+
+impl JsonSchemaCtx {
+    fn process(&mut self, schema: &Schema) -> Value {
+        let mut json = self.process_kind(schema);
+        let node = &schema.0;
+        if let Value::Object(map) = &mut json {
+            if let Some(description) = &node.description {
+                map.insert("description".into(), json!(description));
+            }
+            if let Some(Value::Object(meta)) = &node.meta {
+                for (key, value) in meta {
+                    map.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        json
+    }
+
+    fn lazy_ref(&mut self, target: &Schema) -> Value {
+        let ptr = Arc::as_ptr(&target.0) as usize;
+        if let Some((_, name)) = self.lazy_names.iter().find(|(p, _)| *p == ptr) {
+            return json!({ "$ref": format!("#/$defs/{name}") });
+        }
+        let name = format!("__schema{}", self.lazy_names.len());
+        self.lazy_names.push((ptr, name.clone()));
+        self.defs.push((name.clone(), None));
+        let def = self.process(target);
+        if let Some(slot) = self.defs.iter_mut().find(|(n, _)| *n == name) {
+            slot.1 = Some(def);
+        }
+        json!({ "$ref": format!("#/$defs/{name}") })
+    }
+
+    fn process_kind(&mut self, schema: &Schema) -> Value {
+        let checks = &schema.0.checks;
+        match &schema.0.kind {
+            Kind::String { .. } => {
+                let mut map = Map::new();
+                map.insert("type".into(), json!("string"));
+                for entry in checks {
+                    match &entry.check {
+                        Check::MinLength(n) => insert_max(&mut map, "minLength", *n, true),
+                        Check::MaxLength(n) => insert_max(&mut map, "maxLength", *n, false),
+                        Check::Length(n) => {
+                            map.insert("minLength".into(), json!(n));
+                            map.insert("maxLength".into(), json!(n));
+                        }
+                        Check::Regex(_, source) => {
+                            map.insert("pattern".into(), json!(source));
+                        }
+                        Check::Email => {
+                            map.insert("format".into(), json!("email"));
+                        }
+                        Check::Url { .. } => {
+                            map.insert("format".into(), json!("uri"));
+                        }
+                        Check::Uuid => {
+                            map.insert("format".into(), json!("uuid"));
+                        }
+                        Check::IsoDatetime { .. } => {
+                            map.insert("format".into(), json!("date-time"));
+                        }
+                        Check::IsoDate => {
+                            map.insert("format".into(), json!("date"));
+                        }
+                        Check::IsoTime => {
+                            map.insert("format".into(), json!("time"));
+                        }
+                        _ => {}
+                    }
+                }
+                Value::Object(map)
+            }
+            Kind::Number { int, .. } => {
+                let mut map = Map::new();
+                let is_int = *int || checks.iter().any(|c| matches!(c.check, Check::Int));
+                map.insert(
+                    "type".into(),
+                    json!(if is_int { "integer" } else { "number" }),
+                );
+                for entry in checks {
+                    match &entry.check {
+                        Check::Gt(limit, inclusive) => {
+                            let key = if *inclusive {
+                                "minimum"
+                            } else {
+                                "exclusiveMinimum"
+                            };
+                            map.insert(key.into(), crate::flow_config::helpers::num_value(*limit));
+                        }
+                        Check::Lt(limit, inclusive) => {
+                            let key = if *inclusive {
+                                "maximum"
+                            } else {
+                                "exclusiveMaximum"
+                            };
+                            map.insert(key.into(), crate::flow_config::helpers::num_value(*limit));
+                        }
+                        Check::MultipleOf(step) => {
+                            map.insert(
+                                "multipleOf".into(),
+                                crate::flow_config::helpers::num_value(*step),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                Value::Object(map)
+            }
+            Kind::Boolean { .. } => json!({ "type": "boolean" }),
+            Kind::Null => json!({ "type": "null" }),
+            Kind::Undefined | Kind::Any | Kind::Unknown | Kind::Custom(_) => json!({}),
+            Kind::Transform(_) | Kind::TransformOpt(_) => json!({}),
+            Kind::Never => json!({ "not": {} }),
+            Kind::Date => json!({ "type": "string", "format": "date-time" }),
+            Kind::Literal(values) => {
+                let type_of = |v: &Value| match v {
+                    Value::String(_) => Some("string"),
+                    Value::Number(n) if n.is_i64() || n.is_u64() => Some("integer"),
+                    Value::Number(_) => Some("number"),
+                    Value::Bool(_) => Some("boolean"),
+                    Value::Null => Some("null"),
+                    _ => None,
+                };
+                let mut map = Map::new();
+                let types: Vec<&str> = values.iter().filter_map(type_of).collect();
+                if let Some(first) = types.first()
+                    && types.iter().all(|t| t == first)
+                {
+                    map.insert("type".into(), json!(first));
+                }
+                if values.len() == 1 {
+                    map.insert("const".into(), values[0].clone());
+                } else {
+                    map.insert("enum".into(), Value::Array(values.clone()));
+                }
+                Value::Object(map)
+            }
+            Kind::Enum(values) => json!({ "type": "string", "enum": values }),
+            Kind::Array(element) => {
+                let mut map = Map::new();
+                map.insert("type".into(), json!("array"));
+                map.insert("items".into(), self.process(element));
+                for entry in checks {
+                    match &entry.check {
+                        Check::MinLength(n) => insert_max(&mut map, "minItems", *n, true),
+                        Check::MaxLength(n) => insert_max(&mut map, "maxItems", *n, false),
+                        Check::Length(n) => {
+                            map.insert("minItems".into(), json!(n));
+                            map.insert("maxItems".into(), json!(n));
+                        }
+                        _ => {}
+                    }
+                }
+                Value::Object(map)
+            }
+            Kind::Tuple(items, rest) => {
+                let mut map = Map::new();
+                map.insert("type".into(), json!("array"));
+                let prefix: Vec<Value> = items.iter().map(|item| self.process(item)).collect();
+                map.insert("prefixItems".into(), Value::Array(prefix));
+                if let Some(rest) = rest {
+                    map.insert("items".into(), self.process(rest));
+                }
+                Value::Object(map)
+            }
+            Kind::Object { shape, catchall } => {
+                let mut properties = Map::new();
+                let mut required = Vec::new();
+                for (key, child) in shape {
+                    properties.insert(key.clone(), self.process(child));
+                    if !matches!(child.0.kind, Kind::Optional(_)) {
+                        required.push(json!(key));
+                    }
+                }
+                let mut map = Map::new();
+                map.insert("type".into(), json!("object"));
+                map.insert("properties".into(), Value::Object(properties));
+                if !required.is_empty() {
+                    map.insert("required".into(), Value::Array(required));
+                }
+                match catchall {
+                    Catchall::Strip | Catchall::Strict => {
+                        map.insert("additionalProperties".into(), json!(false));
+                    }
+                    Catchall::Loose => {}
+                    Catchall::Schema(rest) => {
+                        let rest = self.process(rest);
+                        map.insert("additionalProperties".into(), rest);
+                    }
+                }
+                Value::Object(map)
+            }
+            Kind::Record(key, value) => json!({
+                "type": "object",
+                "propertyNames": self.process(key),
+                "additionalProperties": self.process(value),
+            }),
+            Kind::Union(options) | Kind::DiscriminatedUnion(_, options) => {
+                let options: Vec<Value> =
+                    options.iter().map(|option| self.process(option)).collect();
+                json!({ "anyOf": options })
+            }
+            Kind::Intersection(left, right) => {
+                json!({ "allOf": [self.process(left), self.process(right)] })
+            }
+            Kind::Optional(inner) | Kind::NonOptional(inner) | Kind::Catch(inner, _) => {
+                self.process(inner)
+            }
+            Kind::Nullable(inner) => json!({ "anyOf": [self.process(inner), { "type": "null" }] }),
+            Kind::Default(inner, default) | Kind::Prefault(inner, default) => {
+                let mut json = self.process(inner);
+                if let Value::Object(map) = &mut json {
+                    map.insert("default".into(), default.get());
+                }
+                json
+            }
+            Kind::Pipe(input, output) => {
+                if matches!(output.0.kind, Kind::Transform(_) | Kind::TransformOpt(_)) {
+                    self.process(input)
+                } else {
+                    self.process(output)
+                }
+            }
+            Kind::Preprocess(_, inner) => self.process(inner),
+            Kind::Lazy(..) => {
+                let target = schema.resolve_lazy();
+                self.lazy_ref(&target)
+            }
+        }
+    }
+}
+
+/// Keeps the tightest bound when a check repeats (`min` keeps the largest).
+fn insert_max(map: &mut Map<String, Value>, key: &str, n: usize, keep_larger: bool) {
+    let current = map.get(key).and_then(Value::as_u64).map(|v| v as usize);
+    let next = match current {
+        Some(current) if keep_larger => current.max(n),
+        Some(current) => current.min(n),
+        None => n,
+    };
+    map.insert(key.into(), json!(next));
 }

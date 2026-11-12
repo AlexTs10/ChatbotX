@@ -19,7 +19,7 @@ pub fn is_copyable_text(value: &str) -> bool {
     length > 0 && length <= COPY_TEXT_MAX
 }
 
-fn is_valid_authored_copy_text(value: &Value) -> bool {
+pub(crate) fn is_valid_authored_copy_text(value: &Value) -> bool {
     let text = value.as_str().unwrap_or("");
     if crate::utils::variables::contains_variable_placeholder(text) {
         crate::js::utf16_len(text) <= COPY_TEXT_EXPRESSION_MAX

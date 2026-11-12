@@ -38,7 +38,7 @@ fn is_e164_phone_number(value: &str) -> bool {
     normalize_dialable_phone_number(value).as_deref() == Some(value)
 }
 
-fn is_valid_authored_phone_number(value: &Value) -> bool {
+pub(crate) fn is_valid_authored_phone_number(value: &Value) -> bool {
     let text = value.as_str().unwrap_or("");
     if crate::utils::variables::contains_variable_placeholder(text) {
         crate::js::utf16_len(text) <= PHONE_NUMBER_EXPRESSION_MAX
