@@ -606,13 +606,11 @@ pub fn tz_to_date(text: &str, time_zone: Option<&str>) -> Option<i64> {
         .captures(date_part)
     {
         (m[1].parse::<i64>().ok()?, &date_part[4..])
-    } else if let Some(m) = YYYYYY
-        .get_or_init(|| Regex::new("^([+-][0-9]{6})").expect("re"))
-        .captures(date_part)
-    {
-        (m[1].parse::<i64>().ok()?, &date_part[7..])
     } else {
-        return None;
+        let m = YYYYYY
+            .get_or_init(|| Regex::new("^([+-][0-9]{6})").expect("re"))
+            .captures(date_part)?;
+        (m[1].parse::<i64>().ok()?, &date_part[7..])
     };
     static MM: OnceLock<Regex> = OnceLock::new();
     static MMDD: OnceLock<Regex> = OnceLock::new();
@@ -627,10 +625,10 @@ pub fn tz_to_date(text: &str, time_zone: Option<&str>) -> Option<i64> {
             return None;
         }
         js::date_utc(year, month - 1, 1, 0, 0, 0, 0)
-    } else if let Some(c) = MMDD
-        .get_or_init(|| Regex::new("^-?([0-9]{2})-?([0-9]{2})$").expect("re"))
-        .captures(rest)
-    {
+    } else {
+        let c = MMDD
+            .get_or_init(|| Regex::new("^-?([0-9]{2})-?([0-9]{2})$").expect("re"))
+            .captures(rest)?;
         let month: i64 = c[1].parse().ok()?;
         let day: i64 = c[2].parse().ok()?;
         if !(1..=12).contains(&month)
@@ -640,8 +638,6 @@ pub fn tz_to_date(text: &str, time_zone: Option<&str>) -> Option<i64> {
             return None;
         }
         js::date_utc(year, month - 1, day, 0, 0, 0, 0)
-    } else {
-        return None;
     };
     let mut time_ms = 0f64;
     if let Some(time) = time.as_deref().filter(|t| !t.is_empty()) {
@@ -668,7 +664,8 @@ pub fn tz_to_date(text: &str, time_zone: Option<&str>) -> Option<i64> {
                 return None;
             }
             time_ms = (hours % 24.0) * 3_600_000.0 + minutes * 60_000.0;
-        } else if let Some(c) = hhmmss.captures(time) {
+        } else {
+            let c = hhmmss.captures(time)?;
             let hours: f64 = c[1].parse().ok()?;
             let minutes: f64 = c[2].parse().ok()?;
             let seconds = parse_fraction_ms(&c[3], frac(c.get(4)).as_deref(), 1.0);
@@ -679,8 +676,6 @@ pub fn tz_to_date(text: &str, time_zone: Option<&str>) -> Option<i64> {
                 return None;
             }
             time_ms = (hours % 24.0) * 3_600_000.0 + minutes * 60_000.0 + seconds * 1000.0;
-        } else {
-            return None;
         }
     }
     let local = date_ms as f64 + time_ms;

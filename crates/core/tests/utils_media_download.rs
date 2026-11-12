@@ -1,6 +1,7 @@
 //! Port of `packages/utils/__tests__/media-download.test.ts`. The stubbed
 //! `fetch` / `Response` become a fake `MediaFetcher` / `MediaBody` that
 //! count reads and cancels; the abort signal is the timeout passed to fetch.
+#![allow(clippy::type_complexity)] // P3.1 orchestrator: style lint in locked ported test
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

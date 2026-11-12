@@ -451,7 +451,7 @@ fn meridiem_patterns() -> &'static [(&'static str, Regex)] {
             .map(|(marker, aliases)| {
                 let mut sorted: Vec<&str> = aliases.to_vec();
                 // Stable sort by UTF-16 length, longest first.
-                sorted.sort_by(|a, b| js::utf16_len(b).cmp(&js::utf16_len(a)));
+                sorted.sort_by_key(|a| std::cmp::Reverse(js::utf16_len(a)));
                 let alternatives: Vec<String> = sorted.iter().map(|a| escape_regexp(a)).collect();
                 let pattern = format!(r"(?i)([0-9])\s*(?:{})\.?$", alternatives.join("|"));
                 (marker, Regex::new(&pattern).expect("valid regex"))

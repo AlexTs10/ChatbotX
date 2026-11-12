@@ -1,4 +1,5 @@
 //! Port of `packages/utils/__tests__/whatsapp-call.test.ts`.
+#![allow(clippy::bool_assert_comparison)] // P3.1 orchestrator: style lint in locked ported test
 
 use chatbotx_core::utils::whatsapp_call::{WhatsappCallMediaToggles, transcribes_calls};
 

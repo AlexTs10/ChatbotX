@@ -525,8 +525,8 @@ pub fn compute_next_occurrence(
         return Ok(None);
     }
     let end_date = last_eligible_date(rule);
-    let mut period = (period_index_of(rule, &local_date_of(after_ms, &rule.timezone)) - 1).max(0);
-    for _ in 0..MAX_PERIOD_STEPS {
+    let first = (period_index_of(rule, &local_date_of(after_ms, &rule.timezone)) - 1).max(0);
+    for period in (first..).take(MAX_PERIOD_STEPS) {
         for date in dates_of_period(rule, period) {
             if end_date.is_some_and(|end| date.as_str() > end) {
                 return Ok(None);
@@ -536,7 +536,6 @@ pub fn compute_next_occurrence(
                 return Ok(Some(instant));
             }
         }
-        period += 1;
     }
     Err(StepLimitExceeded)
 }

@@ -3,6 +3,7 @@
 //! step uses `chrono-tz` directly (the original uses date-fns-tz
 //! `fromZonedTime`; every rule runs at 12:00, which no zone here skips or
 //! repeats).
+#![allow(clippy::double_ended_iterator_last)] // P3.1 orchestrator: style lint in locked ported test
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

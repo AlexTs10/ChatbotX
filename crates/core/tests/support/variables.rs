@@ -2,7 +2,7 @@
 //! each `vi.fn()` mock becomes a configurable answer in [`FakeState`], and
 //! every call is recorded as `name(arg, arg, ...)` so the
 //! `toHaveBeenCalledWith` assertions can be checked.
-
+#![allow(clippy::redundant_closure)] // P3.1 orchestrator: style lint in locked ported test
 #![allow(dead_code)]
 
 use std::collections::HashMap;

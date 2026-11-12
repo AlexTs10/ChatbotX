@@ -185,7 +185,7 @@ pub fn decode_invisible_google_click(text: &str) -> DecodedGoogleClick {
     let mut candidates: Vec<Vec<(usize, &str)>> = vec![runs.clone()];
     if runs.len() > 1 {
         let mut by_length = runs.clone();
-        by_length.sort_by(|a, b| b.1.chars().count().cmp(&a.1.chars().count()));
+        by_length.sort_by_key(|a| std::cmp::Reverse(a.1.chars().count()));
         candidates.extend(by_length.into_iter().map(|run| vec![run]));
     }
     candidates
@@ -197,7 +197,7 @@ pub fn decode_invisible_google_click(text: &str) -> DecodedGoogleClick {
 /// `stripConsumedRuns`: removes only the decoded runs.
 pub fn strip_consumed_runs(text: &str, consumed: &[ConsumedRun]) -> String {
     let mut runs = consumed.to_vec();
-    runs.sort_by(|a, b| b.start.cmp(&a.start));
+    runs.sort_by_key(|a| std::cmp::Reverse(a.start));
     runs.into_iter()
         .fold(text.to_owned(), |kept, ConsumedRun { start, end }| {
             match (kept.get(..start), kept.get(end..)) {

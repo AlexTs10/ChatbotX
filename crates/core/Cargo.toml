@@ -17,6 +17,7 @@ futures = { workspace = true }
 http = { workspace = true }
 icu_normalizer = { workspace = true }
 image = { workspace = true }
+jpeg-decoder = { workspace = true }
 jpeg-encoder = { workspace = true }
 regex = { workspace = true }
 ring = { workspace = true }

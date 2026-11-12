@@ -167,6 +167,15 @@ pub struct ConnectionConfigField {
     pub description: Option<String>,
 }
 
+/// `selfServeSecretSchema`: the one-time credential a self-serve connect
+/// returns exactly once (`{ "kind": "api_channel_token", "token": … }`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum SelfServeSecret {
+    #[serde(rename = "api_channel_token")]
+    ApiChannelToken { token: String },
+}
+
 /// The JSON Schema subset `z.toJSONSchema` emits for a provider config
 /// object (the Rust input in place of the zod object; property order is
 /// kept).
@@ -630,4 +639,25 @@ pub fn connect_failure_cause_of(error: &Value) -> Option<ConnectFailureCause> {
     candidate
         .and_then(Value::as_str)
         .and_then(ConnectFailureCause::parse)
+}
+
+#[cfg(test)]
+mod self_serve_secret_tests {
+    use super::SelfServeSecret;
+
+    #[test]
+    fn keeps_the_wire_shape() {
+        let secret = SelfServeSecret::ApiChannelToken { token: "t".into() };
+        let json = serde_json::to_value(&secret).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "kind": "api_channel_token", "token": "t" })
+        );
+        assert!(
+            serde_json::from_value::<SelfServeSecret>(
+                serde_json::json!({ "kind": "other", "token": "t" })
+            )
+            .is_err()
+        );
+    }
 }

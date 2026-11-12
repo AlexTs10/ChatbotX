@@ -232,6 +232,8 @@ pub fn string_of(value: &serde_json::Value) -> String {
 
 /// `decodeURIComponent`: `Err` (URIError) on a malformed escape or
 /// invalid UTF-8.
+// `URIError` carries nothing the callers use; the unit error mirrors it.
+#[allow(clippy::result_unit_err)]
 pub fn decode_uri_component(text: &str) -> Result<String, ()> {
     let bytes = text.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());

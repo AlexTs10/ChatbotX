@@ -2,6 +2,7 @@
 //! uploader mock records its calls; the logger mock is a `tracing`
 //! recorder (fields in snake_case); each test has its own `EncodeSlots` and
 //! an env map with `stubGenerousEncodeTimeout` (60 s).
+#![allow(clippy::too_many_arguments)] // P3.1 orchestrator: style lint in locked ported test
 
 #[path = "support/images.rs"]
 mod images;

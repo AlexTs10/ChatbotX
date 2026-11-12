@@ -207,3 +207,24 @@ impl<'a, S: VariableSources> Variables<'a, S> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The server runs renders on a multi-threaded runtime: the futures
+    /// must be `Send` for any `Send` sources.
+    #[allow(dead_code)]
+    fn renders_are_send<S: VariableSources>(v: &Variables<'_, S>, ctx: &VariableContext) {
+        fn is_send<T: Send>(_: T) {}
+        is_send(v.replace_all("{{first_name}}", ctx, None));
+        is_send(v.get_all(contact_variable::GetAllInput::default()));
+        is_send(v.resolve_contact_variables_deep(
+            "c",
+            &serde_json::Value::Null,
+            deep_replace::DeepSource::default(),
+            deep_replace::DeepOptions::default(),
+        ));
+        is_send(v.get_system_field_value(ctx, SystemFieldType::Me));
+    }
+}

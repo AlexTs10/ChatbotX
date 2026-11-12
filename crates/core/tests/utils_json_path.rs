@@ -1,5 +1,6 @@
 //! Port of `packages/utils/__tests__/json-path.test.ts`. `undefined` is
 //! `None`; object keys iterate in `serde_json` map order (sorted).
+#![allow(clippy::useless_vec)] // P3.1 orchestrator: style lint in locked ported test
 
 use chatbotx_core::utils::json_path::{
     JsonPathEntry, JsonPathSegment, canonicalize_json_path, format_json_path, is_jsonb_storable,

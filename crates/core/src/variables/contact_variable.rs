@@ -19,6 +19,8 @@ use super::{
 
 /// The `contactInbox` of `getAll`: a loaded row, an id to load, or none.
 #[derive(Debug, Clone, Default, PartialEq)]
+// One per render, moved into the context: boxing the row buys nothing.
+#[allow(clippy::large_enum_variant)]
 pub enum ContactInboxArg {
     Model(ContactInboxModel),
     Id(String),

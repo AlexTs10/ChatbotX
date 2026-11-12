@@ -71,6 +71,40 @@ fn is_animated_webp(bytes: &[u8]) -> bool {
     image::codecs::webp::WebPDecoder::new(Cursor::new(bytes)).is_ok_and(|d| d.has_animation())
 }
 
+/// A JPEG's pixels through `jpeg-decoder` (RGB, grayscale or CMYK).
+fn decode_jpeg(bytes: &[u8]) -> Result<DynamicImage, String> {
+    let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(bytes));
+    let pixels = decoder.decode().map_err(|e| e.to_string())?;
+    let info = decoder.info().ok_or("missing JPEG header")?;
+    let (w, h) = (u32::from(info.width), u32::from(info.height));
+    let image = match info.pixel_format {
+        jpeg_decoder::PixelFormat::RGB24 => {
+            image::RgbImage::from_raw(w, h, pixels).map(DynamicImage::ImageRgb8)
+        }
+        jpeg_decoder::PixelFormat::L8 => {
+            image::GrayImage::from_raw(w, h, pixels).map(DynamicImage::ImageLuma8)
+        }
+        jpeg_decoder::PixelFormat::L16 => {
+            let wide: Vec<u16> = pixels
+                .chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect();
+            image::ImageBuffer::from_raw(w, h, wide).map(DynamicImage::ImageLuma16)
+        }
+        jpeg_decoder::PixelFormat::CMYK32 => {
+            let rgb: Vec<u8> = pixels
+                .chunks_exact(4)
+                .flat_map(|p| {
+                    let k = 255 - u16::from(p[3]);
+                    [0, 1, 2].map(|i| ((255 - u16::from(p[i])) * k / 255) as u8)
+                })
+                .collect();
+            image::RgbImage::from_raw(w, h, rgb).map(DynamicImage::ImageRgb8)
+        }
+    };
+    image.ok_or_else(|| "JPEG pixel buffer has the wrong size".to_owned())
+}
+
 fn resize_inside(image: DynamicImage, max: u32) -> DynamicImage {
     if image.width() <= max && image.height() <= max {
         return image;
@@ -138,7 +172,15 @@ fn encode(
     }
     let mut decoder = reader.into_decoder().map_err(|e| e.to_string())?;
     let orientation = decoder.orientation().map_err(|e| e.to_string())?;
-    let mut image = DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
+    let mut image = if format == ImageFormat::Jpeg {
+        // zune-jpeg (image's JPEG decoder) misdecodes some valid 4:2:0
+        // files with optimized Huffman tables (libjpeg and jpeg-decoder
+        // agree); the pixels come from jpeg-decoder, the orientation from
+        // the EXIF read above.
+        decode_jpeg(bytes)?
+    } else {
+        DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?
+    };
     if profile == ImageOptimizeProfile::Media && image.color().has_alpha() {
         let opaque = image.to_rgba8().pixels().all(|p| p.0[3] == 255);
         if !opaque {

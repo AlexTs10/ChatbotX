@@ -124,3 +124,33 @@ pub fn capitalize_first_letter(value: Option<&str>) -> Option<String> {
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn interpolate_trims_names_and_keeps_unknown_literal() {
+        let m = map(&[("first_name", "Ada")]);
+        assert_eq!(
+            interpolate("Hi {{ first_name }} {{x}}", &m, true),
+            "Hi Ada {{x}}"
+        );
+        assert_eq!(extract_variables("{{a}}{{ a }}{{b}}"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn gender_is_cased_by_position_only_in_prose() {
+        let m = map(&[("gender", "Anh")]);
+        let text = "{{gender}} ơi. \"{{gender}}\" và {{gender}}";
+        assert_eq!(interpolate(text, &m, true), "Anh ơi. \"Anh\" và anh");
+        assert_eq!(interpolate(text, &m, false), "Anh ơi. \"Anh\" và Anh");
+    }
+}

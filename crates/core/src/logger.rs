@@ -7,6 +7,7 @@
 //! - `logDiagnostic` → [`log_diagnostic`]: a `tracing` event at `debug`, or
 //!   `info` with `LOG_DEBUG=true`, whose data is one JSON `data` field.
 
+use std::fmt;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -343,19 +344,40 @@ pub fn log_diagnostic_at(
     build_data: impl FnOnce() -> Map<String, Value>,
     message: &str,
 ) {
+    // The data is built when a layer that accepted the event formats the
+    // field, so `build_data` never runs for a level nobody records (the
+    // callsite's cached interest can say "enabled" for a subscriber whose
+    // per-layer filter then drops the event).
+    let data = LazyData::new(build_data);
     match level {
-        DiagnosticLevel::Info => {
-            if tracing::enabled!(tracing::Level::INFO) {
-                let data = Value::Object(build_data()).to_string();
-                tracing::info!(data = %data, "{message}");
-            }
+        DiagnosticLevel::Info => tracing::info!(data = %data, "{message}"),
+        DiagnosticLevel::Debug => tracing::debug!(data = %data, "{message}"),
+    }
+}
+
+/// The `data` field of a diagnostic: `build_data`'s JSON, built on the
+/// first format and reused by later layers.
+struct LazyData<F> {
+    build: std::cell::Cell<Option<F>>,
+    json: std::cell::OnceCell<String>,
+}
+
+impl<F: FnOnce() -> Map<String, Value>> LazyData<F> {
+    fn new(build: F) -> Self {
+        LazyData {
+            build: std::cell::Cell::new(Some(build)),
+            json: std::cell::OnceCell::new(),
         }
-        DiagnosticLevel::Debug => {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                let data = Value::Object(build_data()).to_string();
-                tracing::debug!(data = %data, "{message}");
-            }
-        }
+    }
+}
+
+impl<F: FnOnce() -> Map<String, Value>> fmt::Display for LazyData<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let json = self.json.get_or_init(|| match self.build.take() {
+            Some(build) => Value::Object(build()).to_string(),
+            None => String::new(),
+        });
+        f.write_str(json)
     }
 }
 
