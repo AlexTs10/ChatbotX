@@ -52,7 +52,16 @@ pub fn get_safe_since_time(
     time: Option<SinceTimeInput<'_>>,
     buffer_ms: Option<i64>,
 ) -> Option<i64> {
-    todo!("P3.3")
+    let ts = match time? {
+        SinceTimeInput::Date(ms) => ms,
+        SinceTimeInput::Ms(0) | SinceTimeInput::Text("") => return None,
+        SinceTimeInput::Ms(ms) => ms,
+        SinceTimeInput::Text(text) => parse_iso(text)?,
+    };
+    match buffer_ms {
+        Some(buffer) => Some((ts - buffer).div_euclid(HOUR_MS) * HOUR_MS),
+        None => Some(ts.div_euclid(HOUR_MS) * HOUR_MS - HOUR_MS),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -404,7 +413,9 @@ fn since_required(method: &str) -> Error {
 
 /// `isMessagePrimaryKeyViolation`.
 pub fn is_message_primary_key_violation(error: &Error) -> bool {
-    todo!("P3.3")
+    error.as_db().is_some_and(|e| {
+        e.is_unique_violation() && e.constraint().is_some_and(|c| c.ends_with("Message_pkey"))
+    })
 }
 
 fn json_opt_text(value: &Option<JsonValue>) -> Result<Value> {
@@ -794,7 +805,10 @@ fn source_key(message: &CreateMessageInput) -> Option<&str> {
 
 /// `create`.
 pub fn create(conn: &Connection, message: &CreateMessageInput) -> Result<Message> {
-    todo!("P3.3")
+    with_primary_key_collision_recovery(message, |input| {
+        insert_message(conn, input, false)?
+            .ok_or_else(|| Error::msg("message insert returned no row"))
+    })
 }
 
 /// `bulkCreate`: chunks of 1000, `ON CONFLICT (contactInboxId, sourceId, createdAt) DO NOTHING`.
@@ -802,7 +816,29 @@ pub fn bulk_create(
     conn: &Connection,
     messages: &[CreateMessageInput],
 ) -> Result<Vec<CreatedMessageRef>> {
-    todo!("P3.3")
+    let Some(first) = messages.first() else {
+        return Ok(Vec::new());
+    };
+    if messages
+        .iter()
+        .any(|m| m.workspace_id != first.workspace_id)
+    {
+        return Err(Error::msg(
+            "bulkCreate: all messages must belong to the same workspace",
+        ));
+    }
+    let mut inserted = Vec::new();
+    for chunk in messages.chunks(BULK_CREATE_CHUNK_SIZE) {
+        for message in chunk {
+            if let Some(row) = insert_message(conn, &with_created_at(message), true)? {
+                inserted.push(CreatedMessageRef {
+                    id: row.id,
+                    source_id: row.source_id,
+                });
+            }
+        }
+    }
+    Ok(inserted)
 }
 
 /// `bulkCreateAttachments` (returns the ids).
@@ -810,7 +846,11 @@ pub fn bulk_create_attachments(
     conn: &Connection,
     attachments: &[CreateAttachmentInput],
 ) -> Result<Vec<i64>> {
-    todo!("P3.3")
+    let mut ids = Vec::with_capacity(attachments.len());
+    for attachment in attachments {
+        ids.push(insert_attachment(conn, attachment)?.id);
+    }
+    Ok(ids)
 }
 
 fn create_with_attachments_internal(
@@ -843,7 +883,10 @@ pub fn create_with_attachments(
     message: &CreateMessageInput,
     attachments: &[CreateAttachmentInput],
 ) -> Result<MessageWithAttachments> {
-    todo!("P3.3")
+    with_primary_key_collision_recovery(message, |input| {
+        create_with_attachments_internal(conn, input, attachments, false)?
+            .ok_or_else(|| shard_unavailable("createWithAttachments: insert returned no row"))
+    })
 }
 
 /// `createOrUpdate`: dedup guard read, idempotent insert, re-read on a dedup conflict.
@@ -851,7 +894,75 @@ pub fn create_or_update(
     conn: &Connection,
     message: &CreateMessageInput,
 ) -> Result<CreateMessageResult> {
-    todo!("P3.3")
+    let Some(source_id) = source_key(message) else {
+        return Ok(CreateMessageResult {
+            message: create(conn, message)?,
+            is_new: true,
+        });
+    };
+    let since = dedup_since(message);
+    if let Some(existing) = find_by_source_id(
+        conn,
+        source_id,
+        message.conversation_id,
+        message.workspace_id,
+        since,
+    )? {
+        return Ok(CreateMessageResult {
+            message: existing,
+            is_new: false,
+        });
+    }
+    let created =
+        with_primary_key_collision_recovery(message, |input| insert_message(conn, input, true));
+    let created = match created {
+        Ok(v) => v,
+        Err(error) => {
+            log_save_failure("createOrUpdate", message, &error);
+            return Err(error);
+        }
+    };
+    if let Some(created) = created {
+        return Ok(CreateMessageResult {
+            message: created,
+            is_new: true,
+        });
+    }
+    let raced = match find_by_source_id(
+        conn,
+        source_id,
+        message.conversation_id,
+        message.workspace_id,
+        since,
+    )? {
+        Some(row) => Some(row),
+        None => find_on_write_by_source(conn, message)?,
+    };
+    tracing::info!(
+        conversationId = message.conversation_id,
+        sourceId = source_id,
+        workspaceId = message.workspace_id,
+        found = raced.is_some(),
+        "Duplicate message skipped (dedup conflict)"
+    );
+    match raced {
+        Some(row) => Ok(CreateMessageResult {
+            message: row,
+            is_new: false,
+        }),
+        None => {
+            tracing::warn!(
+                conversationId = message.conversation_id,
+                sourceId = source_id,
+                workspaceId = message.workspace_id,
+                "Dedup conflict but row unreadable even on the write shard"
+            );
+            Ok(CreateMessageResult {
+                message: message_from_input(message),
+                is_new: false,
+            })
+        }
+    }
 }
 
 /// `createOrUpdateWithAttachments`.
@@ -860,7 +971,98 @@ pub fn create_or_update_with_attachments(
     message: &CreateMessageInput,
     attachments: &[CreateAttachmentInput],
 ) -> Result<CreateWithAttachmentsResult> {
-    todo!("P3.3")
+    let Some(source_id) = source_key(message) else {
+        let created = with_primary_key_collision_recovery(message, |input| {
+            create_with_attachments_internal(conn, input, attachments, false)?.ok_or_else(|| {
+                shard_unavailable("createOrUpdateWithAttachments: insert returned no row")
+            })
+        })?;
+        return Ok(CreateWithAttachmentsResult {
+            result: created,
+            is_new: true,
+        });
+    };
+    let build_existing = |existing: Message| -> Result<CreateWithAttachmentsResult> {
+        let found = find_by_id(
+            conn,
+            &FindMessageByIdParams {
+                conversation_id: None,
+                created_at: existing.created_at,
+                id: existing.id,
+                workspace_id: message.workspace_id,
+            },
+        )?;
+        Ok(CreateWithAttachmentsResult {
+            result: found.unwrap_or(MessageWithAttachments {
+                message: existing,
+                attachment_count: None,
+                attachments: Vec::new(),
+            }),
+            is_new: false,
+        })
+    };
+    let since = dedup_since(message);
+    if let Some(existing) = find_by_source_id(
+        conn,
+        source_id,
+        message.conversation_id,
+        message.workspace_id,
+        since,
+    )? {
+        return build_existing(existing);
+    }
+    let created = with_primary_key_collision_recovery(message, |input| {
+        create_with_attachments_internal(conn, input, attachments, true)
+    });
+    let created = match created {
+        Ok(v) => v,
+        Err(error) => {
+            log_save_failure("createOrUpdateWithAttachments", message, &error);
+            return Err(error);
+        }
+    };
+    if let Some(created) = created {
+        return Ok(CreateWithAttachmentsResult {
+            result: created,
+            is_new: true,
+        });
+    }
+    let raced = match find_by_source_id(
+        conn,
+        source_id,
+        message.conversation_id,
+        message.workspace_id,
+        since,
+    )? {
+        Some(row) => Some(row),
+        None => find_on_write_by_source(conn, message)?,
+    };
+    tracing::info!(
+        conversationId = message.conversation_id,
+        sourceId = source_id,
+        workspaceId = message.workspace_id,
+        found = raced.is_some(),
+        "Duplicate message skipped (dedup conflict)"
+    );
+    match raced {
+        Some(row) => build_existing(row),
+        None => {
+            tracing::warn!(
+                conversationId = message.conversation_id,
+                sourceId = source_id,
+                workspaceId = message.workspace_id,
+                "Dedup conflict but row unreadable even on the write shard"
+            );
+            Ok(CreateWithAttachmentsResult {
+                result: MessageWithAttachments {
+                    message: message_from_input(message),
+                    attachment_count: None,
+                    attachments: Vec::new(),
+                },
+                is_new: false,
+            })
+        }
+    }
 }
 
 /// `updateContentAttributes`.
@@ -871,7 +1073,11 @@ pub fn update_content_attributes(
     content_attributes: &JsonValue,
     created_at: i64,
 ) -> Result<Option<i64>> {
-    todo!("P3.3")
+    let set = set_value(
+        "contentAttributes",
+        json_opt_text(&Some(content_attributes.clone()))?,
+    );
+    Ok(update_by_key(conn, message_id, workspace_id, created_at, set, None)?.map(|r| r.id))
 }
 
 /// `updateMessageAttributes` (`{ liked, hidden }`).
@@ -883,7 +1089,9 @@ pub fn update_message_attributes(
     hidden: bool,
     created_at: i64,
 ) -> Result<Option<i64>> {
-    todo!("P3.3")
+    let attributes = serde_json::json!({ "liked": liked, "hidden": hidden });
+    let set = set_value("attributes", Value::Text(attributes.to_string()));
+    Ok(update_by_key(conn, message_id, workspace_id, created_at, set, None)?.map(|r| r.id))
 }
 
 /// `updateMessageText`.
@@ -894,7 +1102,8 @@ pub fn update_message_text(
     new_text: &str,
     created_at: i64,
 ) -> Result<Option<MessageRef>> {
-    todo!("P3.3")
+    let set = set_value("text", Value::Text(new_text.to_owned()));
+    update_by_key(conn, message_id, workspace_id, created_at, set, None)
 }
 
 /// `updateTextBySourceId`.
@@ -904,7 +1113,10 @@ pub fn update_text_by_source_id(
     workspace_id: i64,
     new_text: &str,
 ) -> Result<Option<MessageRef>> {
-    todo!("P3.3")
+    let mut set = set_value("text", Value::Text(new_text.to_owned()));
+    set.push(", \"updatedAt\" = ");
+    set.push_bind(now_ms());
+    patch_by_source_id(conn, source_id, workspace_id, set)
 }
 
 /// `updateContentBySourceId` (an empty patch still bumps `updatedAt`).
@@ -914,7 +1126,16 @@ pub fn update_content_by_source_id(
     workspace_id: i64,
     patch: &ContentBySourcePatch,
 ) -> Result<Option<i64>> {
-    todo!("P3.3")
+    let mut set = Sql::bind("\"updatedAt\" = ", now_ms());
+    if let Some(text) = &patch.text {
+        set.push(", \"text\" = ");
+        set.push_bind(opt_text(text.as_deref()));
+    }
+    if let Some(ca) = &patch.content_attributes {
+        set.push(", \"contentAttributes\" = ");
+        set.push_bind(json_opt_text(ca)?);
+    }
+    Ok(patch_by_source_id(conn, source_id, workspace_id, set)?.map(|r| r.id))
 }
 
 /// `mergeContentAttributesBySourceId`: one jsonb-merge UPDATE (never a whole-column overwrite).
@@ -924,7 +1145,23 @@ pub fn merge_content_attributes_by_source_id(
     workspace_id: i64,
     overlay: &Map<String, JsonValue>,
 ) -> Result<Option<MergedContentAttributes>> {
-    todo!("P3.3")
+    let mut q = Sql::raw("UPDATE \"Message\" SET \"contentAttributes\" = ");
+    q.append(merge_object_sql("contentAttributes", overlay)?);
+    q.push(", \"updatedAt\" = ");
+    q.push_bind(now_ms());
+    q.push(" WHERE \"sourceId\" = ");
+    q.push_bind(source_id.to_owned());
+    q.push(" AND \"workspaceId\" = ");
+    q.push_bind(workspace_id);
+    q.push(" RETURNING \"id\", \"contentAttributes\"");
+    let rows = q.query_map(conn, |r| {
+        let ca: Option<Json> = r.get(1)?;
+        Ok(MergedContentAttributes {
+            id: r.get(0)?,
+            content_attributes: ca.map(|j| j.0),
+        })
+    })?;
+    Ok(rows.into_iter().next())
 }
 
 /// `claimContentAttributes`: merges `overlay` only while `contentAttributes -> guardKey` is
@@ -933,7 +1170,22 @@ pub fn claim_content_attributes(
     conn: &Connection,
     params: &ClaimContentAttributesParams,
 ) -> Result<Option<i64>> {
-    todo!("P3.3")
+    let mut set = Sql::raw("\"contentAttributes\" = ");
+    set.append(merge_object_sql("contentAttributes", &params.overlay)?);
+    let guard = Sql::bind(
+        "json_type(\"contentAttributes\", '$.\"' || ",
+        Value::Text(params.guard_key.clone()),
+    )
+    .closed(" || '\"') IS NULL");
+    Ok(update_by_key(
+        conn,
+        params.message_id,
+        params.workspace_id,
+        params.created_at,
+        set,
+        Some(guard),
+    )?
+    .map(|r| r.id))
 }
 
 /// `bulkPatchContentAttributes` (needs `sinceTime`).
@@ -941,7 +1193,34 @@ pub fn bulk_patch_content_attributes(
     conn: &Connection,
     params: &BulkPatchContentAttributesParams,
 ) -> Result<()> {
-    todo!("P3.3")
+    if params.patches.is_empty() {
+        return Ok(());
+    }
+    let Some(since) = params.since_time else {
+        return Err(since_required("bulkPatchContentAttributes"));
+    };
+    for patch in &params.patches {
+        let mut q = Sql::raw("UPDATE \"Message\" SET ");
+        if let Some(text) = &patch.text {
+            q.push("\"text\" = ");
+            q.push_bind(opt_text(text.as_deref()));
+            q.push(", ");
+        }
+        q.push("\"contentAttributes\" = ");
+        q.append(merge_object_sql("contentAttributes", &patch.overlay)?);
+        q.push(", \"updatedAt\" = ");
+        q.push_bind(now_ms());
+        q.push(" WHERE \"workspaceId\" = ");
+        q.push_bind(params.workspace_id);
+        q.push(" AND \"contactInboxId\" = ");
+        q.push_bind(patch.contact_inbox_id);
+        q.push(" AND \"sourceId\" = ");
+        q.push_bind(patch.source_id.clone());
+        q.push(" AND \"createdAt\" >= ");
+        q.push_bind(since);
+        q.execute(conn)?;
+    }
+    Ok(())
 }
 
 /// `deleteAttachmentsByMessageId`.
@@ -951,7 +1230,11 @@ pub fn delete_attachments_by_message_id(
     workspace_id: i64,
     _created_at: i64,
 ) -> Result<()> {
-    todo!("P3.3")
+    conn.execute(
+        "DELETE FROM \"Attachment\" WHERE \"messageId\" = ?1 AND \"workspaceId\" = ?2",
+        rusqlite::params![message_id, workspace_id],
+    )?;
+    Ok(())
 }
 
 /// `updateSendError`.
@@ -962,7 +1245,8 @@ pub fn update_send_error(
     workspace_id: i64,
     created_at: i64,
 ) -> Result<Option<i64>> {
-    todo!("P3.3")
+    let set = set_value("sendError", opt_text(send_error));
+    Ok(update_by_key(conn, id, workspace_id, created_at, set, None)?.map(|r| r.id))
 }
 
 /// `updateSourceId`.
@@ -973,7 +1257,8 @@ pub fn update_source_id(
     workspace_id: i64,
     created_at: i64,
 ) -> Result<Option<i64>> {
-    todo!("P3.3")
+    let set = set_value("sourceId", Value::Text(source_id.to_owned()));
+    Ok(update_by_key(conn, id, workspace_id, created_at, set, None)?.map(|r| r.id))
 }
 
 /// `deleteBySourceId`: soft-deletes the row and its children (`parentId` = the row id). The
@@ -984,7 +1269,43 @@ pub fn delete_by_source_id(
     workspace_id: i64,
     _created_at: i64,
 ) -> Result<Vec<MessageRef>> {
-    todo!("P3.3")
+    let parent: Option<i64> = Sql::new(
+        "SELECT \"id\" FROM \"Message\" WHERE \"workspaceId\" = ?1 AND \"sourceId\" = ?2 LIMIT 1",
+        vec![
+            Value::Integer(workspace_id),
+            Value::Text(source_id.to_owned()),
+        ],
+    )
+    .query_map(conn, |r| r.get(0))?
+    .into_iter()
+    .next();
+    let now = now_ms();
+    let mut q = Sql::raw("UPDATE \"Message\" SET \"deletedAt\" = ");
+    q.push_bind(now);
+    q.push(", \"updatedAt\" = ");
+    q.push_bind(now);
+    q.push(" WHERE \"workspaceId\" = ");
+    q.push_bind(workspace_id);
+    q.push(" AND (\"sourceId\" = ");
+    q.push_bind(source_id.to_owned());
+    if let Some(parent_id) = parent {
+        q.push(" OR \"parentId\" = ");
+        q.push_bind(parent_id.to_string());
+    }
+    q.push(") RETURNING \"conversationId\", \"id\"");
+    let rows = q.query_map(conn, |r| {
+        Ok(MessageRef {
+            conversation_id: r.get(0)?,
+            id: r.get(1)?,
+        })
+    })?;
+    let mut out: Vec<MessageRef> = Vec::new();
+    for row in rows {
+        if !out.iter().any(|r| r.id == row.id) {
+            out.push(row);
+        }
+    }
+    Ok(out)
 }
 
 /// `deleteById` (soft delete; returns the ids).
@@ -994,7 +1315,19 @@ pub fn delete_by_id(
     workspace_id: i64,
     created_at: i64,
 ) -> Result<Vec<i64>> {
-    todo!("P3.3")
+    let now = now_ms();
+    let rows = Sql::new(
+        "UPDATE \"Message\" SET \"deletedAt\" = ?1, \"updatedAt\" = ?1 WHERE \"workspaceId\" = ?2 \
+         AND \"id\" = ?3 AND \"createdAt\" = ?4 RETURNING \"id\"",
+        vec![
+            Value::Integer(now),
+            Value::Integer(workspace_id),
+            Value::Integer(id),
+            Value::Integer(created_at),
+        ],
+    )
+    .query_map(conn, |r| r.get(0))?;
+    Ok(rows)
 }
 
 /// `hardDeleteAllByContactInbox`: deletes the contact inbox's messages since `sinceTime` and
@@ -1003,12 +1336,74 @@ pub fn hard_delete_all_by_contact_inbox(
     conn: &Connection,
     params: &HardDeleteAllByContactInboxParams,
 ) -> Result<HardDeleteAllByContactInboxResult> {
-    todo!("P3.3")
+    let attachment_where = "\"Attachment\".\"workspaceId\" = ?1 AND EXISTS (SELECT 1 FROM \"Message\" \
+         WHERE \"Message\".\"workspaceId\" = ?1 AND \"Message\".\"createdAt\" >= ?2 \
+         AND \"Message\".\"id\" = \"Attachment\".\"messageId\" \
+         AND \"Message\".\"createdAt\" = \"Attachment\".\"messageCreatedAt\" \
+         AND \"Message\".\"contactInboxId\" = ?3)";
+    let args = vec![
+        Value::Integer(params.workspace_id),
+        Value::Integer(params.since_time),
+        Value::Integer(params.contact_inbox_id),
+    ];
+    let paths = Sql::new(
+        format!(
+            "SELECT \"originPath\", \"thumbnailPath\" FROM \"Attachment\" WHERE {attachment_where}"
+        ),
+        args.clone(),
+    )
+    .query_map(conn, |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+    })?;
+    Sql::new(
+        format!("DELETE FROM \"Attachment\" WHERE {attachment_where}"),
+        args.clone(),
+    )
+    .execute(conn)?;
+    Sql::new(
+        "DELETE FROM \"Message\" WHERE \"workspaceId\" = ?1 AND \"contactInboxId\" = ?3 AND \"createdAt\" >= ?2",
+        args,
+    )
+    .execute(conn)?;
+    let mut attachment_paths: Vec<String> = Vec::new();
+    for (origin, thumbnail) in paths {
+        for path in std::iter::once(Some(origin))
+            .chain(std::iter::once(thumbnail))
+            .flatten()
+        {
+            if !path.is_empty() && !attachment_paths.contains(&path) {
+                attachment_paths.push(path);
+            }
+        }
+    }
+    Ok(HardDeleteAllByContactInboxResult { attachment_paths })
 }
 
 /// `updateAttachment` (returns the updated row count).
 pub fn update_attachment(conn: &Connection, params: &UpdateAttachmentParams) -> Result<usize> {
-    todo!("P3.3")
+    let mut q = Sql::raw("UPDATE \"Attachment\" SET \"originPath\" = ");
+    q.push_bind(params.fields.origin_path.clone());
+    q.push(", \"mimeType\" = ");
+    q.push_bind(params.fields.mime_type.clone());
+    q.push(", \"size\" = ");
+    q.push_bind(params.fields.size);
+    if let Some(height) = params.fields.height {
+        q.push(", \"height\" = ");
+        q.push_bind(height);
+    }
+    if let Some(width) = params.fields.width {
+        q.push(", \"width\" = ");
+        q.push_bind(width);
+    }
+    q.push(", \"updatedAt\" = ");
+    q.push_bind(now_ms());
+    q.push(" WHERE \"id\" = ");
+    q.push_bind(params.id);
+    q.push(" AND \"workspaceId\" = ");
+    q.push_bind(params.workspace_id);
+    q.push(" AND \"createdAt\" = ");
+    q.push_bind(params.created_at);
+    q.execute(conn)
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,7 +1415,17 @@ pub fn has_attachment_of_type(
     conn: &Connection,
     params: &HasAttachmentOfTypeParams,
 ) -> Result<bool> {
-    todo!("P3.3")
+    let rows: Vec<i64> = Sql::new(
+        "SELECT \"id\" FROM \"Attachment\" WHERE \"messageId\" = ?1 AND \"messageCreatedAt\" = ?2 \
+         AND \"fileType\" = ?3 LIMIT 1",
+        vec![
+            Value::Integer(params.message_id),
+            Value::Integer(params.message_created_at),
+            Value::Text(params.file_type.clone()),
+        ],
+    )
+    .query_map(conn, |r| r.get(0))?;
+    Ok(!rows.is_empty())
 }
 
 /// `findById` (with the message's attachments).
@@ -1028,7 +1433,22 @@ pub fn find_by_id(
     conn: &Connection,
     params: &FindMessageByIdParams,
 ) -> Result<Option<MessageWithAttachments>> {
-    todo!("P3.3")
+    let mut q = Sql::raw(Message::select_sql());
+    q.push(" WHERE \"id\" = ");
+    q.push_bind(params.id);
+    q.push(" AND \"createdAt\" = ");
+    q.push_bind(params.created_at);
+    q.push(" AND \"workspaceId\" = ");
+    q.push_bind(params.workspace_id);
+    if let Some(conversation_id) = params.conversation_id {
+        q.push(" AND \"conversationId\" = ");
+        q.push_bind(conversation_id);
+    }
+    q.push(" LIMIT 1");
+    let Some(message) = q.model::<Message>(conn)? else {
+        return Ok(None);
+    };
+    Ok(with_attachments(conn, vec![message])?.into_iter().next())
 }
 
 /// `findTriggerMessage` (`findByIdInConversation`).
@@ -1036,7 +1456,22 @@ pub fn find_trigger_message(
     conn: &Connection,
     options: &FindTriggerMessageOptions,
 ) -> Result<Option<MessageWithAttachments>> {
-    todo!("P3.3")
+    let Some(message) = Sql::new(
+        message_sql(
+            "WHERE \"id\" = ?1 AND \"conversationId\" = ?2 AND \"workspaceId\" = ?3 AND \"createdAt\" >= ?4 LIMIT 1",
+        ),
+        vec![
+            Value::Integer(options.id),
+            Value::Integer(options.conversation_id),
+            Value::Integer(options.workspace_id),
+            Value::Integer(options.since_time),
+        ],
+    )
+    .model::<Message>(conn)?
+    else {
+        return Ok(None);
+    };
+    Ok(with_attachments(conn, vec![message])?.into_iter().next())
 }
 
 /// `findBySourceId` (needs `sinceTime`; the newest match).
@@ -1047,7 +1482,22 @@ pub fn find_by_source_id(
     workspace_id: i64,
     since_time: Option<i64>,
 ) -> Result<Option<Message>> {
-    todo!("P3.3")
+    let Some(since) = since_time else {
+        return Err(since_required("findBySourceId"));
+    };
+    Sql::new(
+        message_sql(
+            "WHERE \"sourceId\" = ?1 AND \"conversationId\" = ?2 AND \"workspaceId\" = ?3 AND \"createdAt\" >= ?4 \
+             ORDER BY \"createdAt\" DESC LIMIT 1",
+        ),
+        vec![
+            Value::Text(source_id.to_owned()),
+            Value::Integer(conversation_id),
+            Value::Integer(workspace_id),
+            Value::Integer(since),
+        ],
+    )
+    .model::<Message>(conn)
 }
 
 /// `findManyBySourceIds` (needs `sinceTime`).
@@ -1055,7 +1505,32 @@ pub fn find_many_by_source_ids(
     conn: &Connection,
     params: &FindManyBySourceIdsParams,
 ) -> Result<Vec<MessageSourceRow>> {
-    todo!("P3.3")
+    if params.contact_inbox_ids.is_empty() || params.source_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(since) = params.since_time else {
+        return Err(since_required("findManyBySourceIds"));
+    };
+    Sql::new(
+        "SELECT \"id\", \"conversationId\", \"contactInboxId\", \"sourceId\", \"createdAt\" FROM \"Message\" \
+         WHERE \"workspaceId\" = ?1 AND \"contactInboxId\" IN (SELECT value FROM json_each(?2)) \
+         AND \"sourceId\" IN (SELECT value FROM json_each(?3)) AND \"createdAt\" >= ?4 ORDER BY \"createdAt\", \"id\"",
+        vec![
+            Value::Integer(params.workspace_id),
+            Value::Text(ids_json(&params.contact_inbox_ids)),
+            Value::Text(super::text_list(&params.source_ids)),
+            Value::Integer(since),
+        ],
+    )
+    .query_map(conn, |r| {
+        Ok(MessageSourceRow {
+            id: r.get(0)?,
+            conversation_id: r.get(1)?,
+            contact_inbox_id: r.get(2)?,
+            source_id: r.get(3)?,
+            created_at: r.get(4)?,
+        })
+    })
 }
 
 /// `findAttachmentById`.
@@ -1063,7 +1538,25 @@ pub fn find_attachment_by_id(
     conn: &Connection,
     params: &FindAttachmentByIdParams,
 ) -> Result<Option<AttachmentLookupRow>> {
-    todo!("P3.3")
+    let rows = Sql::new(
+        "SELECT \"id\", \"messageId\", \"messageCreatedAt\", \"sourceId\", \"originPath\", \"mimeType\", \"size\", \
+         \"createdAt\", \"keepOriginal\" FROM \"Attachment\" WHERE \"id\" = ?1 AND \"workspaceId\" = ?2 LIMIT 1",
+        vec![Value::Integer(params.id), Value::Integer(params.workspace_id)],
+    )
+    .query_map(conn, |r| {
+        Ok(AttachmentLookupRow {
+            id: r.get(0)?,
+            message_id: r.get(1)?,
+            message_created_at: r.get(2)?,
+            source_id: r.get(3)?,
+            origin_path: r.get(4)?,
+            mime_type: r.get(5)?,
+            size: r.get(6)?,
+            created_at: r.get(7)?,
+            keep_original: r.get(8)?,
+        })
+    })?;
+    Ok(rows.into_iter().next())
 }
 
 fn rich_response_of(content_attributes: Option<Json>) -> Option<JsonValue> {
@@ -1078,7 +1571,48 @@ pub fn find_rich_response_by_button(
     conn: &Connection,
     params: &FindRichResponseByButtonParams,
 ) -> Result<Option<JsonValue>> {
-    todo!("P3.3")
+    let since = params
+        .since_time
+        .unwrap_or_else(|| now_ms() - RICH_RESPONSE_FALLBACK_LOOKBACK_MS);
+    if let Some(message_id) = params.message_id {
+        let rows: Vec<Option<Json>> = Sql::new(
+            "SELECT \"contentAttributes\" FROM \"Message\" WHERE \"id\" = ?1 AND \"workspaceId\" = ?2 \
+             AND \"conversationId\" = ?3 AND \"contactInboxId\" = ?4 AND \"createdAt\" >= ?5 LIMIT 1",
+            vec![
+                Value::Integer(message_id),
+                Value::Integer(params.workspace_id),
+                Value::Integer(params.conversation_id),
+                Value::Integer(params.contact_inbox_id),
+                Value::Integer(since),
+            ],
+        )
+        .query_map(conn, |r| r.get(0))?;
+        if let Some(rich) = rows.into_iter().next().and_then(rich_response_of) {
+            // `richResponse.buttonPayloads[buttonId]` of a rich response without
+            // `buttonPayloads` throws in the TS; the catch goes on to the fallback.
+            if let Some(payloads) = rich.get("buttonPayloads").filter(|p| p.is_object()) {
+                return Ok(payloads
+                    .get(&params.button_id)
+                    .is_some_and(js_truthy)
+                    .then_some(rich));
+            }
+        }
+    }
+    let rows: Vec<Option<Json>> = Sql::new(
+        "SELECT \"contentAttributes\" FROM \"Message\" WHERE \"workspaceId\" = ?1 AND \"conversationId\" = ?2 \
+         AND \"contactInboxId\" = ?3 AND \"createdAt\" >= ?4 AND EXISTS (SELECT 1 FROM \
+         json_each(\"contentAttributes\", '$.richResponse.buttonPayloads') WHERE key = ?5) \
+         ORDER BY \"createdAt\" DESC, \"id\" DESC LIMIT 1",
+        vec![
+            Value::Integer(params.workspace_id),
+            Value::Integer(params.conversation_id),
+            Value::Integer(params.contact_inbox_id),
+            Value::Integer(since),
+            Value::Text(params.button_id.clone()),
+        ],
+    )
+    .query_map(conn, |r| r.get(0))?;
+    Ok(rows.into_iter().next().and_then(rich_response_of))
 }
 
 /// `findAIContextMessages`: messages after the marker (newest `limit`), in chronological order.
@@ -1086,7 +1620,49 @@ pub fn find_ai_context_messages(
     conn: &Connection,
     options: &FindAiContextMessagesOptions,
 ) -> Result<Vec<Message>> {
-    todo!("P3.3")
+    let Some(since) = options.since_time else {
+        return Err(shard_unavailable(
+            "sinceTime is required for sharded AI context reads",
+        ));
+    };
+    let marker: Option<(i64, i64)> = match options.marker_message_id {
+        Some(marker_id) => Sql::new(
+            "SELECT \"createdAt\", \"id\" FROM \"Message\" WHERE \"id\" = ?1 AND \"conversationId\" = ?2 \
+             AND \"workspaceId\" = ?3 LIMIT 1",
+            vec![
+                Value::Integer(marker_id),
+                Value::Integer(options.conversation_id),
+                Value::Integer(options.workspace_id),
+            ],
+        )
+        .query_map(conn, |r| Ok((r.get(0)?, r.get(1)?)))?
+        .into_iter()
+        .next(),
+        None => None,
+    };
+    let mut q = Sql::raw(Message::select_sql());
+    q.push(" WHERE \"conversationId\" = ");
+    q.push_bind(options.conversation_id);
+    q.push(" AND \"workspaceId\" = ");
+    q.push_bind(options.workspace_id);
+    q.push(" AND \"createdAt\" >= ");
+    q.push_bind(since);
+    push_types(&mut q, &options.message_types);
+    if options.text_not_null {
+        q.push(" AND \"text\" IS NOT NULL");
+    }
+    if let Some((created_at, id)) = marker {
+        q.push(" AND (\"createdAt\", \"id\") > (");
+        q.push_bind(created_at);
+        q.push(", ");
+        q.push_bind(id);
+        q.push(")");
+    }
+    q.push(" ORDER BY \"createdAt\" DESC, \"id\" DESC LIMIT ");
+    q.push_bind(options.limit);
+    let mut rows = q.models::<Message>(conn)?;
+    rows.reverse();
+    Ok(rows)
 }
 
 fn conversation_query(
@@ -1121,7 +1697,28 @@ pub fn find_last_by_conversation(
     conversation_id: i64,
     options: &FindLastByConversationOptions,
 ) -> Result<Vec<MessageWithAttachments>> {
-    todo!("P3.3")
+    let Some(since) = options.since_time else {
+        return Err(since_required("findLastByConversation"));
+    };
+    let q = conversation_query(
+        conversation_id,
+        since,
+        options.workspace_id,
+        &options.message_types,
+        false,
+        options.limit.unwrap_or(1),
+    );
+    let messages = q.models::<Message>(conn)?;
+    if messages.is_empty() {
+        return Ok(Vec::new());
+    }
+    if options.with_attachments {
+        return with_attachments(conn, messages);
+    }
+    if options.attachment_count_only {
+        return with_attachment_counts(conn, messages);
+    }
+    Ok(bare(messages))
 }
 
 /// `findManyByConversation` (needs `sinceTime`; newest first).
@@ -1130,7 +1727,18 @@ pub fn find_many_by_conversation(
     conversation_id: i64,
     options: &FindManyByConversationOptions,
 ) -> Result<Vec<Message>> {
-    todo!("P3.3")
+    let Some(since) = options.since_time else {
+        return Err(since_required("findManyByConversation"));
+    };
+    conversation_query(
+        conversation_id,
+        since,
+        options.workspace_id,
+        &options.message_types,
+        options.text_not_null,
+        options.limit,
+    )
+    .models::<Message>(conn)
 }
 
 /// `findManyByIds` (needs `sinceTime`; `workspace_id` only chose the write shard in the TS).
@@ -1141,7 +1749,31 @@ pub fn find_many_by_ids(
     since_time: Option<i64>,
     _workspace_id: Option<i64>,
 ) -> Result<Vec<MessageTextWithFileTypes>> {
-    todo!("P3.3")
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(since) = since_time else {
+        return Err(since_required("findManyByIds"));
+    };
+    let messages = Sql::new(
+        message_sql(
+            "WHERE \"contactInboxId\" = ?1 AND \"id\" IN (SELECT value FROM json_each(?2)) AND \"createdAt\" >= ?3",
+        ),
+        vec![
+            Value::Integer(contact_inbox_id),
+            Value::Text(ids_json(ids)),
+            Value::Integer(since),
+        ],
+    )
+    .models::<Message>(conn)?;
+    Ok(with_attachments(conn, messages)?
+        .into_iter()
+        .map(|m| MessageTextWithFileTypes {
+            id: m.message.id,
+            text: m.message.text,
+            attachment_file_types: m.attachments.into_iter().map(|a| a.file_type).collect(),
+        })
+        .collect())
 }
 
 /// `listIncomingTextsByContactInbox`: incoming, non-deleted texts since `sinceTime`, newest
@@ -1150,7 +1782,45 @@ pub fn list_incoming_texts_by_contact_inbox(
     conn: &Connection,
     params: &ListIncomingTextsByContactInboxParams,
 ) -> Result<Vec<String>> {
-    todo!("P3.3")
+    let mut messages: Vec<String> = Vec::new();
+    let mut cursor: Option<(i64, i64)> = None;
+    loop {
+        let remaining = match params.limit {
+            Some(limit) if messages.len() as i64 >= limit => break,
+            Some(limit) => LIST_INCOMING_TEXTS_BATCH_SIZE.min(limit - messages.len() as i64),
+            None => LIST_INCOMING_TEXTS_BATCH_SIZE,
+        };
+        let mut q = Sql::raw(
+            "SELECT \"createdAt\", \"id\", \"text\" FROM \"Message\" WHERE \"workspaceId\" = ",
+        );
+        q.push_bind(params.workspace_id);
+        q.push(" AND \"contactInboxId\" = ");
+        q.push_bind(params.contact_inbox_id);
+        q.push(" AND \"messageType\" = 'incoming' AND \"text\" IS NOT NULL AND \"deletedAt\" IS NULL AND \"createdAt\" >= ");
+        q.push_bind(params.since_time);
+        if let Some((created_at, id)) = cursor {
+            q.push(" AND (\"createdAt\", \"id\") < (");
+            q.push_bind(created_at);
+            q.push(", ");
+            q.push_bind(id);
+            q.push(")");
+        }
+        q.push(" ORDER BY \"createdAt\" DESC, \"id\" DESC LIMIT ");
+        q.push_bind(remaining);
+        let rows: Vec<(i64, i64, Option<String>)> =
+            q.query_map(conn, |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let count = rows.len() as i64;
+        let last = rows.last().map(|(c, i, _)| (*c, *i));
+        messages.extend(rows.into_iter().filter_map(|(_, _, text)| text));
+        if count < remaining {
+            break;
+        }
+        match last {
+            Some(key) => cursor = Some(key),
+            None => break,
+        }
+    }
+    Ok(messages)
 }
 
 /// `listByConversation`: newest first, keyset cursor, `limit + 1` over-fetch. No time filter
@@ -1159,5 +1829,57 @@ pub fn list_by_conversation(
     conn: &Connection,
     query: &ListMessagesQuery,
 ) -> Result<PaginatedMessages> {
-    todo!("P3.3")
+    let limit = query.pagination.limit;
+    let mut q = Sql::raw(Message::select_sql());
+    q.push(" WHERE \"workspaceId\" = ");
+    q.push_bind(query.workspace_id);
+    if let Some(conversation_id) = query.conversation_id {
+        q.push(" AND \"conversationId\" = ");
+        q.push_bind(conversation_id);
+    }
+    if let Some(contact_inbox_id) = query.contact_inbox_id {
+        q.push(" AND \"contactInboxId\" = ");
+        q.push_bind(contact_inbox_id);
+    }
+    if let Some(cursor) = &query.pagination.cursor {
+        match cursor.id {
+            Some(id) => {
+                q.push(" AND (\"createdAt\", \"id\") < (");
+                q.push_bind(cursor.created_at);
+                q.push(", ");
+                q.push_bind(id);
+                q.push(")");
+            }
+            None => {
+                q.push(" AND \"createdAt\" < ");
+                q.push_bind(cursor.created_at);
+            }
+        }
+    }
+    q.push(" ORDER BY \"createdAt\" DESC, \"id\" DESC LIMIT ");
+    q.push_bind(limit.max(0) + 1);
+    let mut messages = q.models::<Message>(conn)?;
+    let has_more = messages.len() as i64 > limit;
+    messages.truncate(limit.max(0) as usize);
+    if messages.is_empty() {
+        return Ok(PaginatedMessages {
+            data: Vec::new(),
+            has_partial_results: None,
+            next_cursor: None,
+        });
+    }
+    let next_cursor = if has_more {
+        messages.last().map(|m| PaginationCursor {
+            created_at: m.created_at,
+            id: Some(m.id),
+            shard_id: None,
+        })
+    } else {
+        None
+    };
+    Ok(PaginatedMessages {
+        data: with_attachments(conn, messages)?,
+        has_partial_results: None,
+        next_cursor,
+    })
 }
