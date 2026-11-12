@@ -1,0 +1,20 @@
+# Edge of the Rust stack: same entry point as the original (http://app, port 80).
+# /ws/* goes to the realtime gateway inside the same binary (prefix stripped,
+# like the original edge); everything else to the server.
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	handle_path /ws/* {
+		reverse_proxy server:8080 {
+			header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
+		}
+	}
+	handle {
+		reverse_proxy server:8080 {
+			header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
+		}
+	}
+}

@@ -1,0 +1,52 @@
+# The Rust ChatbotX stack for the parity harness: one `chatbotx-server` binary
+# (built on the host by run-rust.sh, mounted read-only into a slim glibc image)
+# behind a Caddy edge. Merged on top of stacks/harness.compose.yml; relative
+# paths resolve against `conversion/parity` (see run-rust.sh).
+#
+# The SQLite database lives in the `rust-data` volume; the parity runner
+# mounts the same volume and writes fixture rows with `node:sqlite`
+# (stacks/rust/fixtures.ts).
+
+services:
+
+  server:
+    image: node:24.22.1-trixie-slim@sha256:89c5244bc22a9bc3287d89ebc7e49b9cb5bb84cd40e6175ac3421d5a9f68b95a
+    init: true
+    env_file:
+      - ./stacks/rust/rust.env
+    entrypoint: ["/usr/local/bin/chatbotx-server"]
+    volumes:
+      - ../../target/release/chatbotx-server:/usr/local/bin/chatbotx-server:ro
+      - rust-data:/rust-data
+      - parity-tls:/parity-tls:ro
+    networks:
+      - parity-internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  # Edge proxy: the only entry point for tests (http://app, port 80).
+  app:
+    image: caddy@sha256:78bd35025c7ba85961dd149ae670315129954e77abe2383ac47c89106b35ade9 # 2-alpine
+    volumes:
+      - ./stacks/rust/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - parity-internal
+    ports:
+      - "127.0.0.1:18480:80"
+    depends_on:
+      server:
+        condition: service_healthy
+
+  # Runner settings for this stack (merged into harness.compose.yml).
+  parity:
+    environment:
+      STACK: rust
+      PARITY_SQLITE_PATH: /rust-data/chatbotx.db
+    volumes:
+      - rust-data:/rust-data
+
+volumes:
+  rust-data: {}
