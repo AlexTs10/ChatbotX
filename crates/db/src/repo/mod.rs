@@ -543,6 +543,7 @@ pub mod license;
 pub mod mac_partitions;
 pub mod media_library_file;
 pub mod media_library_folder;
+pub mod message;
 pub mod messaging_ad_operation;
 pub mod messaging_ads_connection;
 pub mod messenger_welcome_message_flow;
