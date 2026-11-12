@@ -9,6 +9,8 @@ publish.workspace = true
 axum.workspace = true
 # Unverified JWT `aud` peek of a mobile access token (base64url segments); same version as crates/rt.
 base64 = "0.22"
+# `isPlaceholderEmail` (sign-up gate).
+chatbotx-core.workspace = true
 # Token scope names (`WORKSPACE_API_TOKEN_SCOPES`) and the auth repositories.
 chatbotx-db.workspace = true
 # API rate limits (`assertApiNotRateLimited`) and the clock.

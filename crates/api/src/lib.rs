@@ -5,6 +5,7 @@ pub mod errors;
 pub mod iso8601;
 pub mod orpc;
 pub mod routes;
+pub mod session;
 
 use axum::Router;
 use axum::http::header;
