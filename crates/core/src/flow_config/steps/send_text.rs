@@ -9,17 +9,15 @@ schema!(pub fn send_text_step_schema = z::object(vec![("id", z::string().regex(r
 ("text", z::string().trim().min(1).refine(send_text_step_schema_text_refine, Some("sendTextTooLongForChannel"), None).describe("Message text. May include `{{variable}}` placeholders; the maximum length depends on the target channel.")),
 ("buttons", z::array(button_step_schema()).describe("Buttons attached to the message (use [] for none). Per-channel button limits apply."))]));
 
-// HAND-PORT sendTextStepDefaultFn:
-// (props={})=>({text:"",buttons:[],...props,id:createId(),stepType:stepTypes.enum.sendText})
-
-// value=>countMessageCharacters(value)<=SEND_TEXT_MAX
 fn send_text_step_schema_text_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    count_message_characters(value.as_str()) <= SEND_TEXT_MAX
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `sendTextStepDefaultFn(props)`.
 pub fn send_text_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({ "text": "", "buttons": [] }),
+        props,
+        json!({ "id": create_id(), "stepType": "sendText" }),
+    )
 }

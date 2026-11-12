@@ -45,7 +45,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -88,12 +88,14 @@ make_step_schema(),
 trigger_n8n_step_schema(),
 find_places_near_me_step_schema()])))]))]))]));
 
-// HAND-PORT performActionNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.performAction,...props.nodeProps,data:{name:"Perform Action",isStartNode:false,...props.dataProps,details:{steps:[],...props.detailProps}}})
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `performActionNodeDefaultFn(props)`.
 pub fn perform_action_node_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    node_default(
+        props,
+        "performAction",
+        "Perform Action",
+        json!({ "steps": [] }),
+        true,
+        false,
+    )
 }

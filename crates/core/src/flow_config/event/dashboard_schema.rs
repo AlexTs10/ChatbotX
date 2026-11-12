@@ -230,10 +230,10 @@ z::number()])),
 ("measuredFrom", z::union(vec![z::date(),
 z::string(),
 z::number()])),
-("responseSeconds", z::number().int().gte(0 as f64)),
-("workingResponseSeconds", z::number().int().gte(0 as f64).nullable()),
+("responseSeconds", z::number().int().gte(0_f64)),
+("workingResponseSeconds", z::number().int().gte(0_f64).nullable()),
 ("workingHoursId", z::string().nullable()),
-("slaTargetSeconds", z::number().int().gt(0 as f64).nullable().optional()),
+("slaTargetSeconds", z::number().int().gt(0_f64).nullable().optional()),
 ("slaMet", z::boolean().nullable().optional()),
 ("isFirstResponse", z::boolean()),
 ("channel", z::string().nullable().optional()),
@@ -256,4 +256,7 @@ conversation_unarchived_event_schema(),
 message_bot_received_event_schema(),
 agent_replied_event_schema()]));
 
-// HAND-PORT analyticsDashboardEventSchemas (object): {"analytics:dashboard":"<schema analyticsDashboardEventSchema>"}
+/// `analyticsDashboardEventSchemas`.
+pub fn analytics_dashboard_event_schemas() -> Vec<(&'static str, Schema)> {
+    vec![("analytics:dashboard", analytics_dashboard_event_schema())]
+}

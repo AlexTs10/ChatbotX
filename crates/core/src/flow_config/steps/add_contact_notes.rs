@@ -9,3 +9,11 @@ schema!(pub fn add_contact_notes_step_schema = z::object(vec![("id", z::string()
 
 // HAND-PORT addContactNotesStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.addContactNotes,content:"",...props})
+
+/// `addContactNotesStepDefaultFn(props)`.
+pub fn add_contact_notes_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "addContactNotes", "content": ""}),
+        props,
+    )
+}

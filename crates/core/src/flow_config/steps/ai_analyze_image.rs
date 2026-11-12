@@ -22,27 +22,63 @@ schema!(pub fn ai_analyze_image_schema = z::object(vec![("id", z::string().regex
 ("prompt", z::string().trim().min(1)),
 ("inputFieldId", z::string().trim().min(1)),
 ("outputFieldId", z::string().trim().min(1).refine(ai_analyze_image_schema_output_field_id_refine, Some("Value starting with \"bot_field:\" must be a valid bot field reference (e.g. \"bot_field:123\")."), None)),
-("temperature", z::number().gte(0 as f64).lte(2 as f64).describe("Sampling temperature, 0-2 (Muse: 0-1).")),
-("maxOutputTokens", z::number().int().gte(250 as f64).lte(4096 as f64).describe("Maximum tokens of reply text. Muse models may use up to 1024 extra reasoning tokens on top, billed as output.")),
+("temperature", z::number().gte(0_f64).lte(2_f64).describe("Sampling temperature, 0-2 (Muse: 0-1).")),
+("maxOutputTokens", z::number().int().gte(250_f64).lte(4096_f64).describe("Maximum tokens of reply text. Muse models may use up to 1024 extra reasoning tokens on top, billed as output.")),
 ("states", z::tuple(vec![success_state_schema(),
 error_state_schema()]).optional())]).super_refine(ai_analyze_image_schema_super_refine));
 
-// HAND-PORT AIAnalyzeImageDefaultFn:
-// (props={})=>{const provider=props.provider??"openai";const model=props.model??(provider==="openaiCompatible"?"":defaultAnalyzeModels[provider]);return{id:createId(),provider,...provider==="openaiCompatible"?{integrationId:"integrationId"in props?props.integrationId:""}:{},model,prompt:"",inputFieldId:"",outputFieldId:"",temperature:1,maxOutputTokens:1e3,...props,stepType:stepTypes.enum.aiAnalyzeImage,states:[successStateDefaultFn(),errorStateDefaultFn()]}}
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_analyze_image_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// (value,ctx)=>{if(!value.model.trim()){ctx.addIssue({code:"custom",path:["model"],message:"Model is required"})}if(value.provider==="openaiCompatible"&&!value.integrationId?.trim()){ctx.addIssue({code:"custom",path:["integrationId"],message:"Integration is required"})}if(value.provider==="muse"&&value.temperature>MUSE_MAX_TEMPERATURE){ctx.addIssue({code:"custom",path:["temperature"],message:`Muse supports temperature up to ${MUSE_MAX_TEMPERATURE}`})}}
 fn ai_analyze_image_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+    ai_model_rules(value, ctx, true);
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
+/// The `model` / `integrationId` / Muse temperature rules of the AI steps.
+pub(crate) fn ai_model_rules(value: &Value, ctx: &mut RefineCtx, muse_temperature: bool) {
+    if trimmed(&value["model"]).unwrap_or("").is_empty() {
+        ctx.issue(path!["model"], "Model is required");
+    }
+    if value["provider"] == "openaiCompatible"
+        && trimmed(&value["integrationId"]).unwrap_or("").is_empty()
+    {
+        ctx.issue(path!["integrationId"], "Integration is required");
+    }
+    if muse_temperature
+        && value["provider"] == "muse"
+        && value["temperature"]
+            .as_f64()
+            .is_some_and(|t| t > MUSE_MAX_TEMPERATURE as f64)
+    {
+        ctx.issue(
+            path!["temperature"],
+            format!(
+                "Muse supports temperature up to {}",
+                crate::js::number_to_string(MUSE_MAX_TEMPERATURE as f64)
+            ),
+        );
+    }
+}
 
+/// `AIAnalyzeImageDefaultFn(props)`.
 pub fn ai_analyze_image_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    let head = ai_step_head(props, |p| default_analyze_models().get(p).cloned());
+    spread3(
+        merge(
+            json!({ "id": create_id() }),
+            merge(
+                head,
+                json!({
+                    "prompt": "",
+                    "inputFieldId": "",
+                    "outputFieldId": "",
+                    "temperature": 1.0,
+                    "maxOutputTokens": 1000,
+                }),
+            ),
+        ),
+        props,
+        json!({ "stepType": "aiAnalyzeImage", "states": [success_state_default_fn(), error_state_default_fn()] }),
+    )
 }

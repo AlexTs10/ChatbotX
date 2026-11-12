@@ -12,7 +12,6 @@ schema!(pub fn send_file_step_schema = z::object(vec![("id", z::string().regex(r
 
 default_fn!(pub fn send_file_step_default_fn = json!({"id": create_id(), "stepType": "sendFile", "mode": "file", "url": "", "buttons": []}));
 
-// value=>containsVariablePlaceholder(value)||z.url().safeParse(value).success
 fn send_file_step_schema_url_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    deps::url_with_variables_ok(value)
 }

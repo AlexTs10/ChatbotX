@@ -18,32 +18,41 @@ schema!(pub fn ai_segment_image_schema = z::object(vec![("id", z::string().regex
 skip_state_schema(),
 error_state_schema()]).describe("Exactly [success, skip, error]: success = object found, skip = no object found, error = processing failed."))]).super_refine(ai_segment_image_schema_super_refine));
 
-// HAND-PORT aiSegmentImageDefaultFn:
-// (props={})=>({id:createId(),inputFieldId:"",target:"",matchSelection:aiSegmentImageMatchSelection.enum.largest,outputFieldId:"",...props,stepType:stepTypes.enum.aiSegmentImage,states:[successStateDefaultFn(),skipStateDefaultFn(),errorStateDefaultFn()]})
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_segment_image_schema_input_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_segment_image_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_segment_image_schema_details_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// (value,ctx)=>{if(!value.detailsOutputFieldId){return}if(value.detailsOutputFieldId===value.outputFieldId){ctx.addIssue({code:"custom",path:["detailsOutputFieldId"],message:"Details field must differ from the output image field"})}if(value.detailsOutputFieldId===value.inputFieldId){ctx.addIssue({code:"custom",path:["detailsOutputFieldId"],message:"Details field must differ from the source image field"})}}
-fn ai_segment_image_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
-}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `aiSegmentImageDefaultFn(props)`.
 pub fn ai_segment_image_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({"id": create_id(), "inputFieldId": "", "target": "", "matchSelection": "largest", "outputFieldId": ""}),
+        props,
+        json!({"stepType": "aiSegmentImage", "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "skip"}, {"id": create_id(), "stateType": "error"}]}),
+    )
+}
+
+fn ai_segment_image_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
+    if !truthy(value.get("detailsOutputFieldId")) {
+        return;
+    }
+    if value["detailsOutputFieldId"] == value["outputFieldId"] {
+        ctx.issue(
+            path!["detailsOutputFieldId"],
+            "Details field must differ from the output image field",
+        );
+    }
+    if value["detailsOutputFieldId"] == value["inputFieldId"] {
+        ctx.issue(
+            path!["detailsOutputFieldId"],
+            "Details field must differ from the source image field",
+        );
+    }
 }

@@ -65,17 +65,38 @@ schema!(pub fn ai_edit_image_schema = z::object(vec![("id", z::string().regex(r#
 ("states", z::tuple(vec![success_state_schema(),
 error_state_schema()]).optional())]));
 
-// HAND-PORT aiEditImageDefaultFn:
-// (props={})=>{const provider=props.provider??"openai";return{id:createId(),provider,model:props.model??aiEditImageDefaultModels[provider],inputFieldId:"",prompt:"",size:props.size??aiEditImageDefaultSizes[provider],quality:props.quality??aiEditImageDefaultQualities[provider],outputFieldId:"",...props,stepType:stepTypes.enum.aiEditImage,states:[successStateDefaultFn(),errorStateDefaultFn()]}}
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_edit_image_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `aiEditImageDefaultFn(props)`.
 pub fn ai_edit_image_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    let provider = props
+        .get("provider")
+        .filter(|v| !v.is_null())
+        .cloned()
+        .unwrap_or_else(|| json!("openai"));
+    let p = provider.as_str().unwrap_or("").to_owned();
+    let pick = |key: &str, table: &Value| {
+        props
+            .get(key)
+            .filter(|v| !v.is_null())
+            .cloned()
+            .or_else(|| table.get(&p).cloned())
+    };
+    let mut base = json!({ "id": create_id(), "provider": provider, "inputFieldId": "", "prompt": "", "outputFieldId": "" });
+    for (key, table) in [
+        ("model", ai_edit_image_default_models()),
+        ("size", ai_edit_image_default_sizes()),
+        ("quality", ai_edit_image_default_qualities()),
+    ] {
+        if let Some(v) = pick(key, table) {
+            base[key] = v;
+        }
+    }
+    spread3(
+        base,
+        props,
+        json!({ "stepType": "aiEditImage", "states": [success_state_default_fn(), error_state_default_fn()] }),
+    )
 }

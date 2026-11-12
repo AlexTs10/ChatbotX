@@ -26,20 +26,20 @@ pub const AI_TEXT_TO_SPEECH_DEFAULT_EXTENSION: &str = "mp3";
 
 pub const AI_TEXT_TO_SPEECH_MESSAGE_MAX_LENGTH: usize = 4096;
 
-// HAND-PORT getAITextToSpeechAudioPath:
-// ({storagePrefix,fileName})=>`${storagePrefix}/${fileName}`
-
-// HAND-PORT AITextToSpeechDefaultFn:
-// props=>({id:createId(),provider:"openai",model:aiTextToSpeechModelTypes.enum["gpt-4o-mini-tts"],message:"",voiceType:aiTextToSpeechVoiceTypes.enum.alloy,voiceTone:"",outputFieldId:"",...props,stepType:stepTypes.enum.aiTextToSpeech,states:[successStateDefaultFn(),errorStateDefaultFn()]})
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_text_to_speech_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `AITextToSpeechDefaultFn(props)`.
 pub fn ai_text_to_speech_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({"id": create_id(), "provider": "openai", "model": "gpt-4o-mini-tts", "message": "", "voiceType": "alloy", "voiceTone": "", "outputFieldId": ""}),
+        props,
+        json!({"stepType": "aiTextToSpeech", "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}),
+    )
+}
+
+/// `getAITextToSpeechAudioPath`.
+pub fn get_ai_text_to_speech_audio_path(storage_prefix: &str, file_name: &str) -> String {
+    format!("{storage_prefix}/{file_name}")
 }

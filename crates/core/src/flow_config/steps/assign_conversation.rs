@@ -9,3 +9,11 @@ schema!(pub fn assign_conversation_step_schema = z::object(vec![("id", z::string
 
 // HAND-PORT assignConversationStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.assignConversation,assignedId:"",...props})
+
+/// `assignConversationStepDefaultFn(props)`.
+pub fn assign_conversation_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "assignConversation", "assignedId": ""}),
+        props,
+    )
+}

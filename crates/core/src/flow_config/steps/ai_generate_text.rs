@@ -30,27 +30,39 @@ schema!(pub fn ai_generate_text_schema = z::object(vec![("id", z::string().regex
 ("outputFieldId", z::string().trim().min(1).refine(ai_generate_text_schema_output_field_id_refine, Some("Value starting with \"bot_field:\" must be a valid bot field reference (e.g. \"bot_field:123\")."), None)),
 ("tools", z::array(z::string()).optional()),
 ("remember", z::boolean()),
-("temperature", z::number().gte(0 as f64).lte(2 as f64).describe("Sampling temperature, 0-2 (Muse: 0-1).")),
-("maxOutputTokens", z::number().int().gte(250 as f64).lte(4096 as f64).describe("Maximum tokens of reply text. Muse models may use up to 1024 extra reasoning tokens on top, billed as output.")),
+("temperature", z::number().gte(0_f64).lte(2_f64).describe("Sampling temperature, 0-2 (Muse: 0-1).")),
+("maxOutputTokens", z::number().int().gte(250_f64).lte(4096_f64).describe("Maximum tokens of reply text. Muse models may use up to 1024 extra reasoning tokens on top, billed as output.")),
 ("states", z::tuple(vec![success_state_schema(),
 error_state_schema()]))]).super_refine(ai_generate_text_schema_super_refine));
 
-// HAND-PORT aiGenerateTextDefaultFn:
-// (props={})=>{const provider=props.provider??"openai";const model=props.model??(provider==="openaiCompatible"?"":defaultAIModels[provider]);return{id:createId(),provider,...provider==="openaiCompatible"?{integrationId:"integrationId"in props?props.integrationId:""}:{},model,system:"",text:"",outputFieldId:"",tools:[],remember:false,temperature:1,maxOutputTokens:250,...props,stepType:stepTypes.enum.aiGenerateText,states:[successStateDefaultFn(),errorStateDefaultFn()]}}
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_generate_text_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// (value,ctx)=>{if(!value.model.trim()){ctx.addIssue({code:"custom",path:["model"],message:"Model is required"})}if(value.provider==="openaiCompatible"&&!value.integrationId?.trim()){ctx.addIssue({code:"custom",path:["integrationId"],message:"Integration is required"})}if(value.provider==="muse"&&value.temperature>MUSE_MAX_TEMPERATURE){ctx.addIssue({code:"custom",path:["temperature"],message:`Muse supports temperature up to ${MUSE_MAX_TEMPERATURE}`})}}
 fn ai_generate_text_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+    ai_model_rules(value, ctx, true);
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `aiGenerateTextDefaultFn(props)`.
 pub fn ai_generate_text_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    let head = ai_step_head(props, |p| default_ai_models().get(p).cloned());
+    spread3(
+        merge(
+            json!({ "id": create_id() }),
+            merge(
+                head,
+                json!({
+                    "system": "",
+                    "text": "",
+                    "outputFieldId": "",
+                    "tools": [],
+                    "remember": false,
+                    "temperature": 1.0,
+                    "maxOutputTokens": 250,
+                }),
+            ),
+        ),
+        props,
+        json!({ "stepType": "aiGenerateText", "states": [success_state_default_fn(), error_state_default_fn()] }),
+    )
 }

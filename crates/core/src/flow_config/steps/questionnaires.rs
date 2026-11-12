@@ -13,7 +13,6 @@ schema!(pub fn questionnaires_step_schema = z::object(vec![("id", z::string().re
 
 default_fn!(pub fn questionnaires_step_default_fn = json!({"id": create_id(), "stepType": "questionnaires", "mode": "start", "questionnaireId": ""}));
 
-// ()=>void 0
-fn questionnaires_step_schema_states_preprocess(value: Option<Value>) -> Option<Value> {
-    todo!("P3.4")
+fn questionnaires_step_schema_states_preprocess(_value: Option<Value>) -> Option<Value> {
+    None
 }

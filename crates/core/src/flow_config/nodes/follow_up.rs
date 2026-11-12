@@ -13,5 +13,14 @@ schema!(pub fn follow_up_node_schema = z::object(vec![("id", z::string().regex(r
 ("isStartNode", z::boolean().describe("True for the node where the flow begins. Exactly one node should be the start node.")),
 ("details", z::object(vec![("steps", z::array(follow_up_step_schema()).min(1).max(1))]))]))]));
 
-// HAND-PORT followUpNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.followUp,...props.nodeProps,data:{name:"Follow Up",isStartNode:false,...props.dataProps,details:{steps:[followUpStepDefaultFn()],...props.detailProps}}})
+/// `followUpNodeDefaultFn(props)`.
+pub fn follow_up_node_default_fn(props: &Value) -> Value {
+    node_default(
+        props,
+        "followUp",
+        "Follow Up",
+        json!({ "steps": [follow_up_step_default_fn()] }),
+        true,
+        false,
+    )
+}

@@ -22,7 +22,39 @@ error_state_schema()]))]).super_refine(active_campaign_sync_contact_schema_super
 
 default_fn!(pub fn active_campaign_sync_contact_default_fn = json!({"id": create_id(), "stepType": "activeCampaignSyncContact", "operation": "createOrUpdateContact", "emailField": "email", "listIds": [], "tagIds": [], "fieldValues": [], "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}));
 
-// (data,ctx)=>{if(data.operation==="addContactToAutomation"&&!data.automationId?.trim()){ctx.addIssue({code:z.ZodIssueCode.custom,message:"ActiveCampaign automation is required",path:["automationId"]})}if(data.operation==="addContactToAutomation"){return}const listIds=new Set;for(let i=0;i<data.listIds.length;i++){if(listIds.has(data.listIds[i])){ctx.addIssue({code:z.ZodIssueCode.custom,message:`Duplicate ActiveCampaign list: "${data.listIds[i]}"`,path:["listIds",i]})}listIds.add(data.listIds[i])}const tagIds=new Set;for(let i=0;i<data.tagIds.length;i++){if(tagIds.has(data.tagIds[i])){ctx.addIssue({code:z.ZodIssueCode.custom,message:`Duplicate ActiveCampaign tag: "${data.tagIds[i]}"`,path:["tagIds",i]})}tagIds.add(data.tagIds[i])}const fieldIds=new Set;for(let i=0;i<data.fieldValues.length;i++){const fieldId=data.fieldValues[i].activeCampaignFieldId;if(fieldIds.has(fieldId)){ctx.addIssue({code:z.ZodIssueCode.custom,message:`Duplicate ActiveCampaign field mapping: "${fieldId}"`,path:["fieldValues",i,"activeCampaignFieldId"]})}fieldIds.add(fieldId)}}
-fn active_campaign_sync_contact_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+fn active_campaign_sync_contact_schema_super_refine(data: &Value, ctx: &mut RefineCtx) {
+    if data["operation"] == "addContactToAutomation"
+        && trimmed(&data["automationId"]).unwrap_or("").is_empty()
+    {
+        ctx.issue(
+            path!["automationId"],
+            "ActiveCampaign automation is required",
+        );
+    }
+    if data["operation"] == "addContactToAutomation" {
+        return;
+    }
+    report_duplicates(ctx, arr_field(data, "listIds"), key_of, |i, k| {
+        (
+            path!["listIds", i],
+            format!("Duplicate ActiveCampaign list: \"{k}\""),
+        )
+    });
+    report_duplicates(ctx, arr_field(data, "tagIds"), key_of, |i, k| {
+        (
+            path!["tagIds", i],
+            format!("Duplicate ActiveCampaign tag: \"{k}\""),
+        )
+    });
+    report_duplicates(
+        ctx,
+        arr_field(data, "fieldValues"),
+        |v| key_of(&v["activeCampaignFieldId"]),
+        |i, k| {
+            (
+                path!["fieldValues", i, "activeCampaignFieldId"],
+                format!("Duplicate ActiveCampaign field mapping: \"{k}\""),
+            )
+        },
+    );
 }

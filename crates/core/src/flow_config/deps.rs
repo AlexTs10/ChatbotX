@@ -15,8 +15,39 @@ schema!(pub fn meta_capi_action_source_schema = z::enum_(&["business_messaging",
 
 schema!(pub fn meta_capi_content_type_schema = z::enum_(&["product", "product_group"]));
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `zodUrlWithVariables(message = "Invalid URL")`.
 pub fn zod_url_with_variables(message: Option<&str>) -> Schema {
-    todo!("P3.4")
+    z::string().refine_owned(
+        url_with_variables_ok,
+        Some(message.unwrap_or("Invalid URL").to_owned()),
+        None,
+    )
+}
+
+/// The `zodUrlWithVariables` check: a `{{variable}}` or a parseable URL.
+pub fn url_with_variables_ok(value: &Value) -> bool {
+    let text = value.as_str().unwrap_or("");
+    crate::utils::variables::contains_variable_placeholder(text) || crate::utils::zod::is_url(text)
+}
+
+/// `metaCapiValueSchema`.
+pub fn meta_capi_value_schema() -> Schema {
+    z::string()
+        .trim()
+        .regex(r"^\d+(\.\d+)?$", "")
+        .msg("Value must be a plain number such as 19.99")
+        .refine(
+            |v| js_number(Some(v)) <= 9_007_199_254_740_991.0,
+            Some("Value is too large"),
+            None,
+        )
+}
+
+/// `metaCapiCurrencySchema`.
+pub fn meta_capi_currency_schema() -> Schema {
+    z::string().trim().to_upper_case().pipe(
+        z::string()
+            .regex("^[A-Z]{3}$", "")
+            .msg("Currency must be a 3-letter ISO 4217 code such as USD"),
+    )
 }

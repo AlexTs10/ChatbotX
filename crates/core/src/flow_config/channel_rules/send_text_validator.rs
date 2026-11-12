@@ -3,10 +3,36 @@
 #[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
-// HAND-PORT sendTextValidator (object): {"omnichannel":"<schema ?>","api":"<schema ?>","instagram":"<schema ?>","messenger":"<schema ?>","smtp":"<schema ?>","telegram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","webchat":"<schema ?>","whatsapp":"<schema ?>","zalo":"<schema ?>"}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `sendTextValidator`: the per-channel length rules (and TikTok's card title).
 pub fn send_text_validator() -> StepValidator {
-    todo!("P3.4")
+    static V: LazyLock<StepValidator> = LazyLock::new(|| {
+        let with = |channel: &'static str| {
+            send_text_step_schema().super_refine(refine_send_text_length_for_channel(channel))
+        };
+        let overrides = [
+            "api",
+            "instagram",
+            "messenger",
+            "smtp",
+            "telegram",
+            "threads",
+            "webchat",
+            "whatsapp",
+            "zalo",
+        ]
+        .into_iter()
+        .map(|c| (c.to_owned(), with(c)))
+        .chain(std::iter::once((
+            "tiktok".to_owned(),
+            send_text_step_schema()
+                .super_refine(refine_tiktok_send_text_step)
+                .super_refine(refine_send_text_length_for_channel("tiktok")),
+        )))
+        .collect();
+        StepValidator::PerChannel {
+            base: with("omnichannel"),
+            overrides,
+        }
+    });
+    V.clone()
 }

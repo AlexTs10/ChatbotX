@@ -8,3 +8,11 @@ schema!(pub fn disable_messenger_composer_step_schema = z::object(vec![("id", z:
 
 // HAND-PORT disableMessengerComposerStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.disableMessengerComposer,...props})
+
+/// `disableMessengerComposerStepDefaultFn(props)`.
+pub fn disable_messenger_composer_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "disableMessengerComposer"}),
+        props,
+    )
+}

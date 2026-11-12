@@ -3,11 +3,27 @@
 #[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
-// HAND-PORT channelAwareStepValidators (object): {"sendAudio":{"omnichannel":"<schema sendAudioStepSchema>","messenger":"<schema ?>","whatsapp":"<schema ?>","zalo":"<schema ?>","smtp":"<schema ?>","instagram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","api":"<schema ?>"},"sendCarousel":{"omnichannel":"<schema sendCarouselStepSchema>","whatsapp":"<schema ?>"},"sendFile":{"omnichannel":"<schema sendFileStepSchema>","messenger":"<schema ?>","whatsapp":"<schema ?>","zalo":"<schema ?>","smtp":"<schema ?>","instagram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","api":"<schema ?>"},"sendGif":{"omnichannel":"<schema sendGifStepSchema>","whatsapp":"<schema ?>","smtp":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>"},"sendImage":{"omnichannel":"<schema sendImageStepSchema>","smtp":"<schema ?>","instagram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","api":"<schema ?>"},"sendProducts":{"whatsapp":"<schema ?>","omnichannel":"<schema ?>"},"sendText":{"omnichannel":"<schema ?>","api":"<schema ?>","instagram":"<schema ?>","messenger":"<schema ?>","smtp":"<schema ?>","telegram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","webchat":"<schema ?>","whatsapp":"<schema ?>","zalo":"<schema ?>"},"sendVideo":{"omnichannel":"<schema sendVideoStepSchema>","whatsapp":"<schema ?>","zalo":"<schema ?>","smtp":"<schema ?>","instagram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","api":"<schema ?>"},"sendWaTemplateMessage":{"omnichannel":"<schema ?>"}}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `channelAwareStepValidators`.
 pub fn channel_aware_step_validators()
 -> &'static std::collections::BTreeMap<&'static str, StepValidator> {
-    todo!("P3.4")
+    static V: LazyLock<std::collections::BTreeMap<&'static str, StepValidator>> =
+        LazyLock::new(|| {
+            [
+                ("sendAudio", send_audio_validator()),
+                ("sendCarousel", send_carousel_validator()),
+                ("sendFile", send_file_validator()),
+                ("sendGif", send_gif_validator()),
+                ("sendImage", send_image_validator()),
+                ("sendProducts", send_products_validator()),
+                ("sendText", send_text_validator()),
+                ("sendVideo", send_video_validator()),
+                (
+                    "sendWaTemplateMessage",
+                    send_wa_template_message_validator(),
+                ),
+            ]
+            .into_iter()
+            .collect()
+        });
+    &V
 }

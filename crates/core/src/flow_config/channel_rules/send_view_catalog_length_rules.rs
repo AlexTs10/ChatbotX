@@ -7,11 +7,6 @@ pub const SEND_VIEW_CATALOG_TEXT_MAX: usize = 1024;
 
 pub const SEND_VIEW_CATALOG_FOOTER_MAX: usize = 60;
 
-// HAND-PORT resolveSendViewCatalogLengthLimits:
-// channel=>{const parsed=channelTypes.safeParse(channel);const declared=parsed.success?CHANNEL_FLOW_POLICIES[parsed.data].limits.viewCatalog:void 0;return declared??{footer:SEND_VIEW_CATALOG_FOOTER_MAX,text:SEND_VIEW_CATALOG_TEXT_MAX}}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
 /// `SendViewCatalogLengthLimits`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SendViewCatalogLengthLimits {
@@ -19,8 +14,16 @@ pub struct SendViewCatalogLengthLimits {
     pub footer: usize,
 }
 
+/// `resolveSendViewCatalogLengthLimits(channel)`: the channel's declared
+/// limits, else the widest supported ones.
 pub fn resolve_send_view_catalog_length_limits(
     channel: Option<&str>,
 ) -> SendViewCatalogLengthLimits {
-    todo!("P3.4")
+    channel
+        .and_then(|c| channel_flow_policies().get(c))
+        .and_then(|p| p.limits.view_catalog)
+        .unwrap_or(SendViewCatalogLengthLimits {
+            text: SEND_VIEW_CATALOG_TEXT_MAX,
+            footer: SEND_VIEW_CATALOG_FOOTER_MAX,
+        })
 }

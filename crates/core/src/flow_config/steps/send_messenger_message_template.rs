@@ -28,51 +28,359 @@ schema!(pub fn send_messenger_template_message_step_schema = z::object(vec![("id
 ("integrationMessengerId", z::string().optional())])),
 ("buttons", z::array(button_step_schema()).super_refine(refine_reply_only_buttons).default(json!([])))]));
 
-// HAND-PORT sendMessengerTemplateMessageStepDefaultFn:
-// (props={})=>{const{template:templateProps,...restProps}=props;return{template:{id:"",name:"",language:"",parameterFormat:"POSITIONAL",params:{},...templateProps},buttons:[],...restProps,id:createId(),stepType:stepTypes.enum.sendMessengerTemplateMessage}}
-
-// HAND-PORT findMessengerTokenVariable:
-// function findMessengerTokenVariable(text){const match=text?.match(TOKEN_VARIABLE_PATTERN);return match?.[1]??null}
-
-// HAND-PORT normalizeMessengerTokenUrl:
-// function normalizeMessengerTokenUrl(url){const match=TOKEN_URL_SUFFIXES.find(entry=>entry.pastedPattern.test(url));if(!match){return null}return{url:url.replace(TRAILING_PLACEHOLDER_PATTERN,"{{1}}"),variable:match.variable}}
-
-// HAND-PORT readMessengerMiniAppButtons:
-// function readMessengerMiniAppButtons(components){const miniAppButtons=[];for(const component of components??[]){if(component.type!=="BUTTONS"||!component.buttons){continue}for(const[index,button]of component.buttons.entries()){const url=button.url??"";const miniAppId=url.match(MINI_APP_ID_PATTERN)?.[1];if(button.type.toUpperCase()==="URL"&&miniAppId&&MINI_APP_URL_PATTERN.test(url)){miniAppButtons.push({index,label:button.text??"",miniAppId})}}}return miniAppButtons}
-
-// HAND-PORT suggestMessengerUrlSuffixVariable:
-// function suggestMessengerUrlSuffixVariable(url){const match=TOKEN_URL_SUFFIXES.find(entry=>entry.savedPattern.test(url??""));return match?`{{${match.variable}}}`:""}
-
-// HAND-PORT extractMessengerTemplateParams:
-// function extractMessengerTemplateParams(components,parameterFormat){const params={};if(!components||components.length===0){return params}for(const component of components){if(component.type==="HEADER"){const names=extractPlaceholderNames(component.text);if(names.length>0){params.header=names.map(name=>({type:"text",text:"",...toParameterName(name,parameterFormat)}))}}else if(component.type==="BODY"){const names=extractPlaceholderNames(component.text);if(names.length>0){params.body=names.map(name=>({text:"",...toParameterName(name,parameterFormat)}))}}else if(component.type==="BUTTONS"&&component.buttons){const buttonParams=[];for(const[idx,button]of component.buttons.entries()){const buttonType=button.type.toUpperCase();if(buttonType==="URL"&&button.url){buttonParams.push({sub_type:"url",index:idx,text:hasPlaceholder(button.url)?suggestMessengerUrlSuffixVariable(button.url):button.url})}if(buttonType==="PHONE_NUMBER"){buttonParams.push({sub_type:"phone_number",index:idx})}}if(buttonParams.length>0){params.button=buttonParams}}}return params}
-
-// HAND-PORT extractMessengerParameterInfos:
-// function extractMessengerParameterInfos(components,parameterFormat){const params=[];if(!components||components.length===0){return params}const toDisplayName=__name((name,idx)=>parameterFormat==="NAMED"?name:String(idx+1),"toDisplayName");for(const component of components){if(component.type==="HEADER"){for(const[idx,name]of extractPlaceholderNames(component.text).entries()){params.push({type:"header",index:idx,paramName:toDisplayName(name,idx),format:"text"})}}else if(component.type==="BODY"){for(const[idx,name]of extractPlaceholderNames(component.text).entries()){params.push({type:"body",index:idx,paramName:toDisplayName(name,idx)})}}else if(component.type==="BUTTONS"&&component.buttons){for(const[buttonIdx,button]of component.buttons.entries()){const buttonType=button.type.toUpperCase();const[urlSuffixName]=extractPlaceholderNames(button.url);if(buttonType==="URL"&&urlSuffixName){params.push({type:"button",index:0,paramName:toDisplayName(urlSuffixName,0),buttonIndex:buttonIdx,buttonSubType:"url"})}}}}return params}
-
-// HAND-PORT extractMessengerFlowButtons:
-// function extractMessengerFlowButtons(components,options={}){const buttons=[];if(!components||components.length===0){return buttons}const miniAppButtonsByIndex=new Map(options.includeMiniApp?readMessengerMiniAppButtons(components).map(button=>[button.index,button]):[]);for(const component of components){if(component.type==="BUTTONS"&&component.buttons){for(const[index,button]of component.buttons.entries()){const buttonType=button.type.toUpperCase();const miniAppButton=miniAppButtonsByIndex.get(index);if(miniAppButton){buttons.push({...buttonStepDefaultFn({label:miniAppButton.label}),buttonType:buttonTypes.enum.openMiniApp,beforeStep:openMiniAppStepDefaultFn({miniAppId:miniAppButton.miniAppId})})}else if((buttonType==="POSTBACK"||buttonType==="QUICK_REPLY")&&button.payload?.includes("{{")){buttons.push(buttonStepDefaultFn({label:button.text??""}))}}}}return buttons}
-
-// HAND-PORT mergeMessengerFlowButtonsWithExisting:
-// function mergeMessengerFlowButtonsWithExisting(templateButtons,existingButtons=[]){const merged=mergeTemplateButtonsWithExisting(templateButtons,existingButtons);return merged.map((button,index)=>{const templateButton=templateButtons[index];if(!templateButton||button===templateButton){return button}if(isOpenMiniApp(button)!==isOpenMiniApp(templateButton)){return templateButton}if(button.buttonType===buttonTypes.enum.openMiniApp&&templateButton.buttonType===buttonTypes.enum.openMiniApp&&button.beforeStep.miniAppId!==templateButton.beforeStep.miniAppId){return{...button,beforeStep:{...button.beforeStep,miniAppId:templateButton.beforeStep.miniAppId}}}return button})}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `sendMessengerTemplateMessageStepDefaultFn(props)`.
 pub fn send_messenger_template_message_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    template_step_default(
+        props,
+        json!({ "id": "", "name": "", "language": "", "parameterFormat": "POSITIONAL", "params": {} }),
+        json!([]),
+        "sendMessengerTemplateMessage",
+    )
 }
 
+/// `{ template: { ...defaults, ...props.template }, buttons, ...rest, id, stepType }`.
+pub(crate) fn template_step_default(
+    props: &Value,
+    template: Value,
+    buttons: Value,
+    step_type: &str,
+) -> Value {
+    let template = spread_props(template, props.get("template").unwrap_or(&Value::Null));
+    let mut rest = props.clone();
+    if let Some(obj) = rest.as_object_mut() {
+        obj.remove("template");
+    }
+    spread3(
+        json!({ "template": template, "buttons": buttons }),
+        &rest,
+        json!({ "id": create_id(), "stepType": step_type }),
+    )
+}
+
+fn re(pattern: &str) -> regex::Regex {
+    regex::Regex::new(pattern).expect("valid regex")
+}
+
+fn placeholder_re() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| re(r"\{\{([0-9]+|[a-zA-Z_]+)\}\}"))
+}
+
+fn extract_placeholder_names(text: Option<&str>) -> Vec<String> {
+    text.map(|t| {
+        placeholder_re()
+            .captures_iter(t)
+            .map(|c| c[1].to_owned())
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+fn has_placeholder(text: Option<&str>) -> bool {
+    !extract_placeholder_names(text).is_empty()
+}
+
+const TOKEN_URL_PAGES: &[(&str, &str)] = &[
+    ("mini-apps", "mini_app_token"),
+    ("minigames", "minigame_play_token"),
+];
+
+fn token_url_pattern(page: &str, placeholder: &str) -> regex::Regex {
+    re(&format!(
+        r"/{page}\?(?:[^#]*&)?token=\{{\{{{placeholder}\}}\}}$"
+    ))
+}
+
+struct TokenUrlSuffix {
+    variable: &'static str,
+    pasted: regex::Regex,
+    saved: regex::Regex,
+}
+
+fn token_url_suffixes() -> &'static [TokenUrlSuffix] {
+    static V: std::sync::OnceLock<Vec<TokenUrlSuffix>> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        TOKEN_URL_PAGES
+            .iter()
+            .map(|(page, variable)| TokenUrlSuffix {
+                variable,
+                pasted: token_url_pattern(page, &format!(r"\s*{variable}\s*")),
+                saved: token_url_pattern(page, r"[A-Za-z0-9_]+"),
+            })
+            .collect()
+    })
+}
+
+/// `findMessengerTokenVariable`: the token variable a text embeds.
+pub fn find_messenger_token_variable(text: Option<&str>) -> Option<&'static str> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = RE.get_or_init(|| {
+        let names: Vec<&str> = TOKEN_URL_PAGES.iter().map(|(_, v)| *v).collect();
+        re(&format!(r"\{{\{{\s*({})\s*\}}\}}", names.join("|")))
+    });
+    let name = pattern.captures(text?)?.get(1)?.as_str().to_owned();
+    TOKEN_URL_PAGES.iter().map(|(_, v)| *v).find(|v| *v == name)
+}
+
+/// `normalizeMessengerTokenUrl`: a pasted token URL becomes `…{{1}}`.
+pub fn normalize_messenger_token_url(url: &str) -> Option<(String, &'static str)> {
+    static TRAILING: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let entry = token_url_suffixes()
+        .iter()
+        .find(|e| e.pasted.is_match(url))?;
+    let trailing = TRAILING.get_or_init(|| re(r"\{\{[^{}]*\}\}$"));
+    Some((trailing.replace(url, "{{1}}").into_owned(), entry.variable))
+}
+
+fn mini_app_url_pattern() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| token_url_pattern("mini-apps", r"[A-Za-z0-9_]+"))
+}
+
+fn mini_app_id(url: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = RE.get_or_init(|| re(r"[?&]id=([0-9]+)(?:&|$)"));
+    pattern.captures(url).map(|c| c[1].to_owned())
+}
+
+fn component_buttons(component: &Value) -> Option<&Vec<Value>> {
+    if component["type"] != "BUTTONS" {
+        return None;
+    }
+    component["buttons"].as_array()
+}
+
+/// `readMessengerMiniAppButtons`: URL buttons that open a Mini App.
+pub fn read_messenger_mini_app_buttons(components: &[Value]) -> Vec<Value> {
+    let mut out = Vec::new();
+    for component in components {
+        let Some(buttons) = component_buttons(component) else {
+            continue;
+        };
+        for (index, button) in buttons.iter().enumerate() {
+            let url = str_field(button, "url");
+            let id = mini_app_id(url);
+            if crate::js::to_upper(str_field(button, "type")) == "URL"
+                && id.is_some()
+                && mini_app_url_pattern().is_match(url)
+            {
+                out.push(
+                    json!({ "index": index, "label": str_field(button, "text"), "miniAppId": id }),
+                );
+            }
+        }
+    }
+    out
+}
+
+/// `suggestMessengerUrlSuffixVariable`.
+pub fn suggest_messenger_url_suffix_variable(url: Option<&str>) -> String {
+    token_url_suffixes()
+        .iter()
+        .find(|e| e.saved.is_match(url.unwrap_or("")))
+        .map(|e| format!("{{{{{}}}}}", e.variable))
+        .unwrap_or_default()
+}
+
+fn with_parameter_name(mut param: Value, name: &str, parameter_format: &str) -> Value {
+    if parameter_format == "NAMED" {
+        param["parameter_name"] = json!(name);
+    }
+    param
+}
+
+/// `extractMessengerTemplateParams(components, parameterFormat)`.
+pub fn extract_messenger_template_params(components: &[Value], parameter_format: &str) -> Value {
+    let mut params = Map::new();
+    for component in components {
+        match component["type"].as_str() {
+            Some("HEADER") => {
+                let names = extract_placeholder_names(component["text"].as_str());
+                if !names.is_empty() {
+                    let header: Vec<Value> = names
+                        .iter()
+                        .map(|n| {
+                            with_parameter_name(
+                                json!({ "type": "text", "text": "" }),
+                                n,
+                                parameter_format,
+                            )
+                        })
+                        .collect();
+                    params.insert("header".into(), Value::Array(header));
+                }
+            }
+            Some("BODY") => {
+                let names = extract_placeholder_names(component["text"].as_str());
+                if !names.is_empty() {
+                    let body: Vec<Value> = names
+                        .iter()
+                        .map(|n| with_parameter_name(json!({ "text": "" }), n, parameter_format))
+                        .collect();
+                    params.insert("body".into(), Value::Array(body));
+                }
+            }
+            Some("BUTTONS") => {
+                let Some(buttons) = component["buttons"].as_array() else {
+                    continue;
+                };
+                let mut button_params = Vec::new();
+                for (idx, button) in buttons.iter().enumerate() {
+                    let button_type = crate::js::to_upper(str_field(button, "type"));
+                    let url = button["url"].as_str().filter(|u| !u.is_empty());
+                    if button_type == "URL"
+                        && let Some(url) = url
+                    {
+                        let text = if has_placeholder(Some(url)) {
+                            suggest_messenger_url_suffix_variable(Some(url))
+                        } else {
+                            url.to_owned()
+                        };
+                        button_params
+                            .push(json!({ "sub_type": "url", "index": idx, "text": text }));
+                    }
+                    if button_type == "PHONE_NUMBER" {
+                        button_params.push(json!({ "sub_type": "phone_number", "index": idx }));
+                    }
+                }
+                if !button_params.is_empty() {
+                    params.insert("button".into(), Value::Array(button_params));
+                }
+            }
+            _ => {}
+        }
+    }
+    Value::Object(params)
+}
+
+/// `extractMessengerParameterInfos(components, parameterFormat)`.
+pub fn extract_messenger_parameter_infos(
+    components: &[Value],
+    parameter_format: &str,
+) -> Vec<Value> {
+    let display = |name: &str, idx: usize| {
+        if parameter_format == "NAMED" {
+            name.to_owned()
+        } else {
+            (idx + 1).to_string()
+        }
+    };
+    let mut out = Vec::new();
+    for component in components {
+        match component["type"].as_str() {
+            Some("HEADER") => {
+                for (idx, name) in extract_placeholder_names(component["text"].as_str())
+                    .iter()
+                    .enumerate()
+                {
+                    out.push(json!({ "type": "header", "index": idx, "paramName": display(name, idx), "format": "text" }));
+                }
+            }
+            Some("BODY") => {
+                for (idx, name) in extract_placeholder_names(component["text"].as_str())
+                    .iter()
+                    .enumerate()
+                {
+                    out.push(
+                        json!({ "type": "body", "index": idx, "paramName": display(name, idx) }),
+                    );
+                }
+            }
+            Some("BUTTONS") => {
+                let Some(buttons) = component["buttons"].as_array() else {
+                    continue;
+                };
+                for (button_idx, button) in buttons.iter().enumerate() {
+                    let button_type = crate::js::to_upper(str_field(button, "type"));
+                    let names = extract_placeholder_names(button["url"].as_str());
+                    if button_type == "URL"
+                        && let Some(suffix) = names.first()
+                    {
+                        out.push(json!({
+                            "type": "button",
+                            "index": 0,
+                            "paramName": display(suffix, 0),
+                            "buttonIndex": button_idx,
+                            "buttonSubType": "url",
+                        }));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `extractMessengerFlowButtons(components, { includeMiniApp })`.
 pub fn extract_messenger_flow_buttons(components: &[Value], include_mini_app: bool) -> Vec<Value> {
-    todo!("P3.4")
+    let mini_apps: std::collections::HashMap<u64, Value> = if include_mini_app {
+        read_messenger_mini_app_buttons(components)
+            .into_iter()
+            .map(|b| (b["index"].as_u64().unwrap_or(0), b))
+            .collect()
+    } else {
+        std::collections::HashMap::new()
+    };
+    let mut out = Vec::new();
+    for component in components {
+        let Some(buttons) = component_buttons(component) else {
+            continue;
+        };
+        for (index, button) in buttons.iter().enumerate() {
+            let button_type = crate::js::to_upper(str_field(button, "type"));
+            if let Some(mini_app) = mini_apps.get(&(index as u64)) {
+                let mut b = button_step_default_fn(&json!({ "label": mini_app["label"] }));
+                b["buttonType"] = json!("openMiniApp");
+                b["beforeStep"] =
+                    open_mini_app_step_default_fn(&json!({ "miniAppId": mini_app["miniAppId"] }));
+                out.push(b);
+            } else if (button_type == "POSTBACK" || button_type == "QUICK_REPLY")
+                && str_field(button, "payload").contains("{{")
+            {
+                out.push(button_step_default_fn(
+                    &json!({ "label": str_field(button, "text") }),
+                ));
+            }
+        }
+    }
+    out
 }
 
+fn is_open_mini_app(button: Option<&Value>) -> bool {
+    button.is_some_and(|b| b["buttonType"] == "openMiniApp")
+}
+
+/// `mergeMessengerFlowButtonsWithExisting`: like the template merge, but a
+/// slot that switched between reply and Mini App takes the template button,
+/// and a Mini App button follows the template's Mini App.
 pub fn merge_messenger_flow_buttons_with_existing(
     template_buttons: &[Value],
     existing: &[Value],
 ) -> Vec<Value> {
-    todo!("P3.4")
-}
-
-pub fn read_messenger_mini_app_buttons(components: &[Value]) -> Vec<Value> {
-    todo!("P3.4")
+    let merged = merge_template_buttons_with_existing(template_buttons, existing);
+    merged
+        .into_iter()
+        .enumerate()
+        .map(|(index, button)| {
+            let Some(template_button) = template_buttons.get(index) else {
+                return button;
+            };
+            if existing.get(index).is_none() {
+                return button;
+            }
+            if is_open_mini_app(Some(&button)) != is_open_mini_app(Some(template_button)) {
+                return template_button.clone();
+            }
+            if button["buttonType"] == "openMiniApp"
+                && template_button["buttonType"] == "openMiniApp"
+                && button["beforeStep"]["miniAppId"] != template_button["beforeStep"]["miniAppId"]
+            {
+                let mut out = button.clone();
+                out["beforeStep"]["miniAppId"] = template_button["beforeStep"]["miniAppId"].clone();
+                return out;
+            }
+            button
+        })
+        .collect()
 }

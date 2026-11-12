@@ -9,11 +9,55 @@ pub fn whatsapp_carousel_card_limits() -> &'static Value {
     &V
 }
 
-// HAND-PORT readCarouselCardUrlButton:
-// buttons=>{const[button]=buttons;if(buttons.length!==1||button?.buttonType!==buttonTypes.enum.openWebsite){return}return{button,url:button.beforeStep.url}}
+/// `readCarouselCardUrlButton`: the single link button of a card.
+pub fn read_carousel_card_url_button(buttons: &[Value]) -> Option<(Value, String)> {
+    let button = buttons.first()?;
+    if buttons.len() != 1 || button["buttonType"] != "openWebsite" {
+        return None;
+    }
+    Some((
+        button.clone(),
+        str_field(&button["beforeStep"], "url").to_owned(),
+    ))
+}
 
-// HAND-PORT readStrandedCarouselLinkButton:
-// buttons=>buttons.length>1?buttons.find(isLinkButton):void 0
+/// `readStrandedCarouselLinkButton`: a link button next to other buttons.
+pub fn read_stranded_carousel_link_button(buttons: &[Value]) -> Option<&Value> {
+    if buttons.len() > 1 {
+        buttons.iter().find(|b| is_link_button(b))
+    } else {
+        None
+    }
+}
 
-// HAND-PORT refineWhatsappCarouselStep:
-// (step,ctx)=>{const strandedIndex=step.cards.findIndex(card=>readStrandedCarouselLinkButton(card.buttons)!==void 0);if(strandedIndex!==-1){ctx.addIssue({code:"custom",message:flowValidationCodes.whatsappCarouselLinkButtonNotAlone,path:["cards",strandedIndex,"buttons"]})}if(step.cards.length>=whatsappCarouselCardLimits.min&&!hasMatchingButtons(step.cards)){ctx.addIssue({code:"custom",message:flowValidationCodes.whatsappCarouselButtonsMismatch,path:["cards"]})}}
+fn read_card_button_signature(buttons: &[Value]) -> String {
+    if buttons.len() == 1 && is_link_button(&buttons[0]) {
+        "link".to_owned()
+    } else {
+        format!("reply:{}", buttons.len())
+    }
+}
+
+/// `refineWhatsappCarouselStep(step, ctx)`.
+pub fn refine_whatsapp_carousel_step(step: &Value, ctx: &mut RefineCtx) {
+    let cards = arr_field(step, "cards");
+    if let Some(stranded) = cards
+        .iter()
+        .position(|c| read_stranded_carousel_link_button(arr_field(c, "buttons")).is_some())
+    {
+        ctx.issue(
+            path!["cards", stranded, "buttons"],
+            "whatsappCarouselLinkButtonNotAlone",
+        );
+    }
+    if cards.len() >= 2 {
+        let expected =
+            read_card_button_signature(cards.first().map_or(&[][..], |c| arr_field(c, "buttons")));
+        if !cards
+            .iter()
+            .all(|c| read_card_button_signature(arr_field(c, "buttons")) == expected)
+        {
+            ctx.issue(path!["cards"], "whatsappCarouselButtonsMismatch");
+        }
+    }
+}

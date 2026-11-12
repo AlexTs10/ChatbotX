@@ -29,10 +29,14 @@ schema!(pub fn condition_step_schema = z::object(vec![("id", z::string().regex(r
 
 default_fn!(pub fn condition_case_default_fn = json!({"id": create_id(), "operator": "and", "conditions": []}));
 
-// HAND-PORT conditionStepDefaultFn:
-// props=>({id:createId(),stepType:stepTypes.enum.condition,cases:[conditionCaseDefaultFn()],otherwiseId:createId(),...props})
+/// `conditionStepDefaultFn(props)`.
+pub fn condition_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "condition", "cases": [{"id": create_id(), "operator": "and", "conditions": []}], "otherwiseId": create_id()}),
+        props,
+    )
+}
 
-// condition=>condition.field!=="pipelineItem"
-fn condition_filter_condition_schema_refine(value: &Value) -> bool {
-    todo!("P3.4")
+fn condition_filter_condition_schema_refine(condition: &Value) -> bool {
+    condition["field"] != "pipelineItem"
 }

@@ -38,7 +38,36 @@ error_state_schema()]))]).super_refine(validate_request_fields));
 
 default_fn!(pub fn external_request_step_default_fn = json!({"id": create_id(), "stepType": "callApi", "method": "GET", "url": "", "headers": [], "mapping": [{"jsonPath": "", "outputFieldId": ""}], "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}));
 
-// (data,ctx)=>{const methodAllowsBody=methodsWithBody.includes(data.method);if(methodAllowsBody&&!data.body){ctx.addIssue({code:"custom",path:["body"],message:"Body is required for this HTTP method"})}if(!methodAllowsBody&&data.body){ctx.addIssue({code:"custom",path:["body"],message:"Body is not supported for this HTTP method"})}if(hasDuplicateKeys(data.headers)){ctx.addIssue({code:"custom",path:["headers"],message:"Header keys must be unique"})}if(data.body?.bodyType===externalRequestBodyTypes.enum.formEncoded&&hasDuplicateKeys(data.body.formFields)){ctx.addIssue({code:"custom",path:["body","formFields"],message:"Field keys must be unique"})}}
-fn validate_request_fields(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+fn has_duplicate_keys(items: &[Value]) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    for item in items {
+        let normalized = crate::js::to_lower(crate::js::trim(str_field(item, "key")));
+        if normalized.is_empty() {
+            continue;
+        }
+        if !seen.insert(normalized) {
+            return true;
+        }
+    }
+    false
+}
+
+fn validate_request_fields(data: &Value, ctx: &mut RefineCtx) {
+    let method = str_field(data, "method");
+    let method_allows_body = METHODS_WITH_BODY.contains(&method);
+    let has_body = truthy(data.get("body"));
+    if method_allows_body && !has_body {
+        ctx.issue(path!["body"], "Body is required for this HTTP method");
+    }
+    if !method_allows_body && has_body {
+        ctx.issue(path!["body"], "Body is not supported for this HTTP method");
+    }
+    if has_duplicate_keys(arr_field(data, "headers")) {
+        ctx.issue(path!["headers"], "Header keys must be unique");
+    }
+    if data["body"]["bodyType"] == "formEncoded"
+        && has_duplicate_keys(arr_field(&data["body"], "formFields"))
+    {
+        ctx.issue(path!["body", "formFields"], "Field keys must be unique");
+    }
 }

@@ -19,3 +19,11 @@ error_state_schema()]))]));
 
 // HAND-PORT autoAssignConversationStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.autoAssignConversation,assignedIds:[],rule:AutoAssignConversationRule.ALL_TIME,states:[successStateDefaultFn(),errorStateDefaultFn()],...props})
+
+/// `autoAssignConversationStepDefaultFn(props)`.
+pub fn auto_assign_conversation_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "autoAssignConversation", "assignedIds": [], "rule": "ALL_TIME", "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}),
+        props,
+    )
+}

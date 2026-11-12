@@ -8,3 +8,11 @@ schema!(pub fn block_contact_step_schema = z::object(vec![("id", z::string().reg
 
 // HAND-PORT blockContactStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.blockContact,...props})
+
+/// `blockContactStepDefaultFn(props)`.
+pub fn block_contact_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "blockContact"}),
+        props,
+    )
+}

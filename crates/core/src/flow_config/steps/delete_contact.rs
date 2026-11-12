@@ -8,3 +8,11 @@ schema!(pub fn delete_contact_step_schema = z::object(vec![("id", z::string().re
 
 // HAND-PORT deleteContactStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.deleteContact,...props})
+
+/// `deleteContactStepDefaultFn(props)`.
+pub fn delete_contact_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "deleteContact"}),
+        props,
+    )
+}

@@ -14,7 +14,8 @@
 macro_rules! schema {
     ($vis:vis fn $name:ident = $e:expr) => {
         $vis fn $name() -> $crate::flow_config::z::Schema {
-            todo!(concat!("P3.4 ", stringify!($name)))
+            static S: std::sync::LazyLock<$crate::flow_config::z::Schema> = std::sync::LazyLock::new(|| $e);
+            S.clone()
         }
     };
 }
@@ -23,7 +24,7 @@ macro_rules! schema {
 macro_rules! default_fn {
     ($vis:vis fn $name:ident = $e:expr) => {
         $vis fn $name() -> serde_json::Value {
-            todo!(concat!("P3.4 ", stringify!($name)))
+            $e
         }
     };
 }
@@ -35,6 +36,7 @@ pub mod definition;
 pub mod deps;
 pub mod event;
 pub mod field_reference;
+mod helpers;
 pub mod import_export;
 pub mod migrations;
 pub mod nodes;
@@ -53,6 +55,7 @@ pub mod z;
 pub use authoring::*;
 pub use channel_rules::*;
 pub use deep_link::*;
+#[allow(unused_imports)]
 pub use definition::*;
 pub use event::*;
 pub use field_reference::*;
@@ -77,6 +80,7 @@ pub mod prelude {
     pub use serde_json::{Map, Value, json};
 
     pub use super::deps;
+    pub use super::helpers::*;
     pub use super::z::{self, IssueCode, PathSegment, Payload, RawIssue, RefineCtx, Schema, path};
     pub use super::*;
     pub use crate::utils::id::create_id;

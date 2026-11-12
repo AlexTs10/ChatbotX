@@ -18,7 +18,19 @@ error_state_schema()]))]).super_refine(drip_subscribe_subscriber_schema_super_re
 
 default_fn!(pub fn drip_subscribe_subscriber_default_fn = json!({"id": create_id(), "stepType": "dripSubscribeSubscriber", "accountId": "", "emailField": "email", "tags": [], "mergeFields": [], "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}));
 
-// (data,ctx)=>{const seen=new Set;for(let i=0;i<data.mergeFields.length;i++){const{dripField}=data.mergeFields[i];if(seen.has(dripField)){ctx.addIssue({code:z.ZodIssueCode.custom,message:`Duplicate Drip field mapping: "${dripField}"`,path:["mergeFields",i,"dripField"]})}seen.add(dripField)}const tagsSeen=new Set;for(let i=0;i<data.tags.length;i++){if(tagsSeen.has(data.tags[i])){ctx.addIssue({code:z.ZodIssueCode.custom,message:`Duplicate tag: "${data.tags[i]}"`,path:["tags",i]})}tagsSeen.add(data.tags[i])}}
-fn drip_subscribe_subscriber_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+fn drip_subscribe_subscriber_schema_super_refine(data: &Value, ctx: &mut RefineCtx) {
+    report_duplicates(
+        ctx,
+        arr_field(data, "mergeFields"),
+        |m| key_of(&m["dripField"]),
+        |i, k| {
+            (
+                path!["mergeFields", i, "dripField"],
+                format!("Duplicate Drip field mapping: \"{k}\""),
+            )
+        },
+    );
+    report_duplicates(ctx, arr_field(data, "tags"), key_of, |i, k| {
+        (path!["tags", i], format!("Duplicate tag: \"{k}\""))
+    });
 }

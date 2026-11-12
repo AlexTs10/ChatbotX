@@ -8,3 +8,11 @@ schema!(pub fn enable_messenger_composer_step_schema = z::object(vec![("id", z::
 
 // HAND-PORT enableMessengerComposerStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.enableMessengerComposer,...props})
+
+/// `enableMessengerComposerStepDefaultFn(props)`.
+pub fn enable_messenger_composer_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "enableMessengerComposer"}),
+        props,
+    )
+}

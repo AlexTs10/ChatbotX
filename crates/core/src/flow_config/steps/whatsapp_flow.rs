@@ -42,20 +42,27 @@ schema!(pub fn whatsapp_flow_dialog_form_schema = z::object(vec![("buttonLabel",
 ("startScreenId", z::string().trim().min(1)),
 ("fieldMappings", z::array(whatsapp_flow_field_mapping_schema()))]))]));
 
-// HAND-PORT whatsappFlowDefaultButton:
-// (label="button #1")=>({id:createId(),label,buttonType:null,beforeStep:null,steps:[]})
-
-// HAND-PORT whatsappFlowStepDefaultFn:
-// (props={})=>({text:"",buttons:[whatsappFlowDefaultButton()],inboxId:null,flow:{id:null,sourceId:"",startScreenId:null,fieldMappings:[]},...props,id:createId(),stepType:stepTypes.enum.whatsappFlow})
-
-// (flow,ctx)=>{if(flow.id===null||!flow.startScreenId?.trim()){ctx.addIssue({code:"custom",message:flowValidationCodes.whatsappFlowIncomplete})}}
-fn whatsapp_flow_step_schema_flow_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+/// `whatsappFlowStepDefaultFn(props)`.
+pub fn whatsapp_flow_step_default_fn(props: &Value) -> Value {
+    spread3(
+        json!({
+            "text": "",
+            "buttons": [whatsapp_flow_default_button(None)],
+            "inboxId": null,
+            "flow": { "id": null, "sourceId": "", "startScreenId": null, "fieldMappings": [] },
+        }),
+        props,
+        json!({ "id": create_id(), "stepType": "whatsappFlow" }),
+    )
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
+fn whatsapp_flow_step_schema_flow_super_refine(flow: &Value, ctx: &mut RefineCtx) {
+    if flow["id"].is_null() || trimmed(&flow["startScreenId"]).unwrap_or("").is_empty() {
+        ctx.message("whatsappFlowIncomplete");
+    }
+}
 
-pub fn whatsapp_flow_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+/// `whatsappFlowDefaultButton(label = "button #1")`.
+pub fn whatsapp_flow_default_button(label: Option<&str>) -> Value {
+    json!({ "id": create_id(), "label": label.unwrap_or("button #1"), "buttonType": null, "beforeStep": null, "steps": [] })
 }

@@ -1,3 +1,5 @@
+// Slice P3.4b: still being ported.
+#![allow(unused_variables, dead_code)]
 //! Port of `packages/flow-config/src/import-export/reference-fields.ts`.
 
 #[allow(unused_imports)]

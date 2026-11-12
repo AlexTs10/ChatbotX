@@ -15,7 +15,7 @@ schema!(pub fn flow_exported_flow_schema = z::object(vec![("name", z::string().t
 ("active", z::boolean()),
 ("enableInInbox", z::boolean()),
 ("startNodeId", z::string()),
-("nodes", z::array(flow_version_schema()).super_refine(refine_steps_by_channel)),
+("nodes", z::array(flow_version_schema()).super_refine(|nodes, ctx| refine_steps_by_channel(nodes.as_array().map_or(&[][..], Vec::as_slice), ctx))),
 ("edges", z::array(edge_schema()))]));
 
 schema!(pub fn flow_export_schema = z::object(vec![("formatVersion", z::literal(json!(2))),
@@ -27,10 +27,47 @@ schema!(pub fn flow_export_schema = z::object(vec![("formatVersion", z::literal(
 ("customFields", z::record(z::string(), flow_export_custom_field_schema()).default(json!({}))),
 ("botFields", z::record(z::string(), flow_export_bot_field_schema()).default(json!({})))]));
 
-// HAND-PORT parseFlowExport:
-// raw=>{const preParsed=z.object({formatVersion:z.unknown()}).safeParse(raw);if(preParsed.success&&preParsed.data.formatVersion!==FLOW_EXPORT_FORMAT_VERSION){const reason=`Unsupported export format version: ${String(preParsed.data.formatVersion)}`;return{ok:false,reason,errors:[{code:"invalidGraph",message:reason,path:"formatVersion"}]}}const result=flowExportSchema.safeParse(raw);if(!result.success){const errors=zodErrorToFlowAuthoringErrors(result.error,"invalidGraph");return{ok:false,reason:errors[0]?.message??"The export file is invalid.",errors}}return{ok:true,data:result.data}}
+fn flow_export_bot_field_schema_name_refine(name: &Value) -> bool {
+    !is_reserved_field_name(name.as_str().unwrap_or(""))
+}
 
-// name=>!isReservedFieldName(name)
-fn flow_export_bot_field_schema_name_refine(value: &Value) -> bool {
-    todo!("P3.4")
+/// The failure of `parseFlowExport`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowExportParseError {
+    pub reason: String,
+    pub errors: Vec<FlowAuthoringError>,
+}
+
+/// `parseFlowExport(raw)`: never throws.
+pub fn parse_flow_export(raw: &Value) -> Result<Value, FlowExportParseError> {
+    if let Value::Object(map) = raw {
+        let version = map.get("formatVersion");
+        if version.and_then(Value::as_f64) != Some(FLOW_EXPORT_FORMAT_VERSION as f64) {
+            let shown = match version {
+                None => "undefined".to_owned(),
+                Some(v) => crate::js::string_of(v),
+            };
+            let reason = format!("Unsupported export format version: {shown}");
+            return Err(FlowExportParseError {
+                errors: vec![FlowAuthoringError {
+                    code: "invalidGraph".into(),
+                    message: reason.clone(),
+                    path: "formatVersion".into(),
+                    ..FlowAuthoringError::default()
+                }],
+                reason,
+            });
+        }
+    }
+    match flow_export_schema().parse(raw) {
+        Ok(data) => Ok(data),
+        Err(error) => {
+            let errors = zod_error_to_flow_authoring_errors(&error, "invalidGraph", None);
+            let reason = errors.first().map_or_else(
+                || "The export file is invalid.".to_owned(),
+                |e| e.message.clone(),
+            );
+            Err(FlowExportParseError { reason, errors })
+        }
+    }
 }

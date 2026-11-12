@@ -3,11 +3,34 @@
 #[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
-// HAND-PORT isQuickReplyCarrierStep:
-// function isQuickReplyCarrierStep(channel,step){const carrierSteps=QUICK_REPLY_CARRIER_STEPS_BY_CHANNEL[channel??""]??DEFAULT_QUICK_REPLY_CARRIER_STEPS;return carrierSteps.has(step.stepType)}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `isQuickReplyCarrierStep(channel, step)`: whether the step can carry the
+/// node's quick replies on this channel.
 pub fn is_quick_reply_carrier_step(channel: &str, step: &Value) -> bool {
-    todo!("P3.4")
+    const MEDIA: &[&str] = &[
+        "sendText",
+        "sendImage",
+        "sendVideo",
+        "sendAudio",
+        "sendFile",
+        "sendGif",
+    ];
+    const META: &[&str] = &[
+        "sendText",
+        "sendImage",
+        "sendVideo",
+        "sendAudio",
+        "sendFile",
+        "sendGif",
+        "sendMultipleImages",
+    ];
+    let carriers: &[&str] = match channel {
+        "instagram" | "messenger" => META,
+        "telegram" => MEDIA,
+        "whatsapp" => &["sendText", "sendImage", "sendCarousel"],
+        "zalo" => &["sendText", "sendImage"],
+        _ => &["sendText"],
+    };
+    step["stepType"]
+        .as_str()
+        .is_some_and(|t| carriers.contains(&t))
 }

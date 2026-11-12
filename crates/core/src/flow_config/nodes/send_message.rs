@@ -66,7 +66,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -111,21 +111,9 @@ find_places_near_me_step_schema()]))),
 ("quickReplies", z::array(button_step_schema()).super_refine(refine_reply_only_buttons).max(10).describe("Quick-reply buttons shown after the last message (max 10); use [] for none.")),
 ("quickReplySettings", quick_reply_settings_schema().optional())]).super_refine(refine_quick_reply_settings))]))]));
 
-// HAND-PORT getSendMessageChannel:
-// node=>{const parsed=channelTypes.safeParse(node.data.details.beforeStep.channel);return parsed.success?parsed.data:channelTypes.enum.omnichannel}
-
-// HAND-PORT sendMessageNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.sendMessage,...props.nodeProps,data:{name:"Send Message",isStartNode:false,...props.dataProps,details:{beforeStep:chooseChannelStepDefaultFn(),steps:[],quickReplies:[],quickReplySettings:quickReplySettingsDefaultFn(),...props.detailProps}}})
-
 pub const BROADCAST_PAYLOAD_TYPE: &str = "broadcast";
 
 pub const SEQUENCE_SCHEDULE_PAYLOAD_TYPE: &str = "sequenceSchedule";
-
-// HAND-PORT isBulkOutboundMetadata:
-// (metadata,isBulkBroadcast=false)=>typeof metadata==="object"&&metadata!==null&&"type"in metadata&&(metadata.type===SEQUENCE_SCHEDULE_PAYLOAD_TYPE||metadata.type===BROADCAST_PAYLOAD_TYPE&&isBulkBroadcast)
-
-// HAND-PORT isProactiveOutboundMetadata:
-// metadata=>isBulkOutboundMetadata(metadata,true)
 
 pub const COMMENT_AUTOMATION_PAYLOAD_TYPE: &str = "commentAutomation";
 
@@ -207,9 +195,40 @@ appointment_availability_range_skipped_payload(),
 get_user_data_webview_selection_payload(),
 step_input_resolution_payload()]));
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `sendMessageNodeDefaultFn(props)`.
 pub fn send_message_node_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    node_default(
+        props,
+        "sendMessage",
+        "Send Message",
+        json!({
+            "beforeStep": choose_channel_step_default_fn(&json!({})),
+            "steps": [],
+            "quickReplies": [],
+            "quickReplySettings": quick_reply_settings_default_fn(),
+        }),
+        true,
+        false,
+    )
+}
+
+/// `getSendMessageChannel(node)`: the node's channel, omnichannel when unknown.
+pub fn get_send_message_channel(node: &Value) -> String {
+    let channel = &node["data"]["details"]["beforeStep"]["channel"];
+    if deps::channel_types().safe_parse(channel).success {
+        channel.as_str().unwrap_or("omnichannel").to_owned()
+    } else {
+        "omnichannel".to_owned()
+    }
+}
+
+/// `isBulkOutboundMetadata(metadata, isBulkBroadcast)`.
+pub fn is_bulk_outbound_metadata(metadata: &Value, is_bulk_broadcast: bool) -> bool {
+    metadata["type"] == SEQUENCE_SCHEDULE_PAYLOAD_TYPE
+        || (metadata["type"] == BROADCAST_PAYLOAD_TYPE && is_bulk_broadcast)
+}
+
+/// `isProactiveOutboundMetadata(metadata)`.
+pub fn is_proactive_outbound_metadata(metadata: &Value) -> bool {
+    is_bulk_outbound_metadata(metadata, true)
 }

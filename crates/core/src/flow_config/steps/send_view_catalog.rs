@@ -13,22 +13,23 @@ schema!(pub fn send_view_catalog_step_schema = z::object(vec![("id", z::string()
 schema!(pub fn send_view_catalog_details_form_schema = z::object(vec![("footer", z::string().trim().refine(send_view_catalog_step_schema_footer_refine, Some("sendViewCatalogFooterTooLong"), None).default(json!("")).describe("Optional small text under the message (max 60 characters, UTF-16 units; use an empty string for none). May include `{{variable}}` placeholders.").meta(json!({"maxLength":60}))),
 ("thumbnailProductId", z::string().trim().default(json!("")).describe("Optional catalog product whose image is shown on the message: its Meta catalog `retailerId` (the Content ID in Commerce Manager), as returned by `products.searchMetaCatalogItems`. Use an empty string to let the channel pick one."))]));
 
-// HAND-PORT sendViewCatalogStepDefaultFn:
-// (props={})=>({text:"",footer:"",thumbnailProductId:"",...props,id:createId(),stepType:stepTypes.enum.sendViewCatalog})
-
-// value=>value.length<=SEND_VIEW_CATALOG_TEXT_MAX
 fn send_view_catalog_step_schema_text_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    value
+        .as_str()
+        .is_some_and(|s| crate::js::utf16_len(s) <= SEND_VIEW_CATALOG_TEXT_MAX)
 }
 
-// value=>value.length<=SEND_VIEW_CATALOG_FOOTER_MAX
 fn send_view_catalog_step_schema_footer_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    value
+        .as_str()
+        .is_some_and(|s| crate::js::utf16_len(s) <= SEND_VIEW_CATALOG_FOOTER_MAX)
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `sendViewCatalogStepDefaultFn(props)`.
 pub fn send_view_catalog_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({"text": "", "footer": "", "thumbnailProductId": ""}),
+        props,
+        json!({"id": create_id(), "stepType": "sendViewCatalog"}),
+    )
 }

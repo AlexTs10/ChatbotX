@@ -19,17 +19,14 @@ z::literal(json!(""))])),
 
 default_fn!(pub fn send_card_step_default_fn = json!({"id": create_id(), "stepType": "sendCard", "title": "", "subtitle": "", "image": {"id": create_id(), "stepType": "sendImage", "mode": "file", "url": "", "buttons": []}, "buttons": []}));
 
-// value=>countMessageCharacters(value)<=80
 fn send_card_step_schema_title_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    count_message_characters(value.as_str()) <= 80
 }
 
-// value=>countMessageCharacters(value)<=80
 fn send_card_step_schema_subtitle_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    count_message_characters(value.as_str()) <= 80
 }
 
-// value=>containsVariablePlaceholder(value)||z.url().safeParse(value).success
 fn send_card_step_schema_image_url_0_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    deps::url_with_variables_ok(value)
 }

@@ -9,3 +9,11 @@ schema!(pub fn set_messenger_user_persistent_menu_step_schema = z::object(vec![(
 
 // HAND-PORT setMessengerUserPersistentMenuStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.setMessengerUserPersistentMenu,userPersistentMenuId:"",...props})
+
+/// `setMessengerUserPersistentMenuStepDefaultFn(props)`.
+pub fn set_messenger_user_persistent_menu_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "setMessengerUserPersistentMenu", "userPersistentMenuId": ""}),
+        props,
+    )
+}

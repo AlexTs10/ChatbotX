@@ -1,3 +1,5 @@
+// Slice P3.4b: still being ported.
+#![allow(unused_variables, dead_code)]
 //! Port of `packages/flow-config/src/authoring/spec-schema.ts`.
 
 #[allow(unused_imports)]
@@ -42,7 +44,7 @@ z::object(vec![("type", z::literal(json!("sendViewCatalog")).describe("Step type
 ("thumbnailProductId", z::string().trim().default(json!("")).describe("Optional catalog product whose image is shown on the message: its Meta catalog `retailerId` (the Content ID in Commerce Manager), as returned by `products.searchMetaCatalogItems`. Use an empty string to let the channel pick one."))]).describe("Shares the product catalog: a message with a button that opens it. Publish rejects it on channels that cannot deliver it (see `capabilities.get`'s `unsupportedSteps`); in an omnichannel flow (`channel` omitted) it is accepted but only sent to WhatsApp contacts, so set `channel` to check it at publish."),
 z::object(vec![("type", z::literal(json!("wait")).describe("Step type: \"wait\".")),
 ("id", z::string().min(1).optional().describe("Stable id for this step. Omit to auto-generate one. Set it explicitly when a `goto` elsewhere needs to jump to this exact step.")),
-("duration", z::number().int().gt(0 as f64).describe("How long to wait, in `unit`s.")),
+("duration", z::number().int().gt(0_f64).describe("How long to wait, in `unit`s.")),
 ("unit", wait_step_delay_units().describe("Unit for `duration`."))]).describe("Pauses the flow for a fixed duration before continuing."),
 z::object(vec![("type", z::literal(json!("branch")).describe("Step type: \"branch\".")),
 ("id", z::string().min(1).optional().describe("Stable id for this step. Omit to auto-generate one. Set it explicitly when a `goto` elsewhere needs to jump to this exact step.")),
@@ -138,14 +140,16 @@ fn flow_spec_schema_steps_rec_0_super_refine(value: &Value, ctx: &mut RefineCtx)
     todo!("P3.4")
 }
 
-// value=>value.length<=SEND_VIEW_CATALOG_TEXT_MAX
 fn flow_spec_schema_steps_rec_3_text_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    value
+        .as_str()
+        .is_some_and(|s| crate::js::utf16_len(s) <= SEND_VIEW_CATALOG_TEXT_MAX)
 }
 
-// value=>value.length<=SEND_VIEW_CATALOG_FOOTER_MAX
 fn flow_spec_schema_steps_rec_3_footer_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    value
+        .as_str()
+        .is_some_and(|s| crate::js::utf16_len(s) <= SEND_VIEW_CATALOG_FOOTER_MAX)
 }
 
 // (data,ctx)=>{if((data.action==="addTags"||data.action==="removeTags")&&(!data.tagNames||data.tagNames.length===0)){ctx.addIssue({code:"custom",message:`action "${data.action}" requires a non-empty tagNames`,path:["tagNames"]})}if(data.action==="setCustomField"){if(!data.customFieldName){ctx.addIssue({code:"custom",message:'action "setCustomField" requires customFieldName',path:["customFieldName"]})}const operation=data.operation?fieldOperationByApiName(data.operation):void 0;const valueMissing=!operation||operation===FieldOperationType.set?data.value===void 0:isOperandBlank(operation,data.value);if(valueMissing){ctx.addIssue({code:"custom",message:'action "setCustomField" requires value',path:["value"]})}}}

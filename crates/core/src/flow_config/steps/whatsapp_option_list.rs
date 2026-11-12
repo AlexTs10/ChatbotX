@@ -41,7 +41,16 @@ z::literal(json!(""))]))]));
 
 // ---- stage 1 API (hand-ported in stage 2) ----
 
+/// `whatsappOptionListItemDefaultFn(props)`.
+pub fn whatsapp_option_list_item_default_fn(props: &Value) -> Value {
+    spread3(json!({"title": ""}), props, json!({"id": create_id()}))
+}
+
+/// `whatsappOptionListStepDefaultFn(props)`.
 pub fn whatsapp_option_list_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({"text": "", "buttonLabel": "button #1", "options": [{"title": "Title #1", "id": create_id()}, {"title": "Title #2", "id": create_id()}]}),
+        props,
+        json!({"id": create_id(), "buttonId": create_id(), "stepType": "whatsappOptionList"}),
+    )
 }

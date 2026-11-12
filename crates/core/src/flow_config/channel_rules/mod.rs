@@ -1,21 +1,21 @@
 //! `packages/flow-config/src/channel-rules`.
 
-pub mod channel_step_refinement;
-pub mod channel_validator;
-pub mod characters;
-pub mod copy_text_button;
-pub mod media_step_rules;
-pub mod media_step_validators;
-pub mod policies;
-pub mod product_message_rules;
-pub mod send_carousel_validator;
-pub mod send_products_validator;
-pub mod send_text_length_rules;
-pub mod send_text_validator;
-pub mod send_view_catalog_length_rules;
-pub mod send_wa_template_validator;
-pub mod tiktok_text_rules;
-pub mod validators;
+mod channel_step_refinement;
+mod channel_validator;
+mod characters;
+mod copy_text_button;
+mod media_step_rules;
+mod media_step_validators;
+mod policies;
+mod product_message_rules;
+mod send_carousel_validator;
+mod send_products_validator;
+mod send_text_length_rules;
+mod send_text_validator;
+mod send_view_catalog_length_rules;
+mod send_wa_template_validator;
+mod tiktok_text_rules;
+mod validators;
 
 pub use channel_step_refinement::*;
 pub use channel_validator::*;

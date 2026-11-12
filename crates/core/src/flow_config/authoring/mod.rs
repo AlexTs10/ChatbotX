@@ -1,11 +1,12 @@
 //! `packages/flow-config/src/authoring`.
 
-pub mod compile;
-pub mod errors;
-pub mod layout;
-pub mod normalize_graph;
-pub mod spec_schema;
+mod compile;
+mod errors;
+mod layout;
+mod normalize_graph;
+mod spec_schema;
 
+#[allow(unused_imports)]
 pub use compile::*;
 pub use errors::*;
 pub use layout::*;

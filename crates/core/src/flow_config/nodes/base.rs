@@ -21,5 +21,39 @@ pub fn default_node_measured() -> &'static Value {
     &V
 }
 
-// HAND-PORT defaultNodeData:
-// ()=>({id:createId(),position:{x:100,y:300},measured:DEFAULT_NODE_MEASURED})
+/// `defaultNodeData()`: fresh id, default position and size.
+pub fn default_node_data() -> Value {
+    json!({ "id": create_id(), "position": { "x": 100, "y": 300 }, "measured": default_node_measured() })
+}
+
+/// The shared shape of the `*NodeDefaultFn(props)` factories.
+/// `is_start_after` puts `isStartNode: false` after `dataProps` (addNotes).
+pub(crate) fn node_default(
+    props: &Value,
+    node_type: &str,
+    name: &str,
+    details: Value,
+    detail_props: bool,
+    is_start_after: bool,
+) -> Value {
+    let node = spread3(
+        default_node_data(),
+        &json!({ "type": node_type }),
+        Value::Null,
+    );
+    let node = spread_props(node, props.get("nodeProps").unwrap_or(&Value::Null));
+    let mut data = json!({ "name": name, "isStartNode": false });
+    data = spread_props(data, props.get("dataProps").unwrap_or(&Value::Null));
+    if is_start_after {
+        data["isStartNode"] = json!(false);
+    }
+    let details = if detail_props {
+        spread_props(details, props.get("detailProps").unwrap_or(&Value::Null))
+    } else {
+        details
+    };
+    data["details"] = details;
+    let mut node = node;
+    node["data"] = data;
+    node
+}

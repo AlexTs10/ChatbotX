@@ -13,5 +13,14 @@ schema!(pub fn condition_node_schema = z::object(vec![("id", z::string().regex(r
 ("isStartNode", z::boolean().describe("True for the node where the flow begins. Exactly one node should be the start node.")),
 ("details", z::object(vec![("steps", z::array(condition_step_schema()).min(1).max(1))]))]))]));
 
-// HAND-PORT conditionNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.condition,...props.nodeProps,data:{name:"Condition",isStartNode:false,...props.dataProps,details:{steps:[conditionStepDefaultFn()],...props.detailProps}}})
+/// `conditionNodeDefaultFn(props)`.
+pub fn condition_node_default_fn(props: &Value) -> Value {
+    node_default(
+        props,
+        "condition",
+        "Condition",
+        json!({ "steps": [condition_step_default_fn(&json!({}))] }),
+        true,
+        false,
+    )
+}

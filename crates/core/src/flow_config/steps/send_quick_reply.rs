@@ -11,12 +11,11 @@ schema!(pub fn send_quick_reply_step_schema = z::object(vec![("id", z::string().
 ("message", z::string().trim().min(1).max(1000)),
 ("buttons", z::array(button_step_schema()).super_refine(refine_reply_only_buttons))]));
 
-// HAND-PORT sendQuickReplyStepDefaultFn:
-// (props={})=>({message:"",buttons:[],...props,id:createId(),stepType:stepTypes.enum.sendQuickReply})
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `sendQuickReplyStepDefaultFn(props)`.
 pub fn send_quick_reply_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({ "message": "", "buttons": [] }),
+        props,
+        json!({ "id": create_id(), "stepType": "sendQuickReply" }),
+    )
 }

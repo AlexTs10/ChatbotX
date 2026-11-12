@@ -17,12 +17,10 @@ default_fn!(pub fn set_up_coupon_step_default_fn = json!({"id": create_id(), "st
 
 default_fn!(pub fn mark_coupon_used_step_default_fn = json!({"id": create_id(), "stepType": "markCouponUsed", "topicId": ""}));
 
-// ()=>void 0
-fn set_up_coupon_step_schema_states_preprocess(value: Option<Value>) -> Option<Value> {
-    todo!("P3.4")
+fn set_up_coupon_step_schema_states_preprocess(_value: Option<Value>) -> Option<Value> {
+    None
 }
 
-// ()=>void 0
-fn mark_coupon_used_step_schema_states_preprocess(value: Option<Value>) -> Option<Value> {
-    todo!("P3.4")
+fn mark_coupon_used_step_schema_states_preprocess(_value: Option<Value>) -> Option<Value> {
+    None
 }

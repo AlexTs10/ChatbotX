@@ -79,8 +79,6 @@ schema!(pub fn received_payload_schema = z::object(vec![("workspaceId", z::strin
 ("messageId", z::string().optional()),
 ("isFirstIncomingMessage", z::boolean().optional())]));
 
-// HAND-PORT messageEventSchemas (object): {"message:sent":"<schema sentPayloadSchema>","message:failed":"<schema failedPayloadSchema>","message:delivered":"<schema deliveredPayloadSchema>","message:seen":"<schema seenPayloadSchema>","message:received":"<schema receivedPayloadSchema>"}
-
 schema!(pub fn clicked_payload_schema = z::object(vec![("context", event_context_schema()),
 ("action", flow_click_action_schema()),
 ("stepId", z::string().optional()),
@@ -90,8 +88,6 @@ schema!(pub fn clicked_payload_schema = z::object(vec![("context", event_context
 schema!(pub fn ref_link_payload_schema = z::object(vec![("context", event_context_schema()),
 ("action", ref_link_action_schema()),
 ("occurredAt", z::date())]));
-
-// HAND-PORT flowEventSchemas (object): {"flow:clicked":"<schema clickedPayloadSchema>","flow:ref":"<schema refLinkPayloadSchema>"}
 
 schema!(pub fn contact_sender_type_schema = z::enum_(&["bot", "human"]));
 
@@ -113,7 +109,25 @@ z::number()])),
 ("result", bot_message_result_schema().optional()),
 ("aiProvider", z::string().optional())]));
 
-// () => true
-fn sent_payload_schema_metadata_custom(value: &Value) -> bool {
-    todo!("P3.4")
+fn sent_payload_schema_metadata_custom(_value: &Value) -> bool {
+    true
+}
+
+/// `messageEventSchemas`: payload schema by event type.
+pub fn message_event_schemas() -> Vec<(&'static str, Schema)> {
+    vec![
+        ("message:sent", sent_payload_schema()),
+        ("message:failed", failed_payload_schema()),
+        ("message:delivered", delivered_payload_schema()),
+        ("message:seen", seen_payload_schema()),
+        ("message:received", received_payload_schema()),
+    ]
+}
+
+/// `flowEventSchemas`.
+pub fn flow_event_schemas() -> Vec<(&'static str, Schema)> {
+    vec![
+        ("flow:clicked", clicked_payload_schema()),
+        ("flow:ref", ref_link_payload_schema()),
+    ]
 }

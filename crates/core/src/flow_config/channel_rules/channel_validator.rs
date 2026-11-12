@@ -3,11 +3,6 @@
 #[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
-// HAND-PORT resolveStepValidator:
-// (validator,channel)=>{if(!isChannelValidatorMap(validator)){return validator}const override=validator[channel];return override??validator[channelTypes.enum.omnichannel]}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
 /// `StepValidator`: one schema for every channel, or a base (omnichannel)
 /// schema plus per-channel overrides.
 #[derive(Clone, Debug)]
@@ -29,19 +24,37 @@ impl StepValidator {
                 .collect(),
         }
     }
+}
 
+impl StepValidator {
     /// `validator.omnichannel` (or the schema itself).
     pub fn base(&self) -> Schema {
-        todo!("P3.4")
+        match self {
+            StepValidator::Schema(s) | StepValidator::PerChannel { base: s, .. } => s.clone(),
+        }
     }
 
     /// `validator[channel]` (no fallback).
     pub fn channel(&self, channel: &str) -> Option<Schema> {
-        let _ = channel;
-        todo!("P3.4")
+        match self {
+            StepValidator::Schema(_) => None,
+            StepValidator::PerChannel { base, overrides } => {
+                if channel == "omnichannel" {
+                    return Some(base.clone());
+                }
+                overrides
+                    .iter()
+                    .find(|(c, _)| c == channel)
+                    .map(|(_, s)| s.clone())
+            }
+        }
     }
 }
 
+/// `resolveStepValidator(validator, channel)`: the channel's own rule, else
+/// the omnichannel base.
 pub fn resolve_step_validator(validator: &StepValidator, channel: &str) -> Schema {
-    todo!("P3.4")
+    validator
+        .channel(channel)
+        .unwrap_or_else(|| validator.base())
 }

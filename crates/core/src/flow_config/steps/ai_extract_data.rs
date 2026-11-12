@@ -53,22 +53,27 @@ error_state_schema()]).optional()),
 ("inputType", z::literal(json!("file"))),
 ("inputFieldId", z::string().trim().min(1))])]).super_refine(ai_extract_data_schema_super_refine));
 
-// HAND-PORT aiExtractDataDefaultFn:
-// (props={})=>{const provider=props.provider??"openai";const model=props.model??(provider==="openaiCompatible"?"":aiExtractDataModels[provider].default);return{id:createId(),inputType:"text",inputFieldId:"",provider,...provider==="openaiCompatible"?{integrationId:"integrationId"in props?props.integrationId:""}:{},model,extractFields:[],...props,stepType:stepTypes.enum.aiExtractData,states:[successStateDefaultFn(),errorStateDefaultFn()]}}
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_extract_data_schema_0_extract_fields_custom_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// (value,ctx)=>{if(!value.model.trim()){ctx.addIssue({code:"custom",path:["model"],message:"Model is required"})}if(value.provider==="openaiCompatible"&&!value.integrationId?.trim()){ctx.addIssue({code:"custom",path:["integrationId"],message:"Integration is required"})}}
 fn ai_extract_data_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
+    ai_model_rules(value, ctx, false);
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `aiExtractDataDefaultFn(props)`.
 pub fn ai_extract_data_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    let head = ai_step_head(props, |p| {
+        ai_extract_data_models()
+            .get(p)
+            .map(|m| m["default"].clone())
+    });
+    spread3(
+        merge(
+            json!({ "id": create_id(), "inputType": "text", "inputFieldId": "" }),
+            merge(head, json!({ "extractFields": [] })),
+        ),
+        props,
+        json!({ "stepType": "aiExtractData", "states": [success_state_default_fn(), error_state_default_fn()] }),
+    )
 }

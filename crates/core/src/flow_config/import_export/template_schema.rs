@@ -93,16 +93,36 @@ z::literal(json!(2))])),
 ("manifests", template_manifests_schema()),
 ("resources", template_resources_schema())]));
 
-// HAND-PORT parseTemplateExport:
-// raw=>{const preParsed=z.object({formatVersion:z.unknown()}).safeParse(raw);if(preParsed.success&&!SUPPORTED_FORMAT_VERSIONS.includes(preParsed.data.formatVersion)){return{ok:false,reason:`Unsupported template export format version: ${String(preParsed.data.formatVersion)}`}}const result=templateExportSchema.safeParse(raw);if(!result.success){return{ok:false,reason:result.error.message}}return{ok:true,data:result.data}}
-
-// node=>isRecord(node)&&typeof node.id==="string"&&typeof node.type==="string"&&isRecord(node.data)&&isRecord(node.data.details)&&(!("steps"in node.data.details)||Array.isArray(node.data.details.steps))
-fn template_flow_node_schema_1_custom(value: &Value) -> bool {
-    todo!("P3.4")
+fn template_flow_node_schema_1_custom(node: &Value) -> bool {
+    node.is_object()
+        && node["id"].is_string()
+        && node["type"].is_string()
+        && node["data"].is_object()
+        && node["data"]["details"].is_object()
+        && node["data"]["details"]
+            .get("steps")
+            .is_none_or(Value::is_array)
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `parseTemplateExport(raw)`: never throws; `Err(reason)` when invalid.
 pub fn parse_template_export(raw: &Value) -> Result<Value, String> {
-    todo!("P3.4")
+    if let Value::Object(map) = raw {
+        let version = map.get("formatVersion");
+        let supported = version.and_then(Value::as_f64).is_some_and(|v| {
+            v == TEMPLATE_EXPORT_FORMAT_VERSION as f64
+                || v == TEMPLATE_EXPORT_FORMAT_VERSION_V2 as f64
+        });
+        if !supported {
+            let shown = match version {
+                None => "undefined".to_owned(),
+                Some(v) => crate::js::string_of(v),
+            };
+            return Err(format!(
+                "Unsupported template export format version: {shown}"
+            ));
+        }
+    }
+    template_export_schema()
+        .parse(raw)
+        .map_err(|e| e.to_string())
 }

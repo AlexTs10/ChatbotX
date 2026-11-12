@@ -11,7 +11,16 @@ schema!(pub fn landing_page_node_schema = z::object(vec![("id", z::string().rege
 ("type", z::literal(json!("landingPage")).describe("Node type \"landingPage\". `data.details` is an empty object.")),
 ("data", z::object(vec![("name", z::string().trim().min(1).max(255).describe("Node display name shown on the canvas (1-255 characters).")),
 ("isStartNode", z::boolean().describe("True for the node where the flow begins. Exactly one node should be the start node.")),
-("details", z::object(vec![]))]))]));
+("details", z::object(Vec::<(&str, Schema)>::new()))]))]));
 
-// HAND-PORT landingPageNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.landingPage,...props.nodeProps,data:{name:"Landing Page",isStartNode:false,...props.dataProps,details:{}}})
+/// `landingPageNodeDefaultFn(props)`.
+pub fn landing_page_node_default_fn(props: &Value) -> Value {
+    node_default(
+        props,
+        "landingPage",
+        "Landing Page",
+        json!({}),
+        false,
+        false,
+    )
+}

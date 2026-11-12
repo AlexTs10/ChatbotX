@@ -15,9 +15,6 @@ pub fn pipeline_step_limits() -> &'static Value {
 
 schema!(pub fn pipeline_step_actions = z::enum_(&["addToPipeline", "moveToStage", "changeValue", "assign", "changeStatus", "changePriority", "changeDueDate", "changeTitle", "setCustomField", "clearCustomField", "changeDescription", "removeFromPipeline", "addComment", "transfer"]));
 
-// HAND-PORT pipelineActionCanSkip:
-// action=>!PIPELINE_ACTIONS_WITHOUT_SKIP.has(action)
-
 schema!(pub fn pipeline_step_due_date_schema = z::discriminated_union("mode", vec![z::object(vec![("mode", z::literal(json!("none")))]),
 z::object(vec![("mode", z::literal(json!("customField"))),
 ("customFieldId", z::union(vec![z::literal(json!("")),
@@ -221,28 +218,96 @@ z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pi
 ("destinationStageId", z::union(vec![z::literal(json!("")),
 z::string().regex(r#"^\d+$"#, "").max(18)]).optional().describe("Destination stage id; omitted means the first stage."))])]));
 
-// HAND-PORT pipelineStepDefaultFn:
-// (action="addToPipeline",carry={})=>{const base={id:carry.id??createId(),stepType:stepTypes.enum.pipeline,pipelineId:carry.pipelineId??"",states:carry.states??defaultStates()};const none={mode:"none"};switch(action){case"addToPipeline":return{...base,action,title:"{{full_name}}",description:"",assigneeMemberIds:[],assigneeInboxTeamIds:[],status:"open",dueDate:none,fieldValues:[]};case"moveToStage":return{...base,action,stageId:""};case"changeValue":return{...base,action,value:""};case"assign":return{...base,action,assigneeMemberIds:[],assigneeInboxTeamIds:[]};case"changeStatus":return{...base,action,status:"won"};case"changePriority":return{...base,action,priority:"medium"};case"changeDueDate":return{...base,action,dueDate:none};case"changeTitle":return{...base,action,title:""};case"setCustomField":return{...base,action,pipelineFieldId:"",value:""};case"clearCustomField":return{...base,action,pipelineFieldIds:[]};case"changeDescription":return{...base,action,description:""};case"removeFromPipeline":return{...base,action};case"addComment":return{...base,action,text:""};case"transfer":return{...base,action,destinationPipelineId:""};default:{const exhaustive=action;throw new Error(`Unhandled pipeline action: ${String(exhaustive)}`)}}}
+/// `pipelineActionCanSkip`: every action but `addToPipeline` can skip.
+pub fn pipeline_action_can_skip(action: &str) -> bool {
+    action != "addToPipeline"
+}
 
-// HAND-PORT pipelineActionDefaultFn:
-// (action="addToPipeline",carry={})=>{const{id:_id,stepType:_stepType,states:_states,...fields}=pipelineStepDefaultFn(action,carry);return{...fields,type:"pipeline"}}
+fn default_states() -> Value {
+    json!([
+        success_state_default_fn(),
+        error_state_default_fn(),
+        skip_state_default_fn()
+    ])
+}
 
-// HAND-PORT findMissingRequiredPipelineFields:
-// function findMissingRequiredPipelineFields(fieldValues,definitions){const finalValues=new Map;for(const{pipelineFieldId,value}of fieldValues){finalValues.set(pipelineFieldId,value)}return definitions.filter(definition=>definition.required&&(finalValues.get(definition.id)??"").trim()==="")}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `pipelineStepDefaultFn(action, carry)`.
 pub fn pipeline_step_default_fn(action: &str, carry: &Value) -> Value {
-    todo!("P3.4")
+    let pick = |key: &str| carry.get(key).filter(|v| !v.is_null()).cloned();
+    let base = json!({
+        "id": pick("id").unwrap_or_else(|| json!(create_id())),
+        "stepType": "pipeline",
+        "pipelineId": pick("pipelineId").unwrap_or_else(|| json!("")),
+        "states": pick("states").unwrap_or_else(default_states),
+        "action": action,
+    });
+    let none = json!({ "mode": "none" });
+    let fields = match action {
+        "addToPipeline" => json!({
+            "title": "{{full_name}}",
+            "description": "",
+            "assigneeMemberIds": [],
+            "assigneeInboxTeamIds": [],
+            "status": "open",
+            "dueDate": none,
+            "fieldValues": [],
+        }),
+        "moveToStage" => json!({ "stageId": "" }),
+        "changeValue" => json!({ "value": "" }),
+        "assign" => json!({ "assigneeMemberIds": [], "assigneeInboxTeamIds": [] }),
+        "changeStatus" => json!({ "status": "won" }),
+        "changePriority" => json!({ "priority": "medium" }),
+        "changeDueDate" => json!({ "dueDate": none }),
+        "changeTitle" => json!({ "title": "" }),
+        "setCustomField" => json!({ "pipelineFieldId": "", "value": "" }),
+        "clearCustomField" => json!({ "pipelineFieldIds": [] }),
+        "changeDescription" => json!({ "description": "" }),
+        "removeFromPipeline" => json!({}),
+        "addComment" => json!({ "text": "" }),
+        "transfer" => json!({ "destinationPipelineId": "" }),
+        other => panic!("Unhandled pipeline action: {other}"),
+    };
+    merge(base, fields)
 }
 
+/// `pipelineActionDefaultFn(action, carry)`: the step defaults without the
+/// step envelope, as a trigger action.
 pub fn pipeline_action_default_fn(action: &str, carry: &Value) -> Value {
-    todo!("P3.4")
+    let mut fields = pipeline_step_default_fn(action, carry);
+    if let Some(obj) = fields.as_object_mut() {
+        obj.remove("id");
+        obj.remove("stepType");
+        obj.remove("states");
+    }
+    merge(fields, json!({ "type": "pipeline" }))
 }
 
+/// `findMissingRequiredPipelineFields(fieldValues, definitions)`: the last
+/// row of a field wins; blank counts as missing, a variable as set.
 pub fn find_missing_required_pipeline_fields(
     field_values: &Value,
     definitions: &Value,
 ) -> Vec<Value> {
-    todo!("P3.4")
+    let mut final_values = std::collections::HashMap::new();
+    for row in field_values.as_array().into_iter().flatten() {
+        final_values.insert(
+            str_field(row, "pipelineFieldId").to_owned(),
+            str_field(row, "value").to_owned(),
+        );
+    }
+    definitions
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|definition| {
+            definition["required"] == true
+                && crate::js::trim(
+                    final_values
+                        .get(str_field(definition, "id"))
+                        .map_or("", String::as_str),
+                )
+                .is_empty()
+        })
+        .cloned()
+        .collect()
 }

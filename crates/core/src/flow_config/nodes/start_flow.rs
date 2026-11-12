@@ -13,5 +13,14 @@ schema!(pub fn start_flow_node_schema = z::object(vec![("id", z::string().regex(
 ("isStartNode", z::boolean().describe("True for the node where the flow begins. Exactly one node should be the start node.")),
 ("details", z::object(vec![("beforeStep", start_external_flow_step_schema())]))]))]));
 
-// HAND-PORT startFlowNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.startFlow,...props.nodeProps,data:{name:"Start Flow",isStartNode:false,...props.dataProps,details:{beforeStep:startExternalFlowStepDefaultFn(),...props.detailProps}}})
+/// `startFlowNodeDefaultFn(props)`.
+pub fn start_flow_node_default_fn(props: &Value) -> Value {
+    node_default(
+        props,
+        "startFlow",
+        "Start Flow",
+        json!({ "beforeStep": start_external_flow_step_default_fn(&json!({})) }),
+        true,
+        false,
+    )
+}

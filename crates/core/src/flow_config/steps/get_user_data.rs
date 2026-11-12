@@ -27,31 +27,29 @@ schema!(pub fn get_user_data_step_schema = z::object(vec![("id", z::string().reg
 ("showHint", z::boolean().optional().describe("Phone/email reply formats only: offer the contact's stored phone/email as a quick reply on Messenger and Instagram. With no stored value, Messenger falls back to its native phone/email quick reply. Other channels send the plain prompt.")),
 ("autoSkip", z::boolean().default(json!(false)).describe("Take the Skip branch on its own when the contact has not answered within autoSkipTimeValue autoSkipTimeUnit of the first question (retries do not restart the clock), or after autoSkipFailAttempts invalid replies.")),
 ("autoSkipTimeUnit", z::string().pipe(wait_step_delay_units()).default(json!("minutes")).describe("Unit of autoSkipTimeValue: \"seconds\", \"minutes\", \"hours\" or \"days\".")),
-("autoSkipTimeValue", z::number().coerce().int().gte(1 as f64).lte(100 as f64).default(json!(3)).describe("Time to wait for an answer before auto skipping (1-100).")),
-("autoSkipFailAttempts", z::number().coerce().int().gte(1 as f64).lte(100 as f64).default(json!(3)).describe("Invalid replies allowed before auto skipping (1-100).")),
+("autoSkipTimeValue", z::number().coerce().int().gte(1_f64).lte(100_f64).default(json!(3)).describe("Time to wait for an answer before auto skipping (1-100).")),
+("autoSkipFailAttempts", z::number().coerce().int().gte(1_f64).lte(100_f64).default(json!(3)).describe("Invalid replies allowed before auto skipping (1-100).")),
 ("states", z::tuple(vec![success_state_schema(),
 skip_state_schema()]))]));
 
-// HAND-PORT encodeContactHintQuickReplyPayload:
-// function encodeContactHintQuickReplyPayload(value){return`${CONTACT_HINT_QUICK_REPLY_PREFIX}${value}`}
-
-// HAND-PORT decodeContactHintQuickReplyPayload:
-// function decodeContactHintQuickReplyPayload(payload){if(!payload?.startsWith(CONTACT_HINT_QUICK_REPLY_PREFIX)){return null}return payload.slice(CONTACT_HINT_QUICK_REPLY_PREFIX.length)||null}
-
-// HAND-PORT getUserDataStepDefaultFn:
-// (props={})=>({message:"",replyFormat:ReplyFormat.text,outputFieldId:"",retryMessage:"",skipButtonLabel:"Skip",showHint:false,autoSkip:false,autoSkipTimeUnit:waitStepDelayUnits.enum.minutes,autoSkipTimeValue:3,autoSkipFailAttempts:3,states:[successStateDefaultFn(),skipStateDefaultFn()],...props,id:createId(),stepType:stepTypes.enum.getUserData})
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `getUserDataStepDefaultFn(props)`.
 pub fn get_user_data_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({"message": "", "replyFormat": "RF02", "outputFieldId": "", "retryMessage": "", "skipButtonLabel": "Skip", "showHint": false, "autoSkip": false, "autoSkipTimeUnit": "minutes", "autoSkipTimeValue": 3, "autoSkipFailAttempts": 3, "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "skip"}]}),
+        props,
+        json!({"id": create_id(), "stepType": "getUserData"}),
+    )
 }
 
-pub fn decode_contact_hint_quick_reply_payload(payload: Option<&str>) -> Option<String> {
-    todo!("P3.4")
-}
+const CONTACT_HINT_QUICK_REPLY_PREFIX: &str = "GET_USER_DATA_CONTACT_HINT|";
 
+/// `encodeContactHintQuickReplyPayload`.
 pub fn encode_contact_hint_quick_reply_payload(value: &str) -> String {
-    todo!("P3.4")
+    format!("{CONTACT_HINT_QUICK_REPLY_PREFIX}{value}")
+}
+
+/// `decodeContactHintQuickReplyPayload`: the hint value, or `None`.
+pub fn decode_contact_hint_quick_reply_payload(payload: Option<&str>) -> Option<String> {
+    let rest = payload?.strip_prefix(CONTACT_HINT_QUICK_REPLY_PREFIX)?;
+    (!rest.is_empty()).then(|| rest.to_owned())
 }

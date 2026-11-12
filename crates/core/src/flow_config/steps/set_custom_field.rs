@@ -3,15 +3,6 @@
 #[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
-// HAND-PORT isOperandBlank:
-// (operation,value)=>FIELD_OPERATION_DEFINITIONS[operation].requiresOperand&&!value?.trim()
-
-// HAND-PORT isFieldOperandMissing:
-// (operation,value)=>!BLANK_OPERAND_LEGACY_OPERATIONS.includes(operation)&&isOperandBlank(operation,value)
-
-// HAND-PORT withFieldOperationOperandRule:
-// schema=>schema.superRefine(({operation,value},ctx)=>{if(isFieldOperandMissing(operation,value)){ctx.addIssue({code:"custom",path:["value"],message:"A value is required for this operation."})}})
-
 schema!(pub fn set_custom_field_step_schema = z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
 ("stepType", z::literal(json!("setCustomField")).describe("Step type discriminator: \"setCustomField\".")),
 ("inputFieldId", z::string().trim().min(1).refine(set_custom_field_step_schema_input_field_id_refine, Some("Value starting with \"bot_field:\" must be a valid bot field reference (e.g. \"bot_field:123\")."), None)),
@@ -26,27 +17,52 @@ schema!(pub fn set_custom_field_action_schema = z::object(vec![("customFieldId",
 
 default_fn!(pub fn set_custom_field_step_default_fn = json!({"id": create_id(), "stepType": "setCustomField", "value": "", "inputFieldId": "", "operation": "O01"}));
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn set_custom_field_step_schema_input_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
-
-// ({operation,value},ctx)=>{if(isFieldOperandMissing(operation,value)){ctx.addIssue({code:"custom",path:["value"],message:"A value is required for this operation."})}}
-fn set_custom_field_step_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
-}
-
-// operation=>operation||void 0
-fn set_custom_field_action_schema_operation_preprocess(value: Option<Value>) -> Option<Value> {
-    todo!("P3.4")
-}
-
-// ({operation,value},ctx)=>{if(isFieldOperandMissing(operation,value)){ctx.addIssue({code:"custom",path:["value"],message:"A value is required for this operation."})}}
-fn set_custom_field_action_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
-}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
 
 /// The registry's operation codes (`FieldOperationType` is re-exported).
 pub use crate::utils::custom_field_operation::FieldOperationType;
+
+const BLANK_OPERAND_LEGACY_OPERATIONS: &[FieldOperationType] =
+    &[FieldOperationType::Increase, FieldOperationType::Decrease];
+
+/// `isOperandBlank`: the operation needs an operand and the value is blank.
+pub fn is_operand_blank(operation: FieldOperationType, value: Option<&str>) -> bool {
+    crate::utils::custom_field_operation::field_operation_definition(operation).requires_operand
+        && value.map(crate::js::trim).unwrap_or("").is_empty()
+}
+
+/// `isFieldOperandMissing`: like `isOperandBlank`, increase/decrease exempt.
+pub fn is_field_operand_missing(operation: FieldOperationType, value: Option<&str>) -> bool {
+    !BLANK_OPERAND_LEGACY_OPERATIONS.contains(&operation) && is_operand_blank(operation, value)
+}
+
+/// `withFieldOperationOperandRule(schema)`.
+pub fn with_field_operation_operand_rule(schema: Schema) -> Schema {
+    schema.super_refine(operand_rule)
+}
+
+fn operand_rule(data: &Value, ctx: &mut RefineCtx) {
+    let Some(operation) = data["operation"]
+        .as_str()
+        .and_then(FieldOperationType::parse)
+    else {
+        return;
+    };
+    if is_field_operand_missing(operation, data["value"].as_str()) {
+        ctx.issue(path!["value"], "A value is required for this operation.");
+    }
+}
+
+fn set_custom_field_step_schema_super_refine(data: &Value, ctx: &mut RefineCtx) {
+    operand_rule(data, ctx);
+}
+
+fn set_custom_field_action_schema_super_refine(data: &Value, ctx: &mut RefineCtx) {
+    operand_rule(data, ctx);
+}
+
+fn set_custom_field_action_schema_operation_preprocess(value: Option<Value>) -> Option<Value> {
+    value.filter(|v| truthy(Some(v)))
+}

@@ -13,12 +13,10 @@ error_state_schema()]))]));
 
 default_fn!(pub fn get_data_from_json_step_default_fn = json!({"id": create_id(), "stepType": "getDataFromJson", "inputFieldId": "", "mapping": [{"jsonPath": "", "outputFieldId": ""}], "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}));
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn get_data_from_json_step_schema_input_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn get_data_from_json_step_schema_mapping_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }

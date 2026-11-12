@@ -25,20 +25,40 @@ schema!(pub fn send_products_step_schema = z::object(vec![("id", z::string().reg
 ("footer", z::string().trim().refine(send_products_section_schema_title_refine, Some("sendProductsFieldTooLong"), None).optional().describe("Optional footer text.")),
 ("sections", z::array(send_products_section_schema()).describe("Product sections. \"products\": 1+ sections; \"carousel\": exactly one untitled section."))]));
 
-// HAND-PORT refineSendProductsStructure:
-// (content,ctx)=>{const seen=new Set;content.sections.forEach((section,sectionIndex)=>{if(section.productIds.length===0){ctx.addIssue({code:"custom",path:["sections",sectionIndex,"productIds"],message:flowValidationCodes.sendProductsProductCountOutOfRange})}for(const productId of section.productIds){if(seen.has(productId)){ctx.addIssue({code:"custom",path:["sections",sectionIndex,"productIds"],message:flowValidationCodes.sendProductsDuplicateProduct})}seen.add(productId)}})}
-
-// HAND-PORT sendProductsStepDefaultFn:
-// (props={})=>({display:"products",sections:[{productIds:[]}],...props,id:createId(),stepType:stepTypes.enum.sendProducts})
-
-// value=>countMessageCharacters(value)<=SEND_PRODUCTS_TEXT_MAX
-fn send_products_section_schema_title_refine(value: &Value) -> bool {
-    todo!("P3.4")
+/// `sendProductsStepDefaultFn(props)`.
+pub fn send_products_step_default_fn(props: &Value) -> Value {
+    spread3(
+        json!({"display": "products", "sections": [{"productIds": []}]}),
+        props,
+        json!({"id": create_id(), "stepType": "sendProducts"}),
+    )
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
+fn send_products_section_schema_title_refine(value: &Value) -> bool {
+    count_message_characters(value.as_str()) <= SEND_PRODUCTS_TEXT_MAX
+}
 
-pub fn send_products_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+/// `refineSendProductsStructure(content, ctx)`: non-empty sections, no
+/// duplicate products.
+pub fn refine_send_products_structure(content: &Value, ctx: &mut RefineCtx) {
+    let mut seen = std::collections::HashSet::new();
+    for (section_index, section) in arr_field(content, "sections").iter().enumerate() {
+        let ids = arr_field(section, "productIds");
+        if ids.is_empty() {
+            ctx.issue(
+                path!["sections", section_index, "productIds"],
+                "sendProductsProductCountOutOfRange",
+            );
+        }
+        for id in ids {
+            let key = key_of(id).unwrap_or_default();
+            if seen.contains(&key) {
+                ctx.issue(
+                    path!["sections", section_index, "productIds"],
+                    "sendProductsDuplicateProduct",
+                );
+            }
+            seen.insert(key);
+        }
+    }
 }

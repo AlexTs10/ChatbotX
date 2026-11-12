@@ -11,12 +11,11 @@ schema!(pub fn ai_delete_message_history_schema = z::object(vec![("id", z::strin
 ("states", z::tuple(vec![success_state_schema(),
 error_state_schema()]).optional())]));
 
-// HAND-PORT aiDeleteMessageHistoryDefaultFn:
-// (props={})=>({id:createId(),provider:props.provider??"openai",...props,stepType:stepTypes.enum.aiDeleteMessageHistory,states:[successStateDefaultFn(),errorStateDefaultFn()]})
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `aiDeleteMessageHistoryDefaultFn(props)`.
 pub fn ai_delete_message_history_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({"id": create_id(), "provider": "openai"}),
+        props,
+        json!({"stepType": "aiDeleteMessageHistory", "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}),
+    )
 }

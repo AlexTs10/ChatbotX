@@ -38,20 +38,50 @@ schema!(pub fn ai_generate_image_schema = z::object(vec![("id", z::string().rege
 ("states", z::tuple(vec![success_state_schema(),
 error_state_schema()]).optional())]));
 
-// HAND-PORT getAIGeneratedImagePath:
-// ({storagePrefix,fileName,conversationId})=>`${storagePrefix}/conversations/${conversationId}/${fileName}`
-
-// HAND-PORT aiGenerateImageDefaultFn:
-// (props={})=>{const provider=props.provider??"openai";const model=props.model??defaultModels[provider];return{id:createId(),provider,model,prompt:"",size:imageAspectRatio.enum.auto,quality:aiGenerateImageQuality.enum.auto,outputFieldId:"",...props,stepType:stepTypes.enum.aiGenerateImage,states:[successStateDefaultFn(),errorStateDefaultFn()]}}
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_generate_image_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
+/// `getAIGeneratedImagePath`.
+pub fn get_ai_generated_image_path(
+    storage_prefix: &str,
+    file_name: &str,
+    conversation_id: &str,
+) -> String {
+    format!("{storage_prefix}/conversations/{conversation_id}/{file_name}")
+}
 
+/// `aiGenerateImageDefaultFn(props)`.
 pub fn ai_generate_image_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    let provider = props
+        .get("provider")
+        .filter(|v| !v.is_null())
+        .cloned()
+        .unwrap_or_else(|| json!("openai"));
+    let model = props
+        .get("model")
+        .filter(|v| !v.is_null())
+        .cloned()
+        .or_else(|| {
+            provider
+                .as_str()
+                .and_then(|p| default_models().get(p))
+                .cloned()
+        });
+    let mut base = json!({
+        "id": create_id(),
+        "provider": provider,
+        "prompt": "",
+        "size": "auto",
+        "quality": "auto",
+        "outputFieldId": "",
+    });
+    if let Some(model) = model {
+        base["model"] = model;
+    }
+    spread3(
+        base,
+        props,
+        json!({ "stepType": "aiGenerateImage", "states": [success_state_default_fn(), error_state_default_fn()] }),
+    )
 }

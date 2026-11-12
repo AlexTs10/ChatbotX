@@ -57,11 +57,6 @@ pub const OMNICHANNEL_DELIVERABLE_STEP_TYPES: &[&str] = &[
     "whatsappOptionList",
 ];
 
-// HAND-PORT defineChannelFlowPolicy:
-// definition=>{const steps=createDefaultStepSupport();for(const stepType of definition.supported??[]){steps[stepType]=stepSupport.full}for(const stepType of definition.noButtons??[]){steps[stepType]=stepSupport.noButtons}return{limits:definition.limits,quickRepliesShareButtonSlots:definition.quickRepliesShareButtonSlots??false,nativeButtonTypes:definition.nativeButtonTypes??[],steps,...definition.productMessages?{productMessages:definition.productMessages}:{}}}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
 /// `ChannelFlowPolicy.limits`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelLimits {

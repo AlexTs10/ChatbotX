@@ -13,5 +13,14 @@ schema!(pub fn send_mail_node_schema = z::object(vec![("id", z::string().regex(r
 ("isStartNode", z::boolean().describe("True for the node where the flow begins. Exactly one node should be the start node.")),
 ("details", z::object(vec![("steps", z::array(email_step_schema()))]))]))]));
 
-// HAND-PORT sendMailNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.sendMail,...props.nodeProps,data:{name:"Send Mail",isStartNode:false,...props.dataProps,details:{steps:[emailStepDefaultFn()]}}})
+/// `sendMailNodeDefaultFn(props)`.
+pub fn send_mail_node_default_fn(props: &Value) -> Value {
+    node_default(
+        props,
+        "sendMail",
+        "Send Mail",
+        json!({ "steps": [email_step_default_fn(&json!({}))] }),
+        false,
+        false,
+    )
+}

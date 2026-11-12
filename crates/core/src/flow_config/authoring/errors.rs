@@ -16,20 +16,6 @@ z::object(vec![("actual", z::number().optional()),
 ("policyVersion", z::number()),
 ("unit", z::string().optional())])]));
 
-// HAND-PORT FlowAuthoringException:
-// class FlowAuthoringException extends Error{static{__name(this,"FlowAuthoringException")}errors;constructor(errors){super(errors.length>0?errors.map(error=>`${error.path}: ${formatFlowAuthoringErrorMessage(error)}`).join("; "):"Flow authoring failed");this.name="FlowAuthoringException";this.errors=errors}}
-
-// HAND-PORT formatZodPathSegment:
-// (acc,segment)=>{if(typeof segment==="number"){return`${acc}[${segment}]`}const key=String(segment);return acc.length===0?key:`${acc}.${key}`}
-
-// HAND-PORT zodErrorToFlowAuthoringErrors:
-// function zodErrorToFlowAuthoringErrors(error,code,mapPath){return error.issues.map(issue=>{const issueParams="params"in issue&&typeof issue.params==="object"?issue.params:void 0;const capability=issueParams&&"capability"in issueParams&&isFlowCapability(issueParams.capability)?issueParams.capability:void 0;const capabilityCode=capability?.code;return{capability,path:mapPath?.(issue.path)??issue.path.reduce(formatZodPathSegment,""),code:capabilityCode??code,message:issue.message}})}
-
-// HAND-PORT closestNames:
-// function closestNames(target,available){const targetLower=target.toLowerCase();return[...available].map(name=>({name,score:nameSimilarity(targetLower,name.toLowerCase())})).filter(({score})=>score>0).sort((a,b)=>b.score-a.score).slice(0,MAX_CANDIDATES).map(({name})=>name)}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
 /// `FlowAuthoringError`.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,25 +41,143 @@ impl FlowAuthoringException {
     pub fn new(errors: Vec<FlowAuthoringError>) -> FlowAuthoringException {
         FlowAuthoringException { errors }
     }
+}
 
-    /// `error.message`.
+fn format_flow_authoring_error_message(error: &FlowAuthoringError) -> String {
+    let Some(capability) = &error.capability else {
+        return error.message.clone();
+    };
+    let (block, channel) = (
+        str_field(capability, "block"),
+        str_field(capability, "channel"),
+    );
+    if capability["code"] == "unsupportedBlock" {
+        return format!("The {channel} channel does not support {block}.");
+    }
+    let number = |v: &Value| crate::js::number_to_string(v.as_f64().unwrap_or(0.0));
+    if let (Some(actual), Some(allowed)) = (capability.get("actual"), capability.get("allowed"))
+        && truthy(capability.get("unit"))
+    {
+        return format!(
+            "{block} exceeds the {channel} maximum of {} {} (received {}).",
+            number(allowed),
+            str_field(capability, "unit"),
+            number(actual)
+        );
+    }
+    format!("{block} violates a {channel} channel constraint.")
+}
+
+impl FlowAuthoringException {
+    /// `error.message`: every error, `path: message`, joined by `; `.
     pub fn message(&self) -> String {
-        todo!("P3.4")
+        if self.errors.is_empty() {
+            return "Flow authoring failed".to_owned();
+        }
+        self.errors
+            .iter()
+            .map(|e| format!("{}: {}", e.path, format_flow_authoring_error_message(e)))
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 }
 
-pub fn closest_names(target: &str, available: &[&str]) -> Vec<String> {
-    todo!("P3.4")
+impl std::fmt::Display for FlowAuthoringException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
 }
 
+impl std::error::Error for FlowAuthoringException {}
+
+/// Maps an issue path to an authoring path (`mapPath`).
+pub type PathMapper<'a> = &'a dyn Fn(&[PathSegment]) -> Option<String>;
+
+/// `formatZodPathSegment(acc, segment)`.
 pub fn format_zod_path_segment(acc: &str, segment: &PathSegment) -> String {
-    todo!("P3.4")
+    match segment {
+        PathSegment::Index(i) => format!("{acc}[{i}]"),
+        PathSegment::Key(key) if acc.is_empty() => key.clone(),
+        PathSegment::Key(key) => format!("{acc}.{key}"),
+    }
 }
 
+/// `zodErrorToFlowAuthoringErrors(error, code, mapPath)`.
 pub fn zod_error_to_flow_authoring_errors(
     error: &z::ZodError,
     code: &str,
-    map_path: Option<&dyn Fn(&[PathSegment]) -> Option<String>>,
+    map_path: Option<PathMapper<'_>>,
 ) -> Vec<FlowAuthoringError> {
-    todo!("P3.4")
+    error
+        .issues
+        .iter()
+        .map(|issue| {
+            let capability = issue
+                .params
+                .as_ref()
+                .and_then(|p| p.get("capability"))
+                .filter(|c| flow_capability_schema().safe_parse(c).success)
+                .cloned();
+            let path = map_path.and_then(|m| m(&issue.path)).unwrap_or_else(|| {
+                issue
+                    .path
+                    .iter()
+                    .fold(String::new(), |acc, s| format_zod_path_segment(&acc, s))
+            });
+            FlowAuthoringError {
+                code: capability
+                    .as_ref()
+                    .map_or_else(|| code.to_owned(), |c| str_field(c, "code").to_owned()),
+                capability,
+                path,
+                message: issue.message.clone(),
+                ..FlowAuthoringError::default()
+            }
+        })
+        .collect()
+}
+
+fn name_similarity(target: &str, candidate: &str) -> f64 {
+    if target == candidate {
+        return f64::INFINITY;
+    }
+    let (tl, cl) = (
+        crate::js::utf16_len(target) as f64,
+        crate::js::utf16_len(candidate) as f64,
+    );
+    if candidate.starts_with(target) || target.starts_with(candidate) {
+        return 1000.0 - (cl - tl).abs();
+    }
+    if candidate.contains(target) || target.contains(candidate) {
+        return 500.0 - (cl - tl).abs();
+    }
+    let distance = crate::utils::levenshtein::levenshtein_distance(target, candidate) as f64;
+    let max_length = tl.max(cl);
+    let allowed = 2f64.max((max_length * 0.34).ceil());
+    if distance <= allowed {
+        max_length - distance
+    } else {
+        0.0
+    }
+}
+
+/// `closestNames(target, available)`: up to three similar names, best first.
+pub fn closest_names(target: &str, available: &[&str]) -> Vec<String> {
+    let target_lower = crate::js::to_lower(target);
+    let mut scored: Vec<(&str, f64)> = available
+        .iter()
+        .map(|name| {
+            (
+                *name,
+                name_similarity(&target_lower, &crate::js::to_lower(name)),
+            )
+        })
+        .filter(|(_, score)| *score > 0.0)
+        .collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored
+        .into_iter()
+        .take(3)
+        .map(|(n, _)| n.to_owned())
+        .collect()
 }

@@ -13,7 +13,10 @@ schema!(pub fn start_another_node_step_schema = z::object(vec![("id", z::string(
 
 // ---- stage 1 API (hand-ported in stage 2) ----
 
+/// `startAnotherNodeStepDefaultFn(props)`.
 pub fn start_another_node_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread_props(
+        json!({"id": create_id(), "stepType": "startAnotherNode", "nodeId": ""}),
+        props,
+    )
 }

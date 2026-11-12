@@ -9,3 +9,11 @@ schema!(pub fn add_contact_tag_step_schema = z::object(vec![("id", z::string().r
 
 // HAND-PORT addContactTagStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.addContactTag,tags:[],...props})
+
+/// `addContactTagStepDefaultFn(props)`.
+pub fn add_contact_tag_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "addContactTag", "tags": []}),
+        props,
+    )
+}

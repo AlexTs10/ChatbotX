@@ -46,17 +46,38 @@ error_state_schema()]).optional()),
 schema!(pub fn ai_speech_to_text_schema = z::discriminated_union("provider", vec![ai_speech_to_text_open_ai_schema(),
 ai_speech_to_text_muse_schema()]));
 
-// HAND-PORT AISpeechToTextDefaultFn:
-// (props={})=>{const base={id:createId(),inputFieldId:"",outputFieldId:""};const fixed={stepType:stepTypes.enum.aiSpeechToText,states:[successStateDefaultFn(),errorStateDefaultFn()]};if(props.provider==="muse"){return{...base,...props,provider:"muse",model:props.model??defaultSpeechToTextModels.muse,...fixed}}const{keywords:_keywords,languageBias:_languageBias,...rest}=props;return{...base,...rest,provider:"openai",model:rest.model??defaultSpeechToTextModels.openai,...fixed}}
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_speech_to_text_open_ai_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `AISpeechToTextDefaultFn(props)`: Muse-only fields never carry over to
+/// an OpenAI step.
 pub fn ai_speech_to_text_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    let base = json!({ "id": create_id(), "inputFieldId": "", "outputFieldId": "" });
+    let fixed = json!({
+        "stepType": "aiSpeechToText",
+        "states": [success_state_default_fn(), error_state_default_fn()],
+    });
+    let models = default_speech_to_text_models();
+    let model_or = |p: &Value, d: &str| {
+        p.get("model")
+            .filter(|m| !m.is_null())
+            .cloned()
+            .unwrap_or_else(|| models[d].clone())
+    };
+    if props["provider"] == "muse" {
+        let mut out = spread_props(base, props);
+        out["provider"] = json!("muse");
+        out["model"] = model_or(props, "muse");
+        return spread_props(out, &fixed);
+    }
+    let mut rest = props.clone();
+    if let Some(obj) = rest.as_object_mut() {
+        obj.remove("keywords");
+        obj.remove("languageBias");
+    }
+    let mut out = spread_props(base, &rest);
+    out["provider"] = json!("openai");
+    out["model"] = model_or(&rest, "openai");
+    spread_props(out, &fixed)
 }

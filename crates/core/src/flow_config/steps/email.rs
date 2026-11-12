@@ -54,7 +54,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -135,7 +135,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -216,7 +216,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -297,7 +297,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -378,7 +378,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -459,7 +459,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -522,3 +522,12 @@ pub const UNSUBSCRIBE_PLACEHOLDER: &str = "<<unsubscribeUrl>>";
 
 // HAND-PORT emailStepDefaultFn:
 // (props={})=>({integrationSmtpId:"",topicId:"",from:"",to:"{{email}}",subject:"",preheader:"",elements:[{id:createId(),type:pageElementTypes.enum.text,text:`You received this email from {{page_user_name}}. If you would like to unsubscribe, <a href="${UNSUBSCRIBE_PLACEHOLDER}">click here</a>`}],...props,id:createId(),stepType:stepTypes.enum.email})
+
+/// `emailStepDefaultFn(props)`.
+pub fn email_step_default_fn(props: &Value) -> Value {
+    spread3(
+        json!({"integrationSmtpId": "", "topicId": "", "from": "", "to": "{{email}}", "subject": "", "preheader": "", "elements": [{"id": create_id(), "type": "text", "text": "You received this email from {{page_user_name}}. If you would like to unsubscribe, <a href=\"<<unsubscribeUrl>>\">click here</a>"}]}),
+        props,
+        json!({"id": create_id(), "stepType": "email"}),
+    )
+}

@@ -13,5 +13,14 @@ schema!(pub fn split_traffic_node_schema = z::object(vec![("id", z::string().reg
 ("isStartNode", z::boolean().describe("True for the node where the flow begins. Exactly one node should be the start node.")),
 ("details", z::object(vec![("steps", z::array(split_traffic_step_schema()).min(1))]))]))]));
 
-// HAND-PORT splitTrafficNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.splitTraffic,...props.nodeProps,data:{name:"Split Traffic",isStartNode:false,...props.dataProps,details:{steps:[splitTrafficStepDefaultFn()],...props.detailProps}}})
+/// `splitTrafficNodeDefaultFn(props)`.
+pub fn split_traffic_node_default_fn(props: &Value) -> Value {
+    node_default(
+        props,
+        "splitTraffic",
+        "Split Traffic",
+        json!({ "steps": [split_traffic_step_default_fn()] }),
+        true,
+        false,
+    )
+}

@@ -3,31 +3,39 @@
 #[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
-// HAND-PORT isMediaStepType:
-// stepType=>MEDIA_STEP_TYPES.includes(stepType)
+const MEDIA_STEP_TYPES: &[&str] = &["sendImage", "sendVideo", "sendAudio", "sendFile", "sendGif"];
 
-// HAND-PORT resolveMediaStepSupport:
-// props=>{if(!isMediaStepType(props.stepType)){return stepSupport.full}const channel=channelTypes.safeParse(props.channel);return channel.success?CHANNEL_FLOW_POLICIES[channel.data].steps[props.stepType]:stepSupport.full}
-
-// HAND-PORT isMediaStepUnsupported:
-// props=>resolveMediaStepSupport(props)===stepSupport.unsupported
-
-// HAND-PORT isMediaButtonsDropped:
-// props=>(props.buttons?.length??0)>0&&resolveMediaStepSupport(props)===stepSupport.noButtons
-
-// HAND-PORT channelsWithMediaStepLimits:
-// stepType=>channelTypes.options.filter(channel=>CHANNEL_FLOW_POLICIES[channel].steps[stepType]!==stepSupport.full)
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
-pub fn is_media_buttons_dropped(channel: &str, step_type: &str, buttons: &[Value]) -> bool {
-    todo!("P3.4")
+/// `isMediaStepType`.
+pub fn is_media_step_type(step_type: &str) -> bool {
+    MEDIA_STEP_TYPES.contains(&step_type)
 }
 
-pub fn is_media_step_unsupported(channel: &str, step_type: &str) -> bool {
-    todo!("P3.4")
-}
-
+/// `resolveMediaStepSupport({ channel, stepType })`.
 pub fn resolve_media_step_support(channel: &str, step_type: &str) -> &'static str {
-    todo!("P3.4")
+    if !is_media_step_type(step_type) {
+        return "full";
+    }
+    channel_flow_policies()
+        .get(channel)
+        .and_then(|p| p.steps.get(step_type).copied())
+        .unwrap_or("full")
+}
+
+/// `isMediaStepUnsupported`.
+pub fn is_media_step_unsupported(channel: &str, step_type: &str) -> bool {
+    resolve_media_step_support(channel, step_type) == "unsupported"
+}
+
+/// `isMediaButtonsDropped`: buttons attached on a no-buttons channel.
+pub fn is_media_buttons_dropped(channel: &str, step_type: &str, buttons: &[Value]) -> bool {
+    !buttons.is_empty() && resolve_media_step_support(channel, step_type) == "noButtons"
+}
+
+/// `channelsWithMediaStepLimits(stepType)`.
+pub fn channels_with_media_step_limits(step_type: &str) -> Vec<&'static str> {
+    channel_flow_policies()
+        .iter()
+        .filter(|(_, p)| p.steps.get(step_type).copied() != Some("full"))
+        .map(|(c, _)| *c)
+        .collect()
 }

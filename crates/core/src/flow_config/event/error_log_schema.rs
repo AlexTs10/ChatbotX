@@ -14,4 +14,7 @@ schema!(pub fn error_log_recorded_payload_schema = z::object(vec![("id", z::stri
 ("httpCode", z::string().nullable()),
 ("stackTrace", z::string().optional())]))]));
 
-// HAND-PORT errorLogEventSchemas (object): {"error-log:recorded":"<schema errorLogRecordedPayloadSchema>"}
+/// `errorLogEventSchemas`.
+pub fn error_log_event_schemas() -> Vec<(&'static str, Schema)> {
+    vec![("error-log:recorded", error_log_recorded_payload_schema())]
+}

@@ -8,3 +8,11 @@ schema!(pub fn archive_conversation_step_schema = z::object(vec![("id", z::strin
 
 // HAND-PORT archiveConversationStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.archiveConversation,...props})
+
+/// `archiveConversationStepDefaultFn(props)`.
+pub fn archive_conversation_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "archiveConversation"}),
+        props,
+    )
+}

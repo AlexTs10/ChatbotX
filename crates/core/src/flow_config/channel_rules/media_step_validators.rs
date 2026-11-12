@@ -3,34 +3,56 @@
 #[allow(unused_imports)]
 use crate::flow_config::prelude::*;
 
-// HAND-PORT sendImageValidator (object): {"omnichannel":"<schema sendImageStepSchema>","smtp":"<schema ?>","instagram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","api":"<schema ?>"}
-
-// HAND-PORT sendVideoValidator (object): {"omnichannel":"<schema sendVideoStepSchema>","whatsapp":"<schema ?>","zalo":"<schema ?>","smtp":"<schema ?>","instagram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","api":"<schema ?>"}
-
-// HAND-PORT sendAudioValidator (object): {"omnichannel":"<schema sendAudioStepSchema>","messenger":"<schema ?>","whatsapp":"<schema ?>","zalo":"<schema ?>","smtp":"<schema ?>","instagram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","api":"<schema ?>"}
-
-// HAND-PORT sendFileValidator (object): {"omnichannel":"<schema sendFileStepSchema>","messenger":"<schema ?>","whatsapp":"<schema ?>","zalo":"<schema ?>","smtp":"<schema ?>","instagram":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>","api":"<schema ?>"}
-
-// HAND-PORT sendGifValidator (object): {"omnichannel":"<schema sendGifStepSchema>","whatsapp":"<schema ?>","smtp":"<schema ?>","threads":"<schema ?>","tiktok":"<schema ?>"}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
-pub fn send_audio_validator() -> StepValidator {
-    todo!("P3.4")
+fn build_media_step_validator(schema: Schema, step_type: &'static str) -> StepValidator {
+    let overrides = channels_with_media_step_limits(step_type)
+        .into_iter()
+        .map(|channel| {
+            let refined = schema.clone().super_refine(move |step, ctx| {
+                let buttons = arr_field(step, "buttons");
+                if is_media_buttons_dropped(channel, step_type, buttons) {
+                    ctx.issue(path!["buttons"], "mediaButtonsUnsupported");
+                }
+            });
+            (channel.to_owned(), refined)
+        })
+        .collect();
+    StepValidator::PerChannel {
+        base: schema,
+        overrides,
+    }
 }
 
-pub fn send_file_validator() -> StepValidator {
-    todo!("P3.4")
-}
-
-pub fn send_gif_validator() -> StepValidator {
-    todo!("P3.4")
-}
-
+/// `sendImageValidator`.
 pub fn send_image_validator() -> StepValidator {
-    todo!("P3.4")
+    static V: LazyLock<StepValidator> =
+        LazyLock::new(|| build_media_step_validator(send_image_step_schema(), "sendImage"));
+    V.clone()
 }
 
+/// `sendVideoValidator`.
 pub fn send_video_validator() -> StepValidator {
-    todo!("P3.4")
+    static V: LazyLock<StepValidator> =
+        LazyLock::new(|| build_media_step_validator(send_video_step_schema(), "sendVideo"));
+    V.clone()
+}
+
+/// `sendAudioValidator`.
+pub fn send_audio_validator() -> StepValidator {
+    static V: LazyLock<StepValidator> =
+        LazyLock::new(|| build_media_step_validator(send_audio_step_schema(), "sendAudio"));
+    V.clone()
+}
+
+/// `sendFileValidator`.
+pub fn send_file_validator() -> StepValidator {
+    static V: LazyLock<StepValidator> =
+        LazyLock::new(|| build_media_step_validator(send_file_step_schema(), "sendFile"));
+    V.clone()
+}
+
+/// `sendGifValidator`.
+pub fn send_gif_validator() -> StepValidator {
+    static V: LazyLock<StepValidator> =
+        LazyLock::new(|| build_media_step_validator(send_gif_step_schema(), "sendGif"));
+    V.clone()
 }

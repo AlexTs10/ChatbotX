@@ -10,17 +10,15 @@ schema!(pub fn send_audio_step_schema = z::object(vec![("id", z::string().regex(
 ("url", z::string().refine(send_audio_step_schema_url_refine, Some("Invalid URL"), None)),
 ("buttons", z::array(button_step_schema()))]));
 
-// HAND-PORT sendAudioStepDefaultFn:
-// props=>({id:createId(),mode:uploadModes.enum.file,url:"",buttons:[],...props,stepType:stepTypes.enum.sendAudio})
-
-// value=>containsVariablePlaceholder(value)||z.url().safeParse(value).success
 fn send_audio_step_schema_url_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    deps::url_with_variables_ok(value)
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `sendAudioStepDefaultFn(props)`.
 pub fn send_audio_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread3(
+        json!({ "id": create_id(), "mode": "file", "url": "", "buttons": [] }),
+        props,
+        json!({ "stepType": "sendAudio" }),
+    )
 }

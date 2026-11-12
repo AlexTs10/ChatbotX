@@ -19,6 +19,8 @@ icu_normalizer = { workspace = true }
 image = { workspace = true }
 jpeg-decoder = { workspace = true }
 jpeg-encoder = { workspace = true }
+# Call-button phone numbers (flow_config::steps::call_phone_number).
+phonenumber = { workspace = true }
 regex = { workspace = true }
 ring = { workspace = true }
 serde = { workspace = true }

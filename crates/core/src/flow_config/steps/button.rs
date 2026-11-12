@@ -42,7 +42,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -120,7 +120,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -198,7 +198,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -276,7 +276,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -354,7 +354,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -432,7 +432,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -510,7 +510,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -588,7 +588,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -666,7 +666,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -744,7 +744,7 @@ format_date_step_schema(),
 generate_code_step_schema(),
 count_characters_step_schema(),
 external_request_step_schema(),
-execute_javascript_step_schema(),
+
 evaluate_decision_step_schema(),
 mark_email_verified_step_schema(),
 opt_in_email_step_schema(),
@@ -790,32 +790,88 @@ z::object(vec![("buttonType", z::literal(json!(null))),
 ("beforeStep", z::null()),
 ("steps", z::array(z::any()))])])));
 
-// HAND-PORT getButtonLinkUrl:
-// button=>button.buttonType===buttonTypes.enum.openWebsite?button.beforeStep.url:void 0
-
-// HAND-PORT isLinkButton:
-// button=>button.buttonType===buttonTypes.enum.openWebsite||button.buttonType===buttonTypes.enum.openMiniApp
-
-// HAND-PORT refineNoOpenMiniAppButtons:
-// (buttons,ctx)=>{for(const[index,button]of buttons.entries()){if(button.buttonType===disallowedType){ctx.addIssue({code:"custom",message,path:[index,"buttonType"]})}}}
-
-// HAND-PORT refineReplyOnlyButtons:
-// (buttons,ctx)=>{refineNoCallPhoneNumberButtons(buttons,ctx);refineNoCopyTextButtons(buttons,ctx)}
-
-// HAND-PORT buttonStepDefaultFn:
-// props=>({id:createId(),label:"",buttonType:null,beforeStep:null,steps:[],...props})
-
-// HAND-PORT mergeTemplateButtonsWithExisting:
-// function mergeTemplateButtonsWithExisting(templateButtons,existingButtons=[]){return templateButtons.map((templateButton,index)=>{const existingButton=existingButtons[index];if(!existingButton){return templateButton}if(existingButton.label===templateButton.label){return existingButton}return{...existingButton,label:templateButton.label}})}
-
-// value=>countMessageCharacters(value)<=BUTTON_LABEL_MAX
 fn button_step_schema_label_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    count_message_characters(value.as_str()) <= BUTTON_LABEL_MAX
 }
 
-// ---- stage 1 API (hand-ported in stage 2) ----
+/// `getButtonLinkUrl`: the URL an `openWebsite` button opens.
+pub fn get_button_link_url(button: &Value) -> Option<String> {
+    if button["buttonType"] == "openWebsite" {
+        button["beforeStep"]["url"].as_str().map(str::to_owned)
+    } else {
+        None
+    }
+}
 
+/// `isLinkButton`: `openWebsite` or `openMiniApp`.
+pub fn is_link_button(button: &Value) -> bool {
+    matches!(
+        button["buttonType"].as_str(),
+        Some("openWebsite" | "openMiniApp")
+    )
+}
+
+fn refine_disallowed_button_type(
+    buttons: &Value,
+    ctx: &mut RefineCtx,
+    disallowed: &str,
+    message: &str,
+) {
+    for (index, button) in buttons.as_array().into_iter().flatten().enumerate() {
+        if button["buttonType"] == disallowed {
+            ctx.issue(path![index, "buttonType"], message);
+        }
+    }
+}
+
+/// `refineNoOpenMiniAppButtons` (WhatsApp template step buttons).
+pub fn refine_no_open_mini_app_buttons(buttons: &Value, ctx: &mut RefineCtx) {
+    refine_disallowed_button_type(
+        buttons,
+        ctx,
+        "openMiniApp",
+        "templateButtonOpenMiniAppUnsupported",
+    );
+}
+
+/// `refineReplyOnlyButtons`: neither a call nor a copy button.
+pub fn refine_reply_only_buttons(buttons: &Value, ctx: &mut RefineCtx) {
+    refine_disallowed_button_type(
+        buttons,
+        ctx,
+        "callPhoneNumber",
+        "buttonCallPhoneNumberUnsupported",
+    );
+    refine_disallowed_button_type(buttons, ctx, "copyText", "buttonCopyTextUnsupported");
+}
+
+/// `buttonStepDefaultFn({ label })`.
 pub fn button_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread_props(
+        json!({ "id": create_id(), "label": "", "buttonType": null, "beforeStep": null, "steps": [] }),
+        props,
+    )
+}
+
+/// `mergeTemplateButtonsWithExisting`: pairs by position; an existing
+/// button keeps its id and action, only the label follows the template.
+pub fn merge_template_buttons_with_existing(
+    template_buttons: &[Value],
+    existing_buttons: &[Value],
+) -> Vec<Value> {
+    template_buttons
+        .iter()
+        .enumerate()
+        .map(
+            |(index, template_button)| match existing_buttons.get(index) {
+                None => template_button.clone(),
+                Some(existing) if existing["label"] == template_button["label"] => existing.clone(),
+                Some(existing) => {
+                    let mut out = existing.clone();
+                    out["label"] = template_button["label"].clone();
+                    out
+                }
+            },
+        )
+        .collect()
 }

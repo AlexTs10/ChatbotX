@@ -17,3 +17,12 @@ schema!(pub fn whatsapp_call_button_label_form_schema = z::object(vec![("buttonL
 
 // HAND-PORT whatsappCallButtonStepDefaultFn:
 // (props={})=>({text:"",buttonLabel:"Call Now",...props,id:createId(),stepType:stepTypes.enum.whatsappCallButton})
+
+/// `whatsappCallButtonStepDefaultFn(props)`.
+pub fn whatsapp_call_button_step_default_fn(props: &Value) -> Value {
+    spread3(
+        json!({"text": "", "buttonLabel": "Call Now"}),
+        props,
+        json!({"id": create_id(), "stepType": "whatsappCallButton"}),
+    )
+}

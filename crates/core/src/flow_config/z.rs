@@ -572,6 +572,7 @@ impl RefineCtx {
 pub type RefineFn = Arc<dyn Fn(&Value) -> bool + Send + Sync>;
 pub type SuperRefineFn = Arc<dyn Fn(&Value, &mut RefineCtx) + Send + Sync>;
 pub type TransformFn = Arc<dyn Fn(Value, &mut RefineCtx) -> Value + Send + Sync>;
+pub type TransformOptFn = Arc<dyn Fn(Option<Value>, &mut RefineCtx) -> Option<Value> + Send + Sync>;
 pub type PreprocessFn = Arc<dyn Fn(Option<Value>) -> Option<Value> + Send + Sync>;
 pub type LazyFn = Arc<dyn Fn() -> Schema + Send + Sync>;
 pub type DefaultFn = Arc<dyn Fn() -> Value + Send + Sync>;
@@ -615,6 +616,7 @@ pub enum Kind {
     Catch(Schema, Value),
     Pipe(Schema, Schema),
     Transform(TransformFn),
+    TransformOpt(TransformOptFn),
     Preprocess(PreprocessFn, Schema),
     Lazy(LazyFn, Arc<OnceLock<Schema>>),
     Custom(RefineFn),
@@ -1091,6 +1093,13 @@ impl Schema {
     ) -> Self {
         self.pipe(transform(f))
     }
+    /// `.transform(fn)` where the callback also sees `undefined` (`None`).
+    pub fn transform_opt(
+        self,
+        f: impl Fn(Option<Value>, &mut RefineCtx) -> Option<Value> + Send + Sync + 'static,
+    ) -> Self {
+        self.pipe(node(Kind::TransformOpt(Arc::new(f))))
+    }
     pub fn or(self, other: Schema) -> Self {
         union(vec![self, other])
     }
@@ -1219,7 +1228,7 @@ impl Schema {
             Kind::Prefault(..) => "prefault",
             Kind::Catch(..) => "catch",
             Kind::Pipe(..) | Kind::Preprocess(..) => "pipe",
-            Kind::Transform(_) => "transform",
+            Kind::Transform(_) | Kind::TransformOpt(_) => "transform",
             Kind::Lazy(..) => "lazy",
             Kind::Custom(_) => "custom",
         }
@@ -1306,7 +1315,9 @@ impl Schema {
             Kind::Default(..) | Kind::Prefault(..) => Some(true),
             Kind::Catch(i, _) => Some(i.optin() == Some(true)),
             Kind::Nullable(i) => i.optin(),
-            Kind::Pipe(i, _) | Kind::Preprocess(_, i) => i.optin(),
+            Kind::Pipe(i, _) => i.optin(),
+            // A transform accepts `undefined` (zod `$ZodTransform` optin).
+            Kind::Preprocess(..) | Kind::Transform(_) | Kind::TransformOpt(_) => Some(false),
             Kind::Lazy(..) => self.resolve_lazy().optin(),
             Kind::Union(o) | Kind::DiscriminatedUnion(_, o) => {
                 if o.iter().any(|s| s.optin() == Some(true)) {
@@ -1682,6 +1693,14 @@ impl Schema {
                 };
                 let out = f(v, &mut ctx);
                 p.value = Some(out);
+                p.issues.extend(ctx.issues);
+            }
+            Kind::TransformOpt(f) => {
+                let mut ctx = RefineCtx {
+                    issues: Vec::new(),
+                    input: p.value.clone(),
+                };
+                p.value = f(p.value.take(), &mut ctx);
                 p.issues.extend(ctx.issues);
             }
             Kind::Lazy(..) => {

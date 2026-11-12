@@ -29,27 +29,18 @@ error_state_schema()]))]));
 
 schema!(pub fn spreadsheet_step_versions = z::enum_(&["v1", "v2"]));
 
-// HAND-PORT toSpreadsheetStepVersion:
-// value=>spreadsheetStepVersions.catch(spreadsheetStepVersions.enum.v1).parse(value)
-
 default_fn!(pub fn spreadsheet_default_fn = json!({"id": create_id(), "stepType": "spreadsheetGetRow", "spreadsheetId": "", "sheetName": "", "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}));
 
 schema!(pub fn spreadsheet_sheet_to_contact_mapping_schema = z::object(vec![("customFieldId", z::union(vec![z::string().regex(r#"^\d+$"#, ""),
-z::string().refine(is_bot_field_reference, Some("Must be a valid bot field reference"), None),
+z::string().refine(|v| is_bot_field_reference(v.as_str().unwrap_or("")), Some("Must be a valid bot field reference"), None),
 z::literal(json!(""))]).describe("Id of the contact custom field (from `customFields.list`) that receives the sheet value.")),
 ("header", z::string().min(1).describe("Sheet column header whose value is read into the custom field."))]));
 
-// HAND-PORT spreadsheetSheetToContactMappingDefaultFn:
-// header=>({customFieldId:"",header})
-
 schema!(pub fn spreadsheet_contact_to_sheet_mapping_schema = z::object(vec![("header", z::string().min(1).describe("Sheet column header that receives the value.")),
 ("customFieldId", z::union(vec![z::string().regex(r#"^\d+$"#, ""),
-z::string().refine(is_bot_field_reference, Some("Must be a valid bot field reference"), None),
+z::string().refine(|v| is_bot_field_reference(v.as_str().unwrap_or("")), Some("Must be a valid bot field reference"), None),
 z::literal(json!(""))]).optional().describe("Legacy v1 field. With `version: \"v2\"` leave it unset and use `value`; under v1 (the default when `version` is omitted) `value` is ignored.")),
 ("value", z::string().default(json!("")).describe("Value written to the column. May include `{{variable}}` placeholders such as contact fields."))]));
-
-// HAND-PORT spreadsheetContactToSheetMappingDefaultFn:
-// header=>({header,value:""})
 
 schema!(pub fn spreadsheet_column_filter_schema = z::object(vec![("mode", z::enum_(&["AND", "OR"]).describe("`AND` requires every condition to match a row; `OR` any one.")),
 ("conditions", z::array(z::object(vec![("column", z::string().describe("Sheet column header to test.")),
@@ -58,8 +49,20 @@ schema!(pub fn spreadsheet_column_filter_schema = z::object(vec![("mode", z::enu
 
 default_fn!(pub fn spreadsheet_column_filter_default_fn = json!({"mode": "AND", "conditions": []}));
 
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `toSpreadsheetStepVersion`: `v2`, else `v1` (missing/unknown).
 pub fn to_spreadsheet_step_version(version: Option<&str>) -> &'static str {
-    todo!("P3.4")
+    match version {
+        Some("v2") => "v2",
+        _ => "v1",
+    }
+}
+
+/// `spreadsheetSheetToContactMappingDefaultFn(header)`.
+pub fn spreadsheet_sheet_to_contact_mapping_default_fn(header: &str) -> Value {
+    json!({ "customFieldId": "", "header": header })
+}
+
+/// `spreadsheetContactToSheetMappingDefaultFn(header)`.
+pub fn spreadsheet_contact_to_sheet_mapping_default_fn(header: &str) -> Value {
+    json!({ "header": header, "value": "" })
 }

@@ -13,5 +13,14 @@ schema!(pub fn add_notes_node_schema = z::object(vec![("id", z::string().regex(r
 ("isStartNode", z::boolean().describe("True for the node where the flow begins. Exactly one node should be the start node.")),
 ("details", z::object(vec![("beforeStep", add_notes_step_schema())]))]))]));
 
-// HAND-PORT addNotesNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.addNotes,...props.nodeProps,data:{name:"Add Notes",...props.dataProps,isStartNode:false,details:{beforeStep:addNotesStepDefaultFn(),...props.detailProps}}})
+/// `addNotesNodeDefaultFn(props)`.
+pub fn add_notes_node_default_fn(props: &Value) -> Value {
+    node_default(
+        props,
+        "addNotes",
+        "Add Notes",
+        json!({ "beforeStep": add_notes_step_default_fn(&json!({})) }),
+        true,
+        true,
+    )
+}

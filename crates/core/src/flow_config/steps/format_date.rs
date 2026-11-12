@@ -21,12 +21,18 @@ schema!(pub fn format_date_step_schema = z::object(vec![("id", z::string().regex
 // HAND-PORT formatDateStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.formatDate,inputFieldId:"",format:"",outputFieldId:"",timezone:FormatTimezone.contact,...props})
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn format_date_step_schema_input_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn format_date_step_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
+}
+
+/// `formatDateStepDefaultFn(props)`.
+pub fn format_date_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "formatDate", "inputFieldId": "", "format": "", "outputFieldId": "", "timezone": "contact"}),
+        props,
+    )
 }

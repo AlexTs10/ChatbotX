@@ -10,7 +10,6 @@ schema!(pub fn open_website_step_schema = z::object(vec![("id", z::string().rege
 
 default_fn!(pub fn open_website_step_default_fn = json!({"id": create_id(), "stepType": "openWebsite", "url": "", "browserSize": 100}));
 
-// value=>containsVariablePlaceholder(value)||z.url().safeParse(value).success
 fn open_website_step_schema_url_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    deps::url_with_variables_ok(value)
 }

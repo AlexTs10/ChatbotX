@@ -1,17 +1,17 @@
 //! `packages/flow-config/src/nodes`.
 
-pub mod add_notes;
-pub mod base;
-pub mod condition;
-pub mod follow_up;
-pub mod landing_page;
-pub mod perform_action;
-pub mod quick_reply_carrier;
-pub mod send_mail;
-pub mod send_message;
-pub mod split_traffic;
-pub mod start_flow;
-pub mod wait;
+mod add_notes;
+mod base;
+mod condition;
+mod follow_up;
+mod landing_page;
+mod perform_action;
+mod quick_reply_carrier;
+mod send_mail;
+mod send_message;
+mod split_traffic;
+mod start_flow;
+mod wait;
 
 #[allow(unused_imports)]
 use crate::flow_config::prelude::*;
@@ -49,5 +49,18 @@ pub const DISABLED_CONTINUE_NODE_TYPES: &[&str] = &["splitTraffic", "condition"]
 
 pub const DISABLED_CONTINUE_STEP_TYPES: &[&str] = &["appointmentScheduling"];
 
-// HAND-PORT shouldShowDefaultContinue:
-// (type,data)=>{if(disabledContinueNodeTypes.includes(type)){return false}if(!("steps"in data.details)){return true}const lastStep=data.details.steps?.at(-1);return!(lastStep&&disabledContinueStepTypes.includes(lastStep.stepType))}
+/// `shouldShowDefaultContinue(type, data)`.
+pub fn should_show_default_continue(node_type: &str, data: &Value) -> bool {
+    if DISABLED_CONTINUE_NODE_TYPES.contains(&node_type) {
+        return false;
+    }
+    let Some(steps) = data["details"].get("steps") else {
+        return true;
+    };
+    let last = steps.as_array().and_then(|s| s.last());
+    !last.is_some_and(|step| {
+        step["stepType"]
+            .as_str()
+            .is_some_and(|t| DISABLED_CONTINUE_STEP_TYPES.contains(&t))
+    })
+}

@@ -22,7 +22,10 @@ error_state_schema()]))]));
 
 // ---- stage 1 API (hand-ported in stage 2) ----
 
+/// `threadControlStepDefaultFn(props)`.
 pub fn thread_control_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread_props(
+        json!({"id": create_id(), "stepType": "threadControl", "action": "release", "states": [{"id": create_id(), "stateType": "success"}, {"id": create_id(), "stateType": "error"}]}),
+        props,
+    )
 }

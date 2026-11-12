@@ -16,7 +16,6 @@ schema!(pub fn send_multiple_images_step_schema = z::object(vec![("id", z::strin
 
 default_fn!(pub fn send_multiple_images_step_default_fn = json!({"id": create_id(), "stepType": "sendMultipleImages", "images": [{"id": create_id(), "mode": "file", "url": ""}, {"id": create_id(), "mode": "file", "url": ""}]}));
 
-// value=>containsVariablePlaceholder(value)||z.url().safeParse(value).success
 fn send_multiple_images_item_schema_url_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    deps::url_with_variables_ok(value)
 }

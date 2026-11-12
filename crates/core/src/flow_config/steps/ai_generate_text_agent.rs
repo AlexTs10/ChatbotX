@@ -17,22 +17,47 @@ schema!(pub fn ai_generate_text_agent_schema = z::object(vec![("id", z::string()
 ("states", z::tuple(vec![success_state_schema(),
 error_state_schema()]).optional())]).super_refine(ai_generate_text_agent_schema_super_refine));
 
-// HAND-PORT aiGenerateTextAgentDefaultFn:
-// (props={})=>{const provider=props.provider??"openai";return{id:createId(),provider,...provider==="openaiCompatible"?{integrationId:"integrationId"in props?props.integrationId:"",model:"model"in props?props.model:""}:{},aiAgentId:"",message:"",outputFieldId:"",rememberConversation:true,...props,stepType:stepTypes.enum.aiGenerateTextAgent,states:[successStateDefaultFn(),errorStateDefaultFn()]}}
-
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn ai_generate_text_agent_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// (value,ctx)=>{if(value.provider!=="openaiCompatible"){return}if(!value.integrationId?.trim()){ctx.addIssue({code:"custom",path:["integrationId"],message:"Integration is required"})}if(!value.model?.trim()){ctx.addIssue({code:"custom",path:["model"],message:"Model is required"})}}
-fn ai_generate_text_agent_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
-    todo!("P3.4")
-}
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `aiGenerateTextAgentDefaultFn(props)`.
 pub fn ai_generate_text_agent_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    let provider = props
+        .get("provider")
+        .filter(|v| !v.is_null())
+        .cloned()
+        .unwrap_or_else(|| json!("openai"));
+    let mut base = json!({
+        "id": create_id(),
+        "provider": provider,
+        "aiAgentId": "",
+        "message": "",
+        "outputFieldId": "",
+        "rememberConversation": true,
+    });
+    if base["provider"] == "openaiCompatible" {
+        base["integrationId"] = props
+            .get("integrationId")
+            .cloned()
+            .unwrap_or_else(|| json!(""));
+        base["model"] = props.get("model").cloned().unwrap_or_else(|| json!(""));
+    }
+    spread3(
+        base,
+        props,
+        json!({ "stepType": "aiGenerateTextAgent", "states": [success_state_default_fn(), error_state_default_fn()] }),
+    )
+}
+
+fn ai_generate_text_agent_schema_super_refine(value: &Value, ctx: &mut RefineCtx) {
+    if value["provider"] != "openaiCompatible" {
+        return;
+    }
+    if trimmed(&value["integrationId"]).unwrap_or("").is_empty() {
+        ctx.issue(path!["integrationId"], "Integration is required");
+    }
+    if trimmed(&value["model"]).unwrap_or("").is_empty() {
+        ctx.issue(path!["model"], "Model is required");
+    }
 }

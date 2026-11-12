@@ -13,5 +13,14 @@ schema!(pub fn wait_node_schema = z::object(vec![("id", z::string().regex(r#"^\d
 ("isStartNode", z::boolean().describe("True for the node where the flow begins. Exactly one node should be the start node.")),
 ("details", z::object(vec![("steps", z::array(wait_step_schema()).min(1).max(1))]))]))]));
 
-// HAND-PORT waitNodeDefaultFn:
-// props=>({...defaultNodeData(),type:nodeTypeSchema.enum.wait,...props.nodeProps,data:{name:"Wait",isStartNode:false,...props.dataProps,details:{steps:[waitStepDefaultFn()],...props.detailProps}}})
+/// `waitNodeDefaultFn(props)`.
+pub fn wait_node_default_fn(props: &Value) -> Value {
+    node_default(
+        props,
+        "wait",
+        "Wait",
+        json!({ "steps": [wait_step_default_fn()] }),
+        true,
+        false,
+    )
+}

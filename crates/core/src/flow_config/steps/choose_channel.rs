@@ -7,12 +7,10 @@ schema!(pub fn choose_channel_step_schema = z::object(vec![("id", z::string().re
 ("stepType", z::literal(json!("chooseChannel")).describe("Step type discriminator: \"chooseChannel\".")),
 ("channel", z::string().trim().min(1).describe("Channel this message node targets, e.g. `omnichannel` (any channel) or a specific channel type such as `messenger`, `whatsapp`, `instagram`, `telegram`. Channel-specific steps are validated against it on publish."))]));
 
-// HAND-PORT chooseChannelStepDefaultFn:
-// props=>({id:createId(),stepType:stepTypes.enum.chooseChannel,channel:"omnichannel",...props})
-
-// ---- stage 1 API (hand-ported in stage 2) ----
-
+/// `chooseChannelStepDefaultFn(props)`.
 pub fn choose_channel_step_default_fn(props: &Value) -> Value {
-    let _ = props;
-    todo!("P3.4")
+    spread_props(
+        json!({ "id": create_id(), "stepType": "chooseChannel", "channel": "omnichannel" }),
+        props,
+    )
 }

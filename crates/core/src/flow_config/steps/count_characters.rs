@@ -11,12 +11,18 @@ schema!(pub fn count_characters_step_schema = z::object(vec![("id", z::string().
 // HAND-PORT countCharactersStepDefaultFn:
 // props=>({id:createId(),stepType:stepTypes.enum.countCharacters,inputFieldId:"",outputFieldId:"",...props})
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn count_characters_step_schema_input_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
 }
 
-// value=>!value.startsWith(RESERVED_FIELD_REFERENCE_PREFIX)||BOT_FIELD_REFERENCE_PATTERN.test(value)
 fn count_characters_step_schema_output_field_id_refine(value: &Value) -> bool {
-    todo!("P3.4")
+    field_reference_ok(value)
+}
+
+/// `countCharactersStepDefaultFn(props)`.
+pub fn count_characters_step_default_fn(props: &Value) -> Value {
+    spread_props(
+        json!({"id": create_id(), "stepType": "countCharacters", "inputFieldId": "", "outputFieldId": ""}),
+        props,
+    )
 }

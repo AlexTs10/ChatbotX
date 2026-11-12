@@ -10,5 +10,7 @@ pub fn flow_validation_codes() -> &'static Value {
     &V
 }
 
-// HAND-PORT isFlowValidationCode:
-// message=>Object.hasOwn(flowValidationCodes,message)
+/// `isFlowValidationCode(message)`.
+pub fn is_flow_validation_code(message: &str) -> bool {
+    flow_validation_codes().get(message).is_some()
+}
