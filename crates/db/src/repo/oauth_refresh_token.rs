@@ -10,12 +10,16 @@ pub fn delete_by_user_and_client(
     user_id: i64,
     client_id: &str,
 ) -> Result<usize> {
-    let _ = (conn, user_id, client_id);
-    todo!("P3.3")
+    Ok(conn.execute(
+        "DELETE FROM \"OAuthRefreshToken\" WHERE \"userId\" = ?1 AND \"clientId\" = ?2",
+        rusqlite::params![user_id, client_id],
+    )?)
 }
 
 /// `deleteExpired`: deletes tokens with `expiresAt < now`; returns the deleted count.
 pub fn delete_expired(conn: &Connection, now: i64) -> Result<usize> {
-    let _ = (conn, now);
-    todo!("P3.3")
+    Ok(conn.execute(
+        "DELETE FROM \"OAuthRefreshToken\" WHERE \"expiresAt\" < ?1",
+        [now],
+    )?)
 }

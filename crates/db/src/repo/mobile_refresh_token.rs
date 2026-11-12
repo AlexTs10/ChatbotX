@@ -5,8 +5,8 @@
 
 use rusqlite::Connection;
 
-use super::Result;
 use super::models::MobileRefreshToken;
+use super::{Result, new_id, now_ms};
 
 /// `REVOKED_TOKEN_RETENTION_MS` (24 h).
 pub const REVOKED_TOKEN_RETENTION_MS: i64 = 24 * 60 * 60 * 1000;
@@ -25,8 +25,24 @@ pub struct NewMobileRefreshToken {
 
 /// `insert`.
 pub fn insert(conn: &Connection, values: &NewMobileRefreshToken) -> Result<()> {
-    let _ = (conn, values);
-    todo!("P3.3")
+    let now = now_ms();
+    conn.execute(
+        "INSERT INTO \"MobileRefreshToken\" (\"id\", \"createdAt\", \"updatedAt\", \"userId\", \"deviceId\", \
+         \"familyId\", \"tokenHash\", \"expiresAt\", \"rotatedAt\", \"revoked\") \
+         VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![
+            new_id(),
+            now,
+            values.user_id,
+            values.device_id,
+            values.family_id,
+            values.token_hash,
+            values.expires_at,
+            values.rotated_at,
+            values.revoked
+        ],
+    )?;
+    Ok(())
 }
 
 /// `spendActive`: marks a live token (not rotated, not revoked, not expired) as rotated
@@ -36,14 +52,18 @@ pub fn spend_active(
     token_hash: &str,
     now: i64,
 ) -> Result<Option<MobileRefreshToken>> {
-    let _ = (conn, token_hash, now);
-    todo!("P3.3")
+    let rows = super::returning::<MobileRefreshToken>(
+        conn,
+        "UPDATE \"MobileRefreshToken\" SET \"rotatedAt\" = ?2, \"updatedAt\" = ?3 \
+         WHERE \"tokenHash\" = ?1 AND \"rotatedAt\" IS NULL AND \"revoked\" IS NULL AND \"expiresAt\" > ?2",
+        &[&token_hash, &now, &now_ms()],
+    )?;
+    Ok(rows.into_iter().next())
 }
 
 /// `findByHash`.
 pub fn find_by_hash(conn: &Connection, token_hash: &str) -> Result<Option<MobileRefreshToken>> {
-    let _ = (conn, token_hash);
-    todo!("P3.3")
+    super::find_one(conn, "\"tokenHash\" = ?1", &[&token_hash])
 }
 
 /// `lockFamilyByHash`: the row of `token_hash`, read inside the caller's write job.
@@ -51,37 +71,53 @@ pub fn lock_family_by_hash(
     conn: &Connection,
     token_hash: &str,
 ) -> Result<Option<MobileRefreshToken>> {
-    let _ = (conn, token_hash);
-    todo!("P3.3")
+    find_by_hash(conn, token_hash)
 }
 
 /// `revokeFamilyByHash`: revokes every not-yet-revoked token of the family of `token_hash`.
 pub fn revoke_family_by_hash(conn: &Connection, token_hash: &str, now: i64) -> Result<()> {
-    let _ = (conn, token_hash, now);
-    todo!("P3.3")
+    conn.execute(
+        "UPDATE \"MobileRefreshToken\" SET \"revoked\" = ?2, \"updatedAt\" = ?3 \
+         WHERE \"familyId\" IN (SELECT \"familyId\" FROM \"MobileRefreshToken\" WHERE \"tokenHash\" = ?1) \
+         AND \"revoked\" IS NULL",
+        rusqlite::params![token_hash, now, now_ms()],
+    )?;
+    Ok(())
 }
 
 /// `revokeAllForUser`.
 pub fn revoke_all_for_user(conn: &Connection, user_id: i64, now: i64) -> Result<()> {
-    let _ = (conn, user_id, now);
-    todo!("P3.3")
+    conn.execute(
+        "UPDATE \"MobileRefreshToken\" SET \"revoked\" = ?2, \"updatedAt\" = ?3 \
+         WHERE \"userId\" = ?1 AND \"revoked\" IS NULL",
+        rusqlite::params![user_id, now, now_ms()],
+    )?;
+    Ok(())
 }
 
 /// `deleteSpentInFamily`: deletes tokens of the family rotated before `before`.
 pub fn delete_spent_in_family(conn: &Connection, family_id: &str, before: i64) -> Result<()> {
-    let _ = (conn, family_id, before);
-    todo!("P3.3")
+    conn.execute(
+        "DELETE FROM \"MobileRefreshToken\" WHERE \"familyId\" = ?1 AND \"rotatedAt\" < ?2",
+        rusqlite::params![family_id, before],
+    )?;
+    Ok(())
 }
 
 /// `deleteExpiredForUser`.
 pub fn delete_expired_for_user(conn: &Connection, user_id: i64, now: i64) -> Result<()> {
-    let _ = (conn, user_id, now);
-    todo!("P3.3")
+    conn.execute(
+        "DELETE FROM \"MobileRefreshToken\" WHERE \"userId\" = ?1 AND \"expiresAt\" < ?2",
+        rusqlite::params![user_id, now],
+    )?;
+    Ok(())
 }
 
 /// `deleteExpired`: deletes expired tokens and tokens revoked more than 24 h ago;
 /// returns the deleted count.
 pub fn delete_expired(conn: &Connection, now: i64) -> Result<usize> {
-    let _ = (conn, now);
-    todo!("P3.3")
+    Ok(conn.execute(
+        "DELETE FROM \"MobileRefreshToken\" WHERE \"expiresAt\" < ?1 OR \"revoked\" < ?2",
+        rusqlite::params![now, now - REVOKED_TOKEN_RETENTION_MS],
+    )?)
 }

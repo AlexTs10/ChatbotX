@@ -3,7 +3,7 @@
 use rusqlite::Connection;
 
 use super::models::Invitation;
-use super::{Json, Result};
+use super::{Error, Json, Result, new_id, now_ms};
 
 /// `InvitationInsert` (the columns without a default).
 #[derive(Debug, Clone, PartialEq)]
@@ -17,12 +17,27 @@ pub struct NewInvitation {
 
 /// `findByCode`.
 pub fn find_by_code(conn: &Connection, code: &str) -> Result<Option<Invitation>> {
-    let _ = (conn, code);
-    todo!("P3.3")
+    super::find_one(conn, "\"code\" = ?1", &[&code])
 }
 
 /// `create`: inserts and returns the row.
 pub fn create(conn: &Connection, values: &NewInvitation) -> Result<Invitation> {
-    let _ = (conn, values);
-    todo!("P3.3")
+    let now = now_ms();
+    super::returning::<Invitation>(
+        conn,
+        "INSERT INTO \"Invitation\" (\"id\", \"createdAt\", \"updatedAt\", \"code\", \"permissions\", \
+         \"expiresAt\", \"workspaceId\", \"invitedBy\") VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7)",
+        &[
+            &new_id(),
+            &now,
+            &values.code,
+            &values.permissions,
+            &values.expires_at,
+            &values.workspace_id,
+            &values.invited_by,
+        ],
+    )?
+    .into_iter()
+    .next()
+    .ok_or_else(|| Error::msg("Failed to create invitation"))
 }

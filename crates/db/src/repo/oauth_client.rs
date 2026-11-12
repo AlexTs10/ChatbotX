@@ -7,6 +7,5 @@ use super::models::OAuthClient;
 
 /// `findByClientId`.
 pub fn find_by_client_id(conn: &Connection, client_id: &str) -> Result<Option<OAuthClient>> {
-    let _ = (conn, client_id);
-    todo!("P3.3")
+    super::find_one(conn, "\"clientId\" = ?1", &[&client_id])
 }

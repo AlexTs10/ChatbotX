@@ -1,6 +1,6 @@
 //! Port of `repositories/auth-account/repository.ts` (P3.3).
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use super::Result;
 
@@ -17,6 +17,14 @@ pub fn find_by_user_and_provider(
     user_id: i64,
     provider_id: &str,
 ) -> Result<Option<AuthAccountToken>> {
-    let _ = (conn, user_id, provider_id);
-    todo!("P3.3")
+    let mut stmt = conn.prepare_cached(
+        "SELECT \"accessToken\" FROM \"Account\" WHERE \"userId\" = ?1 AND \"providerId\" = ?2 LIMIT 1",
+    )?;
+    Ok(stmt
+        .query_row(rusqlite::params![user_id, provider_id], |row| {
+            Ok(AuthAccountToken {
+                access_token: row.get(0)?,
+            })
+        })
+        .optional()?)
 }
