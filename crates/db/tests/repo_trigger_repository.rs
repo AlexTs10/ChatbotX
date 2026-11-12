@@ -16,7 +16,7 @@ use repo_common::{ok, setup};
 
 const WS: i64 = 2001;
 
-/// Triggers: 1 "Welcome" in folder 51, 2 "Welcome" at root, 3 "Other" in folder 51.
+/// Triggers: 1 "Welcome" in folder 51, 2 "Welcome root" at root, 3 "Other" in folder 51.
 /// Trigger 2 has two conditions.
 async fn seeded() -> common::TestDb {
     let db = fresh_db().await;
@@ -24,7 +24,7 @@ async fn seeded() -> common::TestDb {
     setup(&db, |tx| {
         ins!(tx, "Folder", { "id" => 51_i64, "name" => "f", "folderType" => "trigger", "workspaceId" => WS, "paths" => "[]" })?;
         ins!(tx, "Trigger", { "id" => 1_i64, "createdAt" => 1_000_i64, "name" => "Welcome", "folderId" => 51_i64, "actions" => "[]", "workspaceId" => WS })?;
-        ins!(tx, "Trigger", { "id" => 2_i64, "createdAt" => 2_000_i64, "name" => "Welcome", "actions" => "[]", "workspaceId" => WS })?;
+        ins!(tx, "Trigger", { "id" => 2_i64, "createdAt" => 2_000_i64, "name" => "Welcome root", "actions" => "[]", "workspaceId" => WS })?;
         ins!(tx, "Trigger", { "id" => 3_i64, "createdAt" => 3_000_i64, "name" => "Other", "folderId" => 51_i64, "actions" => "[]", "workspaceId" => WS })?;
         ins!(tx, "Condition", { "id" => 91_i64, "triggerId" => 2_i64, "type" => "tag" })?;
         ins!(tx, "Condition", { "id" => 92_i64, "triggerId" => 2_i64, "type" => "keyword" })?;
