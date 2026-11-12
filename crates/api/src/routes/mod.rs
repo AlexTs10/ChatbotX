@@ -13,7 +13,10 @@ use axum::response::{IntoResponse, Response};
 
 pub use table::PUBLIC_ROUTES;
 
-use crate::auth::{TokenAuthRequest, WorkspaceTokenDeps, authorize_workspace_token_for_scope};
+use crate::auth::{
+    TokenAuthRequest, WorkspaceTokenDeps, authenticate_channel_api_token,
+    authorize_workspace_token_for_scope, invalid_access_token_error,
+};
 use crate::orpc::OrpcError;
 
 /// The auth chain of an operation (the oRPC builder it is declared with).
@@ -223,10 +226,12 @@ pub async fn handle_public_request<D: WorkspaceTokenDeps>(
             .await
             .map(|_| ())
         }
-        // The channel token (`channelApiTokenAPI`) and the mobile user JWT
-        // (`mobileUserAPI`) are ported with their domains (P3.5e / P3.6+).
-        RouteAuth::ChannelToken | RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
-            Ok(())
+        RouteAuth::ChannelToken => authenticate_channel_api_token(deps, headers)
+            .await
+            .map(|_| ()),
+        // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
+        RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
+            Err(invalid_access_token_error())
         }
     };
     let mut response = match outcome {

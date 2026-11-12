@@ -183,6 +183,76 @@ pub trait WorkspaceTokenDeps: WorkspaceQuota + Sync {
 
     /// `Date.now()`.
     fn now_ms(&self) -> i64;
+
+    /// `findIntegrationApiByTokenHash` + its workspace and inbox (the API
+    /// channel token of `channelApiTokenAuthMidddleware`). Default: no channel.
+    fn find_channel_api_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> impl Future<Output = Result<Option<ChannelApiLookup>, ChatbotXException>> + Send {
+        let _ = token_hash;
+        async { Ok(None) }
+    }
+}
+
+/// An API channel (`IntegrationApi`) found by its token hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelApiLookup {
+    pub integration_api_id: String,
+    pub enabled: bool,
+    pub workspace: AuthWorkspace,
+    /// `inboxService.find({ id: integrationApi.inboxId })` found the inbox.
+    pub inbox_id: Option<String>,
+}
+
+/// The context of an API channel request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelTokenContext {
+    pub integration_api_id: String,
+    pub workspace: AuthWorkspace,
+    pub inbox_id: String,
+    /// `channel-api:<id>`.
+    pub api_credential_id: String,
+}
+
+/// `channelApiTokenAuthMidddleware`: `Bearer <cbx_api_ token>` of an enabled API channel.
+pub async fn authenticate_channel_api_token<D: WorkspaceTokenDeps>(
+    deps: &D,
+    headers: &HeaderMap,
+) -> Result<ChannelTokenContext, OrpcError> {
+    let unauthorized = || OrpcError::new("UNAUTHORIZED", None, None);
+    let token = extract_bearer(headers)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(unauthorized)?;
+    let lookup = deps
+        .find_channel_api_by_token_hash(&hash_token(token))
+        .await
+        .map_err(|error| chatbotx_exception_to_orpc(&error))?
+        .filter(|lookup| lookup.enabled)
+        .ok_or_else(unauthorized)?;
+    if is_workspace_scheduled_for_deletion(&lookup.workspace) {
+        return Err(forbidden("Workspace deletion scheduled"));
+    }
+    let inbox_id = lookup
+        .inbox_id
+        .ok_or_else(|| OrpcError::new("UNAUTHORIZED", None, Some("Inbox not found")))?;
+    Ok(ChannelTokenContext {
+        api_credential_id: format!("channel-api:{}", lookup.integration_api_id),
+        integration_api_id: lookup.integration_api_id,
+        workspace: lookup.workspace,
+        inbox_id,
+    })
+}
+
+/// The answer of a mobile-user route to anything but a valid mobile access
+/// token (`mobileUserAuthMiddleware`; the verification itself is P3.5e).
+pub fn invalid_access_token_error() -> OrpcError {
+    OrpcError::new(
+        "INVALID_CHATBOT_TOKEN",
+        Some(401),
+        Some("Invalid or missing access token"),
+    )
 }
 
 /// `extractBearer(headers)`: the value after `Bearer ` of `Authorization`.

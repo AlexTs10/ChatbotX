@@ -15,9 +15,9 @@ use chatbotx_kv::{Clock, Kv};
 use serde_json::Value;
 
 use super::{
-    AuthWorkspace, McpAccessToken, McpTokenVerificationUnavailable, MobileWorkspacePrincipal,
-    OAuthPrincipalResolution, OwnerAccessState, RequestApiToken, WorkspaceQuota,
-    WorkspaceTokenDeps, WorkspaceTokenLookup, invalid_token_error,
+    AuthWorkspace, ChannelApiLookup, McpAccessToken, McpTokenVerificationUnavailable,
+    MobileWorkspacePrincipal, OAuthPrincipalResolution, OwnerAccessState, RequestApiToken,
+    WorkspaceQuota, WorkspaceTokenDeps, WorkspaceTokenLookup, invalid_token_error,
 };
 use crate::errors::ChatbotXException;
 use crate::orpc::OrpcError;
@@ -137,6 +137,51 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
     fn now_ms(&self) -> i64 {
         self.clock.now_ms()
     }
+
+    async fn find_channel_api_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<ChannelApiLookup>, ChatbotXException> {
+        let token_hash = token_hash.to_string();
+        self.db
+            .read(move |conn| find_channel_api(conn, &token_hash))
+            .await
+            .map_err(|error| ChatbotXException::new(error.to_string()))
+    }
+}
+
+/// `integrationApiRepository.findByTokenHash` + workspace + inbox (private
+/// query: no `IntegrationApi` repository in `crates/db` yet).
+fn find_channel_api(
+    conn: &chatbotx_db::rusqlite::Connection,
+    token_hash: &str,
+) -> Result<Option<ChannelApiLookup>, DbError> {
+    use chatbotx_db::rusqlite::OptionalExtension as _;
+    let row = conn
+        .query_row(
+            r#"SELECT a."id", a."enabled", a."inboxId", w."id", w."name", w."ownerId",
+                      w."scheduledDeletionAt", i."id"
+               FROM "IntegrationApi" a
+               JOIN "Workspace" w ON w."id" = a."workspaceId"
+               LEFT JOIN "Inbox" i ON i."id" = a."inboxId"
+               WHERE a."tokenHash" = ?1 LIMIT 1"#,
+            [token_hash],
+            |row| {
+                Ok(ChannelApiLookup {
+                    integration_api_id: row.get::<_, i64>(0)?.to_string(),
+                    enabled: row.get::<_, Option<bool>>(1)?.unwrap_or(false),
+                    workspace: AuthWorkspace {
+                        id: row.get::<_, i64>(3)?.to_string(),
+                        name: row.get(4)?,
+                        owner_id: row.get::<_, i64>(5)?.to_string(),
+                        scheduled_deletion_at: row.get(6)?,
+                    },
+                    inbox_id: row.get::<_, Option<i64>>(7)?.map(|id| id.to_string()),
+                })
+            },
+        )
+        .optional()?;
+    Ok(row)
 }
 
 /// Scopes of a token row: `None` (all scopes) or the listed names.
