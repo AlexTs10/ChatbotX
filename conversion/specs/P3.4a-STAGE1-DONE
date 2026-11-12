@@ -1,0 +1,14 @@
+P3.4a stage 1 (porter) — 2026-11-12
+
+Ported tests: crates/core/tests/flow_config_*.rs (61 files) + crates/core/tests/flow_config_support/mod.rs.
+Map: conversion/specs/P3.4-test-map.tsv (632 rows over 62 frozen files: 600 ported, 26 adapted, 6 dropped =
+execute-javascript.test.ts). 626 Rust tests.
+Crate API: crates/core/src/flow_config/** (schema!/default_fn! expand to todo!(); hand-port API as todo!() stubs;
+the z runtime is real).
+
+Run on the PC (dell-5570): cargo test -p chatbotx-core --no-fail-fast
+Result: compiles; flow_config targets 4 passed, 622 failed (all failures are todo!() panics).
+  The 4 passing tests check constants only: ai_model_catalog (2, the model table), CHANNEL_POLICY_VERSION == 3,
+  the FieldOperationType re-export (TypeId).
+cargo fmt -p chatbotx-core --check: OK on the PC.
+From here on crates/core/tests/flow_config_*.rs and crates/core/tests/flow_config_support/** are locked.

@@ -209,3 +209,9 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
 - Lint-only `#![allow(clippy::...)]` lines in locked test files are allowed (orchestrator only), as in P2.7. P3.1: 6 files; P3.2: 1 file, plus one rustfmt whitespace fix.
 - P3.1 notes: JPEG pixels decode with `jpeg-decoder` (zune-jpeg misdecodes some 4:2:0 files). JSON object keys sort (no `preserve_order`). Invalid recurrence time zone falls back to UTC. Phone parity flake comes from `update-from-message.ts` digit scan of the message text; fix in the business port or the fixture.
 - P3.2: scope was too large for one batch; the rest goes to new unit P3.2b. Postgres row/advisory locks are no-ops under the single SQLite writer.
+
+## 2026-11-12 — P3.4 flow-config port (implementer; orchestrator-delegated, recommended options)
+
+- Orchestrator-delegated, recommended option: P3.4 is cut in two slices (P3.4a schema core, 61 files; P3.4b graph/authoring, 13 files), each with its own stage 1/stage 2 commits. Spec: `conversion/specs/P3.4.md`.
+- Orchestrator-delegated, recommended option: the zod schemas are rebuilt with a small zod-4 runtime (`chatbotx_core::flow_config::z`, same paths and English messages) from skeletons generated once by `conversion/tools/zod-rust-gen/gen.mts`; closures and functions are hand-ported. Flow data (steps, nodes, edges, template params) stays `serde_json::Value`.
+- Orchestrator-delegated, recommended option: `executeJavascript` is removed from `stepTypes`, `actionSteps` and the channel policy step table (follows the user's drop of the step). A stored flow with that step no longer validates; there is no data import, so nothing breaks.

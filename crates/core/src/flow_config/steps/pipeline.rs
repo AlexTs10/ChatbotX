@@ -1,0 +1,248 @@
+//! Port of `packages/flow-config/src/steps/pipeline.ts`.
+
+#[allow(unused_imports)]
+use crate::flow_config::prelude::*;
+
+pub fn pipeline_step_limits() -> &'static Value {
+    static V: LazyLock<Value> = LazyLock::new(|| {
+        serde_json::from_str(
+            r#"{"title":200,"description":5000,"comment":2000,"assignees":20,"maxFieldIds":50}"#,
+        )
+        .expect("valid JSON")
+    });
+    &V
+}
+
+schema!(pub fn pipeline_step_actions = z::enum_(&["addToPipeline", "moveToStage", "changeValue", "assign", "changeStatus", "changePriority", "changeDueDate", "changeTitle", "setCustomField", "clearCustomField", "changeDescription", "removeFromPipeline", "addComment", "transfer"]));
+
+// HAND-PORT pipelineActionCanSkip:
+// action=>!PIPELINE_ACTIONS_WITHOUT_SKIP.has(action)
+
+schema!(pub fn pipeline_step_due_date_schema = z::discriminated_union("mode", vec![z::object(vec![("mode", z::literal(json!("none")))]),
+z::object(vec![("mode", z::literal(json!("customField"))),
+("customFieldId", z::union(vec![z::literal(json!("")),
+z::string().regex(r#"^\d+$"#, "").max(18)]).describe("Contact custom field (date or datetime) holding the due date. Get ids from `contacts.listCustomFields`."))]),
+z::object(vec![("mode", z::literal(json!("fixed"))),
+("at", z::string().iso_datetime(true, false, None).describe("Fixed ISO-8601 instant."))])]));
+
+schema!(pub fn pipeline_step_schema = z::discriminated_union("action", vec![z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("addToPipeline"))),
+("title", z::string().max(200).describe("Item title; accepts {{variables}}.")),
+("description", z::string().max(5000)),
+("assigneeMemberIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(20).describe("Workspace member ids.")),
+("assigneeInboxTeamIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(20).describe("Inbox team ids.")),
+("status", z::enum_(&["open", "won", "lost"])),
+("stageId", z::union(vec![z::literal(json!("")),
+z::string().regex(r#"^\d+$"#, "").max(18)]).optional().describe("Stage id; omitted means the first stage.")),
+("dueDate", pipeline_step_due_date_schema()),
+("fieldValues", z::array(z::object(vec![("pipelineFieldId", z::string().regex(r#"^\d+$"#, "").max(18).describe("Pipeline custom field id. Get ids from `pipelines.get`.")),
+("value", z::string().describe("Value; accepts {{variables}}."))])).max(50).describe("Pipeline custom field values ({{variables}} allowed)."))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("moveToStage"))),
+("stageId", z::string().regex(r#"^\d+$"#, "").msg("Select a stage").max(18))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("changeValue"))),
+("value", z::string().describe("Opportunity value as a number >= 0; accepts {{variables}}."))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("assign"))),
+("assigneeMemberIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(20).describe("Workspace member ids.")),
+("assigneeInboxTeamIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(20).describe("Inbox team ids."))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("changeStatus"))),
+("status", z::enum_(&["open", "won", "lost"]))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("changePriority"))),
+("priority", z::enum_(&["low", "medium", "high"]))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("changeDueDate"))),
+("dueDate", pipeline_step_due_date_schema())]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("changeTitle"))),
+("title", z::string().max(200))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("setCustomField"))),
+("pipelineFieldId", z::union(vec![z::literal(json!("")),
+z::string().regex(r#"^\d+$"#, "").max(18)]).describe("Pipeline custom field id.")),
+("value", z::string())]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("clearCustomField"))),
+("pipelineFieldIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(50).describe("Pipeline custom field ids to clear."))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("changeDescription"))),
+("description", z::string().max(5000))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("removeFromPipeline")))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("addComment"))),
+("text", z::string().max(2000))]),
+z::object(vec![("id", z::string().regex(r#"^\d+$"#, "").describe("Step id (numeric string), unique within the flow.")),
+("stepType", z::literal(json!("pipeline")).describe("Step type discriminator: \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("states", z::tuple(vec![success_state_schema(),
+error_state_schema(),
+skip_state_schema()])),
+("action", z::literal(json!("transfer"))),
+("destinationPipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18)),
+("destinationStageId", z::union(vec![z::literal(json!("")),
+z::string().regex(r#"^\d+$"#, "").max(18)]).optional().describe("Destination stage id; omitted means the first stage."))])]));
+
+schema!(pub fn pipeline_action_schema = z::discriminated_union("action", vec![z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("addToPipeline"))),
+("title", z::string().max(200).describe("Item title; accepts {{variables}}.")),
+("description", z::string().max(5000)),
+("assigneeMemberIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(20).describe("Workspace member ids.")),
+("assigneeInboxTeamIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(20).describe("Inbox team ids.")),
+("status", z::enum_(&["open", "won", "lost"])),
+("stageId", z::union(vec![z::literal(json!("")),
+z::string().regex(r#"^\d+$"#, "").max(18)]).optional().describe("Stage id; omitted means the first stage.")),
+("dueDate", pipeline_step_due_date_schema()),
+("fieldValues", z::array(z::object(vec![("pipelineFieldId", z::string().regex(r#"^\d+$"#, "").max(18).describe("Pipeline custom field id. Get ids from `pipelines.get`.")),
+("value", z::string().describe("Value; accepts {{variables}}."))])).max(50).describe("Pipeline custom field values ({{variables}} allowed)."))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("moveToStage"))),
+("stageId", z::string().regex(r#"^\d+$"#, "").msg("Select a stage").max(18))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("changeValue"))),
+("value", z::string().describe("Opportunity value as a number >= 0; accepts {{variables}}."))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("assign"))),
+("assigneeMemberIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(20).describe("Workspace member ids.")),
+("assigneeInboxTeamIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(20).describe("Inbox team ids."))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("changeStatus"))),
+("status", z::enum_(&["open", "won", "lost"]))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("changePriority"))),
+("priority", z::enum_(&["low", "medium", "high"]))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("changeDueDate"))),
+("dueDate", pipeline_step_due_date_schema())]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("changeTitle"))),
+("title", z::string().max(200))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("setCustomField"))),
+("pipelineFieldId", z::union(vec![z::literal(json!("")),
+z::string().regex(r#"^\d+$"#, "").max(18)]).describe("Pipeline custom field id.")),
+("value", z::string())]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("clearCustomField"))),
+("pipelineFieldIds", z::array(z::string().regex(r#"^\d+$"#, "").max(18)).max(50).describe("Pipeline custom field ids to clear."))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("changeDescription"))),
+("description", z::string().max(5000))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("removeFromPipeline")))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("addComment"))),
+("text", z::string().max(2000))]),
+z::object(vec![("type", z::literal(json!("pipeline")).describe("Action type \"pipeline\".")),
+("pipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18).describe("Pipeline the action applies to. Get ids from `pipelines.list`.")),
+("action", z::literal(json!("transfer"))),
+("destinationPipelineId", z::string().regex(r#"^\d+$"#, "").msg("Select a pipeline").max(18)),
+("destinationStageId", z::union(vec![z::literal(json!("")),
+z::string().regex(r#"^\d+$"#, "").max(18)]).optional().describe("Destination stage id; omitted means the first stage."))])]));
+
+// HAND-PORT pipelineStepDefaultFn:
+// (action="addToPipeline",carry={})=>{const base={id:carry.id??createId(),stepType:stepTypes.enum.pipeline,pipelineId:carry.pipelineId??"",states:carry.states??defaultStates()};const none={mode:"none"};switch(action){case"addToPipeline":return{...base,action,title:"{{full_name}}",description:"",assigneeMemberIds:[],assigneeInboxTeamIds:[],status:"open",dueDate:none,fieldValues:[]};case"moveToStage":return{...base,action,stageId:""};case"changeValue":return{...base,action,value:""};case"assign":return{...base,action,assigneeMemberIds:[],assigneeInboxTeamIds:[]};case"changeStatus":return{...base,action,status:"won"};case"changePriority":return{...base,action,priority:"medium"};case"changeDueDate":return{...base,action,dueDate:none};case"changeTitle":return{...base,action,title:""};case"setCustomField":return{...base,action,pipelineFieldId:"",value:""};case"clearCustomField":return{...base,action,pipelineFieldIds:[]};case"changeDescription":return{...base,action,description:""};case"removeFromPipeline":return{...base,action};case"addComment":return{...base,action,text:""};case"transfer":return{...base,action,destinationPipelineId:""};default:{const exhaustive=action;throw new Error(`Unhandled pipeline action: ${String(exhaustive)}`)}}}
+
+// HAND-PORT pipelineActionDefaultFn:
+// (action="addToPipeline",carry={})=>{const{id:_id,stepType:_stepType,states:_states,...fields}=pipelineStepDefaultFn(action,carry);return{...fields,type:"pipeline"}}
+
+// HAND-PORT findMissingRequiredPipelineFields:
+// function findMissingRequiredPipelineFields(fieldValues,definitions){const finalValues=new Map;for(const{pipelineFieldId,value}of fieldValues){finalValues.set(pipelineFieldId,value)}return definitions.filter(definition=>definition.required&&(finalValues.get(definition.id)??"").trim()==="")}
+
+// ---- stage 1 API (hand-ported in stage 2) ----
+
+pub fn pipeline_step_default_fn(action: &str, carry: &Value) -> Value {
+    todo!("P3.4")
+}
+
+pub fn pipeline_action_default_fn(action: &str, carry: &Value) -> Value {
+    todo!("P3.4")
+}
+
+pub fn find_missing_required_pipeline_fields(
+    field_values: &Value,
+    definitions: &Value,
+) -> Vec<Value> {
+    todo!("P3.4")
+}
