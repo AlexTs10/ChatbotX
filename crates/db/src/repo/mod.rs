@@ -533,6 +533,22 @@ pub mod contact_inbox;
 pub mod conversation_ai_context;
 pub mod inbox;
 
+// P3.3 (second half of the repositories).
+pub mod auth_account;
+pub mod invitation;
+pub mod license;
+pub mod mobile_refresh_token;
+pub mod oauth_access_token;
+pub mod oauth_client;
+pub mod oauth_consent;
+pub mod oauth_refresh_token;
+pub mod platform_admin;
+pub mod tenant;
+pub mod user;
+pub mod workspace;
+pub mod workspace_api_token;
+pub mod workspace_member;
+
 pub use client::{
     CappedCount, count_query_capped, is_foreign_key_violation_error, is_statement_timeout_error,
     is_unique_violation_error, to_loggable_database_error,
