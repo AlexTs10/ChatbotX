@@ -22,8 +22,7 @@ pub trait RateCounter: Send + Sync {
 
 impl RateCounter for MemKv {
     fn incr_with_window(&self, key: &str, ttl_secs: u64) -> i64 {
-        let _ = (key, ttl_secs);
-        todo!("P2.7 spec 2.5")
+        MemKv::incr_with_window(self, key, ttl_secs)
     }
 }
 
@@ -54,17 +53,29 @@ pub struct RateLimited {
 
 impl fmt::Display for RateLimited {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!("P2.7 spec 2.5")
+        write!(f, "Too many requests. Retry after {}s.", self.retry_after)
     }
 }
+
+/// `WINDOW_SECONDS`.
+const WINDOW_SECS: u64 = 10;
+/// HTTP status of `tooManyRequests`.
+const TOO_MANY_REQUESTS_STATUS: u16 = 429;
 
 impl std::error::Error for RateLimited {}
 
 /// `checkApiRateLimit`.
 pub fn check_api_rate_limit(input: ApiRateLimitInput<'_>) -> ApiRateLimitResult {
-    let _ = input;
-    todo!("P2.7 spec 2.5")
+    let window = input.now_ms.div_euclid(WINDOW_MS);
+    let elapsed = input.now_ms.rem_euclid(WINDOW_MS);
+    let retry_after = u64::try_from((WINDOW_MS - elapsed + 999) / 1000).unwrap_or(0);
+    let key = format!("{}:{}:{window}", input.scope, input.key);
+    let count = input.store.incr_with_window(&key, WINDOW_SECS);
+    let limit = input.limit.unwrap_or(REQUEST_LIMIT);
+    ApiRateLimitResult {
+        limited: u64::try_from(count).is_ok_and(|count| count > limit),
+        retry_after,
+    }
 }
 
 /// `assertApiNotRateLimited`: `Err(RateLimited { "tooManyRequests", 429, .. })`
@@ -73,6 +84,16 @@ pub fn assert_api_not_rate_limited(
     input: ApiRateLimitInput<'_>,
     res_headers: Option<&mut HashMap<String, String>>,
 ) -> Result<(), RateLimited> {
-    let _ = (input, res_headers);
-    todo!("P2.7 spec 2.5")
+    let result = check_api_rate_limit(input);
+    if !result.limited {
+        return Ok(());
+    }
+    if let Some(headers) = res_headers {
+        headers.insert("Retry-After".to_owned(), result.retry_after.to_string());
+    }
+    Err(RateLimited {
+        code: "tooManyRequests",
+        http_status: TOO_MANY_REQUESTS_STATUS,
+        retry_after: result.retry_after,
+    })
 }

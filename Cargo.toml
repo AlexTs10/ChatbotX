@@ -15,6 +15,7 @@ chatbotx-core = { path = "crates/core" }
 chatbotx-db = { path = "crates/db" }
 chatbotx-files = { path = "crates/files" }
 chatbotx-jobs = { path = "crates/jobs" }
+chatbotx-kv = { path = "crates/kv" }
 chatbotx-rt = { path = "crates/rt" }
 
 # External crates. Default features are off; enable only what a crate uses.

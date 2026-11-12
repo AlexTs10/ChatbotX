@@ -1,14 +1,13 @@
 //! The SQLite `DispatchSchedule` (spec 3.2): the `sequence_schedule` table
 //! (`kind`, `dispatch_id`, `bucket`, `at_ms`; primary key `(kind,
-//! dispatch_id)`) and the in-process dispatch lock.
+//! dispatch_id)`) and the in-process dispatch lock (P2.7 `LockMap`).
 
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-use std::time::{Duration, Instant};
 
 use chatbotx_db::rusqlite::{Connection, params};
 use chatbotx_db::{Db, DbError};
+use chatbotx_kv::LockMap;
 use tokio::sync::Notify;
 
 use crate::enqueue::BoxFuture;
@@ -148,11 +147,12 @@ fn signal() -> Arc<Notify> {
     Arc::clone(SIGNAL.get_or_init(|| Arc::new(Notify::new())))
 }
 
-/// The in-process dispatch locks (`withLock` without Redis): key → (holder
-/// token, expiry). A lock past its ttl can be taken again.
-fn locks() -> &'static Mutex<HashMap<String, (u64, Instant)>> {
-    static LOCKS: OnceLock<Mutex<HashMap<String, (u64, Instant)>>> = OnceLock::new();
-    LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+/// The in-process dispatch locks (`withLock` without Redis), process-wide
+/// like the old Redis keys. A held lock does not expire (P2.7 spec 2.2: the
+/// Redlock auto-extension); it is released when the `DispatchLock` drops.
+fn locks() -> &'static LockMap {
+    static LOCKS: OnceLock<LockMap> = OnceLock::new();
+    LOCKS.get_or_init(LockMap::new)
 }
 
 /// `AND bucket IN (..)` unless every bucket is assigned.
@@ -314,31 +314,13 @@ impl DispatchSchedule for SqliteDispatchSchedule {
         ttl_secs: u64,
     ) -> BoxFuture<'a, Result<DispatchLock, ScheduleError>> {
         let key = dispatch_lock_key(bucket, dispatch_id);
+        // `ttl_secs` is metadata only: no expiry while held.
+        let _ = ttl_secs;
         Box::pin(async move {
-            let now = Instant::now();
-            let token = crate::rand::next_u64();
-            {
-                let mut held = locks().lock().unwrap_or_else(PoisonError::into_inner);
-                if let Some((_, expiry)) = held.get(&key)
-                    && *expiry > now
-                {
-                    return Err(ScheduleError::LockAcquisition { key });
-                }
-                held.insert(
-                    key.clone(),
-                    (token, now + Duration::from_secs(ttl_secs.max(1))),
-                );
+            match locks().try_acquire(&key) {
+                Ok(guard) => Ok(DispatchLock::new(key, Box::new(move || drop(guard)))),
+                Err(_) => Err(ScheduleError::LockAcquisition { key }),
             }
-            let released = key.clone();
-            Ok(DispatchLock::new(
-                key,
-                Box::new(move || {
-                    let mut held = locks().lock().unwrap_or_else(PoisonError::into_inner);
-                    if held.get(&released).is_some_and(|(t, _)| *t == token) {
-                        held.remove(&released);
-                    }
-                }),
-            ))
         })
     }
 

@@ -4,6 +4,8 @@
 //! `now >= next`, else sleep the returned wait and retry.
 //! (Spec 3.1 places the final module in `crates/core/src/limits/heavy_provider.rs`.)
 
+use std::time::Duration;
+
 use crate::mem::MemKv;
 
 /// The slot store (the TS Redis `eval`).
@@ -14,8 +16,7 @@ pub trait SlotClaimer: Send + Sync {
 
 impl SlotClaimer for MemKv {
     fn claim_min_interval(&self, key: &str, interval_ms: u64) -> u64 {
-        let _ = (key, interval_ms);
-        todo!("P2.7 K6")
+        MemKv::claim_min_interval(self, key, interval_ms)
     }
 }
 
@@ -29,13 +30,21 @@ pub struct HeavyProviderSlot<'a> {
 
 /// `heavy-provider-rate:${workspaceId}:${provider}`.
 pub fn heavy_provider_rate_key(workspace_id: &str, provider: &str) -> String {
-    let _ = (workspace_id, provider);
-    todo!("P2.7 K6")
+    format!("heavy-provider-rate:{workspace_id}:{provider}")
 }
 
 /// `waitForHeavyProviderSlot`: claims, or sleeps (`tokio::time::sleep`) the
 /// returned wait and tries again.
 pub async fn wait_for_heavy_provider_slot(store: &dyn SlotClaimer, input: HeavyProviderSlot<'_>) {
-    let _ = (store, input);
-    todo!("P2.7 K6")
+    if input.min_interval_ms == 0 {
+        return;
+    }
+    let key = heavy_provider_rate_key(input.workspace_id, input.provider);
+    loop {
+        let wait_ms = store.claim_min_interval(&key, input.min_interval_ms);
+        if wait_ms == 0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(wait_ms.min(input.min_interval_ms))).await;
+    }
 }

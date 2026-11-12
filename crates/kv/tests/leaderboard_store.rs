@@ -3,6 +3,7 @@
 //! (`describe.skipIf(!redisUrl)`, baseline-skip); here it runs always on the
 //! in-memory `kv::Leaderboards`. Raw Redis reads (`ZSCORE`, `EXISTS`, `TTL`,
 //! `ZADD rebuild -inf _`) become test-only helpers (spec 2.7).
+#![allow(clippy::int_plus_one)]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

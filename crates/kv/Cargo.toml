@@ -16,6 +16,7 @@ serde_json = { workspace = true }
 # SHA-256 fingerprint of the Moosend API key (`moosend` module, K5).
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 chatbotx-kv = { path = ".", features = ["test-util"] }

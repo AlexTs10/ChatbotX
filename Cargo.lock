@@ -241,6 +241,7 @@ name = "chatbotx-jobs"
 version = "0.1.0"
 dependencies = [
  "chatbotx-db",
+ "chatbotx-kv",
  "chrono",
  "chrono-tz",
  "serde",
@@ -261,6 +262,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

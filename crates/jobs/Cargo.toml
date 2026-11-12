@@ -7,6 +7,8 @@ publish.workspace = true
 
 [dependencies]
 chatbotx-db = { workspace = true }
+# `Clock` and the keyed lock `LockMap` (P2.7: replaces the interim dispatch lock map).
+chatbotx-kv = { workspace = true }
 # ISO-8601 instants (idempotency keys) and calendar math; `chrono-tz` for the send-time zone.
 chrono = { workspace = true, features = ["std"] }
 chrono-tz = { workspace = true }

@@ -84,13 +84,15 @@ impl fmt::Display for LockAcquisitionError {
 
 impl std::error::Error for LockAcquisitionError {}
 
-/// Whether `err` is a lock-acquisition error: a [`LockAcquisitionError`]
-/// or a `ScheduleError::LockAcquisition`, itself or anywhere in its
-/// `source()` chain (the TypeScript check by `name`).
+/// Whether `err` is a lock-acquisition error: a [`LockAcquisitionError`],
+/// a `chatbotx_kv::LockAcquisitionError` (the `LockMap` error) or a
+/// `ScheduleError::LockAcquisition`, itself or anywhere in its `source()`
+/// chain (the TypeScript check by `name`).
 pub fn is_lock_acquisition_error(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(e) = current {
         if e.is::<LockAcquisitionError>()
+            || e.is::<chatbotx_kv::LockAcquisitionError>()
             || e.is::<crate::sequence::consumer::LockAcquisitionError>()
             || matches!(
                 e.downcast_ref::<ScheduleError>(),
