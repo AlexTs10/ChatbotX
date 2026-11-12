@@ -22,7 +22,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.8 | 1 | Public API parity: `dynamicImages`, `ecommerceAnalytics`, `ecommerceSettings`, `emailTopics`, `errorLogs`, `externalWebhooks`, `facebookLeadAds`, `facebookMarketingMessages`, `fbComments` | done | P1.1 | A: 48 ops, 335 tests | See "Proof P1.8" | commit `868c4acee` |
 | P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | done | P1.1 | A: 53 ops + hook route, 457 tests | See "Proof P1.9" | commit `868c4acee` |
 | P1.10 | 1 | Public API parity: `inboxes`, `instagramChannels`, `integrations`, `keywords`, `leaderboards` | done | P1.1 | A: 52 ops, 398 tests | See "Proof P1.10" | commit `c01a4eea9` |
-| P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | in_progress | P1.1 | A: 52 ops, 344 tests | | |
+| P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | done | P1.1 | A: 52 ops, 344 tests | See \"Proof P1.11\" | commit `1da6b576d` |
 | P1.12 | 1 | Public API parity: `miniApps`, `minigames`, `openHours`, `orders`, `paymentProviders` | todo | P1.1 | A: 43 ops | | |
 | P1.13 | 1 | Public API parity: `pipelines`, `placeCategories`, `placeLocations`, `polls` | todo | P1.1 | A: 51 ops | | |
 | P1.14 | 1 | Public API parity: `productCategories`, `productVendors`, `products`, `qrCodes`, `questionnaires`, `realtime`, `reflinks` | todo | P1.1 | A: 54 ops | | |
@@ -318,6 +318,16 @@ verifier run 1:  Test Files 13 passed (13)   Tests 399 passed (399)   159.65s   
 verifier run 2:  Test Files 13 passed (13)   Tests 399 passed (399)   141.44s   exit 0
 ```
 Minor gaps: `perPage` > 50 clamp not proven (only 11 rows); leaderboards `adjust`/`export`/`triggerRewards` field names checked by error codes only; unlimited 200 for `DELETE graph.instagram.com /v*/me/messenger_profile` in the fake upstream (check P1.9 IG tests do not expect an error there at P1.28).
+
+### Proof P1.11
+
+Writer (spec `conversion/specs/P1.11.md`) → independent verifier (PASS 4/4, two runs). 52/52 operations, 344 tests in `conversion/parity/tests/p1-11-messages-messenger/` + interception check.
+
+```
+verifier run 1:  Test Files 11 passed (11)   Tests 344 passed (344)   74.57s   exit 0
+verifier run 2:  Test Files 11 passed (11)   Tests 344 passed (344)   122.24s  exit 0
+```
+Minor gaps: `messengerTemplates.create` Meta errors checked by status only; foreign `moveFiles` not proven; `messages.create` with `files` and `update` with `newAttachmentPath` are testable (multipart / presigned PUT) but not written — add in P1.28 gap pass.
 
 ### Proof P2.5
 
