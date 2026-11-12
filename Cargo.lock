@@ -251,6 +251,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "chatbotx-kv"
+version = "0.1.0"
+dependencies = [
+ "chatbotx-db",
+ "chatbotx-kv",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "chatbotx-rt"
 version = "0.1.0"
 
