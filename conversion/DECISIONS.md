@@ -215,3 +215,13 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
 - Orchestrator-delegated, recommended option: P3.4 is cut in two slices (P3.4a schema core, 61 files; P3.4b graph/authoring, 13 files), each with its own stage 1/stage 2 commits. Spec: `conversion/specs/P3.4.md`.
 - Orchestrator-delegated, recommended option: the zod schemas are rebuilt with a small zod-4 runtime (`chatbotx_core::flow_config::z`, same paths and English messages) from skeletons generated once by `conversion/tools/zod-rust-gen/gen.mts`; closures and functions are hand-ported. Flow data (steps, nodes, edges, template params) stays `serde_json::Value`.
 - Orchestrator-delegated, recommended option: `executeJavascript` is removed from `stepTypes`, `actionSteps` and the channel policy step table (follows the user's drop of the step). A stored flow with that step no longer validates; there is no data import, so nothing breaks.
+
+## 2026-11-12 — P3.3 implementer (orchestrator-delegated, recommended option)
+
+- Slice order: the auth repositories first (`user`, `auth-account`, `invitation`, `license`, `mobile-refresh-token`, `oauth-*`, `platform-admin`, `tenant` + default template, `workspace`, `workspace-api-token`, `workspace-member`). `auth-account` is in the first half of the alphabet but had no tests and no P3.2 port; it is in P3.3 slice 1 because auth needs it.
+- `logger` spies: a process-wide `tracing` recorder in `crates/db/tests/common/log.rs` (repository code logs on db threads). No new crate dependency.
+- New shared test fixtures go to `crates/db/tests/common/repo3.rs`; the P3.2 helper file stays locked.
+- Drizzle `.set()/.values()` objects with caller-chosen keys: `repo::patch::Patch`, checked against the model columns.
+- Untested repositories get no map rows; `crates/db/tests/repo_p33_smoke.rs` (own test) calls each of their functions once against the schema.
+- Stage 1 speed-up: src is written once, then a script replaces the `pub fn` bodies by `todo!("P3.3")` for the stage 1 commit (tests run only against the stubs before the commit; every stage 1 failure was checked to be the `todo!` panic, except slice 2a, see next point).
+- **Open for the orchestrator:** `crates/db/tests/repo_trigger_repository.rs` (locked, slice 2a, `504a85889`) seeds two triggers named `Welcome` in one workspace, which violates `Trigger_workspaceId_name_key`; all 6 tests fail in setup. Proposed fix (fixture only): rename trigger 2 to `Welcome root` in `seeded()`. The implementation (`repo::trigger`) is done.
