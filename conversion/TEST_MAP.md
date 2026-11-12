@@ -2968,9 +2968,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/payments/__tests__/paypal.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/payments/__tests__/stripe.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/realtime-protocol/__tests__/auth.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
-| `packages/realtime-protocol/__tests__/frame-reader.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
+| `packages/realtime-protocol/__tests__/frame-reader.test.ts` | B | - | todo | Realtime (WebSocket gateway); browser client, class B by user decision 2026-11-12 (P2.8) |
 | `packages/realtime-protocol/__tests__/presence.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
-| `packages/realtime-protocol/__tests__/realtime-socket.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
+| `packages/realtime-protocol/__tests__/realtime-socket.test.ts` | B | - | todo | Realtime (WebSocket gateway); browser client, class B by user decision 2026-11-12 (P2.8) |
 | `packages/realtime-protocol/__tests__/schemas.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
 | `packages/realtime-protocol/__tests__/stream.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
 | `packages/redis/__tests__/cache-utils.test.ts` | C | tbd | todo | Redis (cache, locks, queues, stores) |

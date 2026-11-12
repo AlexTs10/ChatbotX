@@ -23,9 +23,9 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P1.9 | 1 | Public API parity: `flows`, `folders`, `googleAds`, `igComments`, `igStories`, `inboundWebhookChannels`, `inboundWebhooks`, `inboxTeams` | done | P1.1 | A: 53 ops + hook route, 457 tests | See "Proof P1.9" | commit `868c4acee` |
 | P1.10 | 1 | Public API parity: `inboxes`, `instagramChannels`, `integrations`, `keywords`, `leaderboards` | done | P1.1 | A: 52 ops, 398 tests | See "Proof P1.10" | commit `c01a4eea9` |
 | P1.11 | 1 | Public API parity: `magicLinks`, `me`, `mediaLibrary`, `messages`, `messengerChannels`, `messengerPersonas`, `messengerTemplates` | done | P1.1 | A: 52 ops, 344 tests | See "Proof P1.11" | commit `1da6b576d` |
-| P1.12 | 1 | Public API parity: `miniApps`, `minigames`, `openHours`, `orders`, `paymentProviders` | in_progress | P1.1 | A: 43 ops | | |
-| P1.13 | 1 | Public API parity: `pipelines`, `placeCategories`, `placeLocations`, `polls` | in_progress | P1.1 | A: 51 ops | | |
-| P1.14 | 1 | Public API parity: `productCategories`, `productVendors`, `products`, `qrCodes`, `questionnaires`, `realtime`, `reflinks` | in_progress | P1.1 | A: 54 ops | | |
+| P1.12 | 1 | Public API parity: `miniApps`, `minigames`, `openHours`, `orders`, `paymentProviders` | in_progress | P1.1 | A: 43 ops, 297 tests (verification pending) | | |
+| P1.13 | 1 | Public API parity: `pipelines`, `placeCategories`, `placeLocations`, `polls` | in_progress | P1.1 | A: 51 ops, 314 tests (verification pending) | | |
+| P1.14 | 1 | Public API parity: `productCategories`, `productVendors`, `products`, `qrCodes`, `questionnaires`, `realtime`, `reflinks` | in_progress | P1.1 | A: 54 ops, 330 tests (verification pending) | | |
 | P1.15 | 1 | Public API parity: `responseSla`, `savedReplies`, `schemas`, `sequences`, `shopify`, `smtpIntegrations`, `spreadsheets`, `tags`, `templateInstallations` | todo | P1.1 | A: 55 ops | | |
 | P1.16 | 1 | Public API parity: `templateMessages`, `templatePreviews`, `templates`, `threadsComments`, `tiktokChannels`, `tiktokComments`, `token`, `triggers`, `userPersistentMenus`, `webchats` | todo | P1.1 | A: 53 ops | | |
 | P1.17 | 1 | Public API parity: `webhooks`, `webshop`, `whatsappCalls`, `whatsappChannels`, `whatsappFlows`, `whatsappTemplates`, `woocommerce`, `workingHours`, `workspaceMembers`, `workspaceSettings` | todo | P1.1 | A: 55 ops | | |
@@ -49,6 +49,10 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P2.7 | 2 | Redis replacement: locks (`tokio::sync::Mutex` map), pub/sub (`broadcast`), cache/presence/rate limits (in-memory), bloom filter (unique-index table); map each `packages/redis` use | in_progress | P2.6 | C | | |
 | P2.8 | 2 | `rt` crate: axum WebSocket endpoint + `broadcast` fan-out, protocol from `packages/realtime-protocol` | todo | P2.7 | C | | |
 | P2.9 | 2 | `files` crate: `object_store` LocalFileSystem (S3 by config), presigned-style upload/download tokens | done | P2.1 | C:40 | See "Proof P2.9" | commit `conversion(P2.9)` |
+| P3.1 | 3 | Backend port, shared code → `crates/core`: `packages/utils`, `packages/encryption`, `packages/variables` (no JS interpolation), `packages/logger`, `packages/decision-config` (~13k lines, 80 C test files) | in_progress | P2.1 | C | | |
+| P3.2 | 3 | Backend port: `packages/flow-config` (~21k lines, 74 C test files) → `crates/core` | todo | P3.1 | C | | |
+| P3.3 | 3 | Backend port: auth (`packages/auth`, builder auth routes/middleware, workspace API tokens, scopes) + axum API skeleton with oRPC-compatible errors → `crates/api` | todo | P3.1, P2.5 | C + A (P1 auth matrices) | | |
+| P3.4+ | 3 | Business domains (`packages/business` 161k, `apps/builder` server 159k, `packages/database` repositories 85k), worker handlers (`apps/worker` 82k), integrations (~70k). Units are cut per domain at the start of each batch; each batch must turn the matching P1 parity folders green against the Rust stack | todo | P3.3 | C + A | | |
 
 ## Proof
 
