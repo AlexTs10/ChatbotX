@@ -9,12 +9,13 @@ pub const SHARED_SOCIAL_PATH_SUFFIXES: &[&str] =
 
 /// `isSharedSocialPath(pathname)`.
 pub fn is_shared_social_path(pathname: &str) -> bool {
-    let _ = pathname;
-    todo!("P3.5d")
+    SHARED_SOCIAL_PATH_SUFFIXES
+        .iter()
+        .any(|suffix| pathname.ends_with(suffix))
 }
 
 /// `isGenericOAuthPath(pathname, provider)`.
 pub fn is_generic_oauth_path(pathname: &str, provider: Option<&str>) -> bool {
-    let _ = (pathname, provider);
-    todo!("P3.5d")
+    pathname.ends_with(&format!("/callback/{GENERIC_OAUTH_PROVIDER_ID}"))
+        || (provider == Some(GENERIC_OAUTH_PROVIDER_ID) && is_shared_social_path(pathname))
 }

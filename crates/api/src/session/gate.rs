@@ -4,7 +4,8 @@
 
 use std::future::Future;
 
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, header};
+use chatbotx_core::utils::placeholder_email::is_placeholder_email;
 
 /// `INVITATION_COOKIE_NAME`.
 pub const INVITATION_COOKIE_NAME: &str = "chatbotx_invitation";
@@ -27,8 +28,21 @@ pub struct AuthApiError {
 impl AuthApiError {
     /// `new APIError(statusName, { message })`.
     pub fn new(status_name: &str, message: &str) -> AuthApiError {
-        let _ = (status_name, message);
-        todo!("P3.5d")
+        let status = match status_name {
+            "BAD_REQUEST" => 400,
+            "UNAUTHORIZED" => 401,
+            "FORBIDDEN" => 403,
+            "NOT_FOUND" => 404,
+            "UNPROCESSABLE_ENTITY" => 422,
+            "TOO_MANY_REQUESTS" => 429,
+            _ => 500,
+        };
+        AuthApiError {
+            status,
+            status_name: status_name.to_string(),
+            message: message.to_string(),
+            code: None,
+        }
     }
 }
 
@@ -56,14 +70,28 @@ pub struct NewUser {
 
 /// The value of cookie `name` in the `Cookie` header(s).
 pub fn request_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
-    let _ = (headers, name);
-    todo!("P3.5d")
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value.to_string())
 }
 
 /// `isSignUpAllowed(context)`: open sign-up, or a live invitation cookie.
 pub async fn is_sign_up_allowed<D: SignUpGateDeps>(deps: &D, headers: Option<&HeaderMap>) -> bool {
-    let _ = (deps, headers);
-    todo!("P3.5d")
+    if !deps.is_sign_up_disabled() {
+        return true;
+    }
+    let Some(code) = headers
+        .and_then(|headers| request_cookie(headers, INVITATION_COOKIE_NAME))
+        .filter(|code| !code.is_empty())
+    else {
+        return false;
+    };
+    deps.find_active_invitation(&code, &deps.tenant_id()).await
 }
 
 /// `databaseHooks.user.create.before`: anonymous users pass; others need
@@ -73,8 +101,10 @@ pub async fn user_create_before<D: SignUpGateDeps>(
     user: &NewUser,
     headers: Option<&HeaderMap>,
 ) -> Result<(), AuthApiError> {
-    let _ = (deps, user, headers);
-    todo!("P3.5d")
+    if user.is_anonymous == Some(true) || is_sign_up_allowed(deps, headers).await {
+        return Ok(());
+    }
+    Err(AuthApiError::new("FORBIDDEN", SIGNUP_DISABLED_CODE))
 }
 
 /// `hooks.before` (`guardEmailSignUp`) for `path` (relative to `/api/auth`):
@@ -86,6 +116,14 @@ pub async fn email_request_before<D: SignUpGateDeps>(
     body_email: Option<&str>,
     headers: &HeaderMap,
 ) -> Result<(), AuthApiError> {
-    let _ = (deps, path, body_email, headers);
-    todo!("P3.5d")
+    if path != "/sign-up/email" {
+        return Ok(());
+    }
+    if is_placeholder_email(body_email) {
+        return Err(AuthApiError::new("BAD_REQUEST", "Invalid email"));
+    }
+    if !is_sign_up_allowed(deps, Some(headers)).await {
+        return Err(AuthApiError::new("FORBIDDEN", "Sign-up is disabled"));
+    }
+    Ok(())
 }

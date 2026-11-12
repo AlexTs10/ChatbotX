@@ -15,9 +15,17 @@ chatbotx-core.workspace = true
 chatbotx-db.workspace = true
 # API rate limits (`assertApiNotRateLimited`) and the clock.
 chatbotx-kv.workspace = true
+# better-auth cookie signatures and the email verification JWT (HS256); same version as crates/rt.
+hmac = "0.13"
+# Session tokens and password salts (OS randomness).
+ring.workspace = true
+# better-auth password hashes (scrypt N=16384, r=16, p=1, 64 bytes).
+scrypt = { version = "0.12", default-features = false }
 serde_json.workspace = true
 # `hashToken` (SHA-256 hex of a workspace API token).
 sha2.workspace = true
+# SMTP client (mail) and blocking scrypt work.
+tokio = { workspace = true, features = ["io-util", "net", "rt"] }
 tracing.workspace = true
 
 [dev-dependencies]

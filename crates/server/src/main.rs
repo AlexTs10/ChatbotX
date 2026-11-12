@@ -6,6 +6,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use chatbotx_api::auth::LiveAuthDeps;
+use chatbotx_api::mail::{Mailer, NoMailer, SmtpMailer};
+use chatbotx_api::session::{AuthSettings, AuthState};
 use chatbotx_db::Db;
 use chatbotx_kv::{Clock, Kv, KvConfig, SystemClock};
 use chatbotx_rt::{KvPresence, NoRevokeRetry, Realtime, RtConfig};
@@ -107,6 +109,37 @@ fn start_realtime(shared: &Shared, rt_config: RtConfig) -> Realtime {
     )
 }
 
+fn env_or(name: &str, fallback: &str) -> String {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `AUTH_DISABLE_SIGNUP`.
+fn auth_settings() -> AuthSettings {
+    AuthSettings {
+        secret: env_or("BETTER_AUTH_SECRET", ""),
+        base_url: env_or("BETTER_AUTH_URL", "http://localhost:3000")
+            .trim_end_matches('/')
+            .to_string(),
+        sign_up_disabled: env_or("AUTH_DISABLE_SIGNUP", "false") == "true",
+    }
+}
+
+/// `SMTP_SERVER` + `SMTP_FROM` (plain SMTP), else mail is dropped.
+fn mailer() -> Arc<dyn Mailer> {
+    let from = env_or("SMTP_FROM", "no-reply@localhost");
+    match SmtpMailer::from_url(&env_or("SMTP_SERVER", ""), &from) {
+        Some(mailer) => Arc::new(mailer),
+        None => Arc::new(NoMailer),
+    }
+}
+
+fn now_ms() -> i64 {
+    SystemClock.now_ms()
+}
+
 /// `isCloud()`: `NEXT_PUBLIC_EDITION=cloud`.
 fn is_cloud() -> bool {
     std::env::var("NEXT_PUBLIC_EDITION").is_ok_and(|edition| edition == "cloud")
@@ -127,7 +160,15 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         clock: Arc::clone(&shared.clock),
         is_cloud: is_cloud(),
     });
-    let mut app = chatbotx_api::router().merge(chatbotx_api::routes::public_api_router(auth));
+    let sessions = Arc::new(AuthState {
+        db: Arc::clone(&shared.db),
+        settings: auth_settings(),
+        mailer: mailer(),
+        now_ms,
+    });
+    let mut app = chatbotx_api::router()
+        .merge(chatbotx_api::session::auth_router(sessions))
+        .merge(chatbotx_api::routes::public_api_router(auth));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
