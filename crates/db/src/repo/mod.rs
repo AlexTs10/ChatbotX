@@ -577,6 +577,13 @@ pub mod workspace_api_token;
 pub mod workspace_deletion_record;
 pub mod workspace_member;
 pub mod workspace_purge;
+pub mod leaderboard;
+pub mod leaderboard_history;
+pub mod leaderboard_participant;
+pub mod meta_catalog_item;
+pub mod poll;
+pub mod product;
+pub mod working_hours;
 
 pub use client::{
     CappedCount, count_query_capped, is_foreign_key_violation_error, is_statement_timeout_error,
