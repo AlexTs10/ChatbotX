@@ -50,9 +50,11 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P2.8 | 2 | `rt` crate: axum WebSocket endpoint + `broadcast` fan-out, protocol from `packages/realtime-protocol` | todo | P2.7 | C | | |
 | P2.9 | 2 | `files` crate: `object_store` LocalFileSystem (S3 by config), presigned-style upload/download tokens | done | P2.1 | C:40 | See "Proof P2.9" | commit `conversion(P2.9)` |
 | P3.1 | 3 | Backend port, shared code → `crates/core`: `packages/utils`, `packages/encryption`, `packages/variables` (no JS interpolation), `packages/logger`, `packages/decision-config` (~13k lines, 80 C test files) | in_progress | P2.1 | C | | |
-| P3.2 | 3 | Backend port: `packages/flow-config` (~21k lines, 74 C test files) → `crates/core` | todo | P3.1 | C | | |
-| P3.3 | 3 | Backend port: auth (`packages/auth`, builder auth routes/middleware, workspace API tokens, scopes) + axum API skeleton with oRPC-compatible errors → `crates/api` | todo | P3.1, P2.5 | C + A (P1 auth matrices) | | |
-| P3.4+ | 3 | Business domains (`packages/business` 161k, `apps/builder` server 159k, `packages/database` repositories 85k), worker handlers (`apps/worker` 82k), integrations (~70k). Units are cut per domain at the start of each batch; each batch must turn the matching P1 parity folders green against the Rust stack | todo | P3.3 | C + A | | |
+| P3.2 | 3 | Backend port, database access part A → `crates/db` module `repo`: `packages/database/src` shared (`client`, `errors`, `keys`, `utils`, `statement-timeout`, `partials`, `queries`) + repositories `ads-conversion-event` … `integration-whatsapp` (alphabetical first half); sharding/Timescale mechanics n/a | in_progress | P2.5, P3.1 | C | | |
+| P3.3 | 3 | Backend port, database access part B → `crates/db` `repo`: repositories `invitation` … end (second half) | todo | P3.2 | C | | |
+| P3.4 | 3 | Backend port: `packages/flow-config` (~21k lines, 74 C test files) → `crates/core` | todo | P3.1 | C | | |
+| P3.5 | 3 | Backend port: auth (`packages/auth`, builder auth routes/middleware, workspace API tokens, scopes) + axum API skeleton with oRPC-compatible errors → `crates/api`; P1 auth matrices green against Rust | todo | P3.1, P3.2 | C + A | | |
+| P3.6+ | 3 | Business domains (`packages/business` 161k, `apps/builder` server 159k), worker handlers (`apps/worker` 82k), integrations (~70k). Units are cut per domain at the start of each batch; each batch must turn the matching P1 parity folders green against the Rust stack | todo | P3.5 | C + A | | |
 
 ## Proof
 
