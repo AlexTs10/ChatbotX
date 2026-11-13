@@ -7,6 +7,9 @@ publish.workspace = true
 
 # Business services (`packages/business/src/<domain>`), one module per domain (P3.6+).
 [dependencies]
+# Local day and time of an instant in the workspace time zone (`Intl.DateTimeFormat`).
+chrono = { workspace = true, features = ["std"] }
+chrono-tz = { workspace = true }
 chatbotx-core = { workspace = true }
 chatbotx-db = { workspace = true }
 chatbotx-jobs = { workspace = true }
@@ -18,6 +21,8 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+chatbotx-core = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]

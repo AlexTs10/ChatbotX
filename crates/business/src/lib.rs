@@ -3,6 +3,7 @@
 //! (`crates/api`) maps their results and [`errors::BusinessError`]s to the
 //! original JSON shapes.
 
+pub mod ecommerce_open_hours;
 pub mod errors;
 pub mod inbox;
 pub mod place_near_me;

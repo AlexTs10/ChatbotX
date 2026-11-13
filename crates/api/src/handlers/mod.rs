@@ -3,6 +3,7 @@
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
 pub mod input;
+pub mod open_hours;
 pub mod places;
 pub mod polls;
 
@@ -148,6 +149,8 @@ pub fn internal_error(cause: &str) -> OrpcError {
 pub async fn dispatch(state: &ApiState, route_id: &str, call: Call<'_>) -> Option<Response> {
     let reply = if places::ROUTES.contains(&route_id) {
         places::handle(state, route_id, call).await
+    } else if open_hours::ROUTES.contains(&route_id) {
+        open_hours::handle(state, route_id, call).await
     } else if polls::ROUTES.contains(&route_id) {
         polls::handle(state, route_id, call).await
     } else {

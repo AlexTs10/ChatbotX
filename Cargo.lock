@@ -262,6 +262,8 @@ dependencies = [
  "chatbotx-jobs",
  "chatbotx-kv",
  "chatbotx-rt",
+ "chrono",
+ "chrono-tz",
  "serde_json",
  "tokio",
  "tracing",

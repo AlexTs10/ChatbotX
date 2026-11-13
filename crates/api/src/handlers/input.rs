@@ -177,6 +177,11 @@ impl Input {
         }));
     }
 
+    /// Adds issues produced elsewhere (already zod-shaped JSON).
+    pub fn extend_issues(&mut self, issues: Vec<Value>) {
+        self.issues.extend(issues);
+    }
+
     /// Whether any issue was recorded.
     pub fn failed(&self) -> bool {
         !self.issues.is_empty()
