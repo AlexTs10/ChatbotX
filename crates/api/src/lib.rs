@@ -6,6 +6,7 @@ pub mod iso8601;
 pub mod mail;
 pub mod orpc;
 pub mod routes;
+pub mod rpc;
 pub mod session;
 
 use axum::Router;
