@@ -8,7 +8,7 @@ mod common;
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::ecommerce_settings::{self, defaults, parse_patch};
-use common::{WS, flow, open_hours, scalar_text, setup, two_workspaces};
+use common::{OTHER_WS, WS, flow, open_hours, scalar_text, setup, two_workspaces};
 use serde_json::{Value, json};
 
 async fn update(db: &chatbotx_db::Db, patch: Value) -> Result<Value, BusinessError> {
@@ -110,13 +110,17 @@ async fn ecommerce_settings_service_needs_a_link_for_the_external_link_checkout(
 #[tokio::test]
 async fn ecommerce_settings_service_needs_a_flow_of_this_workspace_for_the_flow_checkout() {
     let db = two_workspaces().await;
+    // Orchestrator fix (P3.6-D2): the real reference guard runs first and gives 404 "Flow not
+    // found" for a flow of another workspace (parity p1-08 02-ecommerce-settings.test.ts:180-188).
+    setup(&db, |tx| flow(tx, 99, OTHER_WS)).await;
     let error = update(
         &db,
         json!({ "checkout": { "checkoutMode": "flow", "checkoutFlowId": "99" } }),
     )
     .await
     .expect_err("refused");
-    assert_eq!(field_of(&error).as_deref(), Some("checkoutFlowId"));
+    assert_eq!(error.code(), Some("notFound"));
+    assert_eq!(error.message(), "Flow not found");
 }
 
 #[tokio::test]
@@ -136,13 +140,17 @@ async fn ecommerce_settings_service_needs_a_flow_for_the_flow_order_confirmation
 #[tokio::test]
 async fn ecommerce_settings_service_needs_a_flow_of_this_workspace_for_the_order_confirmation() {
     let db = two_workspaces().await;
+    // Orchestrator fix (P3.6-D2): the real reference guard runs first and gives 404 "Flow not
+    // found" for a flow of another workspace (parity p1-08 02-ecommerce-settings.test.ts:180-188).
+    setup(&db, |tx| flow(tx, 99, OTHER_WS)).await;
     let error = update(
         &db,
         json!({ "checkout": { "orderConfirmationMode": "flow", "orderConfirmationFlowId": "99" } }),
     )
     .await
     .expect_err("refused");
-    assert_eq!(field_of(&error).as_deref(), Some("orderConfirmationFlowId"));
+    assert_eq!(error.code(), Some("notFound"));
+    assert_eq!(error.message(), "Flow not found");
 }
 
 #[tokio::test]
