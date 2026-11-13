@@ -29,6 +29,45 @@ pub struct LinkInbox {
     pub instagram_username: Option<String>,
     /// `integrationWhatsapp.displayPhoneNumber`.
     pub whatsapp_display_phone_number: Option<String>,
+    /// `integrationThreads.username`.
+    pub threads_username: Option<String>,
+}
+
+/// `NON_LINKABLE_CHANNELS`.
+pub const NON_LINKABLE_CHANNELS: &[&str] = &["smtp", "tiktok"];
+/// `PROFILE_LINK_CHANNELS`: no chat deep link, the public profile instead.
+pub const PROFILE_LINK_CHANNELS: &[&str] = &["threads", "tiktok"];
+
+/// `isLinkableChannel`.
+pub fn is_linkable_channel(channel: &str) -> bool {
+    !NON_LINKABLE_CHANNELS.contains(&channel)
+}
+
+/// `isProfileLinkChannel`.
+pub fn is_profile_link_channel(channel: &str) -> bool {
+    PROFILE_LINK_CHANNELS.contains(&channel)
+}
+
+/// `buildInboxProfileLink`: `https://www.threads.com/@user` /
+/// `https://www.tiktok.com/@handle`; `None` without a handle.
+pub fn build_inbox_profile_link(inbox: &LinkInbox) -> Option<String> {
+    let (host, handle) = match inbox.channel.as_str() {
+        "threads" => ("www.threads.com", inbox.threads_username.as_deref()),
+        "tiktok" => ("www.tiktok.com", Some(inbox.source_id.as_str())),
+        _ => return None,
+    };
+    let handle = handle.filter(|h| !h.is_empty())?;
+    let encoded: String = url::form_urlencoded::byte_serialize(handle.as_bytes()).collect();
+    // `encodeURIComponent` keeps `!'()*` and encodes a space as `%20`.
+    let encoded = encoded
+        .replace('+', "%20")
+        .replace("%21", "!")
+        .replace("%27", "'")
+        .replace("%28", "(")
+        .replace("%29", ")")
+        .replace("%2A", "*")
+        .replace("%7E", "~");
+    Some(format!("https://{host}/@{encoded}"))
 }
 
 /// `buildInboxLink`: the chat link of an inbox, with the ref when given.
@@ -113,10 +152,11 @@ pub fn get_inbox_links(
 pub fn list_connected_link_inboxes(conn: &Connection, workspace_id: i64) -> Result<Vec<LinkInbox>> {
     let mut stmt = conn
         .prepare_cached(
-            "SELECT i.\"id\", i.\"workspaceId\", i.\"name\", i.\"channel\", i.\"sourceId\", ig.\"username\", wa.\"displayPhoneNumber\" \
+            "SELECT i.\"id\", i.\"workspaceId\", i.\"name\", i.\"channel\", i.\"sourceId\", ig.\"username\", wa.\"displayPhoneNumber\", th.\"username\" \
              FROM \"Inbox\" i \
              LEFT JOIN \"IntegrationInstagram\" ig ON ig.\"inboxId\" = i.\"id\" \
              LEFT JOIN \"IntegrationWhatsapp\" wa ON wa.\"inboxId\" = i.\"id\" \
+             LEFT JOIN \"IntegrationThreads\" th ON th.\"inboxId\" = i.\"id\" \
              WHERE i.\"workspaceId\" = ?1 AND i.\"status\" = 'connected' ORDER BY i.\"id\"",
         )
         .map_err(chatbotx_db::repo::Error::from)?;
@@ -130,6 +170,7 @@ pub fn list_connected_link_inboxes(conn: &Connection, workspace_id: i64) -> Resu
                 source_id: r.get(4)?,
                 instagram_username: r.get(5)?,
                 whatsapp_display_phone_number: r.get(6)?,
+                threads_username: r.get(7)?,
             })
         })
         .map_err(chatbotx_db::repo::Error::from)?
