@@ -845,6 +845,388 @@ fn more(conn: &chatbotx_db::rusqlite::Connection) -> Result<()> {
     Ok(())
 }
 
+fn templates(conn: &chatbotx_db::rusqlite::Connection) -> Result<()> {
+    use chatbotx_db::repo::*;
+    let t = |s: &str| Value::Text(s.to_owned());
+    // template (snapshot, preview, repository)
+    let lookup = template::ManifestLookup {
+        workspace_id: WS,
+        ids: Some(vec![1]),
+        names: Some(vec!["a".into()]),
+        limit: Some(5),
+    };
+    template::snapshot_find_tags(conn, &lookup)?;
+    template::snapshot_find_custom_fields(conn, &lookup)?;
+    template::snapshot_find_tags(
+        conn,
+        &template::ManifestLookup {
+            workspace_id: WS,
+            ..Default::default()
+        },
+    )?;
+    template::preview_find_tags_by_names(conn, WS, &["a".to_owned()])?;
+    template::preview_list_place_categories(conn, WS)?;
+    template::preview_list_custom_fields(conn, WS)?;
+    template::preview_list_bot_fields(conn, WS)?;
+    template::preview_find_folders(conn, WS, &["tag".to_owned()], &["a".to_owned()])?;
+    let snapshot = template::TemplateVersionSnapshot {
+        payload: Json(json!({"manifests": {"inboxes": [{"id": "1"}]}})),
+        payload_hash: "h1".into(),
+        format_version: 1,
+        changes: None,
+    };
+    let values = vec![
+        ("tenantId", Value::Integer(1)),
+        ("workspaceId", Value::Integer(WS)),
+        ("name", t("T")),
+        ("selection", t("{}")),
+        ("payload", t(r#"{"manifests":{"inboxes":[{"id":"1"}]}}"#)),
+        ("categoryCounts", t(r#"{"flows":1}"#)),
+        ("formatVersion", Value::Integer(1)),
+        ("shareToken", t("share-1")),
+        ("defaultPermissions", t("{}")),
+    ];
+    let tpl = template::create_with_first_version(conn, &values, 77001, &snapshot)?;
+    let id = tpl.id;
+    template::find_live(conn, id, WS)?.expect("live");
+    template::find_live_detail(conn, id, WS)?;
+    template::find_live_by_id(conn, id)?;
+    template::find_live_by_share_token(conn, "share-1")?;
+    template::find_install_source(conn, id)?;
+    template::find_live_payload(conn, id)?;
+    template::find_category_counts(conn, id)?;
+    template::find_sync_source(conn, id)?;
+    template::find_live_tenant(conn, id, WS)?;
+    template::find_by_id_for_tenant(conn, id, 1)?;
+    template::find_for_staging_by_share_token(conn, "share-1")?;
+    assert_eq!(template::find_live_version(conn, id)?, Some(1));
+    template::rotate_share_token(conn, id, WS, "share-2")?;
+    template::update_share_settings(conn, id, WS, true, Some(Some(NOW)))?;
+    template::update_share_settings(conn, id, WS, false, None)?;
+    let saved = template::save_with_version(
+        conn,
+        &template::SaveWithVersion {
+            id,
+            workspace_id: WS,
+            version_id: 77002,
+            set: vec![("name", t("T2"))],
+            snapshot: template::TemplateVersionSnapshot {
+                payload_hash: "h2".into(),
+                ..snapshot.clone()
+            },
+            legacy_payload_hash: None,
+            based_on_version: 1,
+        },
+    )?
+    .expect("saved");
+    assert_eq!(saved.version, 2);
+    let inbox = template::find_inbox_manifest_by_share_token(conn, "share-2")?.expect("manifest");
+    assert_eq!(inbox.inboxes, Some(json!([{"id": "1"}])));
+    // template-installation
+    let inst = template_installation::create(
+        conn,
+        &vec![
+            ("workspaceId", Value::Integer(WS)),
+            ("templateId", Value::Integer(id)),
+            ("sourceTemplateId", Value::Integer(id)),
+            ("templateName", t("T")),
+            ("sourceWorkspaceId", Value::Integer(WS)),
+            ("formatVersion", Value::Integer(1)),
+            ("permissions", t("{}")),
+            ("publisherRef", t("pub-1")),
+        ],
+    )?;
+    let iid = inst.id;
+    template_installation::lock_install_request(conn, WS, id)?;
+    template_installation::find_publisher_ref(conn, WS, id)?;
+    template_installation::list_installed_by_share_token(conn, "share-2", &[WS])?;
+    template_installation::find_publisher_uninstall_grant(conn, WS, id)?;
+    template_installation::list_pending_ids(conn, WS)?;
+    template_installation::find_copy_tenants(conn, id, WS)?;
+    template_installation::find_by_id_and_workspace(conn, iid, WS)?;
+    template_installation::list_by_ids_and_workspace(conn, &[iid], WS)?;
+    template_installation::find_latest_by_source_template(conn, WS, id)?;
+    template_installation::find_active_by_source_template(conn, WS, id)?;
+    template_installation::find_installed_by_source_template(conn, WS, id)?;
+    let claimed = template_installation::claim(conn, iid, WS, "tok", NOW)?.expect("claim");
+    assert_eq!(claimed.status, "installing");
+    template_installation::release(conn, iid, "tok")?;
+    template_installation::claim(conn, iid, WS, "tok", NOW)?;
+    let effect = template_installation::PublishEffect {
+        flow_id: 1,
+        version_id: 2,
+    };
+    template_installation::add_pending_publish_effects(conn, iid, std::slice::from_ref(&effect))?;
+    assert_eq!(
+        template_installation::find_pending_publish_effects(conn, iid)?,
+        vec![effect.clone()]
+    );
+    template_installation::defer_pending_publish_effects(conn, iid)?;
+    template_installation::list_with_pending_publish_effects(conn, NOW, 5)?;
+    template_installation::clear_pending_publish_effects(conn, iid, &[effect])?;
+    assert!(template_installation::complete(
+        conn,
+        iid,
+        "tok",
+        &template_installation::Completion {
+            status: "completed".into(),
+            warnings: Some(json!([{"entityKind": "quota"}])),
+            warning_count: Some(1),
+            resource_count: Some(0),
+            install_folder_id: Some(None),
+            pending_publish_effects: Some(None),
+        },
+    )?);
+    template_installation::fail(conn, iid, "tok", "e", "m")?;
+    template_installation::fail_unclaimed(conn, 0, "e", "m", NOW)?;
+    template_installation::list_stale(conn, NOW, NOW, 0, 5)?;
+    template_installation::fail_abandoned(conn, 0, NOW, NOW, "e", "m")?;
+    template_installation::record_install_event(conn, iid)?;
+    template_installation::list_active_by_publisher_ref(conn, id, "pub-1")?;
+    template_installation::find_latest_by_publisher_ref(conn, id, "pub-1")?;
+    template_installation::set_publisher_uninstall_grant(conn, WS, id, true)?;
+    let page = template_installation::list_page(
+        conn,
+        &template_installation::ListPage {
+            workspace_id: WS,
+            status: Some("completed".into()),
+            active_only: false,
+            before_id: Some(i64::MAX),
+            limit: 5,
+            visible_categories: Some(vec!["flows".into()]),
+        },
+    )?;
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].installer_warning_count, 1);
+    template_installation::list_page(
+        conn,
+        &template_installation::ListPage {
+            workspace_id: WS,
+            active_only: true,
+            limit: 5,
+            visible_categories: Some(vec![]),
+            ..Default::default()
+        },
+    )?;
+    template_installation::list_with_staged_objects_to_clean(conn, NOW, NOW, 5)?;
+    template_installation::claim_staged_objects_cleanup(conn, iid, NOW, NOW)?;
+    template_installation::advance_staged_cleaned_generation(conn, iid, 1, 1)?;
+    template_installation::release_staged_objects_cleanup(conn, iid, NOW)?;
+    // template list / analytics (after the install exists)
+    let listed = template::list_with_install_counts(conn, WS)?;
+    assert_eq!(listed[0].install_count, 2);
+    let first = template::list_with_install_counts_page(conn, WS, 1, None)?;
+    template::list_with_install_counts_page(
+        conn,
+        WS,
+        1,
+        Some((
+            first
+                .last_key
+                .as_deref()
+                .unwrap_or("2026-01-01T00:00:00.000Z"),
+            id,
+        )),
+    )?;
+    template::install_analytics(conn, id)?;
+    let publishers = template::list_publisher_rows(
+        conn,
+        &template::ListPublisherRows {
+            template_id: id,
+            search: Some("Work_%".into()),
+            after: Some((i64::MAX, "z".into())),
+            limit: 5,
+        },
+    )?;
+    assert!(publishers.is_empty());
+    let publishers = template::list_publisher_rows(
+        conn,
+        &template::ListPublisherRows {
+            template_id: id,
+            limit: 5,
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(publishers.len(), 1);
+    // template-installation-sync (rest)
+    let new_sync = template_installation_sync::NewTemplateSync {
+        id: 78001,
+        workspace_id: WS,
+        installation_id: iid,
+        trigger: "manual".into(),
+        requested_version: 2,
+        ..Default::default()
+    };
+    template_installation_sync::create_if_absent(conn, &new_sync)?.expect("sync");
+    template_installation_sync::create_many_if_absent(conn, &[new_sync])?;
+    template_installation_sync::find_by_id(conn, 78001, WS)?;
+    template_installation_sync::adopt_idempotency_key(conn, 78001, "k", None)?;
+    template_installation_sync::find_by_idempotency_key(conn, iid, "k")?;
+    template_installation_sync::find_active_by_installation(conn, iid)?;
+    template_installation_sync::list_by_installation(conn, iid, WS, 5)?;
+    template_installation_sync::claim(conn, 78001, WS, "s", NOW)?.expect("sync claim");
+    template_installation_sync::has_running_sync(conn, iid)?;
+    template_installation_sync::release(conn, 78001, "s")?;
+    template_installation_sync::claim(conn, 78001, WS, "s", NOW)?;
+    template_installation_sync::finish(
+        conn,
+        78001,
+        "s",
+        &template_installation_sync::TemplateSyncOutcome {
+            status: "completed".into(),
+            ..Default::default()
+        },
+    )?;
+    template_installation_sync::find_status_finished_by_claim(conn, 78001, "s")?;
+    template_installation_sync::close_unclaimed(conn, 78001, "skipped", "e", Some(NOW))?;
+    template_installation_sync::cancel_pending_syncs(conn, iid)?;
+    template_installation_sync::list_unfinished(conn, NOW, NOW, 0, 5)?;
+    let codes = vec!["permanent".to_owned()];
+    template_installation_sync::list_auto_update_candidates(conn, id, 3, Some(0), 5, &codes)?;
+    template_installation_sync::list_templates_behind(conn, 5, &codes)?;
+    template_installation_sync::list_templates_behind(conn, 5, &[])?;
+    template_installation_sync::complete_installation_sync(conn, iid, 2)?;
+    template_installation_sync::fail_abandoned(conn, 0, "e")?;
+    template_installation_sync::list_installed_categories_by_pair(conn, WS, id)?;
+    // template-uninstall
+    let op =
+        template_uninstall::create_operation(conn, WS, Some(id), "pub-1", "installer", Some(USER))?;
+    template_uninstall::request(conn, iid, op.id, "installer", Some(USER))?.expect("request");
+    template_uninstall::operation_id_of(conn, iid)?;
+    template_uninstall::operation_has_active_members(conn, op.id)?;
+    template_uninstall::claim(conn, iid, WS, "u")?.expect("uninstall claim");
+    template_uninstall::has_live_uninstall_touching_workspace(conn, WS)?;
+    template_uninstall::renew_lease(conn, iid, "u")?;
+    template_uninstall::release(conn, iid, "u")?;
+    template_uninstall::claim(conn, iid, WS, "u")?;
+    template_uninstall::list_stale(conn, 5)?;
+    template_uninstall::list_abandoned(conn, NOW, 5)?;
+    template_uninstall::is_in_progress(conn, iid)?;
+    let counts = template_uninstall::count_outcomes(conn, iid)?;
+    assert!(template_uninstall::finalize(
+        conn,
+        iid,
+        "u",
+        "partial",
+        &counts,
+        Some("e")
+    )?);
+    template_uninstall::mark_cancelled(conn, iid)?;
+    template_uninstall::mark_skipped(conn, iid, "e")?;
+    template_uninstall::skip_pending(conn, iid, "e")?;
+    template_uninstall::mark_abandoned(conn, iid, NOW, &counts, "e")?;
+    template_uninstall::list_pending_publisher_uninstalls(conn, WS, id)?;
+    template_uninstall::finalize_operation_if_complete(conn, op.id)?;
+    template_uninstall::list_operations_to_finalize(conn, 5)?;
+    template_uninstall::list_undelivered_notices(conn, 5)?;
+    template_uninstall::mark_notice_delivered(conn, op.id)?;
+    template_uninstall::find_operation(conn, op.id, WS)?;
+    conn.execute(
+        "INSERT INTO \"TemplateInstalledResource\" (\"id\", \"installationId\", \"workspaceId\", \"category\", \"resourceKind\", \"resourceId\", \"sourceResourceId\", \"uninstallOutcome\") VALUES (78101, ?1, ?2, 'tags', 'folder', 1, '__installRoot:1', 'failed')",
+        (iid, WS),
+    )?;
+    template_uninstall::set_effects(conn, &[(78101, json!([{"kind": "x"}]))])?;
+    template_uninstall::add_installation_warning(conn, iid, &json!({"code": "w"}))?;
+    template_uninstall::list_pending_effects(conn, iid)?;
+    template_uninstall::list_installations_with_pending_effects(conn, 5)?;
+    template_uninstall::bump_effect_attempts(conn, &[78101])?;
+    template_uninstall::clear_effects(conn, &[78101])?;
+    template_uninstall::list_tombstones(conn, iid, 5)?;
+    template_uninstall::reset_failed_to_deleting(conn, iid)?;
+    template_uninstall::set_outcomes(conn, &[78101], "deleting", Some(None), true)?;
+    template_uninstall::clear_frozen_from(conn, &[78101])?;
+    template_uninstall::set_frozen_from(conn, &[(78101, json!({"a": true}))])?;
+    template_uninstall::mark_delete_committed(conn, &[78101])?;
+    template_uninstall::untombstone(conn, iid)?;
+    template_uninstall::list_doomed(conn, iid)?;
+    template_uninstall::find_install_roots(conn, iid)?;
+    template_uninstall::delete_folder_if_empty(conn, WS, 999_999)?;
+    conn.execute(
+        "INSERT INTO \"Folder\" (\"id\", \"workspaceId\", \"name\", \"folderType\", \"paths\") VALUES (78201, ?1, 'F', 'tag', '[]')",
+        [WS],
+    )?;
+    assert_eq!(
+        template_uninstall::delete_folder_if_empty(conn, WS, 78201)?,
+        "deleted"
+    );
+    let slots = template_uninstall::ReferenceSlots {
+        scalars: vec!["flowId".into()],
+        arrays: vec!["tagIds".into()],
+        prefixes: vec!["flow".into()],
+        condition_types: vec!["tag".into()],
+    };
+    let edges = template_uninstall::find_inbound_edges(
+        conn,
+        WS,
+        &[id.to_string()],
+        &[
+            template_uninstall::ReferenceColumnProbe {
+                holder_kind: Some("installation".into()),
+                table: "TemplateInstallation".into(),
+                column: "templateId".into(),
+                holder_id_column: "id".into(),
+                workspace_column: Some("workspaceId".into()),
+                text_column: false,
+            },
+            template_uninstall::ReferenceColumnProbe {
+                table: "Condition".into(),
+                column: "sourceId".into(),
+                holder_id_column: "id".into(),
+                ..Default::default()
+            },
+        ],
+        &[
+            template_uninstall::ReferenceContainerProbe {
+                holder_kind: Some("template".into()),
+                table: "Template".into(),
+                holder_id_column: "id".into(),
+                json_columns: vec!["payload".into(), "selection".into()],
+                workspace_column: Some("workspaceId".into()),
+                ..Default::default()
+            },
+            template_uninstall::ReferenceContainerProbe {
+                table: "Condition".into(),
+                holder_id_column: "id".into(),
+                json_columns: vec!["value".into()],
+                condition_type_column: Some("type".into()),
+                ..Default::default()
+            },
+            template_uninstall::ReferenceContainerProbe {
+                holder_kind: Some("template".into()),
+                table: "Template".into(),
+                holder_id_column: "id".into(),
+                workspace_column: Some("workspaceId".into()),
+                contact_filter_column: Some("selection".into()),
+                ..Default::default()
+            },
+        ],
+        &slots,
+    )?;
+    assert_eq!(edges.len(), 1, "{edges:?}");
+    assert!(
+        template_uninstall::find_inbound_edges(conn, WS, &["x".into()], &[], &[], &slots).is_err()
+    );
+    template::soft_delete(conn, id, WS)?;
+    template_installation::mark_source_deleted(conn, id)?;
+    template_installation::reset_failed(
+        conn,
+        &template_installation::ResetFailed {
+            id: iid,
+            workspace_id: WS,
+            installed_by: Some(USER),
+            installed_by_kind: "user".into(),
+            source_version: Some(1),
+        },
+    )?;
+    template_installation::mark_uninstalled(
+        conn,
+        iid,
+        "installer",
+        &template_uninstall::empty_counts(),
+    )?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn every_untested_p3_3_function_runs_against_the_schema() {
     let db = fresh_db().await;
@@ -854,4 +1236,7 @@ async fn every_untested_p3_3_function_runs_against_the_schema() {
     let db = fresh_db().await;
     seed(&db).await;
     repo_common::ok(repo::write(&db, |tx| more(tx)).await);
+    let db = fresh_db().await;
+    seed(&db).await;
+    repo_common::ok(repo::write(&db, |tx| templates(tx)).await);
 }
