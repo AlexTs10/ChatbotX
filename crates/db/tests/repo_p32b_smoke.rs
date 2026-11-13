@@ -190,3 +190,50 @@ async fn contact_identity_lookup_and_enrich_if_null() {
     .await;
     assert_eq!(row.as_deref(), Some("+100|b@example.test"));
 }
+
+#[tokio::test]
+async fn contact_custom_field_definition_readers() {
+    use chatbotx_db::repo::contact_custom_field as ccf;
+    let (db, s) = contact_db().await;
+    let selected = repo::read(&db, move |c| {
+        ccf::list_selected_definition_values_by_contact(c, s.workspace_id, s.contact_id, &[70, 99])
+    })
+    .await
+    .expect("selected");
+    assert_eq!(selected.len(), 1);
+    assert_eq!(
+        (selected[0].name.as_str(), selected[0].value.as_str()),
+        ("cf", "x")
+    );
+    let by_name = repo::read(&db, move |c| {
+        ccf::list_values_by_field_keys(c, s.workspace_id, s.contact_id, &[], &["cf".to_owned()])
+    })
+    .await
+    .expect("by keys");
+    assert_eq!(
+        by_name
+            .iter()
+            .map(|v| v.custom_field_id)
+            .collect::<Vec<_>>(),
+        vec![70]
+    );
+    let none = repo::read(&db, move |c| {
+        ccf::list_values_by_field_keys(c, s.workspace_id + 1, s.contact_id, &[70], &[])
+    })
+    .await
+    .expect("other workspace");
+    assert!(none.is_empty());
+    let all = repo::read(&db, move |c| {
+        ccf::list_with_definition_by_contact(c, s.workspace_id, s.contact_id)
+    })
+    .await
+    .expect("list");
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].custom_field.r#type, "shortText");
+    let one = repo::read(&db, move |c| {
+        ccf::find_with_definition(c, s.workspace_id, s.contact_id, 70)
+    })
+    .await
+    .expect("find");
+    assert_eq!(one.map(|v| v.value.id), Some(71));
+}
