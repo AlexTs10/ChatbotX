@@ -11,6 +11,11 @@ pub fn zoned_date_key(column_sql: &str, timezone: &str) -> Sql {
     Sql::new(f.sql, f.params.into_iter().map(Value::Text).collect())
 }
 
+/// `occurrenceBucketGranularities` (`partials/broadcast.ts`): the supported bucket units.
+pub fn occurrence_bucket_granularities() -> [&'static str; 3] {
+    todo!("P3.2b")
+}
+
 /// Bucket granularity of `zonedBucketKey` (`OccurrenceBucketGranularity`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Granularity {

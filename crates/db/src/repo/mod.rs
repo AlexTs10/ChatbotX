@@ -536,6 +536,7 @@ pub mod contact_inbox;
 pub mod conversation_ai_context;
 pub mod external_store;
 pub mod inbox;
+pub mod inbox_team_member;
 
 // P3.3 (second half of the repositories).
 pub mod auth_account;
