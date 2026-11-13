@@ -265,6 +265,7 @@ dependencies = [
  "chatbotx-rt",
  "chrono",
  "chrono-tz",
+ "phonenumber",
  "reqwest",
  "ring",
  "serde_json",
@@ -279,6 +280,7 @@ name = "chatbotx-core"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "chatbotx-db",
  "chatbotx-kv",
  "chrono",
  "chrono-tz",

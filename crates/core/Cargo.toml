@@ -31,6 +31,8 @@ url = { workspace = true }
 webp = { workspace = true }
 
 [dev-dependencies]
+# The db partials that the flow-config parity tests compare with (P3.2b H6c).
+chatbotx-db = { workspace = true }
 # The cache inspection helpers (`contains_key`, `keys_for_tag`) for the
 # `withCache` call assertions.
 chatbotx-kv = { workspace = true, features = ["test-util"] }

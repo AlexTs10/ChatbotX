@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::google_ads::GoogleAdsUploadMethod;
 use crate::repo::{Error, Result};
 
 const LEGACY_AAD_SUFFIX: &str = "false";
@@ -203,4 +204,199 @@ pub fn parse_messenger_credential_update(
     }
     trim_opt(&mut v.marketing_messages_config_id);
     Ok(v)
+}
+
+/// `googleCredentialSchema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleCredential {
+    pub client_id: String,
+    pub client_secret: String,
+    pub verify_token: String,
+}
+
+/// `googleCredentialPublicSchema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleCredentialPublic {
+    pub client_id: String,
+}
+
+/// `googleCredentialUpdateSchema` (trimmed, all required).
+pub type GoogleCredentialUpdate = GoogleCredential;
+
+/// `googleAdsCredentialSchema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleAdsCredential {
+    pub client_id: String,
+    pub client_secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub developer_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_method: Option<GoogleAdsUploadMethod>,
+}
+
+/// `googleAdsCredentialPublicSchema` (the developer token is only `hasDeveloperToken`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleAdsCredentialPublic {
+    pub client_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_method: Option<GoogleAdsUploadMethod>,
+    pub has_developer_token: bool,
+}
+
+/// `googleAdsCredentialUpdateSchema` (trimmed; the secrets are optional).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleAdsCredentialUpdate {
+    pub client_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub developer_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_method: Option<GoogleAdsUploadMethod>,
+}
+
+/// `instagramCredentialUpdateSchema` / `zaloCredentialUpdateSchema` /
+/// `threadsCredentialUpdateSchema` (trimmed, all required).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppCredentialUpdate {
+    pub client_id: String,
+    pub version: String,
+    pub verify_token: String,
+    pub client_secret: String,
+}
+
+/// `giphyCredentialUpdateSchema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GiphyCredentialUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+/// `stripeCredentialUpdateSchema` (`connectClientId` matches `^ca_[A-Za-z0-9]+$`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StripeCredentialUpdate {
+    pub publishable_key: String,
+    pub verify_token: String,
+    pub secret_key: String,
+    pub connect_client_id: String,
+}
+
+/// `smtpCredentialUpdateSchema` (`port` is `z.coerce.number().int().positive()`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmtpCredentialUpdate {
+    pub host: String,
+    pub port: i64,
+    pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    pub from_email: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_name: Option<String>,
+}
+
+/// `tiktokChannelFeaturesSchema`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TiktokChannelFeatures {
+    pub messaging: bool,
+    pub comments: bool,
+}
+
+/// `TIKTOK_DEFAULT_CHANNEL_FEATURES`.
+pub const TIKTOK_DEFAULT_CHANNEL_FEATURES: TiktokChannelFeatures = TiktokChannelFeatures {
+    messaging: true,
+    comments: true,
+};
+
+/// `tiktokCredentialUpdateSchema` (`features` defaults; one feature must be on).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TiktokCredentialUpdate {
+    pub client_id: String,
+    pub client_secret: String,
+    pub features: TiktokChannelFeatures,
+}
+
+/// `googleCredentialSchema.parse`.
+pub fn parse_google_credential(value: &serde_json::Value) -> Result<GoogleCredential> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `googleCredentialPublicSchema.parse`.
+pub fn parse_google_credential_public(value: &serde_json::Value) -> Result<GoogleCredentialPublic> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `googleCredentialUpdateSchema.parse`.
+pub fn parse_google_credential_update(value: &serde_json::Value) -> Result<GoogleCredentialUpdate> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `googleAdsCredentialSchema.parse`.
+pub fn parse_google_ads_credential(value: &serde_json::Value) -> Result<GoogleAdsCredential> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `googleAdsCredentialPublicSchema.parse`.
+pub fn parse_google_ads_credential_public(
+    value: &serde_json::Value,
+) -> Result<GoogleAdsCredentialPublic> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `googleAdsCredentialUpdateSchema.parse`.
+pub fn parse_google_ads_credential_update(
+    value: &serde_json::Value,
+) -> Result<GoogleAdsCredentialUpdate> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `instagramCredentialUpdateSchema.parse`.
+pub fn parse_instagram_credential_update(value: &serde_json::Value) -> Result<AppCredentialUpdate> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `zaloCredentialUpdateSchema.parse`.
+pub fn parse_zalo_credential_update(value: &serde_json::Value) -> Result<AppCredentialUpdate> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `giphyCredentialUpdateSchema.parse`.
+pub fn parse_giphy_credential_update(value: &serde_json::Value) -> Result<GiphyCredentialUpdate> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `stripeCredentialUpdateSchema.parse`.
+pub fn parse_stripe_credential_update(value: &serde_json::Value) -> Result<StripeCredentialUpdate> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `smtpCredentialUpdateSchema.parse`.
+pub fn parse_smtp_credential_update(value: &serde_json::Value) -> Result<SmtpCredentialUpdate> {
+    let _ = value;
+    todo!("P3.2b")
+}
+
+/// `tiktokCredentialUpdateSchema.parse`.
+pub fn parse_tiktok_credential_update(value: &serde_json::Value) -> Result<TiktokCredentialUpdate> {
+    let _ = value;
+    todo!("P3.2b")
 }
