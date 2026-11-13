@@ -4,6 +4,7 @@
 
 pub mod channels;
 pub mod connections;
+pub mod contact_notes;
 pub mod contacts;
 pub mod custom_fields;
 pub mod ecommerce_settings;
@@ -226,6 +227,8 @@ pub async fn dispatch_as(
 ) -> Option<Response> {
     let reply = if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
+    } else if contact_notes::ROUTES.contains(&route_id) {
+        contact_notes::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
     } else if contacts::ROUTES.contains(&route_id) {
