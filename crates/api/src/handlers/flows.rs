@@ -121,7 +121,7 @@ async fn create(state: &ApiState, call: Call<'_>) -> Reply {
     let ws = call.workspace_id;
     let db = &state.db;
     let name = name.unwrap_or_default();
-    async {
+    let created = async {
         let graph =
             flow::resolve_graph_input(db, ws, FlowGraphInput { spec, nodes, edges }, publish)
                 .await?;
@@ -135,18 +135,21 @@ async fn create(state: &ApiState, call: Call<'_>) -> Reply {
         Ok::<_, BusinessError>((flow_id, node_ids))
     }
     .await
-    .map(|(flow_id, node_ids)| {
-        let mut out = Map::new();
-        out.insert("id".into(), id(flow_id));
-        if let Some(node_ids) = node_ids {
-            out.insert(
-                "nodeIds".into(),
-                Value::Object(node_ids.into_iter().map(|(k, v)| (k, json!(v))).collect()),
-            );
-        }
-        json(201, Value::Object(out))
-    })
-    .map_err(|e| flow_error(e, super::CREATING))
+    .map_err(|e| flow_error(e, super::CREATING))?;
+    // `createDraft` / `createPublished`: `this.audit("create", ...)`.
+    let (flow_id, node_ids) = created;
+    state
+        .record_audit("create", &format!("created a new flow (#{flow_id})"))
+        .await;
+    let mut out = Map::new();
+    out.insert("id".into(), id(flow_id));
+    if let Some(node_ids) = node_ids {
+        out.insert(
+            "nodeIds".into(),
+            Value::Object(node_ids.into_iter().map(|(k, v)| (k, json!(v))).collect()),
+        );
+    }
+    Ok(json(201, Value::Object(out)))
 }
 
 /// [`business_error`]; a `FlowAuthoringException` (`invalidRequestData` with
@@ -389,15 +392,33 @@ async fn update(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, super::MUTATING))?;
+    state
+        .record_audit(
+            "update",
+            &format!("updated a flow (#{})", flow_id.unwrap_or_default()),
+        )
+        .await;
     Ok(no_content())
 }
 
 /// `flows.delete`.
 async fn delete(state: &ApiState, call: Call<'_>) -> Reply {
     let flow_id = path_id(&call)?;
-    flow::delete_many(&state.db, call.workspace_id, vec![flow_id])
+    let deleted = flow::delete_many(&state.db, call.workspace_id, vec![flow_id])
         .await
         .map_err(|e| business_error(e, super::MUTATING))?;
+    // `deleteMany`: no audit record when nothing matched.
+    if !deleted.is_empty() {
+        let list = deleted
+            .iter()
+            .map(|id| format!("#{id}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let plural = if deleted.len() > 1 { "s" } else { "" };
+        state
+            .record_audit("delete", &format!("deleted flow{plural} ({list})"))
+            .await;
+    }
     Ok(no_content())
 }
 
@@ -407,6 +428,12 @@ async fn duplicate(state: &ApiState, call: Call<'_>) -> Reply {
     let copy = flow::duplicate(&state.db, call.workspace_id, flow_id)
         .await
         .map_err(|e| business_error(e, super::MUTATING))?;
+    state
+        .record_audit(
+            "create",
+            &format!("duplicated a flow (#{flow_id} \u{2192} #{copy})"),
+        )
+        .await;
     Ok(json(201, json!({ "id": id(copy) })))
 }
 

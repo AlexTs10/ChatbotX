@@ -34,7 +34,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chatbotx_business::BusinessError;
 use chatbotx_business::audit::AuditService;
-use chatbotx_business::events::EventBus;
+use chatbotx_business::events::{Event, EventBus, TriggerEvent};
 use chatbotx_db::Db;
 use chatbotx_jobs::Enqueuer;
 use chatbotx_kv::Kv;
@@ -108,6 +108,30 @@ impl ApiState {
     pub fn with_audit(mut self, audit: AuditService) -> ApiState {
         self.audit = audit;
         self
+    }
+
+    /// `this.audit(action, detail)` (`BaseService.audit`): one audit record
+    /// for the ambient actor (the token middleware sets it).
+    pub async fn record_audit(&self, action: &str, detail: &str) {
+        self.audit.audit(action, detail).await;
+    }
+
+    /// The `emit*` calls of `event-dispatcher.ts`: publishes trigger events
+    /// on the in-process bus, in order.
+    pub async fn emit_triggers(&self, events: impl IntoIterator<Item = TriggerEvent>) {
+        self.events
+            .publish_all(events.into_iter().map(Event::Trigger))
+            .await;
+    }
+
+    /// `queueWorkspaceRealtimeEvent`: publishes `event` to the workspace when
+    /// the realtime gateway is on (an invalid event is logged).
+    pub async fn queue_realtime(&self, workspace_id: i64, event: chatbotx_rt::Envelope) {
+        if let Some(realtime) = &self.realtime {
+            realtime
+                .queue_workspace_event(&workspace_id.to_string(), event)
+                .await;
+        }
     }
 }
 

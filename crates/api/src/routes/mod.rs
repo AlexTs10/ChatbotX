@@ -21,12 +21,13 @@ use crate::auth::{
 use crate::handlers::channels::{self, ChannelCall};
 use crate::handlers::{ApiState, Call, Principal, dispatch_as};
 use crate::idempotency::{MiddlewareCall, api_idempotency_middleware, procedure_input};
+use chatbotx_business::audit::{AuditActor, with_audit_context};
 use chatbotx_kv::{DurableKv, SystemClock};
 
 /// Who passed a route's auth.
 enum Caller {
     /// A workspace token: the workspace id, the token and `apiCredentialId`.
-    Workspace(i64, Principal, String),
+    Workspace(i64, Principal, String, AuditActor),
     /// A channel (`cbx_api_`) token and `apiCredentialId`.
     Channel(ChannelCall, String),
 }
@@ -235,57 +236,67 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
     };
     let route = matched.route;
     let mut res_headers = HeaderMap::new();
-    let outcome =
-        match route.auth {
-            RouteAuth::WorkspaceToken(scopes) => {
-                let url = uri.to_string();
-                authorize_workspace_token_for_scope(
-                    deps,
-                    TokenAuthRequest {
-                        headers,
-                        url: Some(&url),
-                        method: Some(route.method),
-                        path: Some(route.path),
-                    },
-                    scopes,
-                    &mut res_headers,
-                )
-                .await
-                .map(|context| {
-                    let principal = Principal {
-                        token_id: context.api_token.id.parse().ok(),
-                        scopes: context.api_token.scopes.clone(),
-                    };
-                    context.workspace.id.parse::<i64>().ok().map(|ws| {
-                        Caller::Workspace(ws, principal, context.api_credential_id.clone())
-                    })
+    let outcome = match route.auth {
+        RouteAuth::WorkspaceToken(scopes) => {
+            let url = uri.to_string();
+            authorize_workspace_token_for_scope(
+                deps,
+                TokenAuthRequest {
+                    headers,
+                    url: Some(&url),
+                    method: Some(route.method),
+                    path: Some(route.path),
+                },
+                scopes,
+                &mut res_headers,
+            )
+            .await
+            .map(|context| {
+                let principal = Principal {
+                    token_id: context.api_token.id.parse().ok(),
+                    scopes: context.api_token.scopes.clone(),
+                };
+                // `withAuditContext` of `workspaceTokenAuthMiddleware`.
+                let actor = AuditActor {
+                    user_id: Some(context.audit.user_id.clone()),
+                    workspace_id: Some(context.audit.workspace_id.clone()),
+                    ip_address: Some(context.audit.ip_address.clone()),
+                    user_agent: context.audit.user_agent.clone(),
+                    source: Some(context.audit.source.clone()),
+                };
+                context.workspace.id.parse::<i64>().ok().map(|ws| {
+                    Caller::Workspace(ws, principal, context.api_credential_id.clone(), actor)
                 })
-            }
-            RouteAuth::ChannelToken => {
-                authenticate_channel_api_token(deps, headers)
-                    .await
-                    .map(
-                        |context| match (context.inbox_id.parse(), context.workspace.id.parse()) {
-                            (Ok(inbox_id), Ok(workspace_id)) => Some(Caller::Channel(
-                                ChannelCall {
-                                    inbox_id,
-                                    workspace_id,
-                                },
-                                context.api_credential_id.clone(),
-                            )),
-                            _ => None,
-                        },
-                    )
-            }
-            // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
-            RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
-                Err(invalid_access_token_error())
-            }
-        };
+            })
+        }
+        RouteAuth::ChannelToken => {
+            authenticate_channel_api_token(deps, headers)
+                .await
+                .map(
+                    |context| match (context.inbox_id.parse(), context.workspace.id.parse()) {
+                        (Ok(inbox_id), Ok(workspace_id)) => Some(Caller::Channel(
+                            ChannelCall {
+                                inbox_id,
+                                workspace_id,
+                            },
+                            context.api_credential_id.clone(),
+                        )),
+                        _ => None,
+                    },
+                )
+        }
+        // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
+        RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
+            Err(invalid_access_token_error())
+        }
+    };
     let mut response = match outcome {
         Ok(caller) => {
             let handled = match (handlers, caller) {
-                (Some(state), Some(Caller::Workspace(workspace_id, principal, credential_id))) => {
+                (
+                    Some(state),
+                    Some(Caller::Workspace(workspace_id, principal, credential_id, actor)),
+                ) => {
                     let call = Call {
                         workspace_id,
                         params: &matched.params,
@@ -297,7 +308,12 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                     api_idempotency_middleware(
                         &store,
                         idempotency_call(headers, route, &credential_id, &input),
-                        || dispatch_as(state, route.id, call, &principal),
+                        || {
+                            with_audit_context(
+                                actor,
+                                dispatch_as(state, route.id, call, &principal),
+                            )
+                        },
                     )
                     .await
                 }
