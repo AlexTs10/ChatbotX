@@ -6,6 +6,8 @@ mod common;
 mod repo_common;
 #[path = "common/repo10.rs"]
 mod repo10;
+#[path = "common/repo11.rs"]
+mod repo11;
 #[path = "common/repo3.rs"]
 mod repo3;
 
@@ -1084,4 +1086,59 @@ async fn integration_messenger_untested_readers_and_capi_writes() {
     })
     .await;
     assert_eq!(after.iter().map(|t| t.id).collect::<Vec<_>>(), vec![67]);
+}
+
+#[tokio::test]
+async fn google_ads_conversion_event_finders_claim_fence_and_options_guard() {
+    use chatbotx_db::repo::google_ads_conversion_event::{self as gace, EventRef, RedriveInput};
+    use repo11::{OTHER_WS, WS, event_values, i, put_event, read, t, two_ws_db, write};
+    let db = two_ws_db().await;
+    put_event(&db, 1, WS, vec![("status", t("failed")), ("attempt", i(1))]).await;
+    let found = read(&db, |c| gace::find_by_transaction_id(c, WS, "t-1")).await;
+    assert_eq!(found.map(|r| r.id), Some(1));
+    assert!(
+        read(&db, |c| gace::find_by_transaction_id(c, OTHER_WS, "t-1"))
+            .await
+            .is_none()
+    );
+    let ev = |workspace_id| EventRef {
+        id: 1,
+        workspace_id,
+    };
+    assert!(
+        read(&db, move |c| gace::find_workspace_event(c, ev(WS)))
+            .await
+            .is_some()
+    );
+    assert!(
+        read(&db, move |c| gace::find_workspace_event(c, ev(OTHER_WS)))
+            .await
+            .is_none()
+    );
+    // `expectedClaimToken`: a token fence spares an unleased row, `null` matches it.
+    let input = |token: Option<Option<String>>| RedriveInput {
+        id: 1,
+        workspace_id: WS,
+        from_statuses: vec!["failed".to_owned()],
+        expected_attempt: 1,
+        expected_request_id: None,
+        expected_claim_token: token,
+    };
+    let leased = input(Some(Some("token".to_owned())));
+    assert!(
+        write(&db, move |c| gace::redrive(c, &leased))
+            .await
+            .is_none()
+    );
+    let unleased = input(Some(None));
+    assert!(
+        write(&db, move |c| gace::redrive(c, &unleased))
+            .await
+            .is_some()
+    );
+    // The options snapshot is required.
+    let mut values = event_values(WS, "t-x", &[]);
+    values.retain(|(c, _)| *c != "options");
+    let r = repo::write(&db, move |tx| gace::insert_ignore_duplicate(tx, &values)).await;
+    assert!(repo_common::err_message(r).contains("options"));
 }
