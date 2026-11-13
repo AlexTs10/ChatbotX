@@ -4,6 +4,7 @@
 
 pub mod avatar;
 pub mod create;
+pub mod filter_fields;
 pub mod identifier;
 pub mod list;
 pub mod phone;

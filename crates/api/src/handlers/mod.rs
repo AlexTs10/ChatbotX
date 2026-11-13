@@ -28,6 +28,7 @@ pub mod sequences;
 pub mod tags;
 pub mod webchats;
 pub mod workspace_members;
+pub mod contact_filter;
 
 use std::sync::Arc;
 
@@ -420,6 +421,8 @@ async fn route(
         reflinks::handle(state, route_id, call).await
     } else if workspace_members::ROUTES.contains(&route_id) {
         workspace_members::handle(state, route_id, call).await
+    } else if contact_filter::ROUTES.contains(&route_id) {
+        contact_filter::handle(state, route_id, call).await
     } else {
         return None;
     };

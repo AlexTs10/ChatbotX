@@ -251,7 +251,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/contacts-crud-public-api.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/contacts-export-files-public-api.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/contacts-export-public-api.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
-| `apps/builder/__tests__/contacts-filter-fields-public-api.test.ts` | C | tbd | todo | Contact filters and segments; builder server code |
+| `apps/builder/__tests__/contacts-filter-fields-public-api.test.ts` | C | `crates/api/tests/contacts_filter_fields_public_api.rs` | ported | Contact filters and segments; builder server code |
 | `apps/builder/__tests__/contacts-import-public-api.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/contacts-import-template-route.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/contacts-import-template.test.ts` | B | - | todo | Template marketplace (install/share/sync); builder node-env, client logic |
@@ -1039,7 +1039,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/src/features/common/hooks/__tests__/use-stats-selection.test.ts` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/src/features/conditions/__tests__/editor.test.tsx` | B | - | todo | Triggers; builder jsdom |
 | `apps/builder/src/features/conditions/__tests__/schemas.test.ts` | B | - | todo | Triggers; builder jsdom |
-| `apps/builder/src/features/contact-filter/lib/__tests__/list-filter-fields.test.ts` | C | tbd | todo | Contact filters and segments; builder server code |
+| `apps/builder/src/features/contact-filter/lib/__tests__/list-filter-fields.test.ts` | C | `crates/business/tests/contact_filter_list_filter_fields.rs` | ported | Contact filters and segments; builder server code |
 | `apps/builder/src/features/contact-filter/lib/__tests__/prune-conditions.test.ts` | B | - | todo | Contact filters and segments; builder jsdom |
 | `apps/builder/src/features/contact-filter/schema/__tests__/ctwa-retarget-filter.test.ts` | B | - | todo | Contact filters and segments; builder jsdom |
 | `apps/builder/src/features/contacts/actions/__tests__/contact-tag-actions.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
