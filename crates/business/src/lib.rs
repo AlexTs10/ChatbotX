@@ -5,18 +5,19 @@
 
 pub mod connection;
 pub mod discount_code;
+pub mod ecommerce_settings;
 pub mod ecommerce_open_hours;
 pub mod errors;
 pub mod inbox;
 pub mod integration_api;
 pub mod integration_webchat;
+pub mod net;
 pub mod place_near_me;
 pub mod poll;
 pub mod product;
 pub mod product_category;
 pub mod product_message;
 pub mod qr_code;
-pub mod net;
 pub mod referral;
 pub mod reflink;
 pub mod store_source;

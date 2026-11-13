@@ -4,6 +4,7 @@
 
 pub mod channels;
 pub mod connections;
+pub mod ecommerce_settings;
 pub mod input;
 pub mod open_hours;
 pub mod places;
@@ -178,6 +179,8 @@ pub async fn dispatch_as(
 ) -> Option<Response> {
     let reply = if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
+    } else if ecommerce_settings::ROUTES.contains(&route_id) {
+        ecommerce_settings::handle(state, route_id, call).await
     } else if webchats::ROUTES.contains(&route_id) {
         webchats::handle(state, route_id, call).await
     } else if places::ROUTES.contains(&route_id) {
