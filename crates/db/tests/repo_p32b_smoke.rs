@@ -1,6 +1,13 @@
 //! Smoke tests of the P3.2b repository functions that have no TS test (not locked).
 
 mod common;
+#[macro_use]
+#[path = "common/repo.rs"]
+mod repo_common;
+#[path = "common/repo10.rs"]
+mod repo10;
+#[path = "common/repo3.rs"]
+mod repo3;
 
 use chatbotx_db::repo::contact::{self as contacts, ContactListInput};
 use chatbotx_db::repo::sql::Sql;
@@ -722,4 +729,165 @@ async fn inbound_webhook_insert_update_find_count_and_request_lookup() {
     .expect("find request");
     assert_eq!(by_hook.map(|r| r.status), Some("received".to_owned()));
     assert_eq!(other_hook, None);
+}
+
+// ---------------------------------------------------------------------------
+// coexist-sync-run (slice F1): functions without a TS test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn coexist_sync_run_untested_readers_and_terminal_writes() {
+    use chatbotx_db::repo::coexist_sync_run as csr;
+    use chatbotx_db::repo::utils::SortItem;
+    use repo10::{MESSENGER, WHATSAPP, WS, coexist_db, put_runs, read, run_row, write};
+    let db = coexist_db().await;
+    let now = repo::now_ms();
+    put_runs(
+        &db,
+        &[
+            (1, MESSENGER, "messenger", ("coexist", "partial"), now - 3_000, "\"startedAt\" = 100, \"lastSyncedAt\" = 150"),
+            (2, MESSENGER, "messenger", ("coexist", "succeeded"), now - 2_000, "\"startedAt\" = 50"),
+            (3, MESSENGER, "messenger", ("coexist", "running"), now - 1_000, "\"claimToken\" = 't', \"attempts\" = 2, \"currentError\" = 'e', \"importedMessageCount\" = 4, \"skippedCount\" = 1, \"failedCount\" = 3"),
+            (4, 81, "messenger", ("contact_scan", "succeeded"), now - 2_000, ""),
+            (5, 82, "messenger", ("contact_scan", "succeeded"), now - 1_000, ""),
+        ],
+    )
+    .await;
+    // Latest by createdAt; by id; owner of the workspace.
+    assert_eq!(
+        read(&db, |c| csr::find_latest_run(c, WS, MESSENGER, "messenger"))
+            .await
+            .map(|r| r.id),
+        Some(3)
+    );
+    assert_eq!(
+        read(&db, |c| csr::find_run_by_id(c, 2))
+            .await
+            .map(|r| r.status),
+        Some("succeeded".to_owned())
+    );
+    assert!(read(&db, |c| csr::find_run_by_id(c, 99)).await.is_none());
+    assert_eq!(
+        read(&db, |c| csr::find_workspace_owner_id(c, WS)).await,
+        Some(1001)
+    );
+    assert_eq!(
+        read(&db, |c| csr::find_workspace_owner_id(c, 9)).await,
+        None
+    );
+    // A partial prior run resumes from lastSyncedAt (it sorts first: startedAt 100 > 50).
+    assert_eq!(
+        read(&db, |c| csr::find_resume_ceiling(
+            c,
+            MESSENGER,
+            "messenger",
+            3
+        ))
+        .await,
+        Some(150)
+    );
+    assert_eq!(
+        read(&db, |c| csr::find_last_synced_at(c, 1)).await,
+        Some(Some(150))
+    );
+    assert_eq!(read(&db, |c| csr::find_last_synced_at(c, 99)).await, None);
+    let init = read(&db, |c| csr::find_init_state(c, 3))
+        .await
+        .expect("init state");
+    assert_eq!(
+        (
+            init.attempts,
+            init.current_error.as_deref(),
+            init.messenger_sync_phase.as_str()
+        ),
+        (2, Some("e"), "contacts")
+    );
+    let counters = read(&db, |c| csr::find_terminal_counters(c, 3))
+        .await
+        .expect("counters");
+    assert_eq!(
+        (
+            counters.imported_message_count,
+            counters.skipped_count,
+            counters.failed_count
+        ),
+        (4, 1, 3)
+    );
+    // markPartial without an error keeps currentError; markSucceeded clears the cursor.
+    let guard = csr::WriteGuard {
+        status: "running",
+        claim_token: Some("t"),
+    };
+    assert_eq!(
+        write(&db, move |c| csr::mark_partial(c, 3, None, Some(&guard))).await,
+        1
+    );
+    let row = run_row(&db, 3).await.expect("run 3");
+    assert_eq!(
+        (row.status.as_str(), row.current_error.as_deref()),
+        ("partial", Some("e"))
+    );
+    assert!(row.finished_at.is_some());
+    assert_eq!(write(&db, |c| csr::mark_succeeded(c, 3, None)).await, 1);
+    assert_eq!(run_row(&db, 3).await.expect("run 3").status, "succeeded");
+    // Coexist toggle on the channel's integration table, workspace-scoped.
+    let row = write(&db, |c| {
+        csr::set_integration_coexist_enabled(c, "whatsapp", WS, WHATSAPP, true, Some(true))
+    })
+    .await;
+    let row = row.expect("updated");
+    assert_eq!(
+        (
+            row.channel(),
+            row.id(),
+            row.coexist_enabled(),
+            row.coexist_ai_reads_synced_history()
+        ),
+        ("whatsapp", WHATSAPP, true, true)
+    );
+    let row = write(&db, |c| {
+        csr::set_integration_coexist_enabled(c, "whatsapp", WS, WHATSAPP, false, None)
+    })
+    .await;
+    let row = row.expect("updated");
+    assert_eq!(
+        (row.coexist_enabled(), row.coexist_ai_reads_synced_history()),
+        (false, true)
+    );
+    assert!(
+        write(&db, |c| csr::set_integration_coexist_enabled(
+            c,
+            "messenger",
+            2002,
+            MESSENGER,
+            true,
+            None
+        ))
+        .await
+        .is_none()
+    );
+    let unknown = repo::read(&db, |c| {
+        csr::find_integration_for_coexist(c, WS, 1, "telegram")
+    })
+    .await;
+    assert!(unknown.is_err());
+    // A caller sort replaces the createdAt DESC default.
+    let page = read(&db, |c| {
+        csr::list_contact_scan_runs(
+            c,
+            &csr::ListContactScanRunsInput {
+                workspace_id: WS,
+                sort: Some(vec![SortItem {
+                    id: "createdAt".to_owned(),
+                    desc: false,
+                }]),
+                ..Default::default()
+            },
+        )
+    })
+    .await;
+    assert_eq!(
+        page.data.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![4, 5]
+    );
 }
