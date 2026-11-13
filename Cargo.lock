@@ -241,6 +241,7 @@ dependencies = [
  "chatbotx-db",
  "chatbotx-kv",
  "hmac",
+ "icu_normalizer",
  "ring",
  "scrypt",
  "serde_json",

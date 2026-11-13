@@ -5,6 +5,8 @@
 
 use std::future::Future;
 
+use chatbotx_core::utils::placeholder_email::is_placeholder_email;
+
 use super::AuthApiError;
 
 /// `DEFAULT_MAGIC_LINK_SUBJECT` of `@chatbotx.io/mail`.
@@ -90,8 +92,33 @@ pub async fn send_magic_link<D: AuthMailDeps>(
     url: &str,
     request: Option<&AuthMailRequest>,
 ) -> Result<(), AuthApiError> {
-    let _ = (deps, email, url, request);
-    todo!("P3.5d")
+    if is_placeholder_email(Some(email)) {
+        return Ok(());
+    }
+    let request = request.ok_or_else(unknown_request)?;
+    let brand = deps.tenant_settings(&request.domain).await;
+    let smtp = deps.smtp_for_tenant().await;
+    if smtp == SmtpResolution::Blocked {
+        return Ok(());
+    }
+    let magic_url = with_public_host(url, &request.public_origin)?;
+    let Some(user) = deps.find_tenant_user(email).await else {
+        return Err(AuthApiError::new(
+            "BAD_REQUEST",
+            &format!("Your email is not registered with {}", brand.name),
+        ));
+    };
+    let mail = AuthMail {
+        brand_name: brand.name.clone(),
+        brand_logo_url: brand.logo_light_url.clone(),
+        brand_url: brand_url(&request.public_origin),
+        subject: MAGIC_LINK_SUBJECT.to_string(),
+        user_name: user.name.unwrap_or_else(|| email.to_string()),
+        url: magic_url,
+        custom_template: brand.magic_link_email_template,
+    };
+    deps.send_magic_link(email, mail, transport(&smtp)).await;
+    Ok(())
 }
 
 /// `emailAndPassword.sendResetPassword`.
@@ -101,6 +128,56 @@ pub async fn send_reset_password<D: AuthMailDeps>(
     url: &str,
     request: Option<&AuthMailRequest>,
 ) -> Result<(), AuthApiError> {
-    let _ = (deps, user, url, request);
-    todo!("P3.5d")
+    if is_placeholder_email(Some(&user.email)) {
+        return Ok(());
+    }
+    let request = request.ok_or_else(unknown_request)?;
+    let brand = deps.tenant_settings(&request.domain).await;
+    let smtp = deps.smtp_for_tenant().await;
+    if smtp == SmtpResolution::Blocked {
+        return Ok(());
+    }
+    let mail = AuthMail {
+        brand_name: brand.name.clone(),
+        brand_logo_url: brand.logo_light_url.clone(),
+        brand_url: brand_url(&request.public_origin),
+        subject: FORGOT_PASSWORD_SUBJECT.to_string(),
+        user_name: user.name.clone().unwrap_or_else(|| user.email.clone()),
+        url: with_public_host(url, &request.public_origin)?,
+        custom_template: brand.forgot_password_email_template,
+    };
+    deps.send_reset_password(&user.email, mail, transport(&smtp))
+        .await;
+    Ok(())
+}
+
+fn unknown_request() -> AuthApiError {
+    AuthApiError::new("BAD_REQUEST", "Unknown request")
+}
+
+fn transport(smtp: &SmtpResolution) -> Option<&str> {
+    match smtp {
+        SmtpResolution::Transport(transport) => Some(transport),
+        SmtpResolution::Default | SmtpResolution::Blocked => None,
+    }
+}
+
+/// `new URL("/", originUrl).toString()`.
+fn brand_url(public_origin: &str) -> String {
+    url::Url::parse(public_origin)
+        .and_then(|origin| origin.join("/"))
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| format!("{}/", public_origin.trim_end_matches('/')))
+}
+
+/// `link.hostname = new URL(originUrl).hostname`.
+fn with_public_host(link: &str, public_origin: &str) -> Result<String, AuthApiError> {
+    let invalid = |_| AuthApiError::new("INTERNAL_SERVER_ERROR", "Invalid URL");
+    let mut link = url::Url::parse(link).map_err(invalid)?;
+    let origin = url::Url::parse(public_origin).map_err(invalid)?;
+    if let Some(host) = origin.host_str() {
+        link.set_host(Some(host))
+            .map_err(|_| AuthApiError::new("INTERNAL_SERVER_ERROR", "Invalid URL"))?;
+    }
+    Ok(link.to_string())
 }

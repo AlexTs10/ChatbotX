@@ -24,6 +24,8 @@ scrypt = { version = "0.12", default-features = false }
 serde_json.workspace = true
 # `hashToken` (SHA-256 hex of a workspace API token).
 sha2.workspace = true
+# NFKC normalization of passwords (better-auth `password.normalize("NFKC")`).
+icu_normalizer.workspace = true
 # SMTP client (mail) and blocking scrypt work.
 tokio = { workspace = true, features = ["io-util", "net", "rt"] }
 tracing.workspace = true

@@ -7,6 +7,7 @@ mod bearer;
 mod claim;
 mod email_password;
 mod gate;
+mod magic_link;
 mod mcp_config;
 mod oauth_path;
 mod origin;

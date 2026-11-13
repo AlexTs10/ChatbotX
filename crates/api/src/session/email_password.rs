@@ -32,8 +32,9 @@ use sha2::Sha256;
 
 use super::{
     AuthApiError, CustomDomainSource, NewUser, OriginCheckRequest, SignUpGateDeps,
-    TrustedOriginSettings, context_trusted_origins, email_request_before, form_csrf_check,
-    origin_check, request_cookie, trusted_origins, user_create_before,
+    TrustedOriginSettings, apply_bearer, context_trusted_origins, email_request_before,
+    expose_auth_token, form_csrf_check, origin_check, request_cookie, trusted_origins,
+    user_create_before,
 };
 use crate::auth::decode_query_component;
 use crate::iso8601;
@@ -45,9 +46,9 @@ pub const SESSION_COOKIE: &str = "better-auth.session_token";
 pub const SESSION_EXPIRES_IN_SECS: i64 = 7 * 24 * 60 * 60;
 /// better-auth default verification token lifetime (1 hour).
 pub const VERIFICATION_EXPIRES_IN_SECS: i64 = 60 * 60;
-const MIN_PASSWORD_LENGTH: usize = 8;
-const MAX_PASSWORD_LENGTH: usize = 128;
-const ROOT_TENANT_ID: i64 = 1;
+pub(super) const MIN_PASSWORD_LENGTH: usize = 8;
+pub(super) const MAX_PASSWORD_LENGTH: usize = 128;
+pub(super) const ROOT_TENANT_ID: i64 = 1;
 /// `DEFAULT_SIGNUP_SUBJECT` of `@chatbotx.io/mail`.
 const SIGNUP_SUBJECT: &str = "Verify your email address";
 
@@ -137,7 +138,7 @@ impl AuthState {
     }
 
     /// `originCheckMiddleware`, plus `formCsrfMiddleware` when `form_csrf`.
-    async fn check_origins(
+    pub(super) async fn check_origins(
         &self,
         headers: &HeaderMap,
         uri: &Uri,
@@ -170,12 +171,32 @@ pub fn auth_router(state: Arc<AuthState>) -> Router {
         .route("/api/auth/get-session", get(get_session))
         .route("/api/auth/verify-email", get(verify_email))
         .route("/api/auth/sign-out", post(sign_out))
+        .route(
+            "/api/auth/sign-in/magic-link",
+            post(super::magic_link::sign_in_magic_link),
+        )
+        .route(
+            "/api/auth/magic-link/verify",
+            get(super::magic_link::magic_link_verify),
+        )
+        .route(
+            "/api/auth/request-password-reset",
+            post(super::magic_link::request_password_reset),
+        )
+        .route(
+            "/api/auth/reset-password/{token}",
+            get(super::magic_link::reset_password_callback),
+        )
+        .route(
+            "/api/auth/reset-password",
+            post(super::magic_link::reset_password),
+        )
         .with_state(state)
 }
 
 // ---------------------------------------------------------------- responses
 
-fn json_response(status: StatusCode, body: &Value) -> Response {
+pub(super) fn json_response(status: StatusCode, body: &Value) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "application/json")],
@@ -198,13 +219,13 @@ impl IntoResponse for AuthApiError {
     }
 }
 
-fn coded(status_name: &str, code: &str, message: &str) -> AuthApiError {
+pub(super) fn coded(status_name: &str, code: &str, message: &str) -> AuthApiError {
     let mut error = AuthApiError::new(status_name, message);
     error.code = Some(code.to_string());
     error
 }
 
-fn internal(error: impl std::fmt::Display) -> AuthApiError {
+pub(super) fn internal(error: impl std::fmt::Display) -> AuthApiError {
     tracing::error!(error = %error, "auth endpoint failed");
     AuthApiError::new("INTERNAL_SERVER_ERROR", "Internal Server Error")
 }
@@ -234,10 +255,11 @@ pub fn generate_session_token() -> String {
 }
 
 fn scrypt_key(password: &str, salt: &str) -> Vec<u8> {
-    // better-auth hashes `password.normalize("NFKC")`; ASCII passwords are unchanged.
+    // better-auth hashes `password.normalize("NFKC")`.
+    let normalized = icu_normalizer::ComposingNormalizerBorrowed::new_nfkc().normalize(password);
     let params = scrypt::Params::new(14, 16, 1).expect("valid scrypt params");
     let mut key = vec![0; 64];
-    scrypt::scrypt(password.as_bytes(), salt.as_bytes(), &params, &mut key)
+    scrypt::scrypt(normalized.as_bytes(), salt.as_bytes(), &params, &mut key)
         .expect("64-byte scrypt output");
     key
 }
@@ -347,11 +369,11 @@ pub fn email_verification_token(secret: &str, email: &str, now_secs: i64) -> Str
 // ---------------------------------------------------------------- rows
 
 #[derive(Debug, Clone)]
-struct UserRow {
-    id: i64,
-    name: Option<String>,
-    email: String,
-    email_verified: bool,
+pub(super) struct UserRow {
+    pub(super) id: i64,
+    pub(super) name: Option<String>,
+    pub(super) email: String,
+    pub(super) email_verified: bool,
     image: Option<String>,
     created_at: i64,
     updated_at: i64,
@@ -362,7 +384,7 @@ fn iso(ms: i64) -> String {
 }
 
 impl UserRow {
-    fn to_json(&self) -> Value {
+    pub(super) fn to_json(&self) -> Value {
         json!({
             "id": self.id.to_string(),
             "name": self.name,
@@ -390,7 +412,10 @@ fn user_from_row(row: &chatbotx_db::rusqlite::Row<'_>) -> chatbotx_db::rusqlite:
     })
 }
 
-fn find_user_by_email(conn: &Connection, email: &str) -> Result<Option<UserRow>, DbError> {
+pub(super) fn find_user_by_email(
+    conn: &Connection,
+    email: &str,
+) -> Result<Option<UserRow>, DbError> {
     Ok(conn
         .query_row(
             &format!(
@@ -402,7 +427,7 @@ fn find_user_by_email(conn: &Connection, email: &str) -> Result<Option<UserRow>,
         .optional()?)
 }
 
-fn find_user_by_id(conn: &Connection, id: i64) -> Result<Option<UserRow>, DbError> {
+pub(super) fn find_user_by_id(conn: &Connection, id: i64) -> Result<Option<UserRow>, DbError> {
     Ok(conn
         .query_row(
             &format!(r#"SELECT {USER_COLUMNS} FROM "User" WHERE "id" = ?1"#),
@@ -412,7 +437,7 @@ fn find_user_by_id(conn: &Connection, id: i64) -> Result<Option<UserRow>, DbErro
         .optional()?)
 }
 
-fn new_id() -> i64 {
+pub(super) fn new_id() -> i64 {
     chatbotx_core::utils::id::create_id()
         .parse()
         .expect("snowflake ids are integers")
@@ -420,14 +445,14 @@ fn new_id() -> i64 {
 
 // ---------------------------------------------------------------- helpers
 
-fn body_json(body: &Bytes) -> Result<Value, AuthApiError> {
+pub(super) fn body_json(body: &Bytes) -> Result<Value, AuthApiError> {
     serde_json::from_slice::<Value>(body)
         .ok()
         .filter(Value::is_object)
         .ok_or_else(|| AuthApiError::new("BAD_REQUEST", "Invalid request body"))
 }
 
-fn query_value(uri: &Uri, name: &str) -> Option<String> {
+pub(super) fn query_value(uri: &Uri, name: &str) -> Option<String> {
     uri.query()?
         .split('&')
         .filter_map(|pair| pair.split_once('=').or(Some((pair, ""))))
@@ -446,7 +471,7 @@ fn is_valid_email(email: &str) -> bool {
         && !email.chars().any(char::is_whitespace)
 }
 
-fn session_cookie(token: &str, secret: &str) -> HeaderValue {
+pub(super) fn session_cookie(token: &str, secret: &str) -> HeaderValue {
     HeaderValue::from_str(&format!(
         "{SESSION_COOKIE}={}; Max-Age={SESSION_EXPIRES_IN_SECS}; Path=/; HttpOnly; SameSite=Lax",
         sign_cookie_value(token, secret)
@@ -463,6 +488,12 @@ fn cleared_session_cookie() -> HeaderValue {
 /// The public origin of the request (`getPublicOriginFromRequest`): the
 /// configured base URL with the request's host name.
 fn verification_url(settings: &AuthSettings, headers: &HeaderMap, token: &str) -> String {
+    let base = public_origin(settings, headers);
+    format!("{base}/api/auth/verify-email?token={token}&callbackURL=%2F")
+}
+
+/// `getPublicOriginFromRequest`: the configured base URL with the request's host name.
+pub(super) fn public_origin(settings: &AuthSettings, headers: &HeaderMap) -> String {
     let mut base = settings.base_url.clone();
     let host = headers
         .get("x-forwarded-host")
@@ -480,7 +511,7 @@ fn verification_url(settings: &AuthSettings, headers: &HeaderMap, token: &str) -
             .unwrap_or_default();
         base.replace_range(authority_start..authority_end, &format!("{host}{port}"));
     }
-    format!("{base}/api/auth/verify-email?token={token}&callbackURL=%2F")
+    base
 }
 
 // ---------------------------------------------------------------- handlers
@@ -610,6 +641,7 @@ async fn sign_in_email(
                 header::SET_COOKIE,
                 session_cookie(&token, &state.settings.secret),
             );
+            expose_auth_token(response.headers_mut());
             response
         }
         Err(error) => error.into_response(),
@@ -675,9 +707,20 @@ async fn sign_in(
             "Email not verified",
         ));
     }
+    let token = create_session(state, headers, user.id).await?;
+    Ok((token, user))
+}
+
+/// `internalAdapter.createSession(userId)`: a 7-day session with the
+/// request's IP and user agent; the new session token.
+pub(super) async fn create_session(
+    state: &AuthState,
+    headers: &HeaderMap,
+    user_id: i64,
+) -> Result<String, AuthApiError> {
     let token = generate_session_token();
     let now = (state.now_ms)();
-    let (session_id, session_token, user_id) = (new_id(), token.clone(), user.id);
+    let (session_id, session_token) = (new_id(), token.clone());
     let ip = headers
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
@@ -712,10 +755,11 @@ async fn sign_in(
         })
         .await
         .map_err(internal)?;
-    Ok((token, user))
+    Ok(token)
 }
 
 async fn get_session(State(state): State<Arc<AuthState>>, headers: HeaderMap) -> Response {
+    let headers = apply_bearer(&headers, &state.settings.secret);
     let Some(token) = request_cookie(&headers, SESSION_COOKIE)
         .and_then(|raw| verify_signed_cookie(&raw, &state.settings.secret))
     else {
@@ -795,7 +839,7 @@ async fn verify_email(State(state): State<Arc<AuthState>>, uri: Uri) -> Response
     }
 }
 
-fn redirect(location: &str) -> Response {
+pub(super) fn redirect(location: &str) -> Response {
     let mut response = StatusCode::FOUND.into_response();
     if let Ok(value) = HeaderValue::from_str(location) {
         response.headers_mut().insert(header::LOCATION, value);
@@ -809,6 +853,7 @@ async fn sign_out(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let headers = apply_bearer(&headers, &state.settings.secret);
     let body = serde_json::from_slice::<Value>(&body).ok();
     if let Err(error) = state
         .check_origins(&headers, &uri, body.as_ref(), false)

@@ -18,7 +18,9 @@ use chatbotx_db::rusqlite::{OptionalExtension as _, params};
 use serde_json::{Value, json};
 
 use crate::auth::decode_query_component;
-use crate::session::{AuthState, SESSION_COOKIE, request_cookie, verify_signed_cookie};
+use crate::session::{
+    AuthState, SESSION_COOKIE, apply_bearer, request_cookie, verify_signed_cookie,
+};
 
 /// The top-level keys of the builder router (`routers/index.ts`).
 pub const RPC_ROUTER_KEYS: &[&str] = &[
@@ -178,6 +180,7 @@ pub async fn find_rpc_session(
     state: &AuthState,
     headers: &HeaderMap,
 ) -> Result<Option<RpcSession>, chatbotx_db::DbError> {
+    let headers = &apply_bearer(headers, &state.settings.secret);
     let Some(token) = request_cookie(headers, SESSION_COOKIE)
         .and_then(|raw| verify_signed_cookie(&raw, &state.settings.secret))
     else {

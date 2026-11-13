@@ -290,7 +290,8 @@ fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
-fn is_trusted(url: &str, trusted: &[String], allow_relative_paths: bool) -> bool {
+/// `ctx.context.isTrustedOrigin(url, { allowRelativePaths })`.
+pub fn is_trusted_url(url: &str, trusted: &[String], allow_relative_paths: bool) -> bool {
     trusted
         .iter()
         .any(|pattern| matches_origin_pattern(url, pattern, allow_relative_paths))
@@ -373,7 +374,7 @@ pub fn origin_check(
                 &format!("Invalid {label}: expected a string"),
             ));
         };
-        if !is_trusted(url, trusted, true) {
+        if !is_trusted_url(url, trusted, true) {
             tracing::error!(url, "Invalid {label}");
             return Err(forbidden(code, &format!("Invalid {label}")));
         }
