@@ -19,6 +19,7 @@ pub mod query;
 pub mod service;
 pub mod settings;
 pub mod structure;
+pub mod variable_targets;
 
 pub use access::{PipelineAccessScope, PipelineAction, PipelinePermissions};
 pub use currency::{EffectiveCurrency, PipelineView};
