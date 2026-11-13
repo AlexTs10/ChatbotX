@@ -73,7 +73,20 @@ fn find_in(conn: &Connection, workspace_id: i64, id: i64) -> Result<Option<OpenH
 
 /// `ecommerceOpenHoursService.list`: by name, then id.
 pub async fn list(db: &Db, workspace_id: i64) -> Result<Vec<OpenHoursRow>> {
-    todo!("P3.6-D1")
+    tx::read(db, move |conn| {
+        let mut stmt = conn
+            .prepare_cached(&format!(
+                "SELECT {COLUMNS} FROM \"EcommerceOpenHours\" WHERE \"workspaceId\" = ?1 ORDER BY \"name\" ASC, \"id\" ASC"
+            ))
+            .map_err(repo_error)?;
+        let rows = stmt
+            .query_map([workspace_id], map_row)
+            .map_err(repo_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(repo_error)?;
+        Ok(rows)
+    })
+    .await
 }
 
 /// `ecommerceOpenHoursService.create`: the schedule is parsed (name trimmed,
@@ -83,7 +96,26 @@ pub async fn create(
     workspace_id: i64,
     input: &Map<String, Value>,
 ) -> Result<OpenHoursRow> {
-    todo!("P3.6-D1")
+    let schedule = parse_schedule(input, false).map_err(invalid)?;
+    let OpenHoursSchedule {
+        name: Some(name),
+        ranges: Some(ranges),
+    } = schedule
+    else {
+        return Err(invalid(Vec::new()));
+    };
+    tx::write(db, move |conn| {
+        let (id, now) = (new_id(), now_ms());
+        conn.execute(
+            "INSERT INTO \"EcommerceOpenHours\" (\"id\", \"createdAt\", \"updatedAt\", \"workspaceId\", \"name\", \"ranges\") \
+             VALUES (?1, ?2, ?2, ?3, ?4, ?5)",
+            chatbotx_db::rusqlite::params![id, now, workspace_id, name, ranges_text(&ranges)],
+        )
+        .map_err(repo_error)?;
+        find_in(conn, workspace_id, id)?
+            .ok_or_else(|| BusinessError::exception("Failed to create the open-hours schedule", "systemError", 400))
+    })
+    .await
 }
 
 /// `ecommerceOpenHoursService.update`: only the sent parts change; `ranges`
@@ -94,13 +126,51 @@ pub async fn update(
     id: i64,
     data: &Map<String, Value>,
 ) -> Result<OpenHoursRow> {
-    todo!("P3.6-D1")
+    let schedule = parse_schedule(data, true).map_err(invalid)?;
+    tx::write(db, move |conn| {
+        let mut sets = vec!["\"updatedAt\" = ?1".to_string()];
+        let mut args: Vec<SqlValue> = vec![SqlValue::Integer(now_ms())];
+        if let Some(name) = schedule.name {
+            args.push(SqlValue::Text(name));
+            sets.push(format!("\"name\" = ?{}", args.len()));
+        }
+        if let Some(ranges) = &schedule.ranges {
+            args.push(SqlValue::Text(ranges_text(ranges)));
+            sets.push(format!("\"ranges\" = ?{}", args.len()));
+        }
+        args.push(SqlValue::Integer(id));
+        let id_at = args.len();
+        args.push(SqlValue::Integer(workspace_id));
+        let sql = format!(
+            "UPDATE \"EcommerceOpenHours\" SET {} WHERE \"id\" = ?{id_at} AND \"workspaceId\" = ?{}",
+            sets.join(", "),
+            id_at + 1
+        );
+        let changed = conn.execute(&sql, params_from_iter(args)).map_err(repo_error)?;
+        if changed == 0 {
+            return Err(not_found());
+        }
+        find_in(conn, workspace_id, id)?.ok_or_else(not_found)
+    })
+    .await
 }
 
 /// `ecommerceOpenHoursService.delete`: store settings that used it fall back
 /// to always open (`openHoursId` set to null by the foreign key).
 pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
-    todo!("P3.6-D1")
+    tx::write(db, move |conn| {
+        let removed = conn
+            .execute(
+                "DELETE FROM \"EcommerceOpenHours\" WHERE \"id\" = ?1 AND \"workspaceId\" = ?2",
+                [id, workspace_id],
+            )
+            .map_err(repo_error)?;
+        if removed == 0 {
+            return Err(not_found());
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// `ecommerceOpenHoursService.assertBelongsToWorkspace`.
@@ -109,5 +179,9 @@ pub async fn assert_belongs_to_workspace(
     workspace_id: i64,
     id: i64,
 ) -> Result<OpenHoursRow> {
-    todo!("P3.6-D1")
+    tx::read(db, move |conn| {
+        find_in(conn, workspace_id, id)?
+            .ok_or_else(|| BusinessError::not_found("Open-hours schedule does not exist."))
+    })
+    .await
 }

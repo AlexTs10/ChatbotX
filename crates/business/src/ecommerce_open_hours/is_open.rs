@@ -30,5 +30,12 @@ fn local_day_and_time(at_ms: i64, time_zone: &str) -> (u32, String) {
 /// `isWithinOpenHours`: whether `at_ms` falls in one of the ranges (a range
 /// whose `to` is not after `from` runs past midnight into the next day).
 pub fn is_within_open_hours(ranges: &[OpenHoursRange], time_zone: &str, at_ms: i64) -> bool {
-    todo!("P3.6-D1")
+    let (day, time) = local_day_and_time(at_ms, time_zone);
+    let previous_day = (day + 6) % 7;
+    ranges.iter().any(|range| {
+        if range.from < range.to {
+            return range.day == day && time >= range.from && time < range.to;
+        }
+        (range.day == day && time >= range.from) || (range.day == previous_day && time < range.to)
+    })
 }

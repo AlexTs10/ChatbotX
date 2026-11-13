@@ -15,7 +15,7 @@ pub struct OpenHoursRange {
 impl OpenHoursRange {
     /// The stored / output JSON.
     pub fn to_json(&self) -> Value {
-        todo!("P3.6-D1")
+        json!({ "day": self.day, "from": self.from, "to": self.to })
     }
 }
 
@@ -31,7 +31,15 @@ pub const MAX_RANGES: usize = 7 * 4;
 
 /// `TIME_OF_DAY_PATTERN` (`/^([01]\d|2[0-3]):[0-5]\d$/`).
 pub fn is_time_of_day(text: &str) -> bool {
-    todo!("P3.6-D1")
+    let b = text.as_bytes();
+    b.len() == 5
+        && b[2] == b':'
+        && matches!(
+            (b[0], b[1]),
+            (b'0' | b'1', b'0'..=b'9') | (b'2', b'0'..=b'3')
+        )
+        && (b'0'..=b'5').contains(&b[3])
+        && b[4].is_ascii_digit()
 }
 
 fn issue(issues: &mut Vec<Value>, path: Vec<Value>, code: &str, message: &str) {
@@ -131,10 +139,99 @@ pub fn parse_schedule(
     obj: &Map<String, Value>,
     partial: bool,
 ) -> Result<OpenHoursSchedule, Vec<Value>> {
-    todo!("P3.6-D1")
+    let mut issues = Vec::new();
+    let name = match obj.get("name") {
+        None if partial => None,
+        Some(Value::String(text)) => {
+            let trimmed = js::trim(text).to_string();
+            let length = js::utf16_len(&trimmed);
+            if length < 1 {
+                issue(
+                    &mut issues,
+                    vec![json!("name")],
+                    "too_small",
+                    "Too small: expected string to have >=1 characters",
+                );
+                None
+            } else if length > 255 {
+                issue(
+                    &mut issues,
+                    vec![json!("name")],
+                    "too_big",
+                    "Too big: expected string to have <=255 characters",
+                );
+                None
+            } else {
+                Some(trimmed)
+            }
+        }
+        _ => {
+            issue(
+                &mut issues,
+                vec![json!("name")],
+                "invalid_type",
+                "Invalid input: expected string",
+            );
+            None
+        }
+    };
+    let ranges = match obj.get("ranges") {
+        None if partial => None,
+        Some(Value::Array(items)) => {
+            let at = vec![json!("ranges")];
+            let parsed: Vec<Option<OpenHoursRange>> = items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| parse_range(&mut issues, &path(&at, index), item))
+                .collect();
+            if items.len() > MAX_RANGES {
+                issue(
+                    &mut issues,
+                    at.clone(),
+                    "too_big",
+                    "Too big: expected array to have <=28 items",
+                );
+            }
+            if items.is_empty() {
+                issue(
+                    &mut issues,
+                    at,
+                    "too_small",
+                    "Too small: expected array to have >=1 items",
+                );
+            }
+            parsed.into_iter().collect::<Option<Vec<_>>>()
+        }
+        _ => {
+            issue(
+                &mut issues,
+                vec![json!("ranges")],
+                "invalid_type",
+                "Invalid input: expected array",
+            );
+            None
+        }
+    };
+    if issues.is_empty() {
+        Ok(OpenHoursSchedule { name, ranges })
+    } else {
+        Err(issues)
+    }
 }
 
 /// The ranges stored as JSON text (unknown keys dropped, like the output schema).
 pub fn ranges_from_json(text: &str) -> Vec<OpenHoursRange> {
-    todo!("P3.6-D1")
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(text) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            Some(OpenHoursRange {
+                day: u32::try_from(item.get("day")?.as_u64()?).ok()?,
+                from: item.get("from")?.as_str()?.to_string(),
+                to: item.get("to")?.as_str()?.to_string(),
+            })
+        })
+        .collect()
 }

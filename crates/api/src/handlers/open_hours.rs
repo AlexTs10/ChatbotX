@@ -49,5 +49,52 @@ fn schedule_error(error: BusinessError, errors: super::ErrorMap) -> crate::orpc:
 
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
-    todo!("P3.6-D1")
+    let db = &state.db;
+    let ws = call.workspace_id;
+    match route_id {
+        "openHours.list" => service::list(db, ws)
+            .await
+            .map(|rows| {
+                json(
+                    200,
+                    json!({ "data": rows.iter().map(open_hours_json).collect::<Vec<_>>() }),
+                )
+            })
+            .map_err(|e| business_error(e, super::LISTING)),
+        "openHours.create" => {
+            let input = Input::from_body(call.params, call.body);
+            let body = input.obj.clone();
+            input.finish()?;
+            service::create(db, ws, &body)
+                .await
+                .map(|row| json(200, open_hours_json(&row)))
+                .map_err(|e| schedule_error(e, super::CREATING))
+        }
+        "openHours.update" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let open_hours_id = path_id(&mut input);
+            let mut body = input.obj.clone();
+            body.remove("id");
+            if let Err(issues) =
+                chatbotx_business::ecommerce_open_hours::parse_schedule(&body, true)
+            {
+                input.extend_issues(issues);
+            }
+            input.finish()?;
+            service::update(db, ws, open_hours_id.unwrap_or_default(), &body)
+                .await
+                .map(|row| json(200, open_hours_json(&row)))
+                .map_err(|e| schedule_error(e, super::MUTATING))
+        }
+        "openHours.delete" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let open_hours_id = path_id(&mut input);
+            input.finish()?;
+            service::delete(db, ws, open_hours_id.unwrap_or_default())
+                .await
+                .map(|()| no_content())
+                .map_err(|e| business_error(e, super::MUTATING))
+        }
+        _ => Err(crate::routes::not_ported_error()),
+    }
 }
