@@ -10,6 +10,7 @@ pub mod contact_custom_field;
 pub mod contact_filter;
 pub mod contact_note;
 pub mod contact_sequence;
+pub mod copy_name;
 pub mod count_mode;
 pub mod custom_field;
 pub mod discount_code;

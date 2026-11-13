@@ -20,6 +20,11 @@ use serde_json::{Value, json};
 
 use crate::{BusinessError, Result, tx};
 
+mod crud;
+pub mod filters;
+
+pub use crud::*;
+
 fn repo_err(error: chatbotx_db::rusqlite::Error) -> BusinessError {
     BusinessError::Repo(error.into())
 }

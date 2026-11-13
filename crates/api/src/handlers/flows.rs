@@ -9,12 +9,25 @@ use super::input::{Input, Str, key};
 use super::{ApiState, Call, Reply, business_error, id, json};
 
 /// The routes of this module.
-pub const ROUTES: &[&str] = &["flows.create"];
+pub const ROUTES: &[&str] = &[
+    "flows.create",
+    "flows.list",
+    "flows.get",
+    "flows.listNodes",
+    "flows.update",
+    "flows.delete",
+    "flows.duplicate",
+];
 
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     match route_id {
         "flows.create" => create(state, call).await,
+        "flows.list" | "flows.get" | "flows.listNodes" | "flows.update" | "flows.delete"
+        | "flows.duplicate" => {
+            let _ = state;
+            todo!("P3.6-D2")
+        }
         _ => Err(crate::routes::not_ported_error()),
     }
 }
