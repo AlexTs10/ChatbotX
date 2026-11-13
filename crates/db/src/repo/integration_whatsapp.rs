@@ -105,3 +105,95 @@ pub(crate) fn update_flow<M: super::Model>(
     )
     .model(conn)
 }
+
+/// `PROVIDER_ACCOUNT_TARGET_BATCH_SIZE` (`@chatbotx.io/utils` `connection.ts`).
+pub const PROVIDER_ACCOUNT_TARGET_BATCH_SIZE: i64 = 200;
+
+/// `ProviderAccountRouteScope`: which numbers a provider account event may touch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderAccountRouteScope {
+    /// The platform app.
+    Platform { app_id: String },
+    /// A user- or reseller-owned app whose credential owner is `owner_id`.
+    CredentialOwner { owner_id: i64, app_id: String },
+    /// One manually connected integration.
+    ManualIntegration {
+        integration_id: i64,
+        workspace_id: i64,
+    },
+}
+
+/// `ProviderAccountTarget`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderAccountTarget {
+    pub integration_id: i64,
+    pub workspace_id: i64,
+    pub workspace_owner_id: i64,
+    pub inbox_id: i64,
+    /// `None` for a row predating the Connection backfill.
+    pub connection_id: Option<i64>,
+}
+
+/// `ConnectionStatusState` of a client resource inbox.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionStatusState {
+    pub status: String,
+    pub status_reason: Option<String>,
+}
+
+/// The `inbox` of an [`IntegrationWhatsappClientResource`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientResourceInbox {
+    pub id: i64,
+    pub name: String,
+    pub connection: Option<ConnectionStatusState>,
+}
+
+/// `IntegrationWhatsappClientResource` (no `auth`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntegrationWhatsappClientResource {
+    pub id: i64,
+    pub name: String,
+    pub inbox_id: i64,
+    pub display_phone_number: String,
+    pub token_refresh_error: Option<String>,
+    pub phone_number_id: String,
+    pub waba_id: String,
+    pub has_capi_scope: bool,
+    pub capi_scope_checked_at: Option<i64>,
+    pub dataset_id: Option<String>,
+    pub workspace_id: i64,
+    pub created_at: i64,
+    pub is_coexist: bool,
+    pub is_manual: bool,
+    pub inbox: Option<ClientResourceInbox>,
+}
+
+/// `markTokenRefreshError`: scoped by id and workspace; the row's `phoneNumberId`.
+pub fn mark_token_refresh_error(
+    _conn: &Connection,
+    _id: i64,
+    _workspace_id: i64,
+    _error: &str,
+) -> Result<Option<String>> {
+    todo!("P3.2b")
+}
+
+/// `listAccountTargetsByWabaId`: the numbers of `waba_id` that `scope` may act on, by id,
+/// at most [`PROVIDER_ACCOUNT_TARGET_BATCH_SIZE`], after `after_integration_id`.
+pub fn list_account_targets_by_waba_id(
+    _conn: &Connection,
+    _waba_id: &str,
+    _scope: &ProviderAccountRouteScope,
+    _after_integration_id: Option<i64>,
+) -> Result<Vec<ProviderAccountTarget>> {
+    todo!("P3.2b")
+}
+
+/// `listClientResourcesByWorkspaceId` (createdAt ASC).
+pub fn list_client_resources_by_workspace_id(
+    _conn: &Connection,
+    _workspace_id: i64,
+) -> Result<Vec<IntegrationWhatsappClientResource>> {
+    todo!("P3.2b")
+}

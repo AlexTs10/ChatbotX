@@ -229,3 +229,113 @@ pub async fn recipient(
         .await
         .expect("recipient row")
 }
+
+static NUMBER_SEQUENCE: AtomicI64 = AtomicI64::new(7_000);
+
+/// The ids `seed_number` created.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeededNumber {
+    pub workspace_id: i64,
+    pub integration_id: i64,
+    pub inbox_id: i64,
+    pub connection_id: Option<i64>,
+}
+
+/// The TS `seedNumber` of `integration/integration-whatsapp-lifecycle-targets.test.ts`: a
+/// new workspace of `owner_id` (in `tenant_id`, else the root tenant), a whatsapp inbox, an
+/// `IntegrationWhatsapp` on `waba_id` (`auth.clientId` = `app_id`, `auth.metadata.isManual`
+/// when `is_manual`) and, with `with_connection`, a channel `Connection` of the inbox.
+#[allow(clippy::too_many_arguments)]
+pub async fn seed_number(
+    db: &Db,
+    owner_id: i64,
+    tenant_id: Option<i64>,
+    waba_id: &str,
+    phone_number_id: &str,
+    is_manual: bool,
+    with_connection: bool,
+    app_id: Option<&str>,
+) -> SeededNumber {
+    let n = NUMBER_SEQUENCE.fetch_add(1, Ordering::SeqCst);
+    let mut auth = serde_json::Map::new();
+    if let Some(app) = app_id {
+        auth.insert("clientId".to_owned(), serde_json::json!(app));
+    }
+    if is_manual {
+        auth.insert(
+            "metadata".to_owned(),
+            serde_json::json!({ "isManual": true }),
+        );
+    }
+    let auth = serde_json::Value::Object(auth).to_string();
+    let (waba, phone) = (waba_id.to_owned(), phone_number_id.to_owned());
+    let connection_id = with_connection.then_some(n + 300_000);
+    db.write(move |tx| {
+        tx.execute(
+            r#"INSERT INTO "Workspace" ("id", "name", "ownerId", "tenantId") VALUES (?1, ?2, ?3, ?4)"#,
+            chatbotx_db::rusqlite::params![n, format!("lifecycle-{phone}"), owner_id, tenant_id.unwrap_or(1)],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId") VALUES (?1, ?2, 'whatsapp', ?2, ?3)"#,
+            chatbotx_db::rusqlite::params![n + 100_000, phone, n],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "IntegrationWhatsapp" ("id", "auth", "phoneNumberId", "wabaId", "businessId", "name", "workspaceId", "inboxId") VALUES (?1, ?2, ?3, ?4, 'business', ?3, ?5, ?6)"#,
+            chatbotx_db::rusqlite::params![n + 200_000, auth, phone, waba, n, n + 100_000],
+        )?;
+        if let Some(cid) = connection_id {
+            tx.execute(
+                r#"INSERT INTO "Connection" ("id", "workspaceId", "provider", "kind", "channel", "inboxId", "sourceId", "displayName") VALUES (?1, ?2, 'whatsapp', 'channel', 'whatsapp', ?3, ?4, ?4)"#,
+                chatbotx_db::rusqlite::params![cid, n, n + 100_000, phone],
+            )?;
+        }
+        Ok(())
+    })
+    .await
+    .expect("seed number");
+    SeededNumber {
+        workspace_id: n,
+        integration_id: n + 200_000,
+        inbox_id: n + 100_000,
+        connection_id,
+    }
+}
+
+static USER_SEQUENCE: AtomicI64 = AtomicI64::new(5_000);
+
+/// The TS `seedUser`: a new `User`; returns its id.
+pub async fn seed_user(db: &Db) -> i64 {
+    let id = USER_SEQUENCE.fetch_add(1, Ordering::SeqCst);
+    exec(
+        db,
+        format!(
+            r#"INSERT INTO "User" ("id", "email") VALUES ({id}, 'lifecycle-{id}@example.test')"#
+        ),
+    )
+    .await;
+    id
+}
+
+/// A reseller `Tenant` owned by `owner_id`; returns its id.
+pub async fn seed_tenant(db: &Db, owner_id: i64) -> i64 {
+    let id = owner_id + 10_000;
+    exec(
+        db,
+        format!(r#"INSERT INTO "Tenant" ("id", "ownerId") VALUES ({id}, {owner_id})"#),
+    )
+    .await;
+    id
+}
+
+/// A `whatsapp` `PlatformCredential` of `user_id`.
+pub async fn seed_platform_credential(db: &Db, user_id: i64, use_platform_credential: bool) {
+    let flag = i64::from(use_platform_credential);
+    exec(
+        db,
+        format!(
+            r#"INSERT INTO "PlatformCredential" ("id", "userId", "type", "publicConfig", "value", "usePlatformCredential") VALUES ({id}, {user_id}, 'whatsapp', '{{}}', '{{}}', {flag})"#,
+            id = user_id + 20_000
+        ),
+    )
+    .await;
+}
