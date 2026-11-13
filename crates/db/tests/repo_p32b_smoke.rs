@@ -237,3 +237,91 @@ async fn contact_custom_field_definition_readers() {
     .expect("find");
     assert_eq!(one.map(|v| v.value.id), Some(71));
 }
+
+#[tokio::test]
+async fn inbox_readers_and_connection_mirror() {
+    use chatbotx_db::repo::inbox;
+    use chatbotx_db::rusqlite::types::Value;
+    let (db, s) = contact_db().await;
+    db.write(move |tx| {
+        tx.execute(
+            r#"INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId", "status", "disconnectReason") VALUES (3002, 'A smtp', 'smtp', 'mail-1', ?1, 'disconnected', 'tenant_suspended')"#,
+            params![s.workspace_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("inbox fixture");
+    let ws = s.workspace_id;
+    let ids = repo::read(&db, move |c| {
+        inbox::list_identities_by_ids(c, ws, &[s.inbox_id, 3002, 9])
+    })
+    .await
+    .expect("identities");
+    assert_eq!(
+        ids.iter().map(|i| i.id).collect::<Vec<_>>(),
+        vec![s.inbox_id, 3002]
+    );
+    let status = ids[0].status.clone();
+    let connected = repo::read(&db, move |c| {
+        inbox::list_connected_identities_by_channels(c, &[ws], &["messenger", "smtp"])
+    })
+    .await
+    .expect("connected");
+    assert_eq!(connected.len(), usize::from(status == "connected"));
+    let found = repo::read(&db, move |c| inbox::find_by_id(c, 3002))
+        .await
+        .expect("find");
+    assert_eq!(found.map(|i| i.channel), Some("smtp".to_owned()));
+    let locked = repo::read(&db, move |c| inbox::find_by_id_for_update(c, ws + 1, 3002))
+        .await
+        .expect("for update");
+    assert!(locked.is_none());
+    let options = repo::read(&db, move |c| {
+        inbox::list_options_by_workspace_and_channel(c, ws, "smtp")
+    })
+    .await
+    .expect("options");
+    assert_eq!(options, vec![(3002, "A smtp".to_owned())]);
+    let analytics = repo::read(&db, move |c| {
+        inbox::list_analytics_options_by_workspace(c, ws)
+    })
+    .await
+    .expect("analytics");
+    assert!(analytics.iter().all(|o| o.channel != "smtp"));
+    let suspended = repo::read(&db, move |c| {
+        inbox::list_tenant_suspended_without_connection_by_owner(c, s.user_id)
+    })
+    .await
+    .expect("suspended");
+    assert_eq!(
+        suspended.iter().map(|i| i.id).collect::<Vec<_>>(),
+        vec![3002]
+    );
+    repo::write(&db, move |tx| {
+        inbox::update_connection_mirror(
+            tx,
+            ws,
+            3002,
+            &vec![
+                ("status", Value::Text("connected".into())),
+                ("disconnectReason", Value::Null),
+            ],
+        )
+    })
+    .await
+    .expect("mirror");
+    let refused = repo::write(&db, move |tx| {
+        inbox::update_connection_mirror(tx, ws, 3002, &vec![("name", Value::Text("x".into()))])
+    })
+    .await;
+    assert!(refused.is_err());
+    let after = repo::read(&db, move |c| inbox::find_by_id(c, 3002))
+        .await
+        .expect("find")
+        .expect("inbox");
+    assert_eq!(
+        (after.status.as_str(), after.disconnect_reason),
+        ("connected", None)
+    );
+}
