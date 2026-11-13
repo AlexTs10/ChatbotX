@@ -176,6 +176,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         now_ms,
     });
     let mut app = chatbotx_api::router()
+        .merge(chatbotx_api::rpc::rpc_router(Arc::clone(&sessions)))
         .merge(chatbotx_api::session::auth_router(sessions))
         .merge(chatbotx_api::routes::public_api_router(auth));
     if let Some(realtime) = &realtime {
