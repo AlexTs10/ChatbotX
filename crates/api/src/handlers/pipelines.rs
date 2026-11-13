@@ -342,6 +342,12 @@ pub const ROUTES: &[&str] = &[
     "pipelines.listItems",
     "pipelines.stageTotals",
     "pipelines.listContactItems",
+    "pipelines.listComments",
+    "pipelines.addComment",
+    "pipelines.deleteComment",
+    "pipelines.addAttachment",
+    "pipelines.removeAttachment",
+    "pipelines.listActivity",
 ];
 
 /// Runs one of [`ROUTES`].
@@ -501,7 +507,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 stage_id.unwrap_or_default(),
                 move_to,
                 TOKEN,
-                token_actor(),
+                token_actor(&call),
             )
             .await
             .map_err(mutating)?;
@@ -614,6 +620,12 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "pipelines.listItems" | "pipelines.stageTotals" | "pipelines.listContactItems" => {
             query::handle(state, route_id, call).await
         }
+        "pipelines.listComments"
+        | "pipelines.addComment"
+        | "pipelines.deleteComment"
+        | "pipelines.addAttachment"
+        | "pipelines.removeAttachment"
+        | "pipelines.listActivity" => content::handle(state, route_id, call).await,
         "pipelines.listMembers" => {
             let mut input = Input::from_query(call.params, call.query);
             let pipeline_id = input.id("id");
@@ -848,12 +860,12 @@ fn item_fields(input: &mut Input, title_required: bool) -> ItemFields {
     }
 }
 
-/// `tokenActor`.
-fn token_actor() -> PipelineActor {
+/// `tokenActor` (`actorSourceId` = the API token id).
+fn token_actor(call: &Call<'_>) -> PipelineActor {
     PipelineActor {
         kind: "workspaceToken".to_string(),
         user_id: None,
-        source_id: None,
+        source_id: call.token_id().map(|token_id| token_id.to_string()),
     }
 }
 
@@ -931,7 +943,7 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
                     pipeline_id,
                     contact_id: contact_id.unwrap_or_default(),
                     scope: TOKEN,
-                    actor: token_actor(),
+                    actor: token_actor(&call),
                     fields,
                     media_library_file_ids: files.unwrap_or_default(),
                     idempotency_key,
@@ -987,7 +999,7 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
                     pipeline_id,
                     item_id,
                     scope: TOKEN,
-                    actor: token_actor(),
+                    actor: token_actor(&call),
                     fields,
                 },
             )
@@ -1014,7 +1026,7 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
                     destination_pipeline_id: destination,
                     destination_stage_id,
                     scope: TOKEN,
-                    actor: token_actor(),
+                    actor: token_actor(&call),
                 },
             )
             .await
@@ -1026,7 +1038,7 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
             let pipeline_id = input.id("id").unwrap_or_default();
             let item_id = input.id("itemId").unwrap_or_default();
             input.finish()?;
-            item::delete(db, ws, pipeline_id, item_id, TOKEN, token_actor())
+            item::delete(db, ws, pipeline_id, item_id, TOKEN, token_actor(&call))
                 .await
                 .map_err(mutating)?;
             Ok(no_content())

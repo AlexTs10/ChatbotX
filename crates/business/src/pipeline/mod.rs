@@ -5,6 +5,7 @@
 
 pub mod access;
 pub mod assignees;
+pub mod content;
 pub mod currency;
 pub mod events;
 pub mod item;

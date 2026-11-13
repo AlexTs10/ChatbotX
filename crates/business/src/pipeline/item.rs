@@ -31,7 +31,7 @@ use crate::contact_custom_field::normalize_value_for_storage;
 use crate::errors::{BusinessError, Result};
 use crate::tx;
 
-const ITEM_NOT_FOUND: &str = "Item not found";
+pub(crate) const ITEM_NOT_FOUND: &str = "Item not found";
 
 fn is_open(status: &str) -> bool {
     status == "open"
@@ -75,7 +75,7 @@ fn resolve_stage(stages: &[PipelineStage], stage_id: Option<i64>) -> Result<Pipe
 }
 
 /// `lockItemOrFail`.
-fn lock_item(
+pub(crate) fn lock_item(
     conn: &Connection,
     workspace_id: i64,
     pipeline_id: i64,
@@ -94,7 +94,7 @@ fn assert_contact_exists(conn: &Connection, workspace_id: i64, contact_id: i64) 
     Ok(())
 }
 
-fn assert_media_files(conn: &Connection, workspace_id: i64, ids: &[i64]) -> Result<()> {
+pub(crate) fn assert_media_files(conn: &Connection, workspace_id: i64, ids: &[i64]) -> Result<()> {
     let unique: Vec<i64> = ids
         .iter()
         .copied()
@@ -307,7 +307,7 @@ fn subject<'a>(
     }
 }
 
-fn done<T>(value: T, effects: &[PipelineEffect]) -> ItemMutation<T> {
+pub(crate) fn done<T>(value: T, effects: &[PipelineEffect]) -> ItemMutation<T> {
     ItemMutation {
         value,
         events: realtime_events(effects),
