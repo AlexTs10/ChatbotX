@@ -66,3 +66,65 @@ impl AuditService {
         self.jobs.is_some()
     }
 }
+
+tokio::task_local! {
+    static AUDIT_ACTOR: AuditActor;
+}
+
+/// `withAuditContext(actor, fn)` for a future: `actor` is the ambient actor
+/// while `future` runs (nested calls replace it; the outer one comes back).
+pub async fn with_audit_context<F: std::future::Future>(actor: AuditActor, future: F) -> F::Output {
+    AUDIT_ACTOR.scope(actor, future).await
+}
+
+/// `withAuditContext(actor, fn)` for a synchronous callback.
+pub fn with_audit_context_sync<T>(actor: AuditActor, callback: impl FnOnce() -> T) -> T {
+    let _ = (actor, callback);
+    todo!("P3.6-X1")
+}
+
+/// `getAuditActor()`: the ambient actor, if any.
+pub fn audit_actor() -> Option<AuditActor> {
+    todo!("P3.6-X1")
+}
+
+/// `AuditRecordInput`: explicit fields win over the ambient actor.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuditRecordInput {
+    pub action: String,
+    pub detail: String,
+    pub user_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub source: Option<String>,
+}
+
+impl AuditRecordInput {
+    /// `{ action, detail }` (`BaseService.audit(action, detail)`).
+    pub fn new(action: impl Into<String>, detail: impl Into<String>) -> AuditRecordInput {
+        AuditRecordInput {
+            action: action.into(),
+            detail: detail.into(),
+            ..AuditRecordInput::default()
+        }
+    }
+}
+
+impl AuditService {
+    /// `auditService.record`: without a user or a workspace (explicit or
+    /// ambient) the record is dropped with a warning ("audit record dropped:
+    /// missing userId or workspaceId"); else one `sendAuditLog` job on the
+    /// `default` queue, job id `audit-log-<id>`. An enqueue failure is logged
+    /// ("audit log enqueue failed") and swallowed.
+    pub async fn record(&self, input: AuditRecordInput) {
+        let _ = (&self.jobs, &self.ids, input);
+        todo!("P3.6-X1")
+    }
+
+    /// `BaseService.audit(action, detail)`: [`AuditService::record`] with the
+    /// ambient actor only.
+    pub async fn audit(&self, action: &str, detail: &str) {
+        self.record(AuditRecordInput::new(action, detail)).await;
+    }
+}

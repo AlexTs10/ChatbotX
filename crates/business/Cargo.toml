@@ -35,6 +35,8 @@ url = { workspace = true }
 chatbotx-core = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
+# P3.6-X1 tests: log capture (replaces logger spies).
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

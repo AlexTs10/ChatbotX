@@ -8,6 +8,13 @@
 //! `chatbotx_jobs::events` (P2.6); this bus is the in-request fan-out that
 //! feeds them (and the trigger queue) through subscribers.
 
+pub mod cache;
+pub mod contact_inbox;
+pub mod context;
+pub mod emitter;
+pub mod registry;
+pub mod trigger;
+
 use std::sync::{Arc, Mutex, RwLock};
 
 use serde_json::{Map, Value};
