@@ -67,8 +67,17 @@ pub async fn verify_mcp_access_token<V: BearerTokenVerifier>(
     mcp_resource_url: &str,
     token: &str,
 ) -> Result<Option<McpAccessTokenSubject>, TokenVerifyError> {
-    let _ = (verifier, auth_base_url, mcp_resource_url, token);
-    todo!("P3.5e")
+    let claims = verify_claims(verifier, auth_base_url, mcp_resource_url, token, "MCP").await?;
+    let Some(claims) = claims else {
+        return Ok(None);
+    };
+    match (claims["client_id"].as_str(), claims["sub"].as_str()) {
+        (Some(client_id), Some(user_id)) => Ok(Some(McpAccessTokenSubject {
+            client_id: client_id.to_string(),
+            user_id: user_id.to_string(),
+        })),
+        _ => Ok(None),
+    }
 }
 
 /// `verifyMobileAccessToken(auth, token)`.
@@ -78,8 +87,18 @@ pub async fn verify_mobile_access_token<V: BearerTokenVerifier>(
     mobile_audience: &str,
     token: &str,
 ) -> Result<Option<MobileAccessTokenSubject>, TokenVerifyError> {
-    let _ = (verifier, auth_base_url, mobile_audience, token);
-    todo!("P3.5e")
+    let claims = verify_claims(verifier, auth_base_url, mobile_audience, token, "Mobile").await?;
+    let Some(claims) = claims else {
+        return Ok(None);
+    };
+    let Some(user_id) = claims["sub"].as_str().filter(|sub| !sub.is_empty()) else {
+        return Ok(None);
+    };
+    Ok(Some(MobileAccessTokenSubject {
+        user_id: user_id.to_string(),
+        device_id: claims["deviceId"].as_str().map(str::to_string),
+        must_change_password: claims["mustChangePassword"] == Value::Bool(true),
+    }))
 }
 
 /// `verifyOAuthQueryParams(query, secret)`.
@@ -104,6 +123,65 @@ pub async fn verify_mcp_oauth_query<V: OAuthQueryVerifier>(
     query: &str,
     secret: &str,
 ) -> Option<McpConsentQuery> {
-    let _ = (verifier, query, secret);
-    todo!("P3.5e")
+    if !verifier.verify_oauth_query_params(query, secret).await {
+        return None;
+    }
+    let params: Vec<(String, String)> = url::form_urlencoded::parse(query.as_bytes())
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    let get = |name: &str| {
+        params
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+    };
+    let client_id = get("client_id").filter(|id| !id.is_empty())?;
+    let scopes = get("scope")
+        .map(|scope| {
+            scope
+                .split(' ')
+                .filter(|scope| !scope.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(McpConsentQuery { client_id, scopes })
+}
+
+/// jose codes of a JWKS that cannot be read (infrastructure, not the token).
+const JWKS_INFRASTRUCTURE_ERROR_CODES: [&str; 3] = [
+    "ERR_JWKS_TIMEOUT",
+    "ERR_JWKS_INVALID",
+    "ERR_JWKS_MULTIPLE_MATCHING_KEYS",
+];
+
+/// `verifyBearerToken(...).catch(...)`: an invalid token is `None`, a JWKS
+/// failure is `Unavailable`, anything else is rethrown.
+async fn verify_claims<V: BearerTokenVerifier>(
+    verifier: &V,
+    auth_base_url: &str,
+    audience: &str,
+    token: &str,
+    kind: &str,
+) -> Result<Option<Value>, TokenVerifyError> {
+    let issuer = url::Url::parse(auth_base_url)
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_default();
+    let options = VerifyBearerOptions {
+        jwks_url: format!("{auth_base_url}/jwks"),
+        audience: audience.to_string(),
+        issuer,
+    };
+    match verifier.verify_bearer_token(token, &options).await {
+        Ok(claims) => Ok(Some(claims)),
+        Err(BearerVerifyError::Api { status, .. }) if status == "UNAUTHORIZED" => Ok(None),
+        Err(BearerVerifyError::Jose(code))
+            if JWKS_INFRASTRUCTURE_ERROR_CODES.contains(&code.as_str()) =>
+        {
+            tracing::error!(code, "{kind} JWKS verification unavailable");
+            Err(TokenVerifyError::Unavailable)
+        }
+        Err(BearerVerifyError::Jose(code)) if code.starts_with("ERR_J") => Ok(None),
+        Err(error) => Err(TokenVerifyError::Rethrown(error)),
+    }
 }
