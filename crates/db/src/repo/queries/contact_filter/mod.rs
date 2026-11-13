@@ -34,6 +34,7 @@ use super::ctwa_retarget::{
 use crate::repo::sql::Sql;
 use crate::repo::utils::{escape_like_pattern, is_bigint_id, like_contains};
 
+mod commerce;
 mod continents;
 mod field_value;
 pub mod permission;
@@ -718,6 +719,10 @@ fn condition_where(c: &FilterCondition, ctx: &Ctx) -> Option<Sql> {
         "commentedOnPost" => commented_on_post_where(op, v, ctx.workspace_id),
         "leaderboardScore" => leaderboard_score_where(c.leaderboard_id.as_deref(), op, v),
         "isWithinWorkingHours" => working_hours_where(op, v, ctx),
+        "totalSpent" | "numberOfOrders" | "bought" | "boughtItems" | "shoppingCartContainsItems"
+        | "shoppingCartIsEmpty" | "shoppingCartTotal" | "shoppingCartSubtotal" => {
+            commerce::commerce_where(&c.field, op, v, zone)
+        }
         _ => None,
     }
 }
