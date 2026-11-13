@@ -8,6 +8,8 @@ mod repo_common;
 mod repo10;
 #[path = "common/repo11.rs"]
 mod repo11;
+#[path = "common/repo12.rs"]
+mod repo12;
 #[path = "common/repo3.rs"]
 mod repo3;
 
@@ -2072,5 +2074,104 @@ async fn integration_whatsapp_call_settings_and_verification_slot() {
         ))
         .await
         .is_none()
+    );
+}
+
+#[tokio::test]
+async fn contact_inbox_bulk_ai_re_check_and_count() {
+    use chatbotx_db::repo::contact_inbox as ci;
+    use chatbotx_db::repo::queries::ai_handover_bulk_eligibility::AiHandoverBulkAction;
+    use repo11::read;
+    use repo12::{Thread, hours_ago, input, input_for, put_bulk_thread, put_conversation, thread};
+    let db = common::fresh_db().await;
+    let s = seed(&db).await;
+    let (ws, inbox) = (s.workspace_id, s.inbox_id);
+    let held = Thread {
+        state: Some("standby"),
+        role: Some("ai_agent"),
+        updated_at: Some(hours_ago(2)),
+        ..thread()
+    };
+    // 9101, 9102: held by the AI agent; 9103: owned; 9104: held but without a DM.
+    for (ci_id, contact_id, t) in [
+        (9101, 8101, held),
+        (9102, 8102, held),
+        (
+            9103,
+            8103,
+            Thread {
+                state: Some("owned"),
+                ..thread()
+            },
+        ),
+        (9104, 8104, held),
+    ] {
+        put_bulk_thread(&db, ci_id, contact_id, ws, inbox, t).await;
+    }
+    for (conv, contact) in [(7101, 8101), (7102, 8102), (7103, 8103)] {
+        put_conversation(&db, conv, ws, contact, None, None, None).await;
+    }
+    let ids = [9101, 9102, 9103, 9104, 9999];
+    let disable = input();
+    let enable = input_for(AiHandoverBulkAction::Enable);
+    assert_eq!(
+        read(&db, move |c| ci::list_still_bulk_ai_eligible(
+            c, &disable, ws, &ids
+        ))
+        .await,
+        vec![9101, 9102]
+    );
+    assert_eq!(
+        read(&db, move |c| ci::list_still_bulk_ai_eligible(
+            c, &enable, ws, &ids
+        ))
+        .await,
+        vec![9103]
+    );
+    assert!(
+        read(&db, move |c| ci::list_still_bulk_ai_eligible(
+            c,
+            &disable,
+            ws + 1,
+            &ids
+        ))
+        .await
+        .is_empty()
+    );
+    assert_eq!(
+        read(&db, move |c| ci::count_bulk_ai_eligible(
+            c, &disable, ws, inbox, None
+        ))
+        .await,
+        2
+    );
+    assert_eq!(
+        read(&db, move |c| ci::count_bulk_ai_eligible(
+            c,
+            &disable,
+            ws,
+            inbox,
+            Some(9101)
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        read(&db, move |c| ci::count_bulk_ai_eligible(
+            c, &enable, ws, inbox, None
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        read(&db, move |c| ci::count_bulk_ai_eligible(
+            c,
+            &disable,
+            ws,
+            inbox + 1,
+            None
+        ))
+        .await,
+        0
     );
 }

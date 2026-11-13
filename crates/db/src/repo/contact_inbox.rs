@@ -9,6 +9,9 @@ use serde_json::{Value as J, json};
 use super::models::{Contact, ContactInbox, Conversation};
 use super::partials::thread_control::{events_outranked_by, transition};
 use super::queries::ad_referral::ad_conversation_predicate;
+use super::queries::ai_handover_bulk_eligibility::{
+    BulkEligibilityInput, bulk_eligibility_conditions, bulk_eligibility_where,
+};
 use super::sql::Sql;
 use super::{Error, Json, Model, Result, id_list, text_list};
 
@@ -993,11 +996,23 @@ pub struct BulkAiContactInboxRow {
 /// Input of [`list_bulk_ai_page`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BulkAiPageInput {
-    pub eligibility: super::queries::ai_handover_bulk_eligibility::BulkEligibilityInput,
+    pub eligibility: BulkEligibilityInput,
     pub workspace_id: i64,
     pub inbox_id: i64,
     pub after_id: Option<i64>,
     pub limit: i64,
+}
+
+/// `bulkConversationJoin`: the contact's direct-message conversation of the workspace.
+fn bulk_from(select: &str, workspace_id: i64) -> Sql {
+    Sql::bind(
+        format!(
+            "SELECT {select} FROM \"ContactInbox\" INNER JOIN \"Conversation\" AS bcv ON \
+             bcv.\"contactId\" = \"ContactInbox\".\"contactId\" AND bcv.\"sourceId\" IS NULL AND \
+             bcv.\"workspaceId\" = "
+        ),
+        workspace_id,
+    )
 }
 
 /// `listBulkAiPage`: one keyset page (by contact-inbox id) of the eligible threads of an
@@ -1006,29 +1021,68 @@ pub fn list_bulk_ai_page(
     conn: &Connection,
     input: &BulkAiPageInput,
 ) -> Result<Vec<BulkAiContactInboxRow>> {
-    let _ = (conn, input);
-    todo!("P3.2b")
+    let select = format!(
+        "{}, bcv.\"assignedInboxTeamId\", bcv.\"assignedUserId\", bcv.\"id\"",
+        ContactInbox::columns_sql(Some("ContactInbox"))
+    );
+    let mut q = bulk_from(&select, input.workspace_id);
+    q.push(" WHERE ");
+    q.append(bulk_eligibility_where(
+        input.inbox_id,
+        &input.eligibility,
+        input.after_id,
+    ));
+    q.push(" ORDER BY \"ContactInbox\".\"id\" LIMIT ");
+    q.push_bind(input.limit);
+    let n = ContactInbox::COLUMNS.len();
+    q.query_map(conn, |r| {
+        Ok(BulkAiContactInboxRow {
+            contact_inbox: ContactInbox::from_row(r)?,
+            assigned_inbox_team_id: r.get(n)?,
+            assigned_user_id: r.get(n + 1)?,
+            conversation_id: r.get(n + 2)?,
+        })
+    })
 }
 
-/// `listStillBulkAiEligible`: of `ids`, those still eligible (empty `ids`: no query).
+/// `listStillBulkAiEligible`: of `ids`, those still eligible (empty `ids`: no query), by id.
 pub fn list_still_bulk_ai_eligible(
     conn: &Connection,
-    input: &super::queries::ai_handover_bulk_eligibility::BulkEligibilityInput,
+    input: &BulkEligibilityInput,
     workspace_id: i64,
     ids: &[i64],
 ) -> Result<Vec<i64>> {
-    let _ = (conn, input, workspace_id, ids);
-    todo!("P3.2b")
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut q = bulk_from("\"ContactInbox\".\"id\"", workspace_id);
+    q.push(" WHERE ");
+    let mut parts = vec![Some(
+        Sql::bind(
+            "\"ContactInbox\".\"id\" IN (SELECT value FROM json_each(",
+            id_list(ids),
+        )
+        .closed("))"),
+    )];
+    parts.extend(bulk_eligibility_conditions(input).into_iter().map(Some));
+    q.append(Sql::and(parts));
+    q.push(" ORDER BY \"ContactInbox\".\"id\"");
+    q.query_map(conn, |r| r.get(0))
 }
 
 /// `countBulkAiEligible`: eligible threads of one inbox after `after_id` (all when `None`).
 pub fn count_bulk_ai_eligible(
     conn: &Connection,
-    input: &super::queries::ai_handover_bulk_eligibility::BulkEligibilityInput,
+    input: &BulkEligibilityInput,
     workspace_id: i64,
     inbox_id: i64,
     after_id: Option<i64>,
 ) -> Result<i64> {
-    let _ = (conn, input, workspace_id, inbox_id, after_id);
-    todo!("P3.2b")
+    let mut q = bulk_from("count(*)", workspace_id);
+    q.push(" WHERE ");
+    q.append(bulk_eligibility_where(inbox_id, input, after_id));
+    Ok(q.query_map(conn, |r| r.get(0))?
+        .into_iter()
+        .next()
+        .unwrap_or(0))
 }
