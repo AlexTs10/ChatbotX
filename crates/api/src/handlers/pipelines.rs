@@ -22,6 +22,9 @@ use chatbotx_db::repo::partials::pipeline::{PIPELINE_REFERENCE_NAME_MAX, Pipelin
 use chatbotx_db::repo::pipeline_item_content::AttachmentWithFile;
 use serde_json::{Value, json};
 
+mod query;
+pub use query::{item_filter_query, item_list_query};
+
 use super::custom_fields::CUSTOM_FIELD_TYPES;
 use super::input::{Input, Num, Seg, Str, child, key};
 use super::{

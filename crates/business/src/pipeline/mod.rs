@@ -11,6 +11,7 @@ pub mod item;
 pub mod members;
 pub mod mutation;
 pub mod naming;
+pub mod query;
 pub mod service;
 pub mod settings;
 pub mod structure;
