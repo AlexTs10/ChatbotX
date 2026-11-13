@@ -80,7 +80,7 @@ const CONTACT_FIELDS: &[&str] = &[
     "contactCreatedAt",
     "contactCreatedDateMinutesAgo",
     "source",
-    "interactedInLast",
+    "interactedInLast24h",
     "conversationTransferredToHuman",
     "followUp",
     "archived",
