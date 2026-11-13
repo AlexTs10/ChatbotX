@@ -169,31 +169,162 @@ pub struct IntegrationWhatsappClientResource {
     pub inbox: Option<ClientResourceInbox>,
 }
 
+/// `isManualWhatsappAuth`: `COALESCE(auth #>> '{metadata,isManual}', 'false') = 'true'`
+/// (a JSON `true` or the text `"true"`).
+fn is_manual_sql(auth: &str) -> String {
+    format!(
+        "COALESCE(json_type({auth}, '$.metadata.isManual') = 'true' OR \
+         (json_type({auth}, '$.metadata.isManual') = 'text' AND \
+         json_extract({auth}, '$.metadata.isManual') = 'true'), 0)"
+    )
+}
+
 /// `markTokenRefreshError`: scoped by id and workspace; the row's `phoneNumberId`.
 pub fn mark_token_refresh_error(
-    _conn: &Connection,
-    _id: i64,
-    _workspace_id: i64,
-    _error: &str,
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    error: &str,
 ) -> Result<Option<String>> {
-    todo!("P3.2b")
+    let mut stmt = conn.prepare_cached(
+        "UPDATE \"IntegrationWhatsapp\" SET \"tokenRefreshError\" = ?1, \"updatedAt\" = ?2 \
+         WHERE \"id\" = ?3 AND \"workspaceId\" = ?4 RETURNING \"phoneNumberId\"",
+    )?;
+    let mut rows = stmt.query(rusqlite::params![error, super::now_ms(), id, workspace_id])?;
+    Ok(match rows.next()? {
+        Some(row) => Some(row.get(0)?),
+        None => None,
+    })
 }
 
 /// `listAccountTargetsByWabaId`: the numbers of `waba_id` that `scope` may act on, by id,
 /// at most [`PROVIDER_ACCOUNT_TARGET_BATCH_SIZE`], after `after_integration_id`.
 pub fn list_account_targets_by_waba_id(
-    _conn: &Connection,
-    _waba_id: &str,
-    _scope: &ProviderAccountRouteScope,
-    _after_integration_id: Option<i64>,
+    conn: &Connection,
+    waba_id: &str,
+    scope: &ProviderAccountRouteScope,
+    after_integration_id: Option<i64>,
 ) -> Result<Vec<ProviderAccountTarget>> {
-    todo!("P3.2b")
+    // The tenant's owner for a reseller tenant, else the workspace's own owner.
+    let owner = format!(
+        "(CASE WHEN w.\"tenantId\" <> {root} THEN COALESCE(t.\"ownerId\", w.\"ownerId\") \
+         ELSE w.\"ownerId\" END)",
+        root = super::platform_admin::ROOT_TENANT_ID
+    );
+    let manual = is_manual_sql("iw.\"auth\"");
+    let through_app = |app: &str, fallback: &str| {
+        let mut s = Sql::bind("(iw.\"auth\" ->> '$.clientId' = ", app.to_owned());
+        s.push(&format!(
+            " OR (iw.\"auth\" ->> '$.clientId' IS NULL AND {fallback}))"
+        ));
+        s
+    };
+    let scope_sql = match scope {
+        ProviderAccountRouteScope::ManualIntegration {
+            integration_id,
+            workspace_id,
+        } => {
+            let mut s = Sql::bind("iw.\"id\" = ", *integration_id);
+            s.append(Sql::bind(" AND iw.\"workspaceId\" = ", *workspace_id));
+            s
+        }
+        ProviderAccountRouteScope::CredentialOwner { owner_id, app_id } => {
+            let mut s = Sql::bind(format!("{owner} = "), *owner_id);
+            s.push(&format!(" AND NOT ({manual}) AND "));
+            s.append(through_app(app_id, "1"));
+            s
+        }
+        ProviderAccountRouteScope::Platform { app_id } => {
+            let mut s = Sql::raw(format!("NOT ({manual}) AND "));
+            s.append(through_app(
+                app_id,
+                &format!(
+                    "NOT EXISTS (SELECT 1 FROM \"PlatformCredential\" AS pc WHERE pc.\"userId\" = \
+                     {owner} AND pc.\"type\" = 'whatsapp' AND pc.\"usePlatformCredential\" = 0)"
+                ),
+            ));
+            s
+        }
+    };
+    let mut q = Sql::bind(
+        "SELECT iw.\"id\", iw.\"workspaceId\", w.\"ownerId\", iw.\"inboxId\", c.\"id\" \
+         FROM \"IntegrationWhatsapp\" AS iw \
+         JOIN \"Workspace\" AS w ON w.\"id\" = iw.\"workspaceId\" \
+         LEFT JOIN \"Tenant\" AS t ON t.\"id\" = w.\"tenantId\" \
+         LEFT JOIN \"Connection\" AS c ON c.\"inboxId\" = iw.\"inboxId\" \
+         WHERE iw.\"wabaId\" = ",
+        waba_id.to_owned(),
+    );
+    if let Some(after) = after_integration_id {
+        q.append(Sql::bind(" AND iw.\"id\" > ", after));
+    }
+    q.push(" AND (");
+    q.append(scope_sql);
+    q.push(") ORDER BY iw.\"id\" LIMIT ");
+    q.push_bind(PROVIDER_ACCOUNT_TARGET_BATCH_SIZE);
+    q.query_map(conn, |r| {
+        Ok(ProviderAccountTarget {
+            integration_id: r.get(0)?,
+            workspace_id: r.get(1)?,
+            workspace_owner_id: r.get(2)?,
+            inbox_id: r.get(3)?,
+            connection_id: r.get(4)?,
+        })
+    })
 }
 
-/// `listClientResourcesByWorkspaceId` (createdAt ASC).
+/// `listClientResourcesByWorkspaceId` (createdAt ASC, id ASC).
 pub fn list_client_resources_by_workspace_id(
-    _conn: &Connection,
-    _workspace_id: i64,
+    conn: &Connection,
+    workspace_id: i64,
 ) -> Result<Vec<IntegrationWhatsappClientResource>> {
-    todo!("P3.2b")
+    let sql = format!(
+        "SELECT iw.\"id\", iw.\"name\", iw.\"inboxId\", iw.\"displayPhoneNumber\", \
+         iw.\"tokenRefreshError\", iw.\"phoneNumberId\", iw.\"wabaId\", iw.\"hasCapiScope\", \
+         iw.\"capiScopeCheckedAt\", iw.\"datasetId\", iw.\"workspaceId\", iw.\"createdAt\", \
+         iw.\"isCoexist\", {manual}, i.\"id\", i.\"name\", c.\"status\", c.\"statusReason\" \
+         FROM \"IntegrationWhatsapp\" AS iw \
+         LEFT JOIN \"Inbox\" AS i ON i.\"id\" = iw.\"inboxId\" \
+         LEFT JOIN \"Connection\" AS c ON c.\"inboxId\" = iw.\"inboxId\" \
+         WHERE iw.\"workspaceId\" = ?1 ORDER BY iw.\"createdAt\" ASC, iw.\"id\" ASC",
+        manual = is_manual_sql("iw.\"auth\"")
+    );
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let rows = stmt
+        .query_map([workspace_id], |r| {
+            let inbox_id: Option<i64> = r.get(14)?;
+            let status: Option<String> = r.get(16)?;
+            Ok(IntegrationWhatsappClientResource {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                inbox_id: r.get(2)?,
+                display_phone_number: r.get(3)?,
+                token_refresh_error: r.get(4)?,
+                phone_number_id: r.get(5)?,
+                waba_id: r.get(6)?,
+                has_capi_scope: r.get(7)?,
+                capi_scope_checked_at: r.get(8)?,
+                dataset_id: r.get(9)?,
+                workspace_id: r.get(10)?,
+                created_at: r.get(11)?,
+                is_coexist: r.get(12)?,
+                is_manual: r.get(13)?,
+                inbox: match inbox_id {
+                    Some(id) => Some(ClientResourceInbox {
+                        id,
+                        name: r.get(15)?,
+                        connection: match status {
+                            Some(status) => Some(ConnectionStatusState {
+                                status,
+                                status_reason: r.get(17)?,
+                            }),
+                            None => None,
+                        },
+                    }),
+                    None => None,
+                },
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
