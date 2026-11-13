@@ -7,6 +7,8 @@ publish.workspace = true
 
 # Business services (`packages/business/src/<domain>`), one module per domain (P3.6+).
 [dependencies]
+# API channel tokens (`generateApiChannelToken`: base64url of 32 random bytes).
+base64 = "0.22"
 # Local day and time of an instant in the workspace time zone (`Intl.DateTimeFormat`).
 chrono = { workspace = true, features = ["std"] }
 chrono-tz = { workspace = true }
@@ -15,7 +17,12 @@ chatbotx-db = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
+# SSRF guard DoH lookup (`fetch("https://1.1.1.1/dns-query")`); same client as crates/files.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# Random token bytes (`crypto.getRandomValues`).
+ring = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tracing = { workspace = true }
 # Chat links of inboxes (`new URL` + `searchParams.set`).
 url = { workspace = true }

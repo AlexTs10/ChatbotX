@@ -18,7 +18,16 @@ use crate::auth::{
     TokenAuthRequest, WorkspaceTokenDeps, authenticate_channel_api_token,
     authorize_workspace_token_for_scope, invalid_access_token_error,
 };
-use crate::handlers::{ApiState, Call, dispatch};
+use crate::handlers::channels::{self, ChannelCall};
+use crate::handlers::{ApiState, Call, Principal, dispatch_as};
+
+/// Who passed a route's auth.
+enum Caller {
+    /// A workspace token: the workspace id and the token.
+    Workspace(i64, Principal),
+    /// A channel (`cbx_api_`) token.
+    Channel(ChannelCall),
+}
 use crate::orpc::OrpcError;
 
 /// The auth chain of an operation (the oRPC builder it is declared with).
@@ -239,26 +248,52 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                 &mut res_headers,
             )
             .await
-            .map(|context| context.workspace.id.parse::<i64>().ok())
+            .map(|context| {
+                let principal = Principal {
+                    token_id: context.api_token.id.parse().ok(),
+                    scopes: context.api_token.scopes.clone(),
+                };
+                context
+                    .workspace
+                    .id
+                    .parse::<i64>()
+                    .ok()
+                    .map(|ws| Caller::Workspace(ws, principal))
+            })
         }
         RouteAuth::ChannelToken => authenticate_channel_api_token(deps, headers)
             .await
-            .map(|_| None),
+            .map(|context| {
+                match (context.inbox_id.parse(), context.workspace.id.parse()) {
+                    (Ok(inbox_id), Ok(workspace_id)) => Some(Caller::Channel(ChannelCall {
+                        inbox_id,
+                        workspace_id,
+                    })),
+                    _ => None,
+                }
+            }),
         // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
         RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
             Err(invalid_access_token_error())
         }
     };
     let mut response = match outcome {
-        Ok(workspace_id) => {
-            let call = workspace_id.map(|workspace_id| Call {
-                workspace_id,
-                params: &matched.params,
-                query: uri.query(),
-                body,
-            });
-            let handled = match (handlers, call) {
-                (Some(state), Some(call)) => dispatch(state, route.id, call).await,
+        Ok(caller) => {
+            let handled = match (handlers, caller) {
+                (Some(state), Some(Caller::Workspace(workspace_id, principal))) => {
+                    let call = Call {
+                        workspace_id,
+                        params: &matched.params,
+                        query: uri.query(),
+                        body,
+                    };
+                    dispatch_as(state, route.id, call, &principal).await
+                }
+                (Some(state), Some(Caller::Channel(call))) => {
+                    channels::handle(state, route.id, call)
+                        .await
+                        .map(|reply| reply.unwrap_or_else(IntoResponse::into_response))
+                }
                 _ => None,
             };
             handled.unwrap_or_else(|| not_ported_error().into_response())

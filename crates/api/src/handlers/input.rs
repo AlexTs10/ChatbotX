@@ -120,6 +120,14 @@ pub struct Input {
 }
 
 impl Input {
+    /// Input from one JSON object (a nested config checked on its own).
+    pub fn from_object(obj: Map<String, Value>) -> Input {
+        Input {
+            obj,
+            issues: Vec::new(),
+        }
+    }
+
     /// Input from the path params and a JSON body (`None` = no body).
     pub fn from_body(params: &[(&'static str, String)], body: &[u8]) -> Input {
         let mut input = Input::default();

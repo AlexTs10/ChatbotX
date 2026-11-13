@@ -2,6 +2,8 @@
 //! one module per builder router. [`dispatch`] runs the handler of a route after
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
+pub mod channels;
+pub mod connections;
 pub mod input;
 pub mod open_hours;
 pub mod places;
@@ -11,6 +13,7 @@ pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
 pub mod reflinks;
+pub mod webchats;
 
 use std::sync::Arc;
 
@@ -42,6 +45,16 @@ pub struct Call<'a> {
     pub query: Option<&'a str>,
     /// The raw request body.
     pub body: &'a [u8],
+}
+
+/// The calling workspace token (`context.apiToken`). The default (no token
+/// id, `scopes: None` = every scope) is what [`dispatch`] uses.
+#[derive(Debug, Clone, Default)]
+pub struct Principal {
+    /// `context.apiToken.id`.
+    pub token_id: Option<i64>,
+    /// `context.apiToken.scopes` (`None` = unrestricted).
+    pub scopes: Option<Vec<String>>,
 }
 
 /// A handler outcome.
@@ -150,9 +163,24 @@ pub fn internal_error(cause: &str) -> OrpcError {
     out
 }
 
-/// Runs the handler of `route_id`; `None` = not ported yet.
+/// Runs the handler of `route_id` with an unrestricted token; `None` = not
+/// ported yet.
 pub async fn dispatch(state: &ApiState, route_id: &str, call: Call<'_>) -> Option<Response> {
-    let reply = if places::ROUTES.contains(&route_id) {
+    dispatch_as(state, route_id, call, &Principal::default()).await
+}
+
+/// Runs the handler of `route_id` for `principal`; `None` = not ported yet.
+pub async fn dispatch_as(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    principal: &Principal,
+) -> Option<Response> {
+    let reply = if connections::ROUTES.contains(&route_id) {
+        connections::handle(state, route_id, call, principal).await?
+    } else if webchats::ROUTES.contains(&route_id) {
+        webchats::handle(state, route_id, call).await
+    } else if places::ROUTES.contains(&route_id) {
         places::handle(state, route_id, call).await
     } else if open_hours::ROUTES.contains(&route_id) {
         open_hours::handle(state, route_id, call).await

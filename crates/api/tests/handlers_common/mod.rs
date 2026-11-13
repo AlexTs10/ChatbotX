@@ -102,3 +102,70 @@ pub async fn call(
     };
     (status, json)
 }
+
+/// [`call`] for a token with these `scopes` (`None` = unrestricted), through
+/// `handlers::dispatch_as` (P3.6-D2). `None` = the route did not handle the
+/// call (not ported).
+pub async fn call_as(
+    fixture: &Fixture,
+    route_id: &str,
+    workspace_id: i64,
+    scopes: Option<&[&str]>,
+    params: &[(&'static str, &str)],
+    query: Option<&str>,
+    body: Option<Value>,
+) -> Option<(u16, Value)> {
+    let params: Vec<(&'static str, String)> =
+        params.iter().map(|(k, v)| (*k, (*v).to_string())).collect();
+    let body = body.map(|b| b.to_string()).unwrap_or_default();
+    let principal = chatbotx_api::handlers::Principal {
+        token_id: None,
+        scopes: scopes.map(|s| s.iter().map(|v| (*v).to_string()).collect()),
+    };
+    let response = chatbotx_api::handlers::dispatch_as(
+        &fixture.state,
+        route_id,
+        Call {
+            workspace_id,
+            params: &params,
+            query,
+            body: body.as_bytes(),
+        },
+        &principal,
+    )
+    .await?;
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).expect("JSON body")
+    };
+    Some((status, json))
+}
+
+/// A row value of the fixture database (`sql` has one `?1`).
+pub async fn scalar(fixture: &Fixture, sql: &'static str, id: i64) -> Option<Value> {
+    fixture
+        .state
+        .db
+        .read(move |conn| {
+            use chatbotx_db::rusqlite::OptionalExtension as _;
+            conn.query_row(sql, [id], |row| {
+                let value: chatbotx_db::rusqlite::types::Value = row.get(0)?;
+                Ok(match value {
+                    chatbotx_db::rusqlite::types::Value::Null => Value::Null,
+                    chatbotx_db::rusqlite::types::Value::Integer(v) => Value::from(v),
+                    chatbotx_db::rusqlite::types::Value::Real(v) => Value::from(v),
+                    chatbotx_db::rusqlite::types::Value::Text(v) => Value::String(v),
+                    chatbotx_db::rusqlite::types::Value::Blob(_) => Value::Null,
+                })
+            })
+            .optional()
+            .map_err(Into::into)
+        })
+        .await
+        .expect("scalar")
+}
