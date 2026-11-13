@@ -17,6 +17,7 @@ pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
 pub mod reflinks;
+pub mod tags;
 pub mod webchats;
 
 use std::sync::Arc;
@@ -225,6 +226,8 @@ pub async fn dispatch_as(
 ) -> Option<Response> {
     let reply = if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
+    } else if tags::ROUTES.contains(&route_id) {
+        tags::handle(state, route_id, call).await
     } else if contacts::ROUTES.contains(&route_id) {
         contacts::handle(state, route_id, call).await
     } else if custom_fields::ROUTES.contains(&route_id) {

@@ -25,6 +25,7 @@ pub mod qr_code;
 pub mod referral;
 pub mod reflink;
 pub mod store_source;
+pub mod tag;
 pub mod tx;
 pub mod vendor;
 pub mod workspace_api_token;

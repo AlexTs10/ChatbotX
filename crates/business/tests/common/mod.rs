@@ -365,3 +365,36 @@ pub fn folder(
     )?;
     Ok(id)
 }
+
+/// Inserts a live `Tag`.
+pub fn tag(tx: &Connection, id: i64, workspace_id: i64, name: &str) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Tag" ("id", "workspaceId", "name") VALUES (?1, ?2, ?3)"#,
+        params![id, workspace_id, name],
+    )?;
+    Ok(id)
+}
+
+/// Links a contact and a tag (`"ContactToTag"`).
+pub fn tag_link(tx: &Connection, contact_id: i64, tag_id: i64) -> Result<(), DbError> {
+    tx.execute(
+        r#"INSERT INTO "ContactToTag" ("contactId", "tagId") VALUES (?1, ?2)"#,
+        params![contact_id, tag_id],
+    )?;
+    Ok(())
+}
+
+/// The tag ids linked to a contact, ascending.
+pub async fn linked_tag_ids(db: &Db, contact_id: i64) -> Vec<i64> {
+    db.read(move |conn| {
+        let mut stmt = conn.prepare(
+            r#"SELECT "tagId" FROM "ContactToTag" WHERE "contactId" = ?1 ORDER BY "tagId""#,
+        )?;
+        let ids = stmt
+            .query_map(params![contact_id], |r| r.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ids)
+    })
+    .await
+    .expect("linked tags")
+}
