@@ -6,7 +6,10 @@
 use chatbotx_db::repo::client::CappedCount;
 use chatbotx_db::{StatementTimeout, WriteTx};
 
-use crate::errors::Result;
+use chatbotx_db::repo;
+
+use crate::errors::{BusinessError, Result};
+use crate::tx;
 
 /// `BOUNDED_COUNT_CAP`.
 pub const BOUNDED_COUNT_CAP: i64 = 100_000;
@@ -53,8 +56,9 @@ pub async fn count_by_mode(
     exact: ExactCount,
     bounded: BoundedCount,
 ) -> Result<CountOutcome> {
-    let _ = (db, mode, exact, bounded);
-    todo!("P3.6-D2")
+    let timeout = StatementTimeout::parse(EXACT_COUNT_STATEMENT_TIMEOUT)
+        .map_err(|e| BusinessError::Repo(repo::Error::msg(format!("{e:?}"))))?;
+    count_by_mode_with_timeout(db, mode, timeout, exact, bounded).await
 }
 
 /// `countByMode` under a given statement timeout: a timed-out statement is
@@ -66,6 +70,45 @@ pub async fn count_by_mode_with_timeout(
     exact: ExactCount,
     bounded: BoundedCount,
 ) -> Result<CountOutcome> {
-    let _ = (db, mode, timeout, exact, bounded);
-    todo!("P3.6-D2")
+    let mode = mode.unwrap_or_default();
+    let outcome = tx::write(db, move |tx| {
+        tx.set_statement_timeout(timeout)?;
+        match mode {
+            CountMode::Exact => Ok(CountOutcome {
+                total: exact(tx)?,
+                total_count_capped: false,
+                count_cap: None,
+            }),
+            CountMode::Bounded => {
+                let counted = bounded(BOUNDED_COUNT_CAP, tx)?;
+                Ok(CountOutcome {
+                    total: counted.total,
+                    total_count_capped: counted.capped,
+                    count_cap: Some(BOUNDED_COUNT_CAP),
+                })
+            }
+        }
+    })
+    .await;
+    outcome.map_err(|error| {
+        if is_statement_timeout(&error) {
+            count_timeout_exception()
+        } else {
+            error
+        }
+    })
+}
+
+/// `isStatementTimeoutError`: SQLSTATE `57014`.
+fn is_statement_timeout(error: &BusinessError) -> bool {
+    matches!(error, BusinessError::Repo(repo::Error::Db(db)) if db.sqlstate() == Some("57014"))
+}
+
+/// `countTimeoutException`.
+pub fn count_timeout_exception() -> BusinessError {
+    BusinessError::exception(
+        "Counting took too long. Narrow the filter, or use countMode \"bounded\" for a capped count.",
+        "countTimeout",
+        503,
+    )
 }

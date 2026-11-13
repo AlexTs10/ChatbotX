@@ -1,21 +1,28 @@
 //! `features/contacts/api/public/crud.ts` (P3.6-D2 slice contacts core):
 //! `contacts.get / create / update / updateLegacy / delete / block /
-//! unblock / upsert / findByCustomField`. The list, count, search, import and sub-resource
-//! routes are not ported yet.
+//! unblock / upsert / findByCustomField`; slice contacts list: `contacts.list /
+//! search / count`. The import and sub-resource routes are not ported yet.
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::contact::avatar::{AvatarInbox, TenantUrls, resolve_contact_avatar_url};
+use chatbotx_business::contact::list::{
+    ContactListInclude, ListContactsInput, ListOptions, ListRows, ListScope, ListedContact,
+    Projection, count as count_contacts, list as list_contacts,
+};
 use chatbotx_business::contact::{
     CreateContactInput, CreateOptions, UpsertData, block_and_record, create_with_inbox,
     delete_and_record, find_public_contact_or_fail, list_by_custom_field_value,
     resolve_id_by_identifier, unblock_and_record, update_fields_and_custom_fields,
     upsert_by_identifier,
 };
+use chatbotx_business::contact_filter::{parse_strict_param, to_filter_criteria};
+use chatbotx_business::count_mode::CountMode;
+use chatbotx_db::repo::SortItem;
 use chatbotx_db::repo::contact::{ContactInboxWithInbox, ConversationWithAssignees, PublicContact};
 use chatbotx_db::repo::models::{Contact, ContactCustomField, Inbox, Tag};
 use serde_json::{Map, Value, json};
 
-use super::input::{Input, Str, key};
+use super::input::{Input, Num, Seg, Str, key};
 use super::{
     ApiState, Call, ErrorMap, FINDING, MUTATING, Reply, business_error, date, id, json, no_content,
     opt_date, opt_id,
@@ -695,15 +702,292 @@ async fn find_by_custom_field(state: &ApiState, call: Call<'_>) -> Reply {
 
 // ---- list / search / count ------------------------------------------------
 
+const BROADCAST_SUBACTIONS: &[&str] = &[
+    "allContacts",
+    "messengerActiveContacts",
+    "messengerTemplateMessage",
+    "whatsappTemplateMessage",
+    "whatsappWithin24Hours",
+    "instagramActiveContacts",
+    "telegramAllContacts",
+    "tiktokActiveContacts",
+];
+const INCLUDE_OPTIONS: &[&str] = &["tags", "customFields", "inboxes", "conversation"];
+/// `possibleErrorsOnCounting`.
+const COUNTING: ErrorMap = &[("businessError", 400), ("countTimeout", 503)];
+
+/// The query string as one object; oRPC bracket keys (`key[]=a`,
+/// `key[0]=a`) become arrays, every other key is a string (the last value
+/// of a repeated key wins).
+fn bracket_query(params: &[(&'static str, String)], query: Option<&str>) -> Input {
+    let mut obj = Map::new();
+    let mut indexed: Vec<(String, usize, String)> = Vec::new();
+    for (name, value) in url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()) {
+        let (name, value) = (name.into_owned(), value.into_owned());
+        if let Some(base) = name.strip_suffix("[]") {
+            let slot = obj
+                .entry(base.to_string())
+                .or_insert_with(|| Value::Array(Vec::new()));
+            if let Value::Array(items) = slot {
+                items.push(Value::String(value));
+            } else {
+                *slot = Value::Array(vec![Value::String(value)]);
+            }
+        } else if let Some((base, rest)) = name.split_once('[')
+            && let Some(Ok(index)) = rest.strip_suffix(']').map(str::parse::<usize>)
+        {
+            indexed.push((base.to_string(), index, value));
+        } else {
+            obj.insert(name, Value::String(value));
+        }
+    }
+    indexed.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
+    for (base, _, value) in indexed {
+        let slot = obj.entry(base).or_insert_with(|| Value::Array(Vec::new()));
+        if let Value::Array(items) = slot {
+            items.push(Value::String(value));
+        }
+    }
+    for (name, value) in params {
+        obj.insert((*name).to_string(), Value::String(value.clone()));
+    }
+    Input::from_object(obj)
+}
+
+/// A `nullish` positive integer key (`z.coerce.number().int().min(1)`).
+fn positive_int(input: &mut Input, name: &str) -> Option<i64> {
+    if matches!(input.get(name), Some(Value::Null)) {
+        return None;
+    }
+    input.opt_coerce_int(
+        name,
+        Num {
+            min: Some(1.0),
+            ..Num::default()
+        },
+    )
+}
+
+/// An optional array key whose items each pass `item`.
+fn array_of<T>(
+    input: &mut Input,
+    name: &str,
+    mut item: impl FnMut(&mut Input, &[Seg], &Value) -> Option<T>,
+) -> Option<Vec<T>> {
+    let value = input.get(name).cloned()?;
+    let Value::Array(items) = value else {
+        input.issue(
+            &key(name),
+            "invalid_type",
+            &format!(
+                "Invalid input: expected array, received {}",
+                if value.is_string() { "string" } else { "other" }
+            ),
+        );
+        return None;
+    };
+    let mut out = Vec::new();
+    for (index, value) in items.iter().enumerate() {
+        let path = vec![Seg::Key(name.into()), Seg::Index(index)];
+        if let Some(parsed) = item(input, &path, value) {
+            out.push(parsed);
+        }
+    }
+    Some(out)
+}
+
+/// `sort` preprocess: an array of `{id, desc}` (or its JSON text), else none.
+fn sort_items(value: Option<&Value>) -> Option<Vec<SortItem>> {
+    let parsed = match value? {
+        Value::String(text) => serde_json::from_str::<Value>(text).ok()?,
+        other => other.clone(),
+    };
+    let Value::Array(items) = parsed else {
+        return None;
+    };
+    items
+        .iter()
+        .map(|item| {
+            Some(SortItem {
+                id: item.get("id")?.as_str()?.to_string(),
+                desc: item.get("desc")?.as_bool()?,
+            })
+        })
+        .collect()
+}
+
+/// `listContactsPublicRequest` / `countContactsPublicRequest` keys shared
+/// by list and count.
+fn parse_list_input(input: &mut Input, workspace_id: i64) -> ListContactsInput {
+    let page = positive_int(input, "page");
+    let per_page = positive_int(input, "perPage");
+    let sort = sort_items(input.get("sort"));
+    let keyword = input.opt_string("keyword", Str::default());
+    let contact_filter = match parse_strict_param(input.get("contactFilter")) {
+        Ok(filter) => filter.as_ref().map(to_filter_criteria),
+        Err(issues) => {
+            input.extend_issues(issues);
+            None
+        }
+    };
+    let channels = array_of(input, "channels", |input, path, value| {
+        input.enum_at(path, Some(value), CHANNEL_TYPES, true)
+    });
+    let inbox_ids = array_of(input, "inboxIds", |input, path, value| {
+        input.id_at(path, Some(value), true)
+    });
+    let integration_whatsapp_id = input
+        .get("integrationWhatsappId")
+        .cloned()
+        .and_then(|v| input.id_at(&key("integrationWhatsappId"), Some(&v), false));
+    let integration_messenger_id = input
+        .get("integrationMessengerId")
+        .cloned()
+        .and_then(|v| input.id_at(&key("integrationMessengerId"), Some(&v), false));
+    let subaction = input
+        .get("subaction")
+        .cloned()
+        .and_then(|v| input.enum_at(&key("subaction"), Some(&v), BROADCAST_SUBACTIONS, false));
+    ListContactsInput {
+        workspace_id,
+        keyword,
+        contact_filter,
+        channels,
+        inbox_ids,
+        integration_whatsapp_id,
+        integration_messenger_id,
+        subaction,
+        page,
+        per_page,
+        sort,
+    }
+}
+
+/// `withCount`: a boolean (`"true"` / `"false"` from a query string).
+fn with_count(input: &mut Input) -> bool {
+    match input.get("withCount").cloned() {
+        None => true,
+        Some(Value::String(text)) if text == "true" => true,
+        Some(Value::String(text)) if text == "false" => false,
+        Some(value) => input
+            .bool_at(&key("withCount"), Some(&value), false)
+            .unwrap_or(true),
+    }
+}
+
+/// One `contacts.list` row (`contactResponse` without the relations the
+/// caller left out of `include`).
+fn listed_contact_json(state: &ApiState, row: &ListedContact) -> Value {
+    let mut out = contact_json(&row.contact);
+    let inboxes: Vec<AvatarInbox> = row
+        .contact_inboxes
+        .iter()
+        .flatten()
+        .map(|ci| AvatarInbox {
+            id: ci.contact_inbox.id,
+            channel: ci.contact_inbox.channel.clone(),
+            last_message_at: ci.contact_inbox.last_message_at,
+        })
+        .collect();
+    let avatar = resolve_contact_avatar_url(
+        row.contact.workspace_id,
+        row.contact.avatar.as_deref(),
+        &inboxes,
+        &tenant_urls(state),
+        now_ms(),
+    );
+    out.insert("avatar".into(), json!(avatar));
+    if let Some(values) = &row.contact_custom_fields {
+        out.insert(
+            "contactCustomFields".into(),
+            values.iter().map(custom_field_json).collect(),
+        );
+    }
+    if let Some(tags) = &row.tags {
+        out.insert("tags".into(), tags.iter().map(tag_json).collect());
+    }
+    if let Some(inboxes) = &row.contact_inboxes {
+        out.insert(
+            "contactInboxes".into(),
+            inboxes.iter().map(contact_inbox_json).collect(),
+        );
+    }
+    if let Some(conversation) = &row.conversation {
+        out.insert(
+            "conversation".into(),
+            conversation.as_ref().map_or(Value::Null, conversation_json),
+        );
+    }
+    Value::Object(out)
+}
+
 /// `contacts.list` (GET, query) / `contacts.search` (POST, body):
 /// `listContactsPublicRequest`, the avatars resolved as public URLs.
 async fn list(state: &ApiState, call: Call<'_>, from_body: bool) -> Reply {
-    let _ = (state, call, from_body);
-    todo!("P3.6-D2")
+    let mut input = if from_body {
+        Input::from_body(call.params, call.body)
+    } else {
+        bracket_query(call.params, call.query)
+    };
+    let list_input = parse_list_input(&mut input, call.workspace_id);
+    let include = array_of(&mut input, "include", |input, path, value| {
+        input
+            .enum_at(path, Some(value), INCLUDE_OPTIONS, true)
+            .and_then(|text| ContactListInclude::parse(&text))
+    });
+    let with_count = with_count(&mut input);
+    input.finish()?;
+    let options = ListOptions {
+        scope: ListScope::Unscoped,
+        projection: Projection::Full,
+        include,
+        with_count,
+    };
+    let errors = if from_body {
+        super::CREATING
+    } else {
+        super::LISTING
+    };
+    let result = list_contacts(&state.db, &list_input, &options, now_ms())
+        .await
+        .map_err(|e| business_error(e, errors))?;
+    let data: Vec<Value> = match &result.data {
+        ListRows::Full(rows) => rows
+            .iter()
+            .map(|row| listed_contact_json(state, row))
+            .collect(),
+        ListRows::Table(_) => Vec::new(),
+    };
+    Ok(json(
+        200,
+        json!({
+            "data": data,
+            "pageCount": result.page_count,
+            "totalCount": result.total_count,
+            "totalCountCapped": result.total_count_capped,
+        }),
+    ))
 }
 
 /// `contacts.count`: `countContactsPublicRequest`.
 async fn count(state: &ApiState, call: Call<'_>) -> Reply {
-    let _ = (state, call);
-    todo!("P3.6-D2")
+    let mut input = bracket_query(call.params, call.query);
+    let list_input = parse_list_input(&mut input, call.workspace_id);
+    let mode = input
+        .get("countMode")
+        .cloned()
+        .and_then(|v| input.enum_at(&key("countMode"), Some(&v), &["exact", "bounded"], false))
+        .and_then(|text| CountMode::parse(&text));
+    input.finish()?;
+    let outcome = count_contacts(&state.db, &list_input, &ListScope::Unscoped, mode, now_ms())
+        .await
+        .map_err(|e| business_error(e, COUNTING))?;
+    let mut body = json!({
+        "total": outcome.total,
+        "totalCountCapped": outcome.total_count_capped,
+    });
+    if let Some(cap) = outcome.count_cap {
+        body["countCap"] = json!(cap);
+    }
+    Ok(json(200, body))
 }
