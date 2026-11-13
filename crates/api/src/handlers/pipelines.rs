@@ -1,7 +1,304 @@
 //! `features/pipelines/api/public.ts` + `public-items.ts`: `pipelines.*`.
 //! A workspace token acts with `PIPELINE_TOKEN_SCOPE` (bypasses the ACL).
 
-use super::{ApiState, Call, Reply};
+use chatbotx_business::pipeline::PipelineAccessScope;
+use chatbotx_business::pipeline::currency::PipelineView;
+use chatbotx_business::pipeline::service::{self, CreatePipeline, UpdatePipeline, stored_settings};
+use chatbotx_business::pipeline::settings::{
+    CardElementsPatch, PipelineSettingsPatch, StatusLabelsPatch, VisibleFeaturesPatch,
+};
+use chatbotx_business::pipeline::structure::{
+    self, FieldPatch, FieldValues, StageValues, is_color,
+};
+use chatbotx_db::repo::models::{PipelineField, PipelineStage};
+use chatbotx_db::repo::partials::pipeline::{PIPELINE_REFERENCE_NAME_MAX, PipelineType};
+use serde_json::{Value, json};
+
+use super::custom_fields::CUSTOM_FIELD_TYPES;
+use super::input::{Input, Num, Seg, Str, child, key};
+use super::{
+    ApiState, Call, ErrorMap, FINDING, LISTING, Reply, business_error, date, id, json, no_content,
+};
+
+/// `PIPELINE_TOKEN_SCOPE`.
+const TOKEN: PipelineAccessScope = PipelineAccessScope::WorkspaceToken;
+
+/// `possibleErrorsOnMutatingPipeline`.
+pub const MUTATING_PIPELINE: ErrorMap = &[
+    ("notFound", 404),
+    ("businessError", 400),
+    ("stageBusy", 409),
+    ("pipelineItemLimitReached", 409),
+    ("pipelineItemIdempotencyKeyConflict", 409),
+    ("idempotencyKeyInvalid", 422),
+    ("idempotencyKeyReused", 422),
+    ("idempotencyKeyConflict", 409),
+];
+
+const PIPELINE_TYPES: &[&str] = &["opportunity", "ticket", "custom"];
+
+fn no_nul(text: &str) -> bool {
+    !text.contains('\0')
+}
+
+fn is_reference_name(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+fn is_currency(text: &str) -> bool {
+    text.len() == 3 && text.bytes().all(|b| b.is_ascii_uppercase())
+}
+
+/// `nameSchema`.
+pub const NAME: Str = Str {
+    pattern: Some(no_nul),
+    ..Str::trimmed(1, 120)
+};
+const REFERENCE_NAME: Str = Str {
+    trim: false,
+    min: None,
+    max: Some(PIPELINE_REFERENCE_NAME_MAX),
+    pattern: Some(is_reference_name),
+};
+const CURRENCY: Str = Str {
+    trim: false,
+    min: None,
+    max: None,
+    pattern: Some(is_currency),
+};
+const STAGE_DESCRIPTION: Str = Str {
+    pattern: Some(no_nul),
+    ..Str::max(300)
+};
+const COLOR: Str = Str {
+    trim: false,
+    min: None,
+    max: None,
+    pattern: Some(is_color),
+};
+const LABEL: Str = Str::trimmed(1, 40);
+
+/// `toPublicPipeline`.
+pub fn pipeline_json(view: &PipelineView) -> Value {
+    let pipeline = &view.pipeline;
+    json!({
+        "id": id(pipeline.id),
+        "name": pipeline.name,
+        "type": pipeline.r#type,
+        "referenceName": pipeline.reference_name,
+        "currency": view.currency,
+        "currencyOverride": view.currency_override,
+        "settings": serde_json::to_value(stored_settings(pipeline)).unwrap_or_default(),
+        "createdAt": date(pipeline.created_at),
+        "updatedAt": date(pipeline.updated_at),
+    })
+}
+
+/// `toPublicStage`.
+pub fn stage_json(stage: &PipelineStage) -> Value {
+    json!({
+        "id": id(stage.id),
+        "name": stage.name,
+        "description": stage.description,
+        "textColor": stage.text_color,
+        "backgroundColor": stage.background_color,
+        "position": stage.position,
+        "processing": stage.bulk_job_id.is_some(),
+    })
+}
+
+/// `toPublicField`.
+pub fn field_json(field: &PipelineField) -> Value {
+    json!({
+        "id": id(field.id),
+        "name": field.name,
+        "referenceName": field.reference_name,
+        "type": field.r#type,
+        "required": field.required,
+        "position": field.position,
+    })
+}
+
+fn detail_json(view: &PipelineView, stages: &[PipelineStage], fields: &[PipelineField]) -> Value {
+    let mut out = pipeline_json(view);
+    out["stages"] = Value::Array(stages.iter().map(stage_json).collect());
+    out["fields"] = Value::Array(fields.iter().map(field_json).collect());
+    out
+}
+
+/// The body of a DELETE (when sent) or its query.
+fn delete_input(call: &Call<'_>) -> Input {
+    if call.body.iter().all(u8::is_ascii_whitespace) {
+        Input::from_query(call.params, call.query)
+    } else {
+        Input::from_body(call.params, call.body)
+    }
+}
+
+fn pipeline_type(name: &str) -> PipelineType {
+    match name {
+        "ticket" => PipelineType::Ticket,
+        "custom" => PipelineType::Custom,
+        _ => PipelineType::Opportunity,
+    }
+}
+
+/// `pipelineSettingsPatchSchema`.
+fn settings_patch(input: &mut Input) -> Option<PipelineSettingsPatch> {
+    let value = input.get("settings").cloned()?;
+    let path = key("settings");
+    let Value::Object(obj) = value else {
+        input.issue(&path, "invalid_type", "Invalid input: expected object");
+        return None;
+    };
+    let mut patch = PipelineSettingsPatch {
+        assign_contact_on_assign: input.bool_at(
+            &child(&path, "assignContactOnAssign"),
+            obj.get("assignContactOnAssign"),
+            false,
+        ),
+        ..PipelineSettingsPatch::default()
+    };
+    match obj.get("maxOpenItemsPerContact") {
+        None => {}
+        Some(Value::Null) => patch.max_open_items_per_contact = Some(None),
+        Some(value) => {
+            patch.max_open_items_per_contact = input
+                .number_at(
+                    &child(&path, "maxOpenItemsPerContact"),
+                    Some(value),
+                    Num::int(1.0, 100.0),
+                    true,
+                )
+                .map(|n| Some(n as i64));
+        }
+    }
+    let group = |input: &mut Input, name: &str, keys: &[&str]| -> Vec<Option<bool>> {
+        let group_path = child(&path, name);
+        match obj.get(name) {
+            None => vec![None; keys.len()],
+            Some(Value::Object(map)) => keys
+                .iter()
+                .map(|k| input.bool_at(&child(&group_path, k), map.get(*k), false))
+                .collect(),
+            Some(_) => {
+                input.issue(
+                    &group_path,
+                    "invalid_type",
+                    "Invalid input: expected object",
+                );
+                vec![None; keys.len()]
+            }
+        }
+    };
+    let v = group(input, "visibleFeatures", &["priority", "value", "dueDate"]);
+    patch.visible_features = VisibleFeaturesPatch {
+        priority: v[0],
+        value: v[1],
+        due_date: v[2],
+    };
+    let c = group(
+        input,
+        "cardElements",
+        &[
+            "contactPhone",
+            "contactEmail",
+            "createdAt",
+            "updatedAt",
+            "assignees",
+            "comments",
+            "cardId",
+            "priority",
+            "value",
+            "dueDate",
+        ],
+    );
+    patch.card_elements = CardElementsPatch {
+        contact_phone: c[0],
+        contact_email: c[1],
+        created_at: c[2],
+        updated_at: c[3],
+        assignees: c[4],
+        comments: c[5],
+        card_id: c[6],
+        priority: c[7],
+        value: c[8],
+        due_date: c[9],
+    };
+    let labels_path = child(&path, "statusLabels");
+    match obj.get("statusLabels") {
+        None => {}
+        Some(Value::Object(map)) => {
+            let label = |input: &mut Input, k: &str| {
+                input.string_at(&child(&labels_path, k), map.get(k), LABEL, false)
+            };
+            patch.status_labels = StatusLabelsPatch {
+                open: label(input, "open"),
+                won: label(input, "won"),
+                lost: label(input, "lost"),
+            };
+        }
+        Some(_) => input.issue(
+            &labels_path,
+            "invalid_type",
+            "Invalid input: expected object",
+        ),
+    }
+    Some(patch)
+}
+
+fn nullish_at(input: &mut Input, name: &str, spec: Str) -> Option<Option<String>> {
+    input.nullish_string(name, spec)
+}
+
+/// `stageValues` (every key optional).
+fn stage_values(input: &mut Input) -> StageValues {
+    StageValues {
+        name: input.opt_string("name", NAME),
+        description: nullish_at(input, "description", STAGE_DESCRIPTION),
+        text_color: nullish_at(input, "textColor", COLOR),
+        background_color: nullish_at(input, "backgroundColor", COLOR),
+    }
+}
+
+/// `z.array(zodBigintIdAsString()).min(1).max(max)`.
+fn id_list(input: &mut Input, name: &str, max: usize) -> Option<Vec<i64>> {
+    let path = key(name);
+    let value = input.get(name).cloned();
+    let Some(Value::Array(items)) = value else {
+        input.issue(&path, "invalid_type", "Invalid input: expected array");
+        return None;
+    };
+    if items.is_empty() {
+        input.issue(
+            &path,
+            "too_small",
+            "Too small: expected array to have >=1 items",
+        );
+        return None;
+    }
+    if items.len() > max {
+        input.issue(
+            &path,
+            "too_big",
+            &format!("Too big: expected array to have <={max} items"),
+        );
+        return None;
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let mut item_path = path.clone();
+        item_path.push(Seg::Index(index));
+        out.push(input.id_at(&item_path, Some(item), true));
+    }
+    out.into_iter().collect()
+}
+
+fn ok(status: u16, body: Value) -> Reply {
+    Ok(json(status, body))
+}
 
 /// The routes of this module.
 pub const ROUTES: &[&str] = &[
@@ -23,6 +320,264 @@ pub const ROUTES: &[&str] = &[
 
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
-    let _ = (state, route_id, call);
-    todo!("P3.6-D1p")
+    let db = &state.db;
+    let ws = call.workspace_id;
+    let mutating = |e| business_error(e, MUTATING_PIPELINE);
+    match route_id {
+        "pipelines.list" => {
+            let entries = service::list_with_permissions(db, ws, TOKEN)
+                .await
+                .map_err(|e| business_error(e, LISTING))?;
+            let items: Vec<Value> = entries
+                .iter()
+                .map(|entry| {
+                    let mut out = pipeline_json(&entry.pipeline);
+                    out["itemsCount"] = json!(entry.items_count);
+                    out
+                })
+                .collect();
+            ok(200, json!({ "items": items }))
+        }
+        "pipelines.create" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let kind = input.enum_at(
+                &key("type"),
+                input.get("type").cloned().as_ref(),
+                PIPELINE_TYPES,
+                true,
+            );
+            let name = input.string("name", NAME);
+            input.finish()?;
+            let view = service::create(
+                db,
+                CreatePipeline {
+                    workspace_id: ws,
+                    pipeline_type: pipeline_type(kind.as_deref().unwrap_or_default()),
+                    name: name.unwrap_or_default(),
+                    scope: TOKEN,
+                    actor_user_id: None,
+                },
+            )
+            .await
+            .map_err(mutating)?;
+            let detail = service::get(db, ws, view.pipeline.id, TOKEN)
+                .await
+                .map_err(mutating)?;
+            ok(
+                201,
+                detail_json(&detail.pipeline, &detail.stages, &detail.fields),
+            )
+        }
+        "pipelines.get" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let pipeline_id = input.id("id");
+            input.finish()?;
+            let detail = service::get(db, ws, pipeline_id.unwrap_or_default(), TOKEN)
+                .await
+                .map_err(|e| business_error(e, FINDING))?;
+            ok(
+                200,
+                detail_json(&detail.pipeline, &detail.stages, &detail.fields),
+            )
+        }
+        "pipelines.update" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            let name = input.opt_string("name", NAME);
+            let reference_name = input.opt_string("referenceName", REFERENCE_NAME);
+            let currency = input.nullish_string("currency", CURRENCY);
+            let settings = settings_patch(&mut input);
+            input.finish()?;
+            let view = service::update(
+                db,
+                UpdatePipeline {
+                    workspace_id: ws,
+                    id: pipeline_id.unwrap_or_default(),
+                    scope: TOKEN,
+                    name,
+                    reference_name,
+                    currency,
+                    settings,
+                },
+            )
+            .await
+            .map_err(mutating)?;
+            ok(200, pipeline_json(&view))
+        }
+        "pipelines.delete" => {
+            let mut input = delete_input(&call);
+            let pipeline_id = input.id("id");
+            input.finish()?;
+            service::delete(db, ws, pipeline_id.unwrap_or_default(), TOKEN)
+                .await
+                .map_err(mutating)?;
+            Ok(no_content())
+        }
+        "pipelines.duplicate" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            input.finish()?;
+            let view = service::duplicate(db, ws, pipeline_id.unwrap_or_default(), TOKEN, None)
+                .await
+                .map_err(mutating)?;
+            let detail = service::get(db, ws, view.pipeline.id, TOKEN)
+                .await
+                .map_err(mutating)?;
+            ok(
+                201,
+                detail_json(&detail.pipeline, &detail.stages, &detail.fields),
+            )
+        }
+        "pipelines.createStage" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            let name = input.string("name", NAME);
+            let mut values = stage_values(&mut input);
+            values.name = name;
+            input.finish()?;
+            let stage =
+                structure::create_stage(db, ws, pipeline_id.unwrap_or_default(), TOKEN, values)
+                    .await
+                    .map_err(mutating)?;
+            ok(201, stage_json(&stage))
+        }
+        "pipelines.updateStage" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            let stage_id = input.id("stageId");
+            let values = stage_values(&mut input);
+            input.finish()?;
+            let stage = structure::update_stage(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                stage_id.unwrap_or_default(),
+                TOKEN,
+                values,
+            )
+            .await
+            .map_err(mutating)?;
+            ok(200, stage_json(&stage))
+        }
+        "pipelines.deleteStage" => {
+            let mut input = delete_input(&call);
+            let pipeline_id = input.id("id");
+            let stage_id = input.id("stageId");
+            let move_to = match input.get("moveItemsToStageId").cloned() {
+                None => None,
+                Some(value) => input.id_at(&key("moveItemsToStageId"), Some(&value), true),
+            };
+            input.finish()?;
+            let result = structure::delete_stage(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                stage_id.unwrap_or_default(),
+                move_to,
+                TOKEN,
+            )
+            .await
+            .map_err(mutating)?;
+            ok(
+                200,
+                json!({ "queued": result.queued, "jobId": result.job_id }),
+            )
+        }
+        "pipelines.reorderStages" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            let stage_ids = id_list(&mut input, "stageIds", 200);
+            input.finish()?;
+            structure::reorder_stages(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                TOKEN,
+                stage_ids.unwrap_or_default(),
+            )
+            .await
+            .map_err(mutating)?;
+            Ok(no_content())
+        }
+        "pipelines.listFields" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let pipeline_id = input.id("id");
+            input.finish()?;
+            let fields = service::list_fields(db, ws, pipeline_id.unwrap_or_default(), TOKEN)
+                .await
+                .map_err(|e| business_error(e, FINDING))?;
+            ok(
+                200,
+                json!({ "items": fields.iter().map(field_json).collect::<Vec<_>>() }),
+            )
+        }
+        "pipelines.createField" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            let name = input.string("name", NAME);
+            let reference_name = input.string("referenceName", REFERENCE_NAME);
+            let field_type = input.enum_at(
+                &key("type"),
+                input.get("type").cloned().as_ref(),
+                CUSTOM_FIELD_TYPES,
+                true,
+            );
+            let required = input.opt_bool("required");
+            input.finish()?;
+            let field = structure::create_field(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                TOKEN,
+                FieldValues {
+                    name: name.unwrap_or_default(),
+                    reference_name: reference_name.unwrap_or_default(),
+                    field_type: field_type.unwrap_or_default(),
+                    required: required.unwrap_or(false),
+                },
+            )
+            .await
+            .map_err(mutating)?;
+            ok(201, field_json(&field))
+        }
+        "pipelines.updateField" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            let field_id = input.id("fieldId");
+            let patch = FieldPatch {
+                name: input.opt_string("name", NAME),
+                reference_name: input.opt_string("referenceName", REFERENCE_NAME),
+                required: input.opt_bool("required"),
+            };
+            input.finish()?;
+            let field = structure::update_field(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                field_id.unwrap_or_default(),
+                TOKEN,
+                patch,
+            )
+            .await
+            .map_err(mutating)?;
+            ok(200, field_json(&field))
+        }
+        "pipelines.deleteField" => {
+            let mut input = delete_input(&call);
+            let pipeline_id = input.id("id");
+            let field_id = input.id("fieldId");
+            input.finish()?;
+            structure::delete_field(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                field_id.unwrap_or_default(),
+                TOKEN,
+            )
+            .await
+            .map_err(mutating)?;
+            Ok(no_content())
+        }
+        _ => Err(super::internal_error(route_id)),
+    }
 }
