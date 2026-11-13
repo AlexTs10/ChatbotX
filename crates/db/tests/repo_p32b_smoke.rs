@@ -1496,3 +1496,581 @@ async fn whatsapp_signup_session_create_and_purge() {
         .is_some()
     );
 }
+
+/// Two numbers (in two new workspaces of user 1001) for the integration-whatsapp smoke
+/// tests.
+async fn two_numbers() -> (common::TestDb, repo11::SeededNumber, repo11::SeededNumber) {
+    let db = repo11::two_ws_db().await;
+    let a = repo11::seed_number(&db, 1001, None, "waba-a", "pn-a", false, false, None).await;
+    let b = repo11::seed_number(&db, 1001, None, "waba-b", "pn-b", false, false, None).await;
+    (db, a, b)
+}
+
+#[tokio::test]
+async fn integration_whatsapp_readers() {
+    use chatbotx_db::repo::integration_whatsapp as iw;
+    use repo11::{exec, read};
+    let (db, a, b) = two_numbers().await;
+    let (aid, aws, ainbox) = (a.integration_id, a.workspace_id, a.inbox_id);
+    let (bid, bws) = (b.integration_id, b.workspace_id);
+    exec(
+        &db,
+        format!(
+            r#"UPDATE "IntegrationWhatsapp" SET "callRecordingEnabled" = 1, "verificationCodeRequestedAt" = 77, "displayPhoneNumber" = '+1 (555) 010' WHERE "id" = {aid};
+               UPDATE "Inbox" SET "name" = 'Sales' WHERE "id" = {ainbox};"#
+        ),
+    )
+    .await;
+    let ids = vec!["pn-a".to_owned(), "pn-x".to_owned()];
+    let connected = read(&db, move |c| iw::find_connected_phone_number_ids(c, &ids)).await;
+    assert_eq!(connected.into_iter().collect::<Vec<_>>(), vec!["pn-a"]);
+    assert!(
+        read(&db, |c| iw::find_connected_phone_number_ids(c, &[]))
+            .await
+            .is_empty()
+    );
+    let all = read(&db, iw::find_all_for_token_refresh).await;
+    let all_ids: Vec<(i64, String)> = all.into_iter().map(|r| (r.id, r.waba_id)).collect();
+    assert!(
+        all_ids.contains(&(aid, "waba-a".to_owned()))
+            && all_ids.contains(&(bid, "waba-b".to_owned()))
+    );
+    let by_ws = read(&db, move |c| {
+        iw::find_for_token_refresh_by_workspace_ids(c, &[bws])
+    })
+    .await;
+    assert_eq!(
+        by_ws
+            .iter()
+            .map(|r| (r.id, r.workspace_id))
+            .collect::<Vec<_>>(),
+        vec![(bid, bws)]
+    );
+    assert!(
+        read(&db, |c| iw::find_for_token_refresh_by_workspace_ids(c, &[]))
+            .await
+            .is_empty()
+    );
+    // Workspace scoping of the id and inbox lookups.
+    assert_eq!(
+        read(&db, move |c| iw::find_by_id_for_workspace(c, aid, aws))
+            .await
+            .map(|r| r.id),
+        Some(aid)
+    );
+    assert!(
+        read(&db, move |c| iw::find_by_id_for_workspace(c, aid, bws))
+            .await
+            .is_none()
+    );
+    assert_eq!(
+        read(&db, move |c| iw::find_by_id_unscoped(c, aid))
+            .await
+            .map(|r| r.workspace_id),
+        Some(aws)
+    );
+    assert_eq!(
+        read(&db, move |c| iw::find_workspace_integration_by_inbox_id(
+            c, aws, ainbox
+        ))
+        .await,
+        Some(iw::IntegrationWabaRef {
+            id: aid,
+            waba_id: "waba-a".to_owned()
+        })
+    );
+    assert!(
+        read(&db, move |c| iw::find_workspace_integration_by_inbox_id(
+            c, bws, ainbox
+        ))
+        .await
+        .is_none()
+    );
+    assert!(
+        read(&db, move |c| iw::find_auth_by_inbox_id_for_workspace(
+            c, aws, ainbox
+        ))
+        .await
+        .is_some()
+    );
+    assert_eq!(
+        read(&db, move |c| iw::find_by_inbox_id_for_workspace(
+            c, aws, ainbox
+        ))
+        .await
+        .map(|r| r.id),
+        Some(aid)
+    );
+    assert!(
+        read(&db, move |c| iw::is_call_recording_enabled_for_inbox(
+            c, aws, ainbox
+        ))
+        .await
+    );
+    assert!(
+        !read(&db, move |c| iw::is_call_recording_enabled_for_inbox(
+            c, bws, ainbox
+        ))
+        .await
+    );
+    assert_eq!(
+        read(&db, move |c| iw::find_verification_code_requested_at(
+            c, aid, aws
+        ))
+        .await,
+        Some(Some(77))
+    );
+    assert_eq!(
+        read(&db, move |c| iw::find_verification_code_requested_at(
+            c, bid, bws
+        ))
+        .await,
+        Some(None)
+    );
+    assert_eq!(
+        read(&db, move |c| iw::find_verification_code_requested_at(
+            c, aid, bws
+        ))
+        .await,
+        None
+    );
+    // Phone number lookup, with and without the WABA filter (an empty WABA is no filter).
+    for (waba, want) in [
+        (None, Some(aid)),
+        (Some(""), Some(aid)),
+        (Some("waba-a"), Some(aid)),
+        (Some("waba-b"), None),
+    ] {
+        let got = read(&db, move |c| iw::find_by_phone_number_id(c, "pn-a", waba)).await;
+        assert_eq!(got.map(|r| r.id), want, "{waba:?}");
+    }
+    let listed = read(&db, move |c| iw::list_by_workspace_id(c, aws)).await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].integration.id, aid);
+    assert_eq!(
+        listed[0].inbox,
+        Some(iw::InboxName {
+            id: ainbox,
+            name: "Sales".to_owned()
+        })
+    );
+    assert_eq!(
+        read(&db, move |c| iw::list_by_display_phone_digits(
+            c, aws, "1555010"
+        ))
+        .await
+        .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn integration_whatsapp_auth_registration_and_routing_writes() {
+    use chatbotx_db::repo::Json;
+    use chatbotx_db::repo::integration_whatsapp as iw;
+    use chatbotx_db::rusqlite::types::Value;
+    use repo11::{exec, read, write};
+    let (db, a, b) = two_numbers().await;
+    let (aid, aws, bws) = (a.integration_id, a.workspace_id, b.workspace_id);
+    exec(
+        &db,
+        format!(
+            r#"UPDATE "IntegrationWhatsapp" SET "tokenRefreshError" = 'expired' WHERE "id" = {aid}"#
+        ),
+    )
+    .await;
+    let auth = Json(serde_json::json!({ "accessToken": "new" }));
+    let auth2 = auth.clone();
+    assert_eq!(
+        write(&db, move |c| iw::update_auth(c, aid, bws, &auth2)).await,
+        None
+    );
+    let auth2 = auth.clone();
+    assert_eq!(
+        write(&db, move |c| iw::update_auth(c, aid, aws, &auth2)).await,
+        Some("pn-a".to_owned())
+    );
+    let row = read(&db, move |c| iw::find_by_id_unscoped(c, aid))
+        .await
+        .unwrap();
+    assert_eq!(
+        (row.auth.clone(), row.token_refresh_error.clone()),
+        (auth.clone(), None)
+    );
+    let unscoped = Json(serde_json::json!({ "accessToken": "webhook" }));
+    let unscoped2 = unscoped.clone();
+    write(&db, move |c| iw::update_auth_unscoped(c, aid, &unscoped2)).await;
+    write(&db, move |c| iw::mark_history_declined(c, aid)).await;
+    let row = read(&db, move |c| iw::find_by_id_unscoped(c, aid))
+        .await
+        .unwrap();
+    assert_eq!(row.auth, unscoped);
+    assert!(row.history_declined);
+    // Registration: only the two registration keys are accepted.
+    let error = serde_json::json!({ "code": 133010, "message": "not registered" });
+    let values = vec![
+        ("registrationStatus", Value::Text("failed".to_owned())),
+        ("registrationError", Value::Text(error.to_string())),
+    ];
+    assert_eq!(
+        write(&db, move |c| iw::update_registration(c, aid, aws, &values)).await,
+        Some(Json(error))
+    );
+    let values = vec![
+        ("registrationStatus", Value::Text("registered".to_owned())),
+        ("registrationError", Value::Null),
+    ];
+    assert_eq!(
+        write(&db, move |c| iw::update_registration(c, aid, aws, &values)).await,
+        None
+    );
+    let refused = vec![("name", Value::Text("x".to_owned()))];
+    assert!(
+        chatbotx_db::repo::write(&db, move |c| iw::update_registration(c, aid, aws, &refused))
+            .await
+            .is_err()
+    );
+    let replaced = Json(serde_json::json!({ "accessToken": "replaced" }));
+    let replaced2 = replaced.clone();
+    let row = write(&db, move |c| {
+        iw::replace_auth(c, aid, aws, &replaced2, true, 500)
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (row.auth, row.has_capi_scope, row.capi_scope_checked_at),
+        (replaced, true, Some(500))
+    );
+    assert!(
+        write(&db, move |c| iw::replace_auth(
+            c,
+            aid,
+            bws,
+            &Json::null(),
+            false,
+            1
+        ))
+        .await
+        .is_none()
+    );
+    // Routing roles: a newer snapshot wins, an older or equal one is kept out.
+    let roles = |at: &str| Json(serde_json::json!({ "roles": [], "checkedAt": at }));
+    let (r1, r0, r2) = (
+        roles("2026-11-13T10:00:00Z"),
+        roles("2026-11-13T09:00:00Z"),
+        roles("2026-11-13T11:00:00Z"),
+    );
+    let r1b = r1.clone();
+    assert_eq!(
+        write(&db, move |c| iw::update_routing_roles_if_newer(
+            c, aid, aws, &r1b
+        ))
+        .await
+        .and_then(|r| r.routing_roles),
+        Some(r1.clone())
+    );
+    let r1b = r1.clone();
+    assert!(
+        write(&db, move |c| iw::update_routing_roles_if_newer(
+            c, aid, aws, &r0
+        ))
+        .await
+        .is_none()
+    );
+    assert!(
+        write(&db, move |c| iw::update_routing_roles_if_newer(
+            c, aid, aws, &r1b
+        ))
+        .await
+        .is_none()
+    );
+    let r2b = r2.clone();
+    assert_eq!(
+        write(&db, move |c| iw::update_routing_roles_if_newer(
+            c, aid, aws, &r2b
+        ))
+        .await
+        .and_then(|r| r.routing_roles),
+        Some(r2)
+    );
+    let no_date = Json(serde_json::json!({ "roles": [] }));
+    assert!(
+        chatbotx_db::repo::write(&db, move |c| iw::update_routing_roles_if_newer(
+            c, aid, aws, &no_date
+        ))
+        .await
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn integration_whatsapp_capi_writes() {
+    use chatbotx_db::repo::Json;
+    use chatbotx_db::repo::integration_whatsapp as iw;
+    use repo11::write;
+    let (db, a, b) = two_numbers().await;
+    let (aid, aws, bws) = (a.integration_id, a.workspace_id, b.workspace_id);
+    // CAS on capiScopeCheckedAt: the initial NULL matches NULL; a stale expectation loses
+    // and the cache write returns the current row.
+    let claimed = write(&db, move |c| {
+        iw::claim_capi_scope_cache_refresh(c, aid, aws, 100, None)
+    })
+    .await;
+    assert_eq!(claimed.map(|r| r.capi_scope_checked_at), Some(Some(100)));
+    assert!(
+        write(&db, move |c| iw::claim_capi_scope_cache_refresh(
+            c, aid, aws, 200, None
+        ))
+        .await
+        .is_none()
+    );
+    let lost = write(&db, move |c| {
+        iw::update_capi_scope_cache(c, aid, aws, true, Some(300), Some(1))
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (lost.has_capi_scope, lost.capi_scope_checked_at),
+        (false, Some(100))
+    );
+    let won = write(&db, move |c| {
+        iw::update_capi_scope_cache(c, aid, aws, true, None, Some(100))
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (won.has_capi_scope, won.capi_scope_checked_at),
+        (true, None)
+    );
+    assert!(
+        write(&db, move |c| iw::update_capi_scope_cache(
+            c, aid, bws, true, None, None
+        ))
+        .await
+        .is_none()
+    );
+    // Dataset: the if-null write keeps an existing id; the plain write overwrites it.
+    let ds = |row: Option<chatbotx_db::repo::models::IntegrationWhatsapp>| {
+        row.and_then(|r| r.dataset_id)
+    };
+    assert_eq!(
+        ds(write(&db, move |c| iw::update_dataset_id_if_null(
+            c, aid, aws, "ds-1"
+        ))
+        .await),
+        Some("ds-1".to_owned())
+    );
+    assert!(
+        write(&db, move |c| iw::update_dataset_id_if_null(
+            c, aid, aws, "ds-2"
+        ))
+        .await
+        .is_none()
+    );
+    assert_eq!(
+        ds(write(&db, move |c| iw::update_dataset_id(c, aid, aws, "ds-3")).await),
+        Some("ds-3".to_owned())
+    );
+    assert!(
+        write(&db, move |c| iw::update_dataset_id(c, aid, bws, "ds-4"))
+            .await
+            .is_none()
+    );
+    let code = write(&db, move |c| {
+        iw::update_capi_test_event_code(c, aid, aws, Some("TEST1"))
+    })
+    .await;
+    assert_eq!(
+        code.and_then(|r| r.capi_test_event_code),
+        Some("TEST1".to_owned())
+    );
+    let code = write(&db, move |c| {
+        iw::update_capi_test_event_code(c, aid, aws, None)
+    })
+    .await;
+    assert_eq!(code.map(|r| r.capi_test_event_code), Some(None));
+    let token = Json(serde_json::json!({ "iv": "a", "data": "b" }));
+    let t2 = token.clone();
+    let row = write(&db, move |c| iw::update_capi_access_token(c, aid, aws, &t2))
+        .await
+        .unwrap();
+    assert_eq!(row.capi_access_token, Some(token.clone()));
+    let row = write(&db, move |c| iw::set_capi_disconnected_at(c, aid, aws, 900))
+        .await
+        .unwrap();
+    assert_eq!(
+        (row.capi_disconnected_at, row.capi_access_token),
+        (Some(900), None)
+    );
+    let t2 = token.clone();
+    let row = write(&db, move |c| {
+        iw::connect_custom_capi(c, aid, aws, "ds-c", &t2)
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            row.dataset_id.as_deref(),
+            row.capi_access_token,
+            row.capi_disconnected_at
+        ),
+        (Some("ds-c"), Some(token), None)
+    );
+    write(&db, move |c| iw::set_capi_disconnected_at(c, aid, aws, 901)).await;
+    let row = write(&db, move |c| iw::clear_capi_disconnected_at(c, aid, aws))
+        .await
+        .unwrap();
+    assert_eq!(row.capi_disconnected_at, None);
+    let t3 = Json(serde_json::json!({ "iv": "c" }));
+    write(&db, move |c| iw::update_capi_access_token(c, aid, aws, &t3)).await;
+    let row = write(&db, move |c| iw::clear_capi_access_token(c, aid, aws))
+        .await
+        .unwrap();
+    assert_eq!(row.capi_access_token, None);
+    for f in [iw::clear_capi_disconnected_at, iw::clear_capi_access_token] {
+        assert!(write(&db, move |c| f(c, aid, bws)).await.is_none());
+    }
+}
+
+#[tokio::test]
+async fn integration_whatsapp_call_settings_and_verification_slot() {
+    use chatbotx_db::repo::integration_whatsapp as iw;
+    use chatbotx_db::rusqlite::types::Value;
+    use repo11::{read, write};
+    let (db, a, b) = two_numbers().await;
+    let (aid, aws, ainbox, bws) = (a.integration_id, a.workspace_id, a.inbox_id, b.workspace_id);
+    // Verification slot: one claim at a time; a release only clears its own claim.
+    assert_eq!(
+        write(&db, move |c| iw::claim_verification_code_slot(
+            c, aid, aws, 1_000, 500
+        ))
+        .await,
+        Some(1_000)
+    );
+    assert_eq!(
+        write(&db, move |c| iw::claim_verification_code_slot(
+            c, aid, aws, 1_100, 900
+        ))
+        .await,
+        None
+    );
+    assert_eq!(
+        write(&db, move |c| iw::claim_verification_code_slot(
+            c, aid, bws, 1_100, 2_000
+        ))
+        .await,
+        None
+    );
+    write(&db, move |c| {
+        iw::release_verification_code_slot(c, aid, aws, 999)
+    })
+    .await;
+    assert_eq!(
+        read(&db, move |c| iw::find_verification_code_requested_at(
+            c, aid, aws
+        ))
+        .await,
+        Some(Some(1_000))
+    );
+    assert_eq!(
+        write(&db, move |c| iw::claim_verification_code_slot(
+            c, aid, aws, 2_000, 1_500
+        ))
+        .await,
+        Some(2_000)
+    );
+    write(&db, move |c| {
+        iw::release_verification_code_slot(c, aid, aws, 2_000)
+    })
+    .await;
+    assert_eq!(
+        read(&db, move |c| iw::find_verification_code_requested_at(
+            c, aid, aws
+        ))
+        .await,
+        Some(None)
+    );
+    // Call recording, Pix redirect and the call settings patch.
+    write(&db, move |c| {
+        iw::update_call_recording_enabled(c, aid, bws, true)
+    })
+    .await;
+    assert!(
+        !read(&db, move |c| iw::is_call_recording_enabled_for_inbox(
+            c, aws, ainbox
+        ))
+        .await
+    );
+    let transcribe = || vec![("callTranscriptionEnabled", Value::Integer(1))];
+    assert!(
+        write(&db, move |c| iw::update_call_settings(
+            c,
+            aid,
+            aws,
+            &transcribe(),
+            true
+        ))
+        .await
+        .is_none()
+    );
+    write(&db, move |c| {
+        iw::update_call_recording_enabled(c, aid, aws, true)
+    })
+    .await;
+    assert!(
+        read(&db, move |c| iw::is_call_recording_enabled_for_inbox(
+            c, aws, ainbox
+        ))
+        .await
+    );
+    let row = write(&db, move |c| {
+        iw::update_call_settings(c, aid, aws, &transcribe(), true)
+    })
+    .await
+    .unwrap();
+    assert!(row.call_transcription_enabled);
+    let hours = serde_json::json!({ "timezone": "UTC", "weeklyHours": [] });
+    let values = vec![
+        ("callRecordingRetentionDays", Value::Integer(30)),
+        ("callingEnabled", Value::Integer(0)),
+        ("inboundCallsEnabled", Value::Integer(1)),
+        ("callHours", Value::Text(hours.to_string())),
+        ("callRecordingEnabled", Value::Integer(0)),
+    ];
+    let row = write(&db, move |c| {
+        iw::update_call_settings(c, aid, aws, &values, false)
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            row.call_recording_retention_days,
+            row.calling_enabled,
+            row.inbound_calls_enabled,
+            row.call_recording_enabled
+        ),
+        (30, Some(false), true, false)
+    );
+    assert_eq!(row.call_hours.map(|h| h.0), Some(hours));
+    let refused = vec![("pixRedirectEnabled", Value::Integer(1))];
+    assert!(
+        chatbotx_db::repo::write(&db, move |c| iw::update_call_settings(
+            c, aid, aws, &refused, false
+        ))
+        .await
+        .is_err()
+    );
+    let row = write(&db, move |c| {
+        iw::update_pix_redirect_enabled(c, aid, aws, true)
+    })
+    .await
+    .unwrap();
+    assert!(row.pix_redirect_enabled);
+    assert!(
+        write(&db, move |c| iw::update_pix_redirect_enabled(
+            c, aid, bws, false
+        ))
+        .await
+        .is_none()
+    );
+}

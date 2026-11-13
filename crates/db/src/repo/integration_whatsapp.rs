@@ -4,8 +4,10 @@
 use rusqlite::Connection;
 use rusqlite::types::Value;
 
-use super::Result;
-use super::sql::Sql;
+use super::models::IntegrationWhatsapp;
+use super::patch::{Patch, set_clause};
+use super::sql::{Sql, opt_int, opt_text};
+use super::{Json, Model, Result};
 
 /// `{ id, inboxId }` of `listByDisplayPhoneDigits`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,4 +329,569 @@ pub fn list_client_resources_by_workspace_id(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+// --- The untested rest of `integrationWhatsappRepository` (P3.2b, implementer 7). Every
+// update also writes `updatedAt` (the Drizzle `sharedColumns` `$onUpdate`).
+
+/// `UPDATE .. SET <set>, "updatedAt" = now WHERE <where> RETURNING *`.
+fn update_where(
+    conn: &Connection,
+    set: &Patch,
+    where_sql: Sql,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let mut all = set.clone();
+    all.push(("updatedAt", Value::Integer(super::now_ms())));
+    let mut q = Sql::raw("UPDATE \"IntegrationWhatsapp\" SET ");
+    q.append(set_clause(IntegrationWhatsapp::COLUMNS, &all)?);
+    q.push(" WHERE ");
+    q.append(where_sql);
+    q.push(&format!(
+        " RETURNING {}",
+        IntegrationWhatsapp::columns_sql(None)
+    ));
+    q.model(conn)
+}
+
+/// `workspaceIntegrationFilter` (`id` and `workspaceId`) plus `extra`.
+fn ws_filter(id: i64, workspace_id: i64, extra: Option<Sql>) -> Sql {
+    let mut q = Sql::bind("\"id\" = ", id);
+    q.push(" AND \"workspaceId\" = ");
+    q.push_bind(workspace_id);
+    if let Some(extra) = extra {
+        q.push(" AND ");
+        q.append(extra);
+    }
+    q
+}
+
+/// An update scoped by id and workspace.
+fn update(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    set: &Patch,
+    extra: Option<Sql>,
+) -> Result<Option<IntegrationWhatsapp>> {
+    update_where(conn, set, ws_filter(id, workspace_id, extra))
+}
+
+fn json_value(value: &Json) -> Value {
+    super::patch::json(&value.0)
+}
+
+/// `findConnectedPhoneNumberIds`: the given phone number ids that have an integration.
+pub fn find_connected_phone_number_ids(
+    conn: &Connection,
+    phone_number_ids: &[String],
+) -> Result<std::collections::BTreeSet<String>> {
+    if phone_number_ids.is_empty() {
+        return Ok(std::collections::BTreeSet::new());
+    }
+    Ok(Sql::bind(
+        "SELECT \"phoneNumberId\" FROM \"IntegrationWhatsapp\" WHERE \"phoneNumberId\" IN \
+         (SELECT value FROM json_each(",
+        super::text_list(phone_number_ids),
+    )
+    .closed("))")
+    .query_map(conn, |r| r.get(0))?
+    .into_iter()
+    .collect())
+}
+
+/// `findAllForTokenRefresh`: `{ id, workspaceId, wabaId, auth }` of every integration, by id.
+pub fn find_all_for_token_refresh(conn: &Connection) -> Result<Vec<WebhookSubscriptionRow>> {
+    Sql::raw(
+        "SELECT \"id\", \"workspaceId\", \"wabaId\", \"auth\" FROM \"IntegrationWhatsapp\" ORDER BY \"id\"",
+    )
+    .query_map(conn, |r| {
+        Ok(WebhookSubscriptionRow {
+            id: r.get(0)?,
+            workspace_id: r.get(1)?,
+            waba_id: r.get(2)?,
+            auth: r.get(3)?,
+        })
+    })
+}
+
+/// One row of `findForTokenRefreshByWorkspaceIds`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TokenRefreshRow {
+    pub id: i64,
+    pub workspace_id: i64,
+    pub auth: Json,
+}
+
+/// `findForTokenRefreshByWorkspaceIds`: `{ id, workspaceId, auth }` of the workspaces'
+/// integrations, by id (empty input: none).
+pub fn find_for_token_refresh_by_workspace_ids(
+    conn: &Connection,
+    workspace_ids: &[i64],
+) -> Result<Vec<TokenRefreshRow>> {
+    if workspace_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Sql::bind(
+        "SELECT \"id\", \"workspaceId\", \"auth\" FROM \"IntegrationWhatsapp\" WHERE \
+         \"workspaceId\" IN (SELECT value FROM json_each(",
+        super::id_list(workspace_ids),
+    )
+    .closed(")) ORDER BY \"id\"")
+    .query_map(conn, |r| {
+        Ok(TokenRefreshRow {
+            id: r.get(0)?,
+            workspace_id: r.get(1)?,
+            auth: r.get(2)?,
+        })
+    })
+}
+
+/// `findByIdForWorkspace`.
+pub fn find_by_id_for_workspace(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<IntegrationWhatsapp>> {
+    super::find_one(
+        conn,
+        "\"id\" = ?1 AND \"workspaceId\" = ?2",
+        &[&id, &workspace_id],
+    )
+}
+
+/// `findByIdUnscoped` (inbound webhooks that know only the id).
+pub fn find_by_id_unscoped(conn: &Connection, id: i64) -> Result<Option<IntegrationWhatsapp>> {
+    super::find_one(conn, "\"id\" = ?1", &[&id])
+}
+
+/// `updateAuth`: replaces `auth`, clears `tokenRefreshError`; the row's `phoneNumberId`.
+pub fn update_auth(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    auth: &Json,
+) -> Result<Option<String>> {
+    let set = vec![
+        ("auth", json_value(auth)),
+        ("tokenRefreshError", Value::Null),
+    ];
+    Ok(update(conn, id, workspace_id, &set, None)?.map(|row| row.phone_number_id))
+}
+
+/// `updateAuthUnscoped`.
+pub fn update_auth_unscoped(conn: &Connection, id: i64, auth: &Json) -> Result<()> {
+    update_where(
+        conn,
+        &vec![("auth", json_value(auth))],
+        Sql::bind("\"id\" = ", id),
+    )?;
+    Ok(())
+}
+
+/// `{ id, wabaId }` of `findWorkspaceIntegrationByInboxId`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntegrationWabaRef {
+    pub id: i64,
+    pub waba_id: String,
+}
+
+/// `inboxId = ? AND workspaceId = ?`.
+const BY_INBOX: &str = "\"inboxId\" = ?1 AND \"workspaceId\" = ?2";
+
+/// `findWorkspaceIntegrationByInboxId`.
+pub fn find_workspace_integration_by_inbox_id(
+    conn: &Connection,
+    workspace_id: i64,
+    inbox_id: i64,
+) -> Result<Option<IntegrationWabaRef>> {
+    Ok(
+        find_by_inbox_id_for_workspace(conn, workspace_id, inbox_id)?.map(|row| {
+            IntegrationWabaRef {
+                id: row.id,
+                waba_id: row.waba_id,
+            }
+        }),
+    )
+}
+
+/// `findAuthByInboxIdForWorkspace`: the integration's `auth`.
+pub fn find_auth_by_inbox_id_for_workspace(
+    conn: &Connection,
+    workspace_id: i64,
+    inbox_id: i64,
+) -> Result<Option<Json>> {
+    Ok(find_by_inbox_id_for_workspace(conn, workspace_id, inbox_id)?.map(|row| row.auth))
+}
+
+/// `findByInboxIdForWorkspace`: the full row.
+pub fn find_by_inbox_id_for_workspace(
+    conn: &Connection,
+    workspace_id: i64,
+    inbox_id: i64,
+) -> Result<Option<IntegrationWhatsapp>> {
+    super::find_one(conn, BY_INBOX, &[&inbox_id, &workspace_id])
+}
+
+/// `markHistoryDeclined` (unscoped).
+pub fn mark_history_declined(conn: &Connection, id: i64) -> Result<()> {
+    update_where(
+        conn,
+        &vec![("historyDeclined", Value::Integer(1))],
+        Sql::bind("\"id\" = ", id),
+    )?;
+    Ok(())
+}
+
+/// `findByPhoneNumberId`; `waba_id` (when set and not empty) narrows the match. The
+/// lowest id wins.
+pub fn find_by_phone_number_id(
+    conn: &Connection,
+    phone_number_id: &str,
+    waba_id: Option<&str>,
+) -> Result<Option<IntegrationWhatsapp>> {
+    match waba_id.filter(|w| !w.is_empty()) {
+        Some(waba) => super::find_one(
+            conn,
+            "\"phoneNumberId\" = ?1 AND \"wabaId\" = ?2 ORDER BY \"id\"",
+            &[&phone_number_id, &waba],
+        ),
+        None => super::find_one(
+            conn,
+            "\"phoneNumberId\" = ?1 ORDER BY \"id\"",
+            &[&phone_number_id],
+        ),
+    }
+}
+
+/// `{ id, name }` of an inbox.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InboxName {
+    pub id: i64,
+    pub name: String,
+}
+
+/// One row of `listByWorkspaceId`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntegrationWhatsappWithInbox {
+    pub integration: IntegrationWhatsapp,
+    pub inbox: Option<InboxName>,
+}
+
+/// `listByWorkspaceId`: by `createdAt`, then id, each with its inbox `{ id, name }`.
+pub fn list_by_workspace_id(
+    conn: &Connection,
+    workspace_id: i64,
+) -> Result<Vec<IntegrationWhatsappWithInbox>> {
+    let rows: Vec<IntegrationWhatsapp> = super::find_many(
+        conn,
+        "WHERE \"workspaceId\" = ?1 ORDER BY \"createdAt\" ASC, \"id\" ASC",
+        &[&workspace_id],
+    )?;
+    let mut out = Vec::with_capacity(rows.len());
+    for integration in rows {
+        let inbox = Sql::bind(
+            "SELECT \"id\", \"name\" FROM \"Inbox\" WHERE \"id\" = ",
+            integration.inbox_id,
+        )
+        .query_map(conn, |r| {
+            Ok(InboxName {
+                id: r.get(0)?,
+                name: r.get(1)?,
+            })
+        })?
+        .into_iter()
+        .next();
+        out.push(IntegrationWhatsappWithInbox { integration, inbox });
+    }
+    Ok(out)
+}
+
+/// `findVerificationCodeRequestedAt`: `None` when the integration is not in the
+/// workspace, else its `verificationCodeRequestedAt`.
+pub fn find_verification_code_requested_at(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<Option<i64>>> {
+    Ok(find_by_id_for_workspace(conn, id, workspace_id)?
+        .map(|row| row.verification_code_requested_at))
+}
+
+const REGISTRATION_COLUMNS: &[&str] = &["registrationStatus", "registrationError"];
+
+/// `updateRegistration`: sets `registrationStatus` / `registrationError` (the patch keys;
+/// others are refused); the stored `registrationError` (`None` also when the row is
+/// missing).
+pub fn update_registration(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    values: &Patch,
+) -> Result<Option<Json>> {
+    super::patch::check(REGISTRATION_COLUMNS, values)?;
+    Ok(update(conn, id, workspace_id, values, None)?.and_then(|row| row.registration_error))
+}
+
+/// `capiScopeCheckedAt IS NOT DISTINCT FROM expected`.
+fn capi_scope_cas(expected: Option<i64>) -> Sql {
+    Sql::bind("\"capiScopeCheckedAt\" IS ", opt_int(expected))
+}
+
+/// `updateCapiScopeCache`: compare-and-set on `capiScopeCheckedAt`; on a lost race, the
+/// current row.
+pub fn update_capi_scope_cache(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    has_capi_scope: bool,
+    capi_scope_checked_at: Option<i64>,
+    expected_capi_scope_checked_at: Option<i64>,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![
+        ("hasCapiScope", Value::Integer(i64::from(has_capi_scope))),
+        ("capiScopeCheckedAt", opt_int(capi_scope_checked_at)),
+    ];
+    let cas = capi_scope_cas(expected_capi_scope_checked_at);
+    match update(conn, id, workspace_id, &set, Some(cas))? {
+        Some(row) => Ok(Some(row)),
+        None => find_by_id_for_workspace(conn, id, workspace_id),
+    }
+}
+
+/// `claimCapiScopeCacheRefresh`: compare-and-set of `capiScopeCheckedAt` only.
+pub fn claim_capi_scope_cache_refresh(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    capi_scope_checked_at: i64,
+    expected_capi_scope_checked_at: Option<i64>,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![("capiScopeCheckedAt", Value::Integer(capi_scope_checked_at))];
+    let cas = capi_scope_cas(expected_capi_scope_checked_at);
+    update(conn, id, workspace_id, &set, Some(cas))
+}
+
+/// `replaceAuth`: `auth` with the CAPI scope cache.
+pub fn replace_auth(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    auth: &Json,
+    has_capi_scope: bool,
+    capi_scope_checked_at: i64,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![
+        ("auth", json_value(auth)),
+        ("hasCapiScope", Value::Integer(i64::from(has_capi_scope))),
+        ("capiScopeCheckedAt", Value::Integer(capi_scope_checked_at)),
+    ];
+    update(conn, id, workspace_id, &set, None)
+}
+
+/// `updateDatasetIdIfNull`.
+pub fn update_dataset_id_if_null(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    dataset_id: &str,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![("datasetId", Value::Text(dataset_id.to_owned()))];
+    let extra = Sql::raw("\"datasetId\" IS NULL");
+    update(conn, id, workspace_id, &set, Some(extra))
+}
+
+/// `updateDatasetId` (unconditional).
+pub fn update_dataset_id(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    dataset_id: &str,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![("datasetId", Value::Text(dataset_id.to_owned()))];
+    update(conn, id, workspace_id, &set, None)
+}
+
+/// `updateCapiTestEventCode` (`None` clears it).
+pub fn update_capi_test_event_code(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    capi_test_event_code: Option<&str>,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![("capiTestEventCode", opt_text(capi_test_event_code))];
+    update(conn, id, workspace_id, &set, None)
+}
+
+/// `updateCapiAccessToken` (`EncryptedData` as JSON).
+pub fn update_capi_access_token(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    capi_access_token: &Json,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![("capiAccessToken", json_value(capi_access_token))];
+    update(conn, id, workspace_id, &set, None)
+}
+
+/// `connectCustomCapi`: dataset + token, and clears `capiDisconnectedAt`.
+pub fn connect_custom_capi(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    dataset_id: &str,
+    capi_access_token: &Json,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![
+        ("datasetId", Value::Text(dataset_id.to_owned())),
+        ("capiAccessToken", json_value(capi_access_token)),
+        ("capiDisconnectedAt", Value::Null),
+    ];
+    update(conn, id, workspace_id, &set, None)
+}
+
+/// `setCapiDisconnectedAt`: stamps the disconnect and drops the token.
+pub fn set_capi_disconnected_at(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    capi_disconnected_at: i64,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![
+        ("capiDisconnectedAt", Value::Integer(capi_disconnected_at)),
+        ("capiAccessToken", Value::Null),
+    ];
+    update(conn, id, workspace_id, &set, None)
+}
+
+/// `clearCapiDisconnectedAt`.
+pub fn clear_capi_disconnected_at(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![("capiDisconnectedAt", Value::Null)];
+    update(conn, id, workspace_id, &set, None)
+}
+
+/// `clearCapiAccessToken`.
+pub fn clear_capi_access_token(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![("capiAccessToken", Value::Null)];
+    update(conn, id, workspace_id, &set, None)
+}
+
+/// `claimVerificationCodeSlot`: stamps `now` when the previous request is absent or older
+/// than `cutoff`; the stamped time, or `None` when another claim holds the slot.
+pub fn claim_verification_code_slot(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    now: i64,
+    cutoff: i64,
+) -> Result<Option<i64>> {
+    let set = vec![("verificationCodeRequestedAt", Value::Integer(now))];
+    let extra = Sql::bind(
+        "(\"verificationCodeRequestedAt\" IS NULL OR \"verificationCodeRequestedAt\" < ",
+        cutoff,
+    )
+    .closed(")");
+    Ok(update(conn, id, workspace_id, &set, Some(extra))?
+        .and_then(|row| row.verification_code_requested_at))
+}
+
+/// `releaseVerificationCodeSlot`: clears the stamp only while it is still `claimed_at`.
+pub fn release_verification_code_slot(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    claimed_at: i64,
+) -> Result<()> {
+    let set = vec![("verificationCodeRequestedAt", Value::Null)];
+    let extra = Sql::bind("\"verificationCodeRequestedAt\" = ", claimed_at);
+    update(conn, id, workspace_id, &set, Some(extra))?;
+    Ok(())
+}
+
+/// `isCallRecordingEnabledForInbox` (`false` without an integration).
+pub fn is_call_recording_enabled_for_inbox(
+    conn: &Connection,
+    workspace_id: i64,
+    inbox_id: i64,
+) -> Result<bool> {
+    Ok(
+        find_by_inbox_id_for_workspace(conn, workspace_id, inbox_id)?
+            .is_some_and(|row| row.call_recording_enabled),
+    )
+}
+
+/// `updateCallRecordingEnabled`.
+pub fn update_call_recording_enabled(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    enabled: bool,
+) -> Result<()> {
+    let set = vec![("callRecordingEnabled", Value::Integer(i64::from(enabled)))];
+    update(conn, id, workspace_id, &set, None)?;
+    Ok(())
+}
+
+/// `updatePixRedirectEnabled`; `None` when the number is not in the workspace.
+pub fn update_pix_redirect_enabled(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    enabled: bool,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let set = vec![("pixRedirectEnabled", Value::Integer(i64::from(enabled)))];
+    update(conn, id, workspace_id, &set, None)
+}
+
+const CALL_SETTINGS_COLUMNS: &[&str] = &[
+    "callRecordingEnabled",
+    "callRecordingRetentionDays",
+    "callTranscriptionEnabled",
+    "callingEnabled",
+    "inboundCallsEnabled",
+    "callHours",
+];
+
+/// `updateCallSettings`: the patch keys of `UpdateCallSettingsInput.values` (others are
+/// refused); with `only_while_recording`, matches only while `callRecordingEnabled`.
+pub fn update_call_settings(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    values: &Patch,
+    only_while_recording: bool,
+) -> Result<Option<IntegrationWhatsapp>> {
+    super::patch::check(CALL_SETTINGS_COLUMNS, values)?;
+    let extra = only_while_recording.then(|| Sql::raw("\"callRecordingEnabled\" = 1"));
+    update(conn, id, workspace_id, values, extra)
+}
+
+/// `updateRoutingRolesIfNewer`: stores `routing_roles` (a `RoutingRolesSnapshot`) unless
+/// the stored snapshot's `checkedAt` is not older (text comparison, as the TS); `None`
+/// when the row is missing or a newer snapshot kept it.
+pub fn update_routing_roles_if_newer(
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    routing_roles: &Json,
+) -> Result<Option<IntegrationWhatsapp>> {
+    let checked_at = routing_roles
+        .0
+        .get("checkedAt")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| super::Error::msg("routingRoles.checkedAt must be a string"))?
+        .to_owned();
+    let set = vec![("routingRoles", json_value(routing_roles))];
+    let extra = Sql::bind(
+        "COALESCE(\"routingRoles\" ->> '$.checkedAt', '') < ",
+        checked_at,
+    );
+    update(conn, id, workspace_id, &set, Some(extra))
 }
