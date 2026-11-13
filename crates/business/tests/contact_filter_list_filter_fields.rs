@@ -132,13 +132,13 @@ async fn list_contact_filter_fields_for_api_derives_each_custom_bot_field_s_valu
     assert_eq!(
         result["customFields"],
         json!([
-            { "id": "1", "name": "Company", "type": "shortText", "valueType": "text" },
             {
                 "id": "2",
                 "name": "Signup date",
                 "type": "date",
                 "valueType": "datetime",
             },
+            { "id": "1", "name": "Company", "type": "shortText", "valueType": "text" },
         ])
     );
     assert_eq!(
@@ -253,7 +253,8 @@ async fn list_contact_filter_fields_for_api_activity_backed_fields_reports_when_
 }
 
 #[tokio::test]
-async fn list_contact_filter_fields_for_api_activity_backed_fields_other_fields_have_no_value_source() {
+async fn list_contact_filter_fields_for_api_activity_backed_fields_other_fields_have_no_value_source()
+ {
     let db = db().await;
     let result = list(&db, Surface::Contacts).await;
 
@@ -385,7 +386,20 @@ async fn list_contact_filter_fields_for_api_pipeline_items_omits_the_pipeline_it
     let flow = list(&db, Surface::FlowCondition).await;
     let contacts = list(&db, Surface::Contacts).await;
 
-    assert_eq!(flow["pipelineItems"], json!({ "pipelines": [], "attributes": [] }));
-    assert_eq!(contacts["pipelineItems"]["pipelines"].as_array().map(Vec::len), Some(1));
-    assert_eq!(contacts["pipelineItems"]["attributes"].as_array().map(Vec::len), Some(4));
+    assert_eq!(
+        flow["pipelineItems"],
+        json!({ "pipelines": [], "attributes": [] })
+    );
+    assert_eq!(
+        contacts["pipelineItems"]["pipelines"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        contacts["pipelineItems"]["attributes"]
+            .as_array()
+            .map(Vec::len),
+        Some(4)
+    );
 }

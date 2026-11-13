@@ -50,7 +50,10 @@ async fn get_v1_contacts_filter_fields_delegates_to_list_contact_filter_fields_f
         .filter_map(|f| f["field"].as_str())
         .collect();
     assert!(fields.contains(&"isWithinWorkingHours"));
-    assert_eq!(body["pipelineItems"], json!({ "pipelines": [], "attributes": [] }));
+    assert_eq!(
+        body["pipelineItems"],
+        json!({ "pipelines": [], "attributes": [] })
+    );
 }
 
 // ---- POST /v1/contacts/filter-value-labels ------------------------------------
