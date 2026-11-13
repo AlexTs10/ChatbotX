@@ -81,26 +81,84 @@ fn map_unique(error: BusinessError) -> BusinessError {
 
 /// `placeCategoryService.list`: by rank, name, id, with location counts.
 pub async fn list(db: &Db, workspace_id: i64) -> Result<Vec<PlaceCategoryListItem>> {
-    todo!("P3.6-D1")
+    let rows = tx::read(db, move |conn| {
+        Ok(place::list_categories_with_location_count(
+            conn,
+            workspace_id,
+        )?)
+    })
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PlaceCategoryListItem {
+            id: row.category.id,
+            name: row.category.name,
+            rank: row.category.rank,
+            location_count: row.location_count,
+            created_at: row.category.created_at,
+            updated_at: row.category.updated_at,
+        })
+        .collect())
 }
 
 /// `placeCategoryService.find`.
 pub async fn find(db: &Db, workspace_id: i64, category_id: i64) -> Result<PlaceCategory> {
-    todo!("P3.6-D1")
+    tx::read(db, move |conn| {
+        place::find_category(conn, workspace_id, category_id)?.ok_or_else(not_found)
+    })
+    .await
 }
 
 /// `placeCategoryService.create`: trims the name; a name taken in any case is
 /// `placeCategoryDuplicated` (409).
 pub async fn create(db: &Db, input: CreatePlaceCategory) -> Result<PlaceCategory> {
-    todo!("P3.6-D1")
+    let name = normalize_name(&input.name);
+    if name.is_empty() {
+        return Err(name_required());
+    }
+    let workspace_id = input.workspace_id;
+    let mut values: Patch = vec![("name", Value::Text(name))];
+    if let Some(rank) = input.rank {
+        values.push(("rank", Value::Integer(rank)));
+    }
+    tx::write(db, move |conn| {
+        place::create_category(conn, workspace_id, &values)?.ok_or_else(|| {
+            BusinessError::exception("Failed to create place category", "systemError", 400)
+        })
+    })
+    .await
+    .map_err(map_unique)
 }
 
 /// `placeCategoryService.update`: only the sent fields change.
 pub async fn update(db: &Db, input: UpdatePlaceCategory) -> Result<PlaceCategory> {
-    todo!("P3.6-D1")
+    let name = input.name.as_deref().map(normalize_name);
+    if name.as_deref() == Some("") {
+        return Err(name_required());
+    }
+    let mut values: Patch = Vec::new();
+    if let Some(name) = name {
+        values.push(("name", Value::Text(name)));
+    }
+    if let Some(rank) = input.rank {
+        values.push(("rank", Value::Integer(rank)));
+    }
+    let (workspace_id, category_id) = (input.workspace_id, input.category_id);
+    tx::write(db, move |conn| {
+        place::update_category(conn, workspace_id, category_id, &values)?.ok_or_else(not_found)
+    })
+    .await
+    .map_err(map_unique)
 }
 
 /// `placeCategoryService.delete`: its locations stay, uncategorized.
 pub async fn delete(db: &Db, workspace_id: i64, category_id: i64) -> Result<DeletedPlaceCategory> {
-    todo!("P3.6-D1")
+    tx::write(db, move |conn| {
+        let count = place::count_category_locations(conn, workspace_id, category_id)?;
+        place::delete_category(conn, workspace_id, category_id)?.ok_or_else(not_found)?;
+        Ok(DeletedPlaceCategory {
+            uncategorized_location_count: count,
+        })
+    })
+    .await
 }

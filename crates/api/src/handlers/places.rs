@@ -93,5 +93,178 @@ pub const ROUTES: &[&str] = &[
 
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
-    todo!("P3.6-D1")
+    let db = &state.db;
+    let ws = call.workspace_id;
+    match route_id {
+        "placeCategories.list" => match category::list(db, ws).await {
+            Ok(rows) => Ok(json(
+                200,
+                json!({ "data": rows.iter().map(category_list_json).collect::<Vec<_>>() }),
+            )),
+            Err(error) => Err(business_error(error, super::LISTING)),
+        },
+        "placeCategories.get" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let category_id = input.id("id");
+            input.finish()?;
+            category::find(db, ws, category_id.unwrap_or_default())
+                .await
+                .map(|row| json(200, category_json(&row)))
+                .map_err(|e| business_error(e, super::FINDING))
+        }
+        "placeCategories.create" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let name = input.string("name", NAME);
+            let rank = input.opt_number("rank", RANK);
+            input.finish()?;
+            category::create(
+                db,
+                CreatePlaceCategory {
+                    workspace_id: ws,
+                    name: name.unwrap_or_default(),
+                    rank: rank.map(|r| r as i64),
+                },
+            )
+            .await
+            .map(|row| json(200, category_json(&row)))
+            .map_err(|e| business_error(e, CREATING_PLACE_CATEGORY))
+        }
+        "placeCategories.update" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let name = input.opt_string("name", NAME);
+            let rank = input.opt_number("rank", RANK);
+            let category_id = input.id("id");
+            input.require_one_of(&["name", "rank"]);
+            input.finish()?;
+            category::update(
+                db,
+                UpdatePlaceCategory {
+                    workspace_id: ws,
+                    category_id: category_id.unwrap_or_default(),
+                    name,
+                    rank: rank.map(|r| r as i64),
+                },
+            )
+            .await
+            .map(|row| json(200, category_json(&row)))
+            .map_err(|e| business_error(e, MUTATING_PLACE_CATEGORY))
+        }
+        "placeCategories.delete" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let category_id = input.id("id");
+            input.finish()?;
+            category::delete(db, ws, category_id.unwrap_or_default())
+                .await
+                .map(|out| {
+                    json(
+                        200,
+                        json!({ "uncategorizedLocationCount": out.uncategorized_location_count }),
+                    )
+                })
+                .map_err(|e| business_error(e, super::MUTATING))
+        }
+        "placeLocations.list" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let name = input.opt_string(
+                "name",
+                Str {
+                    trim: true,
+                    ..Str::max(255)
+                },
+            );
+            let page = input.opt_coerce_int(
+                "page",
+                Num {
+                    min: Some(1.0),
+                    ..Num::default()
+                },
+            );
+            let per_page = input.opt_coerce_int("perPage", Num::int(1.0, 50.0));
+            input.finish()?;
+            location::list(
+                db,
+                ListPlaceLocations {
+                    workspace_id: ws,
+                    name,
+                    page,
+                    per_page,
+                },
+            )
+            .await
+            .map(|list| {
+                json(
+                    200,
+                    json!({
+                        "data": list.data.iter().map(location_json).collect::<Vec<_>>(),
+                        "pageCount": list.page_count,
+                    }),
+                )
+            })
+            .map_err(|e| business_error(e, super::LISTING))
+        }
+        "placeLocations.get" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let location_id = input.id("id");
+            input.finish()?;
+            location::find(db, ws, location_id.unwrap_or_default())
+                .await
+                .map(|item| json(200, location_json(&item)))
+                .map_err(|e| business_error(e, super::FINDING))
+        }
+        "placeLocations.create" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let name = input.string("name", NAME);
+            let latitude = input.number("latitude", LATITUDE);
+            let longitude = input.number("longitude", LONGITUDE);
+            let category_id = input.nullish_id("categoryId");
+            input.finish()?;
+            location::create(
+                db,
+                CreatePlaceLocation {
+                    workspace_id: ws,
+                    name: name.unwrap_or_default(),
+                    latitude: latitude.unwrap_or_default(),
+                    longitude: longitude.unwrap_or_default(),
+                    category_id: category_id.flatten(),
+                },
+            )
+            .await
+            .map(|item| json(200, location_json(&item)))
+            .map_err(|e| business_error(e, super::MUTATING))
+        }
+        "placeLocations.update" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let name = input.opt_string("name", NAME);
+            let latitude = input.opt_number("latitude", LATITUDE);
+            let longitude = input.opt_number("longitude", LONGITUDE);
+            let category_id = input.nullish_id("categoryId");
+            let location_id = input.id("id");
+            input.require_one_of(&["name", "latitude", "longitude", "categoryId"]);
+            input.finish()?;
+            location::update(
+                db,
+                UpdatePlaceLocation {
+                    workspace_id: ws,
+                    location_id: location_id.unwrap_or_default(),
+                    name,
+                    latitude,
+                    longitude,
+                    category_id,
+                },
+            )
+            .await
+            .map(|item| json(200, location_json(&item)))
+            .map_err(|e| business_error(e, super::MUTATING))
+        }
+        "placeLocations.delete" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let location_id = input.id("id");
+            input.finish()?;
+            location::delete(db, ws, location_id.unwrap_or_default())
+                .await
+                .map(|()| no_content())
+                .map_err(|e| business_error(e, super::MUTATING))
+        }
+        _ => Err(crate::routes::not_ported_error()),
+    }
 }

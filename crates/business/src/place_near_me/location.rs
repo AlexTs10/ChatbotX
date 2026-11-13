@@ -130,31 +130,118 @@ fn assert_category(conn: &Connection, workspace_id: i64, category_id: Option<i64
 
 /// `placeLocationService.list`: newest first; without paging every row (`pageCount` 1).
 pub async fn list(db: &Db, input: ListPlaceLocations) -> Result<PlaceLocationList> {
-    todo!("P3.6-D1")
+    let page = tx::read(db, move |conn| {
+        Ok(place::list_locations(
+            conn,
+            input.workspace_id,
+            input.name.as_deref(),
+            PaginationInput {
+                page: input.page,
+                per_page: input.per_page,
+            },
+        )?)
+    })
+    .await?;
+    Ok(PlaceLocationList {
+        data: page.data.into_iter().map(to_item).collect(),
+        page_count: page.page_count,
+    })
 }
 
 /// `placeLocationService.find`.
 pub async fn find(db: &Db, workspace_id: i64, location_id: i64) -> Result<PlaceLocationItem> {
-    todo!("P3.6-D1")
+    tx::read(db, move |conn| find_in(conn, workspace_id, location_id)).await
 }
 
 /// `placeLocationService.create`.
 pub async fn create(db: &Db, input: CreatePlaceLocation) -> Result<PlaceLocationItem> {
-    todo!("P3.6-D1")
+    let name = normalize_name(&input.name)?;
+    tx::write(db, move |conn| {
+        assert_category(conn, input.workspace_id, input.category_id)?;
+        let values: Patch = vec![
+            ("name", Value::Text(name)),
+            ("latitude", Value::Real(input.latitude)),
+            ("longitude", Value::Real(input.longitude)),
+            (
+                "categoryId",
+                input.category_id.map_or(Value::Null, Value::Integer),
+            ),
+        ];
+        let created =
+            place::create_location(conn, input.workspace_id, &values)?.ok_or_else(|| {
+                BusinessError::exception("Failed to create place location", "systemError", 400)
+            })?;
+        find_in(conn, input.workspace_id, created.id)
+    })
+    .await
 }
 
 /// `placeLocationService.update`: only the sent fields change; nothing sent = the row as is.
 pub async fn update(db: &Db, input: UpdatePlaceLocation) -> Result<PlaceLocationItem> {
-    todo!("P3.6-D1")
+    let mut values: Patch = Vec::new();
+    if let Some(name) = &input.name {
+        values.push(("name", Value::Text(normalize_name(name)?)));
+    }
+    if let Some(latitude) = input.latitude {
+        values.push(("latitude", Value::Real(latitude)));
+    }
+    if let Some(longitude) = input.longitude {
+        values.push(("longitude", Value::Real(longitude)));
+    }
+    if let Some(category_id) = input.category_id {
+        values.push((
+            "categoryId",
+            category_id.map_or(Value::Null, Value::Integer),
+        ));
+    }
+    let (workspace_id, location_id) = (input.workspace_id, input.location_id);
+    if values.is_empty() {
+        return find(db, workspace_id, location_id).await;
+    }
+    tx::write(db, move |conn| {
+        assert_category(conn, workspace_id, input.category_id.flatten())?;
+        place::update_location(conn, workspace_id, location_id, &values)?
+            .ok_or_else(location_not_found)?;
+        find_in(conn, workspace_id, location_id)
+    })
+    .await
 }
 
 /// `placeLocationService.delete`.
 pub async fn delete(db: &Db, workspace_id: i64, location_id: i64) -> Result<()> {
-    todo!("P3.6-D1")
+    tx::write(db, move |conn| {
+        place::delete_location(conn, workspace_id, location_id)?
+            .map(|_| ())
+            .ok_or_else(location_not_found)
+    })
+    .await
 }
 
 /// `placeLocationService.findNearest`: the location closest to a point, in one
 /// category or all; `None` if there is none.
 pub async fn find_nearest(db: &Db, input: FindNearestPlace) -> Result<Option<NearestPlace>> {
-    todo!("P3.6-D1")
+    let rows = tx::read(db, move |conn| {
+        Ok(place::list_location_coordinates(
+            conn,
+            input.workspace_id,
+            input.category_id,
+        )?)
+    })
+    .await?;
+    let places: Vec<PlaceCoordinates> = rows
+        .into_iter()
+        .map(|(id, name, latitude, longitude)| PlaceCoordinates {
+            id,
+            name,
+            latitude,
+            longitude,
+        })
+        .collect();
+    Ok(pick_nearest_place(
+        Coordinates {
+            latitude: input.latitude,
+            longitude: input.longitude,
+        },
+        &places,
+    ))
 }

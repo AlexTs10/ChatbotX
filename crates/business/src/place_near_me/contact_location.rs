@@ -100,7 +100,42 @@ pub async fn list_values_by_keys(
     db: &Db,
     input: ContactLocationInput,
 ) -> Result<Vec<ContactFieldValue>> {
-    todo!("P3.6-D1")
+    let mut keys: Vec<String> = Vec::new();
+    for key in input.keys {
+        if !key.is_empty() && !is_bot_field_reference(&key) && !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<i64> = keys
+        .iter()
+        .filter(|key| is_numeric_id(key))
+        .filter_map(|key| key.parse().ok())
+        .collect();
+    let (workspace_id, contact_id) = (input.workspace_id, input.contact_id);
+    let names = keys.clone();
+    let rows = tx::read(db, move |conn| {
+        list_values_by_field_keys(conn, workspace_id, contact_id, &ids, &names)
+    })
+    .await?;
+    let mut values: Vec<ContactFieldValue> = Vec::new();
+    for key in keys {
+        let row = rows
+            .iter()
+            .find(|row| row.custom_field_id.to_string() == key)
+            .or_else(|| rows.iter().find(|row| row.name == key));
+        if let Some(row) = row {
+            values.push(ContactFieldValue {
+                key,
+                value: row.value.clone(),
+                updated_at: row.updated_at,
+            });
+        }
+    }
+    values.sort_by_key(|v| std::cmp::Reverse(v.updated_at));
+    Ok(values)
 }
 
 /// `findContactLocation`: the newest `lat,lng` value the contact holds in any of
@@ -110,5 +145,11 @@ pub async fn find_contact_location(
     db: &Db,
     input: ContactLocationInput,
 ) -> Result<Option<Coordinates>> {
-    todo!("P3.6-D1")
+    let rows = list_values_by_keys(db, input).await?;
+    Ok(rows.iter().find_map(|row| {
+        parse_coordinate_pair(&row.value).map(|pair| Coordinates {
+            latitude: pair.latitude,
+            longitude: pair.longitude,
+        })
+    }))
 }
