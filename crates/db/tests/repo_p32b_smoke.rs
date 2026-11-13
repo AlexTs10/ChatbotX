@@ -564,3 +564,162 @@ async fn contact_inbox_relational_finders() {
         .expect("by contact");
     assert_eq!(by_contact.len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// Slice E1 (flow, file, inbound-webhook): the functions without a TS test.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn flow_prefix_names_and_existence_are_scoped() {
+    use chatbotx_db::repo::flow;
+    let db = fresh_db().await;
+    let s = seed(&db).await;
+    db.write(move |tx| {
+        for (id, name) in [
+            (61, "Welcome"),
+            (62, "Welcome 2"),
+            (63, "welcome lower"),
+            (64, "Other"),
+        ] {
+            tx.execute(
+                r#"INSERT INTO "Flow" ("id", "name", "workspaceId") VALUES (?1, ?2, ?3)"#,
+                params![id, name, s.workspace_id],
+            )?;
+        }
+        Ok(())
+    })
+    .await
+    .expect("seed flows");
+    let ws = s.workspace_id;
+    let names = repo::read(&db, move |c| flow::list_names_with_prefix(c, ws, "Welcome"))
+        .await
+        .expect("names");
+    assert_eq!(names, vec!["Welcome".to_owned(), "Welcome 2".to_owned()]);
+    let pct = repo::read(&db, move |c| flow::list_names_with_prefix(c, ws, "%"))
+        .await
+        .expect("names");
+    assert!(pct.is_empty());
+    let found = repo::read(&db, move |c| flow::exists_in_workspace(c, ws, 61))
+        .await
+        .expect("exists");
+    let foreign = repo::read(&db, move |c| flow::exists_in_workspace(c, ws + 1, 61))
+        .await
+        .expect("exists");
+    assert!(found && !foreign);
+}
+
+#[tokio::test]
+async fn file_create_fills_id_and_timestamps() {
+    use chatbotx_db::repo::file;
+    use chatbotx_db::rusqlite::types::Value;
+    let db = fresh_db().await;
+    let s = seed(&db).await;
+    let ws = s.workspace_id;
+    let row = repo::write(&db, move |c| {
+        file::create(
+            c,
+            &vec![
+                ("workspaceId", Value::Integer(ws)),
+                ("contextType", Value::Text("export".to_owned())),
+                ("subType", Value::Text("contacts".to_owned())),
+                ("path", Value::Text("exports/a.csv".to_owned())),
+                ("fileName", Value::Text("a.csv".to_owned())),
+                ("mimeType", Value::Text("text/csv".to_owned())),
+            ],
+        )
+    })
+    .await
+    .expect("create");
+    assert!(row.id > 0);
+    assert_eq!(row.status, "pending");
+    assert_eq!(row.created_at, row.updated_at);
+    let id = row.id;
+    let again = repo::read(&db, move |c| {
+        file::find_by_id_for_workspace(c, id, ws, Some(1))
+    })
+    .await
+    .expect("find");
+    assert_eq!(again, None, "user filter narrows to the uploader");
+    let bad = repo::write(&db, move |c| {
+        file::create(c, &vec![("nope", Value::Integer(1))])
+    })
+    .await;
+    assert!(bad.is_err());
+}
+
+#[tokio::test]
+async fn inbound_webhook_insert_update_find_count_and_request_lookup() {
+    use chatbotx_db::repo::inbound_webhook as ib;
+    use chatbotx_db::rusqlite::types::Value;
+    let db = fresh_db().await;
+    let s = seed(&db).await;
+    let ws = s.workspace_id;
+    let hook = repo::write(&db, move |c| {
+        ib::insert_inbound_webhook(
+            c,
+            &vec![
+                ("workspaceId", Value::Integer(ws)),
+                ("name", Value::Text("Orders".to_owned())),
+                ("token", Value::Text("iwh_1".to_owned())),
+                ("identifiers", Value::Text("[]".to_owned())),
+                ("fieldMappings", Value::Text("[]".to_owned())),
+                ("actions", Value::Text("[]".to_owned())),
+            ],
+        )
+    })
+    .await
+    .expect("insert");
+    assert_eq!((hook.name.as_str(), hook.request_count), ("Orders", 0));
+    let id = hook.id;
+    let renamed = repo::write(&db, move |c| {
+        ib::update_inbound_webhook(c, id, ws, &vec![("name", Value::Text("Sales".to_owned()))])
+    })
+    .await
+    .expect("update");
+    assert_eq!(renamed.map(|h| h.name), Some("Sales".to_owned()));
+    let foreign = repo::write(&db, move |c| {
+        ib::update_inbound_webhook(c, id, ws + 1, &vec![("name", Value::Text("X".to_owned()))])
+    })
+    .await
+    .expect("update");
+    assert_eq!(foreign, None);
+    let not_allowed = repo::write(&db, move |c| {
+        ib::update_inbound_webhook(c, id, ws, &vec![("requestCount", Value::Integer(9))])
+    })
+    .await;
+    assert!(not_allowed.is_err());
+    let found = repo::read(&db, move |c| ib::find_inbound_webhook_by_id(c, id, ws))
+        .await
+        .expect("find");
+    assert_eq!(found.map(|h| h.name), Some("Sales".to_owned()));
+    let count = repo::read(&db, move |c| ib::count_inbound_webhooks(c, ws))
+        .await
+        .expect("count");
+    assert_eq!(count, 1);
+    let request = repo::write(&db, move |c| {
+        ib::insert_inbound_webhook_request(
+            c,
+            &vec![
+                ("workspaceId", Value::Integer(ws)),
+                ("inboundWebhookId", Value::Integer(id)),
+                ("payload", Value::Text("{}".to_owned())),
+            ],
+        )
+    })
+    .await
+    .expect("insert request")
+    .expect("no key, no conflict");
+    let rid = request.id;
+    let by_hook = repo::read(&db, move |c| {
+        ib::find_inbound_webhook_request(c, rid, ws, Some(id))
+    })
+    .await
+    .expect("find request");
+    let other_hook = repo::read(&db, move |c| {
+        ib::find_inbound_webhook_request(c, rid, ws, Some(id + 1))
+    })
+    .await
+    .expect("find request");
+    assert_eq!(by_hook.map(|r| r.status), Some("received".to_owned()));
+    assert_eq!(other_hook, None);
+}
