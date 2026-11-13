@@ -5,6 +5,7 @@
 pub mod channels;
 pub mod connections;
 pub mod contacts;
+pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod flows;
 pub mod input;
@@ -226,6 +227,8 @@ pub async fn dispatch_as(
         connections::handle(state, route_id, call, principal).await?
     } else if contacts::ROUTES.contains(&route_id) {
         contacts::handle(state, route_id, call).await
+    } else if custom_fields::ROUTES.contains(&route_id) {
+        custom_fields::handle(state, route_id, call).await
     } else if ecommerce_settings::ROUTES.contains(&route_id) {
         ecommerce_settings::handle(state, route_id, call).await
     } else if flows::ROUTES.contains(&route_id) {

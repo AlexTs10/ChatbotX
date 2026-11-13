@@ -351,3 +351,17 @@ pub async fn rows(
     .await
     .expect("rows read")
 }
+
+/// Inserts a `Folder` of a type (`paths` `[]`).
+pub fn folder(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    folder_type: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Folder" ("id", "workspaceId", "name", "folderType", "paths") VALUES (?1, ?2, ?3, ?4, '[]')"#,
+        params![id, workspace_id, format!("Folder {id}"), folder_type],
+    )?;
+    Ok(id)
+}
