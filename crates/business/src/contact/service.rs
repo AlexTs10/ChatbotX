@@ -363,3 +363,16 @@ fn delete_in(tx: &Connection, workspace_id: i64, ids: &[i64]) -> Result<Vec<i64>
     }
     Ok(found)
 }
+
+/// `listByCustomFieldValue` (`list.ts`): `email` / `phone` match the native
+/// columns, any other id a custom field value; at most 100 contacts, the
+/// latest updated first.
+pub async fn list_by_custom_field_value(
+    db: &Db,
+    workspace_id: i64,
+    custom_field_id: &str,
+    value: &str,
+) -> Result<Vec<PublicContact>> {
+    let _ = (db, workspace_id, custom_field_id, value);
+    todo!("P3.6-D2")
+}

@@ -15,8 +15,8 @@ pub use create::{
 pub use identifier::{ContactIdentifier, IdentifierPrefix, parse_contact_identifier};
 pub use service::{
     DeleteOutcome, UpsertData, UpsertOutcome, block_and_record, delete, delete_and_record,
-    find_public_contact_or_fail, resolve_id_by_identifier, unblock_and_record,
-    upsert_by_identifier,
+    find_public_contact_or_fail, list_by_custom_field_value, resolve_id_by_identifier,
+    unblock_and_record, upsert_by_identifier,
 };
 pub use update_fields::{CustomFieldChange, UpdateOutcome, update_fields_and_custom_fields};
 
