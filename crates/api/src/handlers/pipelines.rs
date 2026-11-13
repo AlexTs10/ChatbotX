@@ -316,6 +316,12 @@ pub const ROUTES: &[&str] = &[
     "pipelines.createField",
     "pipelines.updateField",
     "pipelines.deleteField",
+    "pipelines.createItem",
+    "pipelines.getItem",
+    "pipelines.updateItem",
+    "pipelines.moveItem",
+    "pipelines.transferItem",
+    "pipelines.deleteItem",
 ];
 
 /// Runs one of [`ROUTES`].
@@ -578,6 +584,12 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             .map_err(mutating)?;
             Ok(no_content())
         }
+        "pipelines.createItem"
+        | "pipelines.getItem"
+        | "pipelines.updateItem"
+        | "pipelines.moveItem"
+        | "pipelines.transferItem"
+        | "pipelines.deleteItem" => todo!("P3.6-D1p"),
         _ => Err(super::internal_error(route_id)),
     }
 }

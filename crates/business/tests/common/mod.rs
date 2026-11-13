@@ -478,3 +478,17 @@ pub fn pipeline_row(
     )?;
     Ok(id)
 }
+
+/// Inserts a `WorkspaceMember` (role `agent`) (P3.6-D1p).
+pub fn workspace_member(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    user_id: i64,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role") VALUES (?1, ?2, ?3, 'agent')"#,
+        params![id, workspace_id, user_id],
+    )?;
+    Ok(id)
+}
