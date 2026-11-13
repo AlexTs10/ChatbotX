@@ -534,6 +534,7 @@ pub mod contact_activity;
 pub mod contact_custom_field;
 pub mod contact_inbox;
 pub mod contact_list_where;
+pub mod contact_referral_event;
 pub mod conversation;
 pub mod conversation_ai_context;
 pub mod external_store;
