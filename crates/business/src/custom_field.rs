@@ -281,6 +281,14 @@ pub fn find_many_by_keys_in(
     workspace_id: i64,
     keys: &[String],
 ) -> Result<std::collections::HashMap<String, CustomField>> {
-    let _ = (conn, workspace_id, keys);
-    todo!("P3.6-D2")
+    let mut resolved = std::collections::HashMap::new();
+    for key in keys {
+        if resolved.contains_key(key) {
+            continue;
+        }
+        if let Some(field) = find_by_key_in(conn, workspace_id, key)? {
+            resolved.insert(key.clone(), field);
+        }
+    }
+    Ok(resolved)
 }
