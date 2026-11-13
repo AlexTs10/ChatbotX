@@ -339,3 +339,32 @@ pub async fn seed_platform_credential(db: &Db, user_id: i64, use_platform_creden
     )
     .await;
 }
+
+/// Inserts one `WhatsappSignupSession` (user 1001, owner 1002, no workspace) with
+/// `candidates` and `claimed` (JSON arrays) and `expiresAt` = `expires_at`.
+pub async fn put_signup_session(
+    db: &Db,
+    id: i64,
+    candidates: &[&str],
+    claimed: &[&str],
+    expires_at: i64,
+) {
+    let candidates = serde_json::json!(candidates).to_string();
+    let claimed = serde_json::json!(claimed).to_string();
+    db.write(move |tx| {
+        tx.execute(
+            r#"INSERT INTO "WhatsappSignupSession" ("id", "userId", "ownerId", "wabaId", "businessId", "encryptedAccessToken", "apiVersion", "candidatePhoneNumberIds", "claimedPhoneNumberIds", "expiresAt") VALUES (?1, 1001, 1002, 'waba-1', 'business-1', '{}', 'v21.0', ?2, ?3, ?4)"#,
+            chatbotx_db::rusqlite::params![id, candidates, claimed, expires_at],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("put signup session");
+}
+
+/// The stored `WhatsappSignupSession` `id`.
+pub async fn signup_session(db: &Db, id: i64) -> chatbotx_db::repo::models::WhatsappSignupSession {
+    read(db, move |c| repo::find_one(c, "\"id\" = ?1", &[&id]))
+        .await
+        .expect("signup session row")
+}

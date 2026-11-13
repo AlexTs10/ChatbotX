@@ -618,6 +618,7 @@ pub mod whatsapp_business_account;
 pub mod whatsapp_call;
 pub mod whatsapp_call_permission;
 pub mod whatsapp_coexist_staging;
+pub mod whatsapp_signup_session;
 pub mod working_hours;
 pub mod workspace;
 pub mod workspace_api_token;
