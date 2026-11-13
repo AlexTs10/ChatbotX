@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod errors;
 pub mod handlers;
+pub mod idempotency;
 pub mod iso8601;
 pub mod mail;
 pub mod orpc;
