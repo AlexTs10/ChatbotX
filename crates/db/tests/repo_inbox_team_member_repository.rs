@@ -2,6 +2,7 @@
 //! The TS mocks the Drizzle chain and checks the rendered join / where; here the queries
 //! run on a migrated temp file (adapted): teams of workspace 2001 and of another workspace
 //! 2002 with the same members, so the workspace fence is visible in the rows.
+#![allow(clippy::manual_async_fn)] // P3.2b orchestrator: style lint in locked ported test
 
 mod common;
 #[macro_use]
