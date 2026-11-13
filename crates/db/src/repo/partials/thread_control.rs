@@ -106,14 +106,34 @@ pub struct ThreadControlInput<'a> {
 /// `resolveThreadControlState`: the stored state, or `idle` once the channel expiry has
 /// passed (when set) or 24 h after the latest reference time.
 pub fn resolve_thread_control_state<'a>(input: &ThreadControlInput<'a>) -> Option<&'a str> {
-    let _ = input;
-    todo!("P3.2b")
+    let state = input.state?;
+    if state == "idle" {
+        return Some(state);
+    }
+    if let Some(expires_at) = input.thread_owner_expires_at {
+        return Some(if input.now >= expires_at {
+            "idle"
+        } else {
+            state
+        });
+    }
+    let latest = match (
+        input.last_incoming_message_at,
+        input.thread_control_updated_at,
+    ) {
+        (None, None) => return Some(state),
+        (a, b) => a.max(b).unwrap_or_default(),
+    };
+    Some(if input.now - latest >= THREAD_IDLE_AFTER_MS {
+        "idle"
+    } else {
+        state
+    })
 }
 
 /// `isServiceSendBlocked`: a non-template send on a thread that resolves to `standby`.
 pub fn is_service_send_blocked(input: &ThreadControlInput<'_>, is_template_message: bool) -> bool {
-    let _ = (input, is_template_message);
-    todo!("P3.2b")
+    !is_template_message && resolve_thread_control_state(input) == Some("standby")
 }
 
 /// `THREAD_CONTROL_TIMESTAMP_RESOLUTION_MS`.
@@ -121,8 +141,8 @@ pub const THREAD_CONTROL_TIMESTAMP_RESOLUTION_MS: i64 = 1000;
 
 /// `toThreadControlTimestamp`: `ms` truncated to whole seconds.
 pub fn to_thread_control_timestamp(ms: i64) -> i64 {
-    let _ = ms;
-    todo!("P3.2b")
+    // JS `%` keeps the sign of `ms`, as Rust `%`.
+    ms - (ms % THREAD_CONTROL_TIMESTAMP_RESOLUTION_MS)
 }
 
 /// The result of `readThreadControlColumns` (unix ms).
@@ -137,12 +157,28 @@ pub struct ThreadControlColumns {
 /// `readThreadControlColumns`: a row (times as unix ms) or a job payload (times as ISO
 /// texts); a missing column reads as `None`.
 pub fn read_thread_control_columns(row: &Value) -> ThreadControlColumns {
-    let _ = row;
-    todo!("P3.2b")
+    // `value ? new Date(value) : null`: a falsy value (absent, null, "", 0) is `None`.
+    let time = |key: &str| match row.get(key) {
+        Some(Value::Number(n)) => n.as_i64().filter(|ms| *ms != 0),
+        Some(Value::String(text)) if !text.is_empty() => crate::repo::parse_iso(text),
+        _ => None,
+    };
+    ThreadControlColumns {
+        state: row
+            .get("threadControlState")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        last_incoming_message_at: time("lastIncomingMessageAt"),
+        thread_control_updated_at: time("threadControlUpdatedAt"),
+        thread_owner_expires_at: time("threadOwnerExpiresAt"),
+    }
 }
 
 /// `parseThreadControlRole`: a known role, else `None` (`value` `None` is `undefined`).
 pub fn parse_thread_control_role(value: Option<&Value>) -> Option<&'static str> {
-    let _ = value;
-    todo!("P3.2b")
+    let text = value?.as_str()?;
+    THREAD_CONTROL_ROLES
+        .iter()
+        .copied()
+        .find(|role| *role == text)
 }

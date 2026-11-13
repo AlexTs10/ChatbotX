@@ -327,76 +327,180 @@ pub struct TiktokCredentialUpdate {
 
 /// `googleCredentialSchema.parse`.
 pub fn parse_google_credential(value: &serde_json::Value) -> Result<GoogleCredential> {
-    let _ = value;
-    todo!("P3.2b")
+    deserialize(value)
 }
 
 /// `googleCredentialPublicSchema.parse`.
 pub fn parse_google_credential_public(value: &serde_json::Value) -> Result<GoogleCredentialPublic> {
-    let _ = value;
-    todo!("P3.2b")
+    deserialize(value)
 }
 
 /// `googleCredentialUpdateSchema.parse`.
 pub fn parse_google_credential_update(value: &serde_json::Value) -> Result<GoogleCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    let mut parsed: GoogleCredentialUpdate = deserialize(value)?;
+    trim_min1("clientId", &mut parsed.client_id)?;
+    trim_min1("clientSecret", &mut parsed.client_secret)?;
+    trim_min1("verifyToken", &mut parsed.verify_token)?;
+    Ok(parsed)
 }
 
 /// `googleAdsCredentialSchema.parse`.
 pub fn parse_google_ads_credential(value: &serde_json::Value) -> Result<GoogleAdsCredential> {
-    let _ = value;
-    todo!("P3.2b")
+    deserialize(value)
 }
 
 /// `googleAdsCredentialPublicSchema.parse`.
 pub fn parse_google_ads_credential_public(
     value: &serde_json::Value,
 ) -> Result<GoogleAdsCredentialPublic> {
-    let _ = value;
-    todo!("P3.2b")
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Picked {
+        client_id: String,
+        #[serde(default)]
+        developer_token: Option<String>,
+        #[serde(default)]
+        upload_method: Option<GoogleAdsUploadMethod>,
+    }
+    let picked: Picked = deserialize(value)?;
+    Ok(GoogleAdsCredentialPublic {
+        client_id: picked.client_id,
+        upload_method: picked.upload_method,
+        // `Boolean(developerToken)`: an empty token is no token.
+        has_developer_token: picked.developer_token.is_some_and(|t| !t.is_empty()),
+    })
 }
 
 /// `googleAdsCredentialUpdateSchema.parse`.
 pub fn parse_google_ads_credential_update(
     value: &serde_json::Value,
 ) -> Result<GoogleAdsCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    let mut parsed: GoogleAdsCredentialUpdate = deserialize(value)?;
+    trim_min1("clientId", &mut parsed.client_id)?;
+    trim_opt(&mut parsed.client_secret);
+    trim_opt(&mut parsed.developer_token);
+    Ok(parsed)
+}
+
+fn parse_app_credential_update(value: &serde_json::Value) -> Result<AppCredentialUpdate> {
+    let mut parsed: AppCredentialUpdate = deserialize(value)?;
+    trim_min1("clientId", &mut parsed.client_id)?;
+    trim_min1("version", &mut parsed.version)?;
+    trim_min1("verifyToken", &mut parsed.verify_token)?;
+    trim_min1("clientSecret", &mut parsed.client_secret)?;
+    Ok(parsed)
 }
 
 /// `instagramCredentialUpdateSchema.parse`.
 pub fn parse_instagram_credential_update(value: &serde_json::Value) -> Result<AppCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    parse_app_credential_update(value)
 }
 
 /// `zaloCredentialUpdateSchema.parse`.
 pub fn parse_zalo_credential_update(value: &serde_json::Value) -> Result<AppCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    parse_app_credential_update(value)
 }
 
 /// `giphyCredentialUpdateSchema.parse`.
 pub fn parse_giphy_credential_update(value: &serde_json::Value) -> Result<GiphyCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    let mut parsed: GiphyCredentialUpdate = deserialize(value)?;
+    trim_opt(&mut parsed.api_key);
+    Ok(parsed)
 }
 
 /// `stripeCredentialUpdateSchema.parse`.
 pub fn parse_stripe_credential_update(value: &serde_json::Value) -> Result<StripeCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    let mut parsed: StripeCredentialUpdate = deserialize(value)?;
+    trim_min1("publishableKey", &mut parsed.publishable_key)?;
+    trim_min1("verifyToken", &mut parsed.verify_token)?;
+    trim_min1("secretKey", &mut parsed.secret_key)?;
+    parsed.connect_client_id = parsed.connect_client_id.trim().to_owned();
+    let id = &parsed.connect_client_id;
+    let valid = id
+        .strip_prefix("ca_")
+        .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()));
+    if !valid {
+        return Err(Error::msg(
+            "connectClientId: Invalid string: must match pattern /^ca_[A-Za-z0-9]+$/",
+        ));
+    }
+    Ok(parsed)
+}
+
+/// `z.coerce.number()` (JS `Number(value)`; `None` is `NaN`).
+fn coerce_number(value: Option<&serde_json::Value>) -> Option<f64> {
+    use serde_json::Value;
+    match value {
+        None => None,
+        Some(Value::Null) => Some(0.0),
+        Some(Value::Bool(b)) => Some(f64::from(u8::from(*b))),
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(text)) => {
+            let text = text.trim();
+            if text.is_empty() {
+                Some(0.0)
+            } else {
+                text.parse::<f64>().ok().filter(|n| n.is_finite())
+            }
+        }
+        Some(_) => None,
+    }
+}
+
+/// zod `.email()`: `^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$`.
+fn is_zod_email(text: &str) -> bool {
+    static EMAIL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"^[A-Za-z0-9_'+\-.]*[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$",
+        )
+        .expect("email pattern")
+    });
+    !text.starts_with('.') && !text.contains("..") && EMAIL.is_match(text)
 }
 
 /// `smtpCredentialUpdateSchema.parse`.
 pub fn parse_smtp_credential_update(value: &serde_json::Value) -> Result<SmtpCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    let mut object = value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| Error::msg("Invalid input: expected object"))?;
+    let port = coerce_number(object.get("port"))
+        .ok_or_else(|| Error::msg("port: Invalid input: expected number, received NaN"))?;
+    if port.fract() != 0.0 || port <= 0.0 || port > i64::MAX as f64 {
+        return Err(Error::msg("port: expected a positive integer"));
+    }
+    object.insert("port".to_owned(), serde_json::json!(port as i64));
+    let mut parsed: SmtpCredentialUpdate = deserialize(&serde_json::Value::Object(object))?;
+    trim_min1("host", &mut parsed.host)?;
+    trim_min1("username", &mut parsed.username)?;
+    trim_opt(&mut parsed.password);
+    trim_min1("fromEmail", &mut parsed.from_email)?;
+    if !is_zod_email(&parsed.from_email) {
+        return Err(Error::msg("fromEmail: Invalid email address"));
+    }
+    trim_opt(&mut parsed.from_name);
+    Ok(parsed)
 }
 
 /// `tiktokCredentialUpdateSchema.parse`.
 pub fn parse_tiktok_credential_update(value: &serde_json::Value) -> Result<TiktokCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    let mut object = value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| Error::msg("Invalid input: expected object"))?;
+    // `.default(...)`: only an absent (`undefined`) value takes the default.
+    if !object.contains_key("features") {
+        object.insert(
+            "features".to_owned(),
+            serde_json::to_value(TIKTOK_DEFAULT_CHANNEL_FEATURES)
+                .map_err(|e| Error::msg(e.to_string()))?,
+        );
+    }
+    let mut parsed: TiktokCredentialUpdate = deserialize(&serde_json::Value::Object(object))?;
+    trim_min1("clientId", &mut parsed.client_id)?;
+    trim_min1("clientSecret", &mut parsed.client_secret)?;
+    if !(parsed.features.messaging || parsed.features.comments) {
+        return Err(Error::msg("features.messaging: Invalid input"));
+    }
+    Ok(parsed)
 }
