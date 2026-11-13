@@ -325,3 +325,115 @@ async fn inbox_readers_and_connection_mirror() {
         ("connected", None)
     );
 }
+
+#[tokio::test]
+async fn appointment_calendar_crud() {
+    use chatbotx_db::repo::appointment_calendar::{
+        self as cal, AvailabilityInput, CalendarListInput, CreateCalendarInput,
+    };
+    use chatbotx_db::rusqlite::types::Value;
+    let (db, s) = contact_db().await;
+    let ws = s.workspace_id;
+    let mk = |name: &str, slug: &str| CreateCalendarInput {
+        workspace_id: ws,
+        name: name.to_owned(),
+        timezone: "UTC".to_owned(),
+        location_type: "onlineMeeting".to_owned(),
+        public_link_slug: slug.to_owned(),
+        active: Some(false),
+    };
+    let (a, b) = (mk("Consult", "consult"), mk("Consult 2", "consult-2"));
+    let (a, b) = repo::write(&db, move |tx| {
+        Ok((cal::create(tx, &a)?, cal::create(tx, &b)?))
+    })
+    .await
+    .expect("create");
+    assert!(!a.active);
+    let names = repo::read(&db, move |c| cal::list_names_with_prefix(c, ws, "Consult"))
+        .await
+        .expect("names");
+    assert_eq!(names.len(), 2);
+    let page = repo::read(&db, move |c| {
+        cal::list(
+            c,
+            &CalendarListInput {
+                workspace_id: ws,
+                search: Some("2".to_owned()),
+                ..CalendarListInput::default()
+            },
+        )
+    })
+    .await
+    .expect("list");
+    assert_eq!((page.total, page.page_count, page.data[0].id), (1, 1, b.id));
+    let (a_id, b_id) = (a.id, b.id);
+    let updated = repo::write(&db, move |tx| {
+        cal::update(
+            tx,
+            ws,
+            a_id,
+            &vec![
+                ("name", Value::Text("Renamed".into())),
+                ("active", Value::Integer(1)),
+            ],
+        )
+    })
+    .await
+    .expect("update")
+    .expect("a row");
+    assert_eq!((updated.name.as_str(), updated.active), ("Renamed", true));
+    let slots = repo::write(&db, move |tx| {
+        cal::replace_availability(
+            tx,
+            a_id,
+            &[
+                AvailabilityInput {
+                    weekday: 2,
+                    start_minute: 60,
+                    end_minute: 120,
+                },
+                AvailabilityInput {
+                    weekday: 1,
+                    start_minute: 0,
+                    end_minute: 30,
+                },
+            ],
+        )
+    })
+    .await
+    .expect("availability");
+    assert_eq!(slots.len(), 2);
+    let edit = repo::read(&db, move |c| cal::get_for_edit(c, ws, a_id))
+        .await
+        .expect("edit")
+        .expect("calendar");
+    assert_eq!(
+        edit.availability
+            .iter()
+            .map(|a| a.weekday)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    let flow = repo::read(&db, move |c| cal::list_for_flow(c, ws, Some("renamed")))
+        .await
+        .expect("flow");
+    assert_eq!(flow.len(), 1);
+    let slug = repo::read(&db, move |c| {
+        cal::find_by_public_link_slug(c, ws, "consult-2")
+    })
+    .await
+    .expect("slug");
+    assert_eq!(slug.map(|c| c.id), Some(b_id));
+    let deleted = repo::write(&db, move |tx| cal::soft_delete_many(tx, ws, &[b_id, 1]))
+        .await
+        .expect("delete");
+    assert_eq!(deleted, vec![b_id]);
+    let gone = repo::read(&db, move |c| cal::find_by(c, ws, b_id, false))
+        .await
+        .expect("find");
+    assert!(gone.is_none());
+    let kept = repo::read(&db, move |c| cal::find_by(c, ws, b_id, true))
+        .await
+        .expect("find");
+    assert!(kept.is_some_and(|c| c.deleted_at.is_some()));
+}
