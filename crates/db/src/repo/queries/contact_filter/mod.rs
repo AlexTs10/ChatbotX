@@ -31,9 +31,12 @@ use super::ctwa_retarget::{
     CTWA_RETARGET_SEGMENTS, CtwaSegmentPredicateInput, build_ctwa_segment_contact_exists,
     ctwa_retarget_date_range,
 };
+use crate::repo::keys::{Keys, keys};
+use crate::repo::partials::contact_activity::contact_activity_filter;
 use crate::repo::sql::Sql;
 use crate::repo::utils::{escape_like_pattern, is_bigint_id, like_contains};
 
+mod activity;
 mod commerce;
 mod continents;
 mod field_value;
@@ -205,13 +208,28 @@ struct Ctx {
     working_hours_zone: Tz,
     workspace_id: Option<i64>,
     now: i64,
+    /// `env.CONTACT_ACTIVITY_FILTERS_ENABLED`.
+    activity_filters_enabled: bool,
 }
+
+/// The env keys, read once (the TS `env` is parsed at startup).
+static KEYS: LazyLock<Keys> = LazyLock::new(keys);
 
 /// `applyContactFilter`: the AND / OR of the conditions that compile; `None` = `{}`.
 pub fn apply_contact_filter(
     criteria: &FilterCriteria,
     workspace_id: Option<i64>,
     now: i64,
+) -> Option<Sql> {
+    apply_contact_filter_with_keys(criteria, workspace_id, now, *KEYS)
+}
+
+/// [`apply_contact_filter`] with explicit env keys (the activity filters kill switch).
+pub fn apply_contact_filter_with_keys(
+    criteria: &FilterCriteria,
+    workspace_id: Option<i64>,
+    now: i64,
+    keys: Keys,
 ) -> Option<Sql> {
     if criteria.conditions.is_empty() {
         return None;
@@ -221,6 +239,7 @@ pub fn apply_contact_filter(
         working_hours_zone: value_format::resolve_zone(criteria.working_hours_timezone.as_deref()),
         workspace_id,
         now,
+        activity_filters_enabled: keys.contact_activity_filters_enabled,
     };
     let parts: Vec<Sql> = criteria
         .conditions
@@ -754,6 +773,27 @@ fn condition_where(c: &FilterCondition, ctx: &Ctx) -> Option<Sql> {
         | "shoppingCartIsEmpty" | "shoppingCartTotal" | "shoppingCartSubtotal" => {
             commerce::commerce_where(&c.field, op, v, zone)
         }
-        _ => None,
+        "sentMessage" => Some(activity::sent_message_where(
+            op,
+            v,
+            ctx.workspace_id,
+            ctx.activity_filters_enabled,
+        )),
+        "lastDelivered" => Some(activity::last_delivered_where(
+            op,
+            v,
+            ctx.workspace_id,
+            zone,
+            ctx.activity_filters_enabled,
+        )),
+        field => contact_activity_filter(field).map(|config| {
+            activity::contact_activity_where(
+                config,
+                op,
+                v,
+                ctx.workspace_id,
+                ctx.activity_filters_enabled,
+            )
+        }),
     }
 }

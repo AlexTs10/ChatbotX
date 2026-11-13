@@ -3,3 +3,4 @@
 //! `conversion/specs/P3.2.md`).
 
 pub mod thread_control;
+pub mod contact_activity;

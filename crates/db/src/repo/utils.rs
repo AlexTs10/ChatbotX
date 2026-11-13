@@ -249,3 +249,16 @@ mod tests {
         assert!(parse_order_by(&cols, None, None).is_empty());
     }
 }
+
+/// `normalizeForMatch` (`packages/utils/src/normalize-for-match.ts`): NFD, the Combining
+/// Diacritical Marks (U+0300-U+036F) dropped, `đ` / `Đ` -> `d`, lower-cased. Same as
+/// `chatbotx_core::utils::normalize_for_match` (crates/db cannot depend on crates/core).
+pub fn normalize_for_match(value: &str) -> String {
+    let decomposed = icu_normalizer::DecomposingNormalizerBorrowed::new_nfd().normalize(value);
+    let folded: String = decomposed
+        .chars()
+        .filter(|c| !('\u{0300}'..='\u{036f}').contains(c))
+        .map(|c| if c == 'đ' || c == 'Đ' { 'd' } else { c })
+        .collect();
+    folded.to_lowercase()
+}

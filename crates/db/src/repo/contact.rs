@@ -154,3 +154,15 @@ pub fn list_for_export_page(
     }
     Ok(out)
 }
+
+/// `findIdsMatchingFilter`: the ids of `contact_ids` (one broadcast audience scan page) of
+/// the workspace that match the filter (`buildContactFilterMatchSQL`); `[]` for an empty page.
+pub fn find_ids_matching_filter(
+    _conn: &Connection,
+    _workspace_id: i64,
+    _contact_ids: &[i64],
+    _criteria: &crate::repo::queries::contact_filter::FilterCriteria,
+    _now: i64,
+) -> Result<Vec<i64>> {
+    todo!("P3.2b")
+}

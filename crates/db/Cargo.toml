@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
+# P3.2b: `normalizeForMatch` (NFD) for the contact-activity `sentMessage` filter.
+icu_normalizer = { workspace = true }
 regex = { workspace = true }
 # P3.2 repositories: JSON columns and typed JSON payloads.
 serde = { workspace = true }
