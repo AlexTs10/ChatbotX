@@ -11,6 +11,7 @@ mod magic_link;
 mod mcp_config;
 mod oauth_path;
 mod origin;
+mod resource;
 mod social;
 
 pub use auth_mail::*;
@@ -21,4 +22,5 @@ pub use gate::*;
 pub use mcp_config::*;
 pub use oauth_path::*;
 pub use origin::*;
+pub use resource::*;
 pub use social::*;
