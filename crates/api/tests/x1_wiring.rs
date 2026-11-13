@@ -352,3 +352,64 @@ async fn contact_writes_record_audit_rows_and_trigger_events() {
     assert_eq!(events[1].metadata["newValue"], "ada@example.com");
     assert_eq!(events[2].metadata["newValue"], "Bergen");
 }
+
+/// [`as_token`] through `dispatch_as` (the connections routes need it).
+async fn as_token_principal(f: &Fixture, route: &str, body: Value) -> (u16, Value) {
+    with_audit_context(
+        actor(),
+        handlers_common::call_as(f, route, WS, None, &[], None, Some(body)),
+    )
+    .await
+    .expect("handled")
+}
+
+#[tokio::test]
+async fn channel_writes_record_audit_rows() {
+    let (f, _) = wired().await;
+    let (status, body) = as_token_principal(
+        &f,
+        "connections.create",
+        json!({ "provider": "api", "config": { "name": "Bot" } }),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let inbox = body["connection"]["inboxId"]
+        .as_str()
+        .expect("inbox")
+        .to_string();
+    let webchat = json!({
+        "name": "My Webchat",
+        "persistentMenus": [],
+        "authorizedDomains": ["example.com"],
+        "conversationStarters": [],
+        "brandColor": "#112233",
+        "hideHeader": false,
+        "showLogo": true,
+        "hideMessageInput": false,
+        "enable": true,
+    });
+    let (status, body) = as_token(&f, "webchats.create", &[], None, Some(webchat)).await;
+    assert_eq!(status, 201, "{body}");
+    let webchat_id = body["id"].as_str().expect("id").to_string();
+    let (status, _) = as_token(&f, "webchats.delete", &[("id", &webchat_id)], None, None).await;
+    assert_eq!(status, 204);
+    let (status, body) = as_token(
+        &f,
+        "sequences.create",
+        &[],
+        None,
+        Some(json!({ "name": "Welcome" })),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let sequence = body["sequenceId"].as_str().expect("sequence").to_string();
+    assert_eq!(
+        details(&audit_rows(&f).await),
+        [
+            format!("create: created a new API key (#{inbox})"),
+            format!("connect: connected a new Webchat channel (#{webchat_id})"),
+            format!("disconnect: disconnected the Webchat channel (#{webchat_id})"),
+            format!("create: created a new sequence (#{sequence})"),
+        ]
+    );
+}

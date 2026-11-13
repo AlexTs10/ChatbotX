@@ -35,6 +35,12 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(|e| business_error(e, CREATING_IN_FOLDER))?;
+            state
+                .record_audit(
+                    "create",
+                    &format!("created a new sequence (#{sequence_id})"),
+                )
+                .await;
             Ok(json(201, json!({ "sequenceId": sequence_id.to_string() })))
         }
         _ => Err(crate::routes::not_ported_error()),

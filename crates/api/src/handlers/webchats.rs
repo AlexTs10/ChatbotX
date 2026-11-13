@@ -275,10 +275,17 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 return Err(super::internal_error("webchat parse"));
             };
             let now = chatbotx_db::repo::now_ms();
-            integration_webchat::create(db, ws, None, data, &state.app_url, now)
+            let (row, _) = integration_webchat::create(db, ws, None, data, &state.app_url, now)
                 .await
-                .map(|(row, _)| json(201, webchat_json(&row)))
-                .map_err(|e| business_error(e, super::CREATING))
+                .map_err(|e| business_error(e, super::CREATING))?;
+            // `createWithWorkspace`: the audit record.
+            state
+                .record_audit(
+                    "connect",
+                    &format!("connected a new Webchat channel (#{})", row.id),
+                )
+                .await;
+            Ok(json(201, webchat_json(&row)))
         }
         "webchats.update" => {
             let mut input = Input::from_body(call.params, call.body);
@@ -299,10 +306,17 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let mut input = Input::from_query(call.params, call.query);
             let webchat_id = path_id(&mut input);
             input.finish()?;
-            integration_webchat::delete(db, ws, webchat_id.unwrap_or_default())
+            let webchat_id = webchat_id.unwrap_or_default();
+            integration_webchat::delete(db, ws, webchat_id)
                 .await
-                .map(|()| no_content())
-                .map_err(|e| business_error(e, super::MUTATING))
+                .map_err(|e| business_error(e, super::MUTATING))?;
+            state
+                .record_audit(
+                    "disconnect",
+                    &format!("disconnected the Webchat channel (#{webchat_id})"),
+                )
+                .await;
+            Ok(no_content())
         }
         _ => Err(crate::routes::not_ported_error()),
     }

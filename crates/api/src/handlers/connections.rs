@@ -383,7 +383,13 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
                 now,
             )
             .await
-            .map(|(row, token)| (row, Some(token)))
+            .map(|(row, token)| {
+                let detail = format!(
+                    "created a new API key (#{})",
+                    row.inbox_id.unwrap_or_default()
+                );
+                (row, Some(token), detail)
+            })
         }
         "webchat" => {
             let mut cfg = Input::from_object(config);
@@ -403,12 +409,25 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
                 now,
             )
             .await
-            .map(|(_, row)| (row, None))
+            .map(|(webchat, row)| {
+                let detail = format!("connected a new Webchat channel (#{})", webchat.id);
+                (row, None, detail)
+            })
         }
         _ => {
             let _ = meta;
             return None;
         }
+    };
+    // `integrationApiService.connect` / `createWithWorkspace`: the audit
+    // record of the created channel.
+    let created = match created {
+        Ok((row, token, detail)) => {
+            let action = if token.is_some() { "create" } else { "connect" };
+            state.record_audit(action, &detail).await;
+            Ok((row, token))
+        }
+        Err(error) => Err(error),
     };
     Some(
         created
