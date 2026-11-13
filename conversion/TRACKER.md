@@ -60,6 +60,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P3.6-D1p | 3 | Domain: pipelines (split out of D1; 15 business test files ~115 tests + builder pipeline tests; parity p1-13 pipelines needs `POST /v1/contacts`) — after the contacts domain | todo | P3.6-D1 | C + A | | |
 | P3.6-D1o | 3 | Domain: payment providers + orders (p1-12 20-payment-providers, 30-orders, 31-orders-online; Stripe + PayPal clients) | todo | P3.6-D2 | C + A | | |
 | P3.6-D2 | 3 | Domain batch 2: Rust parity stack upstream network; channels + connections + webchats (p1-05); ecommerce settings; flows (p1-09); contacts (p1-06) | in_progress | P3.6-D1 | C + A | | |
+| P3.6-X1 | 3 | Cross-cutting services for domains: ApiState handles (realtime publish, kv, jobs enqueue, event bus, audit log, token id in Call) + `/v1/members`; wire the events the ported domains already return | todo | P3.6-D2 | C + A | | |
 | P3.6+ | 3 | Business domains (`packages/business` 161k, `apps/builder` server 159k), worker handlers (`apps/worker` 82k), integrations (~70k). Units are cut per domain at the start of each batch; each batch must turn the matching P1 parity folders green against the Rust stack | todo | P3.5 | C + A | | |
 
 ## Proof
