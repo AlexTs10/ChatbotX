@@ -393,9 +393,402 @@ fn all(conn: &chatbotx_db::rusqlite::Connection) -> Result<()> {
     Ok(())
 }
 
+/// Slices message / whatsapp-call / pipeline / template-installed-resource / order /
+/// product-category: the functions without a ported test.
+fn more(conn: &chatbotx_db::rusqlite::Connection) -> Result<()> {
+    use chatbotx_db::repo::*;
+    let seed = common::Seed {
+        user_id: USER,
+        workspace_id: WS,
+        inbox_id: 3001,
+        contact_id: 4001,
+    };
+    common::insert_contact_inbox(conn, seed, 3101, "wa-1", None, None)?;
+    common::insert_conversation(conn, seed, 3201, None)?;
+    // whatsapp-call permission
+    whatsapp_call_permission::upsert_for_contact_inbox(
+        conn,
+        &whatsapp_call_permission::UpsertPermissionInput {
+            workspace_id: WS,
+            contact_inbox_id: 3101,
+            response: "accept".into(),
+            is_permanent: false,
+            expires_at: Some(NOW),
+            responded_at: NOW,
+        },
+    )?;
+    whatsapp_call_permission::find_by_contact_inbox_id(conn, 3101)?;
+    // message (no TS tests)
+    message::update_content_attributes(conn, 1, WS, &json!({}), NOW)?;
+    message::update_message_attributes(conn, 1, WS, true, false, NOW)?;
+    message::update_message_text(conn, 1, WS, "t", NOW)?;
+    message::update_text_by_source_id(conn, "s", WS, "t")?;
+    message::update_content_by_source_id(conn, "s", WS, &message::ContentBySourcePatch::default())?;
+    message::claim_content_attributes(
+        conn,
+        &message::ClaimContentAttributesParams {
+            message_id: 1,
+            workspace_id: WS,
+            created_at: NOW,
+            guard_key: "k".into(),
+            overlay: serde_json::Map::new(),
+        },
+    )?;
+    message::delete_attachments_by_message_id(conn, 1, WS, NOW)?;
+    message::update_send_error(conn, 1, Some("e"), WS, NOW)?;
+    message::has_attachment_of_type(
+        conn,
+        &message::HasAttachmentOfTypeParams {
+            workspace_id: WS,
+            message_id: 1,
+            message_created_at: NOW,
+            file_type: "image".into(),
+        },
+    )?;
+    message::find_trigger_message(
+        conn,
+        &message::FindTriggerMessageOptions {
+            conversation_id: 3201,
+            id: 1,
+            require_complete_results: false,
+            since_time: NOW,
+            workspace_id: WS,
+        },
+    )?;
+    message::find_by_source_id(conn, "s", 3201, WS, Some(NOW))?;
+    message::find_last_by_conversation(
+        conn,
+        3201,
+        &message::FindLastByConversationOptions {
+            attachment_count_only: false,
+            limit: Some(5),
+            message_types: vec!["incoming".into()],
+            require_complete_results: false,
+            since_time: Some(NOW),
+            with_attachments: true,
+            workspace_id: Some(WS),
+        },
+    )?;
+    message::find_many_by_ids(conn, &[1], 3101, Some(NOW), Some(WS))?;
+    // pipeline (functions without a ported test)
+    let p = pipeline::insert(
+        conn,
+        &pipeline::PipelineInsert {
+            workspace_id: WS,
+            name: "P".into(),
+            r#type: "opportunity".into(),
+            reference_name: "p".into(),
+            settings: Json(json!({})),
+            ..Default::default()
+        },
+    )?;
+    pipeline::acquire_pipeline_advisory_lock(conn, "k")?;
+    pipeline::find_by_id(conn, WS, p.id)?;
+    pipeline::find_by_reference_name(conn, WS, "p")?;
+    pipeline::find_by_reference_names(conn, WS, &["p".to_owned()])?;
+    pipeline::find_by_name(conn, WS, "P")?;
+    pipeline::list_by_workspace(conn, WS)?;
+    pipeline::count_items_by_pipeline(conn, WS)?;
+    pipeline::list_names_starting_with(conn, WS, pipeline::PipelineNameColumn::ReferenceName, "p")?;
+    pipeline::update(conn, WS, p.id, &vec![("name", Value::Text("P2".into()))])?;
+    pipeline::update(conn, WS, p.id, &vec![])?;
+    let field_values = pipeline::PipelineFieldInsert {
+        workspace_id: WS,
+        pipeline_id: p.id,
+        name: "F".into(),
+        reference_name: "f".into(),
+        r#type: "shortText".into(),
+        required: false,
+        position: 0,
+    };
+    let f = pipeline::insert_field(conn, &field_values)?;
+    pipeline::insert_fields(
+        conn,
+        &[pipeline::PipelineFieldInsert {
+            reference_name: "g".into(),
+            ..field_values
+        }],
+    )?;
+    pipeline::list_fields(conn, WS, p.id)?;
+    pipeline::list_fields_by_pipeline_ids(conn, WS, &[p.id])?;
+    pipeline::update_field(conn, WS, p.id, f.id, &vec![("required", Value::Integer(1))])?;
+    pipeline::lock_fields_shared(conn, WS, p.id, &[f.id])?;
+    pipeline::delete_field(conn, WS, p.id, f.id)?;
+    conn.execute(
+        "INSERT INTO \"WorkspaceMember\" (\"id\", \"workspaceId\", \"userId\", \"role\") VALUES (9901, ?1, ?2, 'agent')",
+        (WS, USER),
+    )?;
+    let values = pipeline::PipelineMemberValues {
+        can_view: true,
+        ..Default::default()
+    };
+    let member = pipeline::PipelineMemberInsert {
+        workspace_id: WS,
+        pipeline_id: p.id,
+        workspace_member_id: 9901,
+        values,
+    };
+    pipeline::upsert_member(conn, &member)?;
+    pipeline::upsert_member(conn, &member)?;
+    pipeline::list_members(conn, WS, p.id)?;
+    pipeline::find_member(conn, WS, p.id, 9901)?;
+    pipeline::list_member_access(conn, WS, 9901)?;
+    pipeline::delete_member(conn, WS, p.id, 9901)?;
+    pipeline::insert_members(conn, &[member])?;
+    let stage = pipeline_stage::insert(
+        conn,
+        &pipeline_stage::PipelineStageInsert {
+            workspace_id: WS,
+            pipeline_id: p.id,
+            name: "S".into(),
+            bulk_job_id: Some("job".into()),
+            ..Default::default()
+        },
+    )?;
+    pipeline_stage::list_by_pipeline_ids(conn, WS, &[p.id])?;
+    pipeline_stage::list_names_by_ids(conn, WS, &[stage.id])?;
+    pipeline_stage::find_by_id(conn, WS, Some(p.id), stage.id)?;
+    pipeline_stage::lock_shared(conn, WS, stage.id)?;
+    pipeline_stage::lock_exclusive(conn, WS, stage.id)?;
+    pipeline_stage::update(
+        conn,
+        WS,
+        p.id,
+        stage.id,
+        &vec![("name", Value::Text("S2".into()))],
+    )?;
+    pipeline_stage::release_bulk_claim(conn, WS, p.id, stage.id, "job")?;
+    pipeline_stage::next_position(conn, WS, p.id)?;
+    let number = pipeline::next_item_number(conn, WS)?;
+    let item = pipeline_item::insert_idempotent(
+        conn,
+        &pipeline_item::PipelineItemInsert {
+            workspace_id: WS,
+            pipeline_id: p.id,
+            stage_id: stage.id,
+            contact_id: 4001,
+            number,
+            title: "I".into(),
+            status: "open".into(),
+            priority: "low".into(),
+            field_values: Json(json!({})),
+            stage_entered_at: NOW,
+            ..Default::default()
+        },
+    )?
+    .row;
+    pipeline_item::find_by_idempotency_key(conn, WS, p.id, "k")?;
+    pipeline_item::lock_for_update(conn, WS, item.id)?;
+    pipeline_item::update(
+        conn,
+        WS,
+        item.id,
+        &vec![("title", Value::Text("I2".into()))],
+    )?;
+    pipeline_item::touch(conn, WS, item.id)?;
+    pipeline_item::list_for_contact(conn, WS, 4001, Some(&[p.id]), 10)?;
+    pipeline_item::list_for_contact(conn, WS, 4001, None, 10)?;
+    conn.execute(
+        "INSERT INTO \"InboxTeam\" (\"id\", \"workspaceId\", \"name\") VALUES (9902, ?1, 'T')",
+        [WS],
+    )?;
+    pipeline_item::replace_assignees(conn, WS, item.id, &[9901], &[9902])?;
+    pipeline_item::replace_assignees(conn, WS, item.id, &[], &[9902])?;
+    pipeline_item::list_assignees_for_items(conn, WS, &[item.id])?;
+    pipeline_variable_targets::list_for_contact(conn, WS, 4001)?;
+    let comment = pipeline_item_content::insert_comment_idempotent(
+        conn,
+        &pipeline_item_content::PipelineCommentInsert {
+            workspace_id: WS,
+            item_id: item.id,
+            text: "c".into(),
+            created_by_id: Some(USER),
+            idempotency_key: Some("k".into()),
+        },
+    )?;
+    pipeline_item_content::insert_comment_idempotent(
+        conn,
+        &pipeline_item_content::PipelineCommentInsert {
+            workspace_id: WS,
+            item_id: item.id,
+            text: "c".into(),
+            created_by_id: Some(USER),
+            idempotency_key: Some("k".into()),
+        },
+    )?;
+    pipeline_item_content::list_comments(conn, WS, item.id, 10, None)?;
+    pipeline_item_content::count_comments_for_items(conn, WS, &[item.id])?;
+    pipeline_item_content::latest_comment_at(conn, WS, item.id)?;
+    pipeline_item_content::delete_comment(conn, WS, item.id, comment.row.id)?;
+    pipeline_item_content::insert_attachments(conn, WS, item.id, &[])?;
+    pipeline_item_content::list_attachments(conn, WS, item.id)?;
+    pipeline_item_content::count_attachments(conn, WS, item.id)?;
+    pipeline_item_content::delete_attachment(conn, WS, item.id, 1)?;
+    pipeline_reference::lock_user_if_exists(conn, USER)?;
+    pipeline_reference::list_workspace_members(conn, WS, &[9901])?;
+    pipeline_reference::list_inbox_team_ids(conn, WS, &[9902])?;
+    pipeline_reference::list_media_library_file_ids(conn, WS, &[1])?;
+    pipeline_reference::list_contact_summaries(conn, WS, &[4001])?;
+    pipeline_reference::contact_exists(conn, WS, 4001)?;
+    pipeline_stage::delete(conn, WS, p.id, stage.id)?;
+    // template-installed-resource (functions without a ported test)
+    conn.execute(
+        "INSERT INTO \"TemplateInstallation\" (\"id\", \"workspaceId\", \"templateName\", \"sourceWorkspaceId\", \"formatVersion\", \"permissions\") VALUES (9903, ?1, 'T', ?1, 1, '{}')",
+        [WS],
+    )?;
+    template_installed_resource::find_blocking(
+        conn,
+        WS,
+        "flow",
+        &[1],
+        template_installed_resource::TemplateResourcePermission::AllowEdit,
+        &[],
+    )?;
+    template_installed_resource::find_live_keys(
+        conn,
+        WS,
+        &[template_installed_resource::ResourceKey {
+            kind: "flow".into(),
+            resource_id: 1,
+        }],
+    )?;
+    template_installed_resource::find_prior_copies(conn, WS, "flow", &["s".to_owned()])?;
+    template_installed_resource::list_categories(conn, 9903, WS)?;
+    template_installation_sync::list_installed_resources_by_installation_ids(conn, &[9903])?;
+    template_installation_sync::mark_synced(conn, 1, Some("h"), 1)?;
+    template_installation_sync::detach_resources(conn, &[1])?;
+    // product-category
+    let cat = product_category::create(
+        conn,
+        &product_category::CreateCategoryInput {
+            workspace_id: WS,
+            name: "C".into(),
+            ..Default::default()
+        },
+    )?
+    .map(|c| c.id)
+    .unwrap_or_default();
+    product_category::create_missing_by_name(conn, WS, &[" C ".to_owned(), "D".to_owned()], None)?;
+    product_category::create_missing_children(
+        conn,
+        WS,
+        &[(cat, "E".to_owned()), (cat, "E ".to_owned())],
+    )?;
+    product_category::list_with_product_count(conn, WS, "chatbotx")?;
+    product_category::list_children(conn, WS, cat)?;
+    product_category::list(conn, WS, "chatbotx")?;
+    product_category::find(conn, WS, cat)?;
+    product_category::update(
+        conn,
+        &product_category::UpdateCategoryInput {
+            workspace_id: WS,
+            category_id: cat,
+            name: Some("C2".into()),
+            parent_id: Some(None),
+            image_url: Some(None),
+            is_visible: Some(false),
+            rank: Some(1),
+        },
+    )?;
+    product_category::file_under_parent(conn, WS, cat, cat)?;
+    product_category::file_as_top_level(conn, WS, cat)?;
+    product_category::count_products(conn, WS, cat)?;
+    product_category::find_by_names(conn, WS, &["D".to_owned()], Some("chatbotx"))?;
+    product_category::delete(conn, WS, cat)?;
+    // order + analytics
+    let o = order::insert(
+        conn,
+        &vec![
+            ("workspaceId", Value::Integer(WS)),
+            ("number", Value::Integer(1)),
+            ("source", Value::Text("manual".into())),
+            ("externalId", Value::Text("x".into())),
+            ("currency", Value::Text("USD".into())),
+            ("subtotal", Value::Integer(0)),
+            ("discountTotal", Value::Integer(0)),
+            ("shippingTotal", Value::Integer(0)),
+            ("serviceFeeTotal", Value::Integer(0)),
+            ("taxTotal", Value::Integer(0)),
+            ("total", Value::Integer(0)),
+        ],
+    )?
+    .map(|o| o.id)
+    .unwrap_or_default();
+    order::insert_items(
+        conn,
+        WS,
+        o,
+        &[vec![
+            ("name", Value::Text("n".into())),
+            ("unitPrice", Value::Integer(1)),
+            ("quantity", Value::Integer(2)),
+            ("discountPercent", Value::Integer(0)),
+            ("taxPercent", Value::Integer(0)),
+            ("discountTotal", Value::Integer(0)),
+            ("taxTotal", Value::Integer(0)),
+            ("lineTotal", Value::Integer(2)),
+            ("vendorName", Value::Text("v".into())),
+        ]],
+    )?;
+    order::insert_history(
+        conn,
+        &vec![
+            ("orderId", Value::Integer(o)),
+            ("workspaceId", Value::Integer(WS)),
+            ("toStatus", Value::Text("pending".into())),
+            ("actorType", Value::Text("user".into())),
+            ("actorUserId", Value::Integer(USER)),
+        ],
+    )?;
+    order::list(
+        conn,
+        &order::OrderListInput {
+            workspace_id: WS,
+            status: vec!["pending".into()],
+            keyword: Some("#1".into()),
+            page: Some(1),
+            per_page: Some(10),
+            ..Default::default()
+        },
+    )?;
+    order::find_detail(conn, WS, o)?;
+    order::mark_paid(conn, WS, o, NOW)?;
+    order::find_for_update(conn, WS, o)?;
+    order::find_by_external_id(conn, WS, "x")?;
+    order::find_by_external_id_for_update(conn, WS, "x")?;
+    order::update(conn, WS, o, &vec![("note", Value::Text("n".into()))])?;
+    order::transition_status(conn, WS, o, &["pending".to_owned()], "accepted", &vec![])?;
+    order::set_rating(conn, WS, o, 5, Some("ok"))?;
+    order::list_items(conn, WS, o)?;
+    let scope = order_analytics::SalesScope {
+        workspace_id: WS,
+        currency: "USD".into(),
+        since: Some(0),
+        until: Some(NOW * 2),
+    };
+    order_analytics::count_other_currency_orders(conn, &scope)?;
+    order_analytics::summary(conn, &scope)?;
+    order_analytics::series(
+        conn,
+        &scope,
+        "UTC",
+        order_analytics::SeriesGranularity::Hour,
+    )?;
+    order_analytics::series(conn, &scope, "UTC", order_analytics::SeriesGranularity::Day)?;
+    order_analytics::top_products(conn, &scope, 5)?;
+    order_analytics::top_vendors(conn, &scope, 5)?;
+    order::delete_items(conn, WS, o)?;
+    order::delete(conn, WS, o)?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn every_untested_p3_3_function_runs_against_the_schema() {
     let db = fresh_db().await;
     seed(&db).await;
     repo_common::ok(repo::write(&db, |tx| all(tx)).await);
+    // A second fresh file: `all` deletes rows of the seed graph.
+    let db = fresh_db().await;
+    seed(&db).await;
+    repo_common::ok(repo::write(&db, |tx| more(tx)).await);
 }

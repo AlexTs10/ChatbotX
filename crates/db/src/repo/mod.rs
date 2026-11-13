@@ -505,7 +505,10 @@ pub fn text_list<S: AsRef<str>>(items: &[S]) -> String {
 pub mod client;
 pub mod keys;
 pub mod models;
+pub mod order;
+pub mod order_analytics;
 pub mod partials;
+pub mod product_category;
 pub mod queries;
 pub mod sql;
 pub mod utils;
