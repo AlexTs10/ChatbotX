@@ -16,6 +16,7 @@ pub mod flows;
 pub mod folders;
 pub mod input;
 pub mod open_hours;
+pub mod pipelines;
 pub mod places;
 pub mod polls;
 pub mod product_categories;
@@ -263,6 +264,8 @@ pub async fn dispatch_as(
         places::handle(state, route_id, call).await
     } else if open_hours::ROUTES.contains(&route_id) {
         open_hours::handle(state, route_id, call).await
+    } else if pipelines::ROUTES.contains(&route_id) {
+        pipelines::handle(state, route_id, call).await
     } else if polls::ROUTES.contains(&route_id) {
         polls::handle(state, route_id, call).await
     } else if product_categories::ROUTES.contains(&route_id) {

@@ -461,3 +461,20 @@ pub async fn bot_field_value(db: &Db, id: i64) -> Option<Option<String>> {
     .await
     .expect("bot field read")
 }
+
+/// Inserts a `Pipeline` (type `opportunity`, empty settings, reference name
+/// `p_<id>`) (P3.6-D1p).
+pub fn pipeline_row(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    name: &str,
+    currency: Option<&str>,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Pipeline" ("id", "workspaceId", "name", "type", "referenceName", "currency", "settings")
+           VALUES (?1, ?2, ?3, 'opportunity', ?4, ?5, '{}')"#,
+        params![id, workspace_id, name, format!("p_{id}"), currency],
+    )?;
+    Ok(id)
+}

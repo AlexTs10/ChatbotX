@@ -22,6 +22,7 @@ pub mod inbox;
 pub mod integration_api;
 pub mod integration_webchat;
 pub mod net;
+pub mod pipeline;
 pub mod place_near_me;
 pub mod poll;
 pub mod product;
