@@ -18,6 +18,7 @@ pub mod ecommerce_open_hours;
 pub mod ecommerce_settings;
 pub mod errors;
 pub mod flow;
+pub mod flow_version;
 pub mod folder;
 pub mod inbox;
 pub mod integration_api;

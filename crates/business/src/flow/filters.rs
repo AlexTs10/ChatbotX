@@ -22,16 +22,40 @@ impl FlowNodeVersions for chatbotx_db::repo::flow::FlowWithVersions {
     }
 }
 
+const SEND_WA_TEMPLATE: &str = "sendWaTemplateMessage";
+
 /// `resolveStepTypeMatches`: the step type and its legacy aliases.
 pub fn resolve_step_type_matches(step_type: &str) -> Vec<&str> {
-    let _ = step_type;
-    todo!("P3.6-D2")
+    let mut out = vec![step_type];
+    if step_type == SEND_WA_TEMPLATE {
+        out.push("WA_TM01");
+    }
+    out
+}
+
+/// The start nodes' steps of `nodes` (`[]` for a non-array).
+fn start_steps(nodes: &Value) -> impl Iterator<Item = &Value> {
+    nodes
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|node| node.is_object() && node["data"]["isStartNode"] == Value::Bool(true))
+        .flat_map(|node| {
+            node["data"]["details"]["steps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+}
+
+fn step_type(step: &Value) -> &str {
+    step["stepType"].as_str().unwrap_or_default()
 }
 
 /// `hasStartNode`: a start node of `nodes` has a step of `step_type`.
-pub fn has_start_node(nodes: &Value, step_type: &str) -> bool {
-    let _ = (nodes, step_type);
-    todo!("P3.6-D2")
+pub fn has_start_node(nodes: &Value, step_type_name: &str) -> bool {
+    let matches = resolve_step_type_matches(step_type_name);
+    start_steps(nodes).any(|step| matches.contains(&step_type(step)))
 }
 
 /// `filterFlowsByStartStepType`.
@@ -39,8 +63,14 @@ pub fn filter_flows_by_start_step_type<T: FlowNodeVersions>(
     flows: Vec<T>,
     step_type: &str,
 ) -> Vec<T> {
-    let _ = (flows, step_type);
-    todo!("P3.6-D2")
+    flows
+        .into_iter()
+        .filter(|flow| {
+            flow.version_nodes()
+                .into_iter()
+                .any(|nodes| has_start_node(nodes, step_type))
+        })
+        .collect()
 }
 
 /// `filterFlowsByTemplateIds`: flows whose start node sends one of the
@@ -49,6 +79,21 @@ pub fn filter_flows_by_template_ids<T: FlowNodeVersions>(
     flows: Vec<T>,
     template_ids: &[String],
 ) -> Vec<T> {
-    let _ = (flows, template_ids);
-    todo!("P3.6-D2")
+    if template_ids.is_empty() {
+        return Vec::new();
+    }
+    let matches = resolve_step_type_matches(SEND_WA_TEMPLATE);
+    flows
+        .into_iter()
+        .filter(|flow| {
+            flow.version_nodes().into_iter().any(|nodes| {
+                start_steps(nodes).any(|step| {
+                    matches.contains(&step_type(step))
+                        && step["template"]["id"]
+                            .as_str()
+                            .is_some_and(|id| template_ids.iter().any(|t| t == id))
+                })
+            })
+        })
+        .collect()
 }

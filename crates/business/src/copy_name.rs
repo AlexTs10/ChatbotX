@@ -22,16 +22,43 @@ pub struct CopyNameOptions {
     pub max_length: usize,
 }
 
+fn suffix_for(style: CopyNameStyle, attempt: usize) -> String {
+    let suffix = match style {
+        CopyNameStyle::Dash => " - Copy",
+        CopyNameStyle::Underscore => " _copy",
+    };
+    if attempt == 1 {
+        suffix.to_string()
+    } else {
+        format!("{suffix} {attempt}")
+    }
+}
+
+/// The first `n` characters of `text`.
+fn head(text: &str, n: usize) -> &str {
+    match text.char_indices().nth(n) {
+        Some((at, _)) => &text[..at],
+        None => text,
+    }
+}
+
 /// `copyName`: the name of copy number `attempt` (1-based).
 pub fn copy_name(base: &str, attempt: usize, options: CopyNameOptions) -> String {
-    let _ = (base, attempt, options);
-    todo!("P3.6-D2")
+    let suffix = suffix_for(options.style, attempt);
+    let keep = options.max_length.saturating_sub(suffix.chars().count());
+    format!("{}{suffix}", head(base, keep))
 }
 
 /// `copyNamePrefix`: the prefix every copy name of `base` starts with.
 pub fn copy_name_prefix(base: &str, options: CopyNameOptions) -> String {
-    let _ = (base, options);
-    todo!("P3.6-D2")
+    let longest = suffix_for(options.style, MAX_COPY_NAME_ATTEMPTS)
+        .chars()
+        .count();
+    let room = options.max_length.saturating_sub(longest);
+    if base.chars().count() <= room {
+        return format!("{base}{}", suffix_for(options.style, 1));
+    }
+    head(base, room).to_string()
 }
 
 /// `freeCopyNames`: the copy names not in `taken`, lowest number first.
@@ -40,9 +67,13 @@ pub fn free_copy_names(
     taken: &HashSet<String>,
     options: CopyNameOptions,
 ) -> Vec<String> {
-    let _ = (base, taken, options);
-    todo!("P3.6-D2")
+    (1..=MAX_COPY_NAME_ATTEMPTS)
+        .map(|attempt| copy_name(base, attempt, options))
+        .filter(|name| !taken.contains(name))
+        .collect()
 }
+
+const COPY_NAME_INSERT_ATTEMPTS: usize = 2;
 
 /// `insertWithFreeCopyName`: tries the first two free names; a unique
 /// violation (of `constraint`, when given) moves to the next one. `Ok(None)`
@@ -53,15 +84,17 @@ pub fn insert_with_free_copy_name<T, E>(
     options: CopyNameOptions,
     constraint: Option<&str>,
     is_unique_violation: impl Fn(&E, Option<&str>) -> bool,
-    insert: impl FnMut(&str) -> Result<T, E>,
+    mut insert: impl FnMut(&str) -> Result<T, E>,
 ) -> Result<Option<T>, E> {
-    let _ = (
-        base,
-        taken,
-        options,
-        constraint,
-        is_unique_violation,
-        insert,
-    );
-    todo!("P3.6-D2")
+    for name in free_copy_names(base, taken, options)
+        .iter()
+        .take(COPY_NAME_INSERT_ATTEMPTS)
+    {
+        match insert(name) {
+            Ok(value) => return Ok(Some(value)),
+            Err(error) if is_unique_violation(&error, constraint) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
 }
