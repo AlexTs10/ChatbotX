@@ -777,6 +777,25 @@ fn more(conn: &chatbotx_db::rusqlite::Connection) -> Result<()> {
     order_analytics::series(conn, &scope, "UTC", order_analytics::SeriesGranularity::Day)?;
     order_analytics::top_products(conn, &scope, 5)?;
     order_analytics::top_vendors(conn, &scope, 5)?;
+    // external-store (functions without a ported test)
+    let ids = ["gid://1".to_owned()];
+    external_store::delete_product_by_external_id(conn, WS, "shopify", "gid://0")?;
+    external_store::delete_products_not_in(conn, WS, "shopify", &ids)?;
+    external_store::delete_products_not_in(conn, WS, "shopify", &[])?;
+    external_store::count_products(conn, WS, "shopify")?;
+    external_store::find_variants_by_external_ids(conn, WS, "shopify", &ids)?;
+    external_store::find_variants_for_variations(conn, WS, "woocommerce", &ids)?;
+    external_store::find_products_by_external_ids(conn, WS, "shopify", &ids)?;
+    external_store::find_checkout_variant_ids(conn, WS, "shopify", &[1], &[1])?;
+    let discount = vec![
+        ("code", Value::Text("SAVE".into())),
+        ("discountType", Value::Text("percentage".into())),
+        ("productIds", Value::Text("[]".into())),
+    ];
+    external_store::upsert_discount(conn, WS, "shopify", "d1", &discount)?;
+    external_store::upsert_discount(conn, WS, "shopify", "d1", &discount)?;
+    external_store::delete_discounts_not_in(conn, WS, "shopify", &["d2".to_owned()])?;
+    external_store::delete_discount_by_external_id(conn, WS, "shopify", "d1")?;
     order::delete_items(conn, WS, o)?;
     order::delete(conn, WS, o)?;
     Ok(())
