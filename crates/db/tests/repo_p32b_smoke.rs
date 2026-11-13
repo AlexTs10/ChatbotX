@@ -1142,3 +1142,307 @@ async fn google_ads_conversion_event_finders_claim_fence_and_options_guard() {
     let r = repo::write(&db, move |tx| gace::insert_ignore_duplicate(tx, &values)).await;
     assert!(repo_common::err_message(r).contains("options"));
 }
+
+#[tokio::test]
+async fn facebook_marketing_message_campaign_and_auth_functions() {
+    use chatbotx_db::repo::facebook_marketing_message::{
+        self as fmm, AuthCreateInput, AuthUpdateInput, CreateInput, StatisticsListInput,
+    };
+    use chatbotx_db::repo::utils::SortItem;
+    use chatbotx_db::rusqlite::types::Value;
+    use repo11::{OTHER_WS, WS, campaign, exec, put_campaign, read, two_ws_db, write};
+    let db = two_ws_db().await;
+    let auth = write(&db, |c| {
+        fmm::auth_create(
+            c,
+            &AuthCreateInput {
+                id: 1,
+                workspace_id: WS,
+                auth: serde_json::json!({ "t": 1 }),
+                token_expires_at: Some(5),
+                facebook_user_id: None,
+            },
+        )
+    })
+    .await;
+    assert_eq!(auth.status, "active");
+    write(&db, |c| fmm::auth_update_status(c, WS, "invalid")).await;
+    let updated = write(&db, |c| {
+        fmm::auth_update_auth(
+            c,
+            &AuthUpdateInput {
+                id: 1,
+                auth: serde_json::json!({ "t": 2 }),
+                token_expires_at: None,
+                facebook_user_id: Some("u".to_owned()),
+            },
+        )
+    })
+    .await
+    .expect("updated");
+    assert_eq!(
+        (updated.status.as_str(), updated.token_expires_at),
+        ("active", None)
+    );
+    assert!(
+        read(&db, |c| fmm::auth_find_by_workspace_id(c, WS))
+            .await
+            .is_some()
+    );
+    assert!(
+        read(&db, |c| fmm::auth_find_by_workspace_id(c, OTHER_WS))
+            .await
+            .is_none()
+    );
+
+    let created = write(&db, |c| {
+        fmm::create(
+            c,
+            &CreateInput {
+                id: 10,
+                workspace_id: WS,
+                name: "Spring sale".to_owned(),
+                page_id: "page-1".to_owned(),
+                ad_account_id: "act_2".to_owned(),
+                currency: "EUR".to_owned(),
+                currency_offset: 100,
+                budget_type: "daily".to_owned(),
+                budget_minor_units: 500,
+                content: serde_json::json!({ "v": 1 }),
+                target_type: "optIn".to_owned(),
+                campaign_id: "meta-10".to_owned(),
+                ..CreateInput::default()
+            },
+        )
+    })
+    .await;
+    assert_eq!(
+        (created.status.as_str(), created.day_sent),
+        ("scheduled", 0)
+    );
+    exec(
+        &db,
+        r#"INSERT INTO "FacebookMarketingMessageAudience" ("id", "workspaceId", "customAudienceId", "adAccountId", "pageId", "name", "rowsUploaded") VALUES (77, 2001, 'ca', 'act_1', 'page-1', 'a', 0)"#,
+    )
+    .await;
+    put_campaign(
+        &db,
+        11,
+        WS,
+        "sending",
+        "\"createdAt\" = 1, \"audienceId\" = 77",
+    )
+    .await;
+    put_campaign(&db, 12, WS, "sending", "\"createdAt\" = 2").await;
+    put_campaign(&db, 13, OTHER_WS, "sending", "").await;
+    exec(
+        &db,
+        r#"UPDATE "FacebookMarketingMessage" SET "createdAt" = 3 WHERE "id" = 10"#,
+    )
+    .await;
+    let all = read(&db, |c| fmm::list_by_workspace_id(c, WS)).await;
+    assert_eq!(
+        all.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![10, 12, 11]
+    );
+    let accounts = read(&db, |c| fmm::list_ad_accounts_by_workspace_id(c, WS)).await;
+    assert_eq!(
+        accounts
+            .iter()
+            .map(|a| (a.ad_account_id.as_str(), a.currency.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("act_2", "EUR"), ("act_1", "USD")]
+    );
+    let page = read(&db, |c| {
+        fmm::list_for_statistics(
+            c,
+            &StatisticsListInput {
+                workspace_id: WS,
+                ad_account_id: "act_1".to_owned(),
+                search: Some(" C1 ".to_owned()),
+                sort: Some(vec![SortItem {
+                    id: "name".to_owned(),
+                    desc: false,
+                }]),
+                ..StatisticsListInput::default()
+            },
+        )
+    })
+    .await;
+    assert_eq!(
+        page.data.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![11, 12]
+    );
+    assert_eq!((page.total, page.page_count), (2, 1));
+    let by_meta = read(&db, |c| {
+        fmm::list_for_statistics(
+            c,
+            &StatisticsListInput {
+                workspace_id: WS,
+                ad_account_id: "act_1".to_owned(),
+                search: Some("meta-12".to_owned()),
+                ..StatisticsListInput::default()
+            },
+        )
+    })
+    .await;
+    assert_eq!(
+        by_meta.data.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![12]
+    );
+    assert!(
+        read(&db, |c| fmm::find_for_workspace(c, 13, WS))
+            .await
+            .is_none()
+    );
+    assert_eq!(read(&db, |c| fmm::count_by_audience_id(c, 77, WS)).await, 1);
+    assert_eq!(
+        read(&db, |c| fmm::find_by_campaign_id(c, "meta-13"))
+            .await
+            .map(|r| r.id),
+        Some(13)
+    );
+    assert_eq!(
+        read(&db, |c| fmm::list_by_status(c, "sending")).await.len(),
+        3
+    );
+    let patch = vec![("status", Value::Text("paused".to_owned()))];
+    let p2 = patch.clone();
+    assert!(
+        write(&db, move |c| fmm::transition(c, 11, &["scheduled"], &p2))
+            .await
+            .is_none()
+    );
+    let moved = write(&db, move |c| fmm::transition(c, 11, &["sending"], &patch)).await;
+    assert_eq!(moved.map(|r| r.status), Some("paused".to_owned()));
+    let frozen = vec![("campaignId", Value::Text("x".to_owned()))];
+    let r =
+        chatbotx_db::repo::write(&db, move |c| fmm::transition(c, 11, &["paused"], &frozen)).await;
+    assert!(repo_common::err_message(r).contains("campaignId"));
+    write(&db, |c| fmm::increment_day_sent(c, 11, 3)).await;
+    write(&db, |c| fmm::set_first_sent_at(c, 11)).await;
+    let first = campaign(&db, 11).await.first_sent_at;
+    write(&db, |c| fmm::set_first_sent_at(c, 11)).await;
+    let row = campaign(&db, 11).await;
+    assert_eq!((row.day_sent, row.first_sent_at), (3, first));
+    assert!(first.is_some());
+    write(&db, |c| fmm::remove(c, &[11, 13], WS)).await;
+    assert!(read(&db, |c| fmm::find_by_id(c, 11)).await.is_none());
+    assert!(read(&db, |c| fmm::find_by_id(c, 13)).await.is_some());
+}
+
+#[tokio::test]
+async fn facebook_marketing_message_recipient_and_audience_functions() {
+    use chatbotx_db::repo::facebook_marketing_message_audience::{
+        self as aud, CreateInput, ListFilter,
+    };
+    use chatbotx_db::repo::facebook_marketing_message_recipient::{
+        self as rec, FailRemainingInput,
+    };
+    use chatbotx_db::rusqlite::types::Value;
+    use repo11::{OTHER_WS, WS, put_campaign, put_recipient, read, recipient, two_ws_db, write};
+    let db = two_ws_db().await;
+    put_campaign(&db, 1, WS, "sending", "").await;
+    let row = |token: &str| {
+        vec![
+            ("workspaceId", Value::Integer(WS)),
+            ("campaignRowId", Value::Integer(1)),
+            ("subscriptionToken", Value::Text(token.to_owned())),
+            ("status", Value::Text("pending".to_owned())),
+        ]
+    };
+    let rows = vec![row("a"), row("b"), row("a")];
+    assert_eq!(write(&db, move |c| rec::insert_many(c, &rows)).await, 2);
+    let due = read(&db, |c| {
+        rec::list_due(c, 1, chatbotx_db::repo::now_ms(), 10)
+    })
+    .await;
+    assert_eq!(due.len(), 2);
+    let a = read(&db, |c| rec::find_by_campaign_token(c, 1, "a"))
+        .await
+        .expect("a");
+    let patch = vec![("trackingId", Value::Text("trk".to_owned()))];
+    write(&db, move |c| rec::update(c, a.id, &patch)).await;
+    assert_eq!(
+        read(&db, |c| rec::find_by_tracking_id(c, "trk"))
+            .await
+            .map(|r| r.id),
+        Some(a.id)
+    );
+    put_recipient(&db, 50, 1, "unconfirmed", "\"sentAt\" = 100").await;
+    put_recipient(&db, 51, 1, "unconfirmed", "\"sentAt\" = 900").await;
+    assert_eq!(
+        write(&db, |c| rec::fail_stale_unconfirmed(c, 1, 500, 1000)).await,
+        1
+    );
+    assert_eq!(
+        recipient(&db, 50).await.error_source.as_deref(),
+        Some("send")
+    );
+    let input = FailRemainingInput {
+        campaign_row_id: 1,
+        error_code: Some(131_000),
+        error_message: "stopped".to_owned(),
+        now: 2000,
+        ..FailRemainingInput::default()
+    };
+    // Default statuses: the two pending rows and unconfirmed 51.
+    assert_eq!(write(&db, move |c| rec::fail_remaining(c, &input)).await, 3);
+    let outcomes = read(&db, |c| rec::count_outcomes(c, 1)).await;
+    assert_eq!(
+        (outcomes.failed, outcomes.pending, outcomes.unconfirmed),
+        (4, 0, 0)
+    );
+    let breakdown = read(&db, |c| rec::error_breakdown(c, 1)).await;
+    assert_eq!(
+        breakdown
+            .iter()
+            .map(|b| (b.error_code, b.error_message.as_str(), b.count))
+            .collect::<Vec<_>>(),
+        vec![(Some(131_000), "stopped", 3), (None, "outcomeUnknown", 1)]
+    );
+
+    let created = write(&db, |c| {
+        aud::create(
+            c,
+            &CreateInput {
+                id: 5,
+                workspace_id: WS,
+                custom_audience_id: "ca".to_owned(),
+                ad_account_id: "act_1".to_owned(),
+                page_id: "page-1".to_owned(),
+                name: "VIP".to_owned(),
+                ..CreateInput::default()
+            },
+        )
+    })
+    .await;
+    assert_eq!(created.rows_uploaded, 0);
+    write(&db, |c| aud::increment_rows_uploaded(c, 5, WS, 7)).await;
+    write(&db, |c| aud::increment_rows_uploaded(c, 5, OTHER_WS, 7)).await;
+    let ready_only = ListFilter {
+        ready_only: true,
+        ..ListFilter::default()
+    };
+    let f2 = ready_only.clone();
+    assert!(
+        read(&db, move |c| aud::list_by_workspace_id(c, WS, &f2))
+            .await
+            .is_empty()
+    );
+    write(&db, |c| aud::mark_ready(c, &[5], WS, 9)).await;
+    let listed = read(&db, move |c| aud::list_by_workspace_id(c, WS, &ready_only)).await;
+    assert_eq!(
+        listed
+            .iter()
+            .map(|a| (a.rows_uploaded, a.ready_at))
+            .collect::<Vec<_>>(),
+        vec![(7, Some(9))]
+    );
+    write(&db, |c| aud::remove(c, 5, WS)).await;
+    assert!(
+        read(&db, |c| aud::find_for_workspace(c, 5, WS))
+            .await
+            .is_none()
+    );
+}
