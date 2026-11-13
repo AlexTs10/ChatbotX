@@ -536,8 +536,12 @@ pub mod contact_inbox;
 pub mod contact_list_where;
 pub mod conversation_ai_context;
 pub mod external_store;
+pub mod file;
+pub mod flow;
+pub mod inbound_webhook;
 pub mod inbox;
 pub mod inbox_team_member;
+pub mod integration_whatsapp;
 
 // P3.3 (second half of the repositories).
 pub mod auth_account;
