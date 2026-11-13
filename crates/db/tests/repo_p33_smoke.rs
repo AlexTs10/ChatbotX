@@ -657,6 +657,50 @@ fn more(conn: &chatbotx_db::rusqlite::Connection) -> Result<()> {
     template_installation_sync::list_installed_resources_by_installation_ids(conn, &[9903])?;
     template_installation_sync::mark_synced(conn, 1, Some("h"), 1)?;
     template_installation_sync::detach_resources(conn, &[1])?;
+    template_installed_resource_meta::spread_created_at(
+        conn,
+        &[
+            ("tag".to_owned(), 1),
+            ("tag".to_owned(), 2),
+            ("flow".to_owned(), 3),
+        ],
+    )?;
+    template_installed_resource_meta::load_resource_labels(
+        conn,
+        WS,
+        &[
+            ("automatedResponse".to_owned(), 1),
+            ("savedReply".to_owned(), 1),
+            ("calendar".to_owned(), 1),
+            ("aiAgent".to_owned(), 1),
+            ("aiFunction".to_owned(), 1),
+            ("aiMcpServer".to_owned(), 1),
+            ("aiFile".to_owned(), 1),
+            ("questionnaire".to_owned(), 1),
+            ("couponTopic".to_owned(), 1),
+            ("integrationWebchat".to_owned(), 1),
+            ("fbCommentAutomation".to_owned(), 1),
+            ("unknownKind".to_owned(), 1),
+        ],
+    )?;
+    for kind in template_installed_resource::TEMPLATE_RESOURCE_KINDS {
+        template_installed_resource_meta::load_resource_labels(conn, WS, &[(kind.to_owned(), 1)])?;
+        template_installed_resource_meta::spread_created_at(
+            conn,
+            &[(kind.to_owned(), 1), (kind.to_owned(), 2)],
+        )?;
+    }
+    template_installed_resource_uninstall::lock_keywords(conn, WS, &[1])?;
+    template_installed_resource_uninstall::find_referenced_keyword_ids(conn, WS, &[1])?;
+    template_installed_resource_uninstall::find_tombstoned(conn, WS, "tag", &[1])?;
+    template_installed_resource_uninstall::delete_keywords(conn, WS, &[1], "inbound")?;
+    template_installed_resource_uninstall::find_delete_blocked_by_others(
+        conn,
+        WS,
+        "tag",
+        &[1],
+        &[9903],
+    )?;
     // product-category
     let cat = product_category::create(
         conn,
