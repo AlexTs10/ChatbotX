@@ -9,6 +9,8 @@ pub mod polls;
 pub mod product_categories;
 pub mod product_vendors;
 pub mod products;
+pub mod qr_codes;
+pub mod reflinks;
 
 use std::sync::Arc;
 
@@ -162,6 +164,10 @@ pub async fn dispatch(state: &ApiState, route_id: &str, call: Call<'_>) -> Optio
         product_vendors::handle(state, route_id, call).await
     } else if products::ROUTES.contains(&route_id) {
         products::handle(state, route_id, call).await
+    } else if qr_codes::ROUTES.contains(&route_id) {
+        qr_codes::handle(state, route_id, call).await
+    } else if reflinks::ROUTES.contains(&route_id) {
+        reflinks::handle(state, route_id, call).await
     } else {
         return None;
     };

@@ -197,3 +197,51 @@ pub async fn scalar_text(db: &Db, sql: &'static str, id: i64) -> Option<String> 
     .await
     .expect("scalar read")
 }
+
+/// Inserts a `Flow`.
+pub fn flow(tx: &Connection, id: i64, workspace_id: i64) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Flow" ("id", "workspaceId", "name") VALUES (?1, ?2, ?3)"#,
+        params![id, workspace_id, format!("Flow {id}")],
+    )?;
+    Ok(id)
+}
+
+/// Inserts an `Inbox` of a channel.
+pub fn inbox(tx: &Connection, id: i64, workspace_id: i64, channel: &str) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Inbox" ("id", "workspaceId", "name", "channel", "sourceId") VALUES (?1, ?2, ?3, ?4, ?5)"#,
+        params![id, workspace_id, format!("Inbox {id}"), channel, format!("src-{id}")],
+    )?;
+    Ok(id)
+}
+
+/// Inserts a `MediaLibraryFile` with a MIME type.
+pub fn media_file(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    mime_type: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "MediaLibraryFile" ("id", "workspaceId", "name", "path", "mimeType", "size") VALUES (?1, ?2, 'logo', ?3, ?4, 1)"#,
+        params![id, workspace_id, format!("files/{id}"), mime_type],
+    )?;
+    Ok(id)
+}
+
+/// Inserts a `Reflink` row (`kind` = `refLink` / `qrCode`).
+pub fn reflink_row(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    kind: &str,
+    name: &str,
+    flow_id: i64,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Reflink" ("id", "workspaceId", "type", "name", "flowId") VALUES (?1, ?2, ?3, ?4, ?5)"#,
+        params![id, workspace_id, kind, name, flow_id],
+    )?;
+    Ok(id)
+}
