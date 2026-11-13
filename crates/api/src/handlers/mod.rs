@@ -125,6 +125,33 @@ impl ApiState {
             .await;
     }
 
+    /// The `pipelineItemChanged` realtime events the pipeline services return
+    /// (`events::PipelineItemChanged`), one per change, in order.
+    pub async fn publish_pipeline_changes(
+        &self,
+        changes: &[chatbotx_business::pipeline::events::PipelineItemChanged],
+    ) {
+        for change in changes {
+            let mut data = serde_json::Map::new();
+            data.insert(
+                "pipelineId".into(),
+                Value::String(change.pipeline_id.to_string()),
+            );
+            if let Some(item) = change.item_id {
+                data.insert("itemId".into(), Value::String(item.to_string()));
+            }
+            if let Some(contact) = change.contact_id {
+                data.insert("contactId".into(), Value::String(contact.to_string()));
+            }
+            data.insert("change".into(), Value::from(change.change));
+            let event = chatbotx_rt::Envelope::new(
+                chatbotx_rt::EventType::PipelineItemChanged,
+                Value::Object(data),
+            );
+            self.queue_realtime(change.workspace_id, event).await;
+        }
+    }
+
     /// `queueWorkspaceRealtimeEvent`: publishes `event` to the workspace when
     /// the realtime gateway is on (an invalid event is logged).
     pub async fn queue_realtime(&self, workspace_id: i64, event: chatbotx_rt::Envelope) {

@@ -486,3 +486,54 @@ async fn members_list_and_get_the_workspace_members() {
     assert_eq!(status, 404, "{body}");
     assert_eq!(body["message"], "Member not found");
 }
+
+#[tokio::test]
+async fn ecommerce_settings_update_records_an_audit_row() {
+    let (f, _) = wired().await;
+    let (status, body) = as_token(&f, "ecommerceSettings.update", &[], None, Some(json!({}))).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        details(&audit_rows(&f).await),
+        ["update: updated ecommerce settings"]
+    );
+}
+
+#[tokio::test]
+async fn pipeline_changes_are_published_as_realtime_frames() {
+    use chatbotx_business::pipeline::events::PipelineItemChanged;
+    use chatbotx_rt::hub::EntryKind;
+    use chatbotx_rt::{NoPresence, NoRevokeRetry, Realtime, RealtimeDeps, RtConfig, SystemClock};
+    let f = fixture().await;
+    let clock: Arc<dyn chatbotx_rt::Clock> = Arc::new(SystemClock);
+    let realtime = Realtime::with_deps(
+        RtConfig::new("x1-test-secret-x1-test-secret-x1-test"),
+        RealtimeDeps {
+            clock: Arc::clone(&clock),
+            revoke_store: Arc::new(chatbotx_kv::DurableKv::new(Arc::clone(&f.state.db), clock)),
+            presence: Arc::new(NoPresence),
+            revoke_retry: Arc::new(NoRevokeRetry),
+        },
+    );
+    // Without a realtime handle nothing happens.
+    let change = PipelineItemChanged {
+        workspace_id: WS,
+        pipeline_id: 3,
+        item_id: Some(4),
+        contact_id: None,
+        change: "moved",
+    };
+    f.state.publish_pipeline_changes(std::slice::from_ref(&change)).await;
+    let state = f.state.clone().with_realtime(realtime.clone());
+    state.publish_pipeline_changes(&[change]).await;
+    let buffered = realtime.hub().buffered(&WS.to_string());
+    assert_eq!(buffered.len(), 1);
+    let EntryKind::WorkspaceEvents { events, .. } = &buffered[0].kind else {
+        panic!("a workspace-events record");
+    };
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type.as_str(), "pipelineItemChanged");
+    assert_eq!(
+        events[0].data,
+        json!({ "pipelineId": "3", "itemId": "4", "change": "moved" })
+    );
+}

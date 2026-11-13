@@ -63,6 +63,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             ecommerce_settings::update(&state.db, ws, patch)
                 .await
                 .map_err(|e| business_error(e, UPDATING))?;
+            state
+                .record_audit("update", "updated ecommerce settings")
+                .await;
             resource(state, ws, UPDATING).await
         }
         _ => Err(crate::routes::not_ported_error()),
