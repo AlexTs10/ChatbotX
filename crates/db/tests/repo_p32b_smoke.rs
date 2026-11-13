@@ -2175,3 +2175,39 @@ async fn contact_inbox_bulk_ai_re_check_and_count() {
         0
     );
 }
+
+#[tokio::test]
+async fn connection_insert_returns_the_row() {
+    use chatbotx_db::repo::connection;
+    use chatbotx_db::rusqlite::types::Value;
+    use repo11::write;
+    let db = common::fresh_db().await;
+    let s = seed(&db).await;
+    let (ws, inbox) = (s.workspace_id, s.inbox_id);
+    let row = write(&db, move |c| {
+        connection::insert(
+            c,
+            &vec![
+                ("workspaceId", Value::Integer(ws)),
+                ("provider", Value::Text("whatsapp".to_owned())),
+                ("kind", Value::Text("channel".to_owned())),
+                ("channel", Value::Text("whatsapp".to_owned())),
+                ("sourceId", Value::Text("pn-1".to_owned())),
+                ("displayName", Value::Text("Sales".to_owned())),
+                ("inboxId", Value::Integer(inbox)),
+            ],
+        )
+    })
+    .await;
+    assert!(row.id > 0);
+    assert_eq!((row.workspace_id, row.display_name.as_str()), (ws, "Sales"));
+    let id = row.id;
+    let found = repo11::read(&db, move |c| connection::find_by_id(c, id)).await;
+    assert_eq!(found.map(|r| r.source_id), Some("pn-1".to_owned()));
+    let unknown = vec![("nope", Value::Integer(1))];
+    assert!(
+        chatbotx_db::repo::write(&db, move |c| connection::insert(c, &unknown))
+            .await
+            .is_err()
+    );
+}

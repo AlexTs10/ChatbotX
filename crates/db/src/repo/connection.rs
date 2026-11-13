@@ -229,3 +229,17 @@ pub fn list_paused_by_owner(conn: &Conn, owner_id: i64) -> Result<Vec<Connection
     );
     super::query_models(conn, &sql, &[&owner_id])
 }
+
+/// `insert`: one `Connection` from the caller's columns (checked against the table); a
+/// new id when the patch has none; the inserted row.
+pub fn insert(conn: &Conn, values: &super::patch::Patch) -> Result<Connection> {
+    let mut all = values.clone();
+    if !all.iter().any(|(col, _)| *col == "id") {
+        all.insert(0, ("id", rusqlite::types::Value::Integer(super::new_id())));
+    }
+    let mut q = Sql::raw("INSERT INTO \"Connection\" ");
+    q.append(super::patch::insert_clause(Connection::COLUMNS, &all)?);
+    q.push(&format!(" RETURNING {}", Connection::columns_sql(None)));
+    q.model(conn)?
+        .ok_or_else(|| super::Error::msg("Connection insert returned no row"))
+}
