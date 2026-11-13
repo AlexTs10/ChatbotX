@@ -8,6 +8,7 @@ pub mod discount_code;
 pub mod ecommerce_open_hours;
 pub mod ecommerce_settings;
 pub mod errors;
+pub mod flow;
 pub mod inbox;
 pub mod integration_api;
 pub mod integration_webchat;
