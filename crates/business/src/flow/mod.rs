@@ -93,6 +93,12 @@ fn authoring_context(conn: &Connection, workspace_id: i64) -> Result<FlowAuthori
     })
 }
 
+/// `assertFlowGraphPublishable` (`invalidGraph` authoring errors).
+pub(crate) fn assert_flow_graph_publishable(nodes: &Value, edges: &Value) -> Result<()> {
+    let list = |v: &Value| v.as_array().cloned().unwrap_or_default();
+    validate_publishable(&list(nodes), &list(edges), "invalidGraph", None).map(|_| ())
+}
+
 /// `publishFlowSchema.safeParse` + `zodErrorToFlowAuthoringErrors(code)`;
 /// `spec_paths` maps a node issue back to its spec path.
 fn validate_publishable(

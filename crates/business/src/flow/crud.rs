@@ -528,3 +528,93 @@ fn duplicate_in(conn: &Connection, workspace_id: i64, id: i64) -> Result<i64> {
     }
     Ok(copy_id)
 }
+
+/// What [`build_export`] read (the handler builds the export document).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowExport {
+    /// `toExportFileName`.
+    pub file_name: String,
+    pub flow: Flow,
+    pub version: FlowVersion,
+    /// `(id, name, type)` of the custom fields the graph uses.
+    pub custom_fields: Vec<(i64, String, String)>,
+    /// `(id, name, type)` of the bot fields the graph uses.
+    pub bot_fields: Vec<(i64, String, String)>,
+}
+
+/// `toExportFileName`: a lowercase slug + `.chatbotx-flow.json`.
+fn to_export_file_name(name: &str) -> String {
+    let mut slug = String::new();
+    let mut dash = false;
+    for c in name.trim().to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            slug.push(c);
+            dash = false;
+        } else if !dash {
+            slug.push('-');
+            dash = true;
+        }
+    }
+    let slug = slug.trim_matches('-');
+    let slug = if slug.is_empty() { "flow" } else { slug };
+    format!("{slug}.chatbotx-flow.json")
+}
+
+fn fields_by_ids(
+    conn: &Connection,
+    table: &str,
+    workspace_id: i64,
+    ids: &[String],
+) -> Result<Vec<(i64, String, String)>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        r#"SELECT "id", "name", "type" FROM "{table}" WHERE "workspaceId" = ?1
+             AND "id" IN (SELECT CAST(value AS INTEGER) FROM json_each(?2)) ORDER BY "id""#
+    );
+    let mut stmt = conn.prepare(&sql).map_err(repo_err)?;
+    let rows = stmt
+        .query_map(
+            params![workspace_id, Value::from(ids.to_vec()).to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(repo_err)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(repo_err)?;
+    Ok(rows)
+}
+
+/// `flowService.buildExport` (+ the route's `exportFailure`): the published
+/// version, or the draft when `draft`. No view-only template check.
+pub async fn build_export(db: &Db, workspace_id: i64, id: i64, draft: bool) -> Result<FlowExport> {
+    tx::read(db, move |conn| {
+        let flow = find_flow(conn, workspace_id, id)?
+            .ok_or_else(|| BusinessError::not_found("Flow not found"))?;
+        let version = find_version(conn, workspace_id, flow.id, draft)?.ok_or_else(|| {
+            if draft {
+                BusinessError::exception("The flow has no draft to export", "flowNoDraft", 409)
+            } else {
+                BusinessError::exception(
+                    "The flow has no published version to export",
+                    "flowNotPublished",
+                    409,
+                )
+            }
+        })?;
+        let refs = chatbotx_core::flow_config::import_export::collect_field_references(
+            &json!({ "nodes": version.nodes.0, "edges": version.edges.0 }),
+        );
+        let custom_fields =
+            fields_by_ids(conn, "CustomField", workspace_id, &refs.custom_field_ids)?;
+        let bot_fields = fields_by_ids(conn, "BotField", workspace_id, &refs.bot_field_ids)?;
+        Ok(FlowExport {
+            file_name: to_export_file_name(&flow.name),
+            flow,
+            version,
+            custom_fields,
+            bot_fields,
+        })
+    })
+    .await
+}

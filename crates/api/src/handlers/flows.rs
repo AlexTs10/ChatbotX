@@ -4,7 +4,12 @@
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::flow::{self, FlowGraphInput, FlowUpdate, ListFlows};
+use chatbotx_business::flow_version;
 use chatbotx_core::flow_config::authoring::flow_spec_schema;
+use chatbotx_core::flow_config::import_export::FLOW_EXPORT_FORMAT_VERSION;
+use chatbotx_core::flow_config::nodes::edge_schema;
+use chatbotx_core::flow_config::publish_schema::publish_flow_schema;
+use chatbotx_core::flow_config::z;
 use chatbotx_db::repo::flow::FlowWithVersions;
 use chatbotx_db::repo::models::{Flow, FlowVersion};
 use serde_json::{Map, Value, json};
@@ -26,6 +31,7 @@ pub const ROUTES: &[&str] = &[
     "flows.validate",
     "flows.updateDraft",
     "flows.versions",
+    "flows.export",
 ];
 
 /// Runs one of [`ROUTES`].
@@ -38,9 +44,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "flows.update" => update(state, call).await,
         "flows.delete" => delete(state, call).await,
         "flows.duplicate" => duplicate(state, call).await,
-        "flows.publish" | "flows.validate" | "flows.updateDraft" | "flows.versions" => {
-            todo!("P3.6-D2")
-        }
+        "flows.publish" => publish(state, call).await,
+        "flows.validate" => validate(state, call).await,
+        "flows.updateDraft" => update_draft(state, call).await,
+        "flows.versions" => versions(state, call).await,
+        "flows.export" => export(state, call).await,
         _ => Err(crate::routes::not_ported_error()),
     }
 }
@@ -414,14 +422,262 @@ pub enum GraphBody {
     },
 }
 
+fn zod_issues(issues: &[chatbotx_core::flow_config::z::Issue]) -> Vec<Value> {
+    issues
+        .iter()
+        .filter_map(|issue| serde_json::to_value(issue).ok())
+        .collect()
+}
+
+fn custom_root_issue(message: &str) -> Value {
+    json!({ "code": "custom", "path": [], "message": message })
+}
+
+/// `flowSpecRequest`: `{ spec }`, no `nodes` / `edges`.
+fn flow_spec_request(body: &Map<String, Value>) -> Result<Value, Vec<Value>> {
+    if body.contains_key("nodes") || body.contains_key("edges") {
+        return Err(vec![custom_root_issue(
+            "Cannot combine \"nodes\"/\"edges\" with \"spec\" in the same request body.",
+        )]);
+    }
+    let parsed =
+        z::object(vec![("spec", flow_spec_schema())]).safe_parse(&Value::Object(body.clone()));
+    if parsed.success {
+        Ok(parsed
+            .data
+            .and_then(|d| d.get("spec").cloned())
+            .unwrap_or_default())
+    } else {
+        Err(zod_issues(parsed.issues()))
+    }
+}
+
+/// A `{ nodes, edges }` member of a request union (no `spec`).
+fn graph_request(body: &Map<String, Value>, schema: z::Schema) -> Result<GraphBody, Vec<Value>> {
+    if body.contains_key("spec") {
+        return Err(vec![custom_root_issue(
+            "Cannot combine \"spec\" with \"nodes\"/\"edges\" in the same request body.",
+        )]);
+    }
+    let parsed = schema.safe_parse(&Value::Object(body.clone()));
+    if !parsed.success {
+        return Err(zod_issues(parsed.issues()));
+    }
+    // The stored graph is the body's own (the parsed one drops unknown keys).
+    let list = |key: &str| {
+        body.get(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    Ok(GraphBody::Graph {
+        nodes: list("nodes"),
+        edges: list("edges"),
+    })
+}
+
+/// `z.union([flowSpecRequest, graph])`: one `invalid_union` issue at the root.
+fn spec_or_graph(body: &Map<String, Value>, graph: z::Schema) -> Result<GraphBody, Vec<Value>> {
+    let spec_issues = match flow_spec_request(body) {
+        Ok(spec) => return Ok(GraphBody::Spec(spec)),
+        Err(issues) => issues,
+    };
+    let graph_issues = match graph_request(body, graph) {
+        Ok(out) => return Ok(out),
+        Err(issues) => issues,
+    };
+    Err(vec![json!({
+        "code": "invalid_union",
+        "errors": [spec_issues, graph_issues],
+        "path": [],
+        "message": "Invalid input",
+    })])
+}
+
 /// `publishFlowRequest` (`flowSpecRequest` | `publishFlowSchema`); `Err` = the issues.
 pub fn publish_flow_request(body: &Map<String, Value>) -> Result<GraphBody, Vec<Value>> {
-    let _ = body;
-    todo!("P3.6-D2")
+    spec_or_graph(body, publish_flow_schema())
 }
 
 /// `updateDraftFlowRequest` (`flowSpecRequest` | `updateDraftFlowVersionSchema`).
 pub fn update_draft_flow_request(body: &Map<String, Value>) -> Result<GraphBody, Vec<Value>> {
-    let _ = body;
-    todo!("P3.6-D2")
+    spec_or_graph(
+        body,
+        z::object(vec![
+            ("nodes", z::array(z::any())),
+            ("edges", z::array(edge_schema())),
+        ]),
+    )
+}
+
+/// A publish / updateDraft body parser.
+type RequestParser = fn(&Map<String, Value>) -> Result<GraphBody, Vec<Value>>;
+
+/// The `{id}` param and the parsed body of a publish / updateDraft call.
+fn graph_call(
+    call: &Call<'_>,
+    parse: RequestParser,
+) -> Result<(i64, GraphBody), crate::orpc::OrpcError> {
+    let mut input = Input::from_body(call.params, call.body);
+    let parsed = parse(&input.obj);
+    let flow_id = input.id("id");
+    let body = match parsed {
+        Ok(body) => Some(body),
+        Err(issues) => {
+            input.extend_issues(issues);
+            None
+        }
+    };
+    input.finish()?;
+    Ok((
+        flow_id.unwrap_or_default(),
+        body.unwrap_or(GraphBody::Graph {
+            nodes: vec![],
+            edges: vec![],
+        }),
+    ))
+}
+
+/// The graph of a body: a spec is compiled (`validate` = `compileAndValidateSpec`).
+async fn graph_of(
+    state: &ApiState,
+    workspace_id: i64,
+    body: GraphBody,
+    validate: bool,
+) -> chatbotx_business::Result<(Vec<Value>, Vec<Value>)> {
+    match body {
+        GraphBody::Graph { nodes, edges } => Ok((nodes, edges)),
+        GraphBody::Spec(spec) => {
+            let graph = flow::resolve_graph_input(
+                &state.db,
+                workspace_id,
+                FlowGraphInput {
+                    spec: Some(spec),
+                    nodes: None,
+                    edges: None,
+                },
+                validate,
+            )
+            .await?
+            .unwrap_or(flow::FlowGraph {
+                nodes: vec![],
+                edges: vec![],
+                start_node_id: String::new(),
+                node_ids: None,
+            });
+            Ok((graph.nodes, graph.edges))
+        }
+    }
+}
+
+/// `flows.publish`.
+async fn publish(state: &ApiState, call: Call<'_>) -> Reply {
+    let (flow_id, body) = graph_call(&call, publish_flow_request)?;
+    let ws = call.workspace_id;
+    async {
+        let (nodes, edges) = graph_of(state, ws, body, true).await?;
+        flow_version::publish(&state.db, ws, flow_id, nodes, edges).await
+    }
+    .await
+    .map_err(|e| flow_error(e, super::MUTATING))?;
+    Ok(no_content())
+}
+
+/// `flows.validate` (`flowSpecRequest` -> `publishFlowSchema`).
+async fn validate(state: &ApiState, call: Call<'_>) -> Reply {
+    let mut input = Input::from_body(call.params, call.body);
+    let spec = match flow_spec_request(&input.obj) {
+        Ok(spec) => Some(spec),
+        Err(issues) => {
+            input.extend_issues(issues);
+            None
+        }
+    };
+    input.finish()?;
+    let (nodes, edges) = graph_of(
+        state,
+        call.workspace_id,
+        GraphBody::Spec(spec.unwrap_or_default()),
+        true,
+    )
+    .await
+    .map_err(|e| flow_error(e, super::MUTATING))?;
+    Ok(json(200, json!({ "nodes": nodes, "edges": edges })))
+}
+
+/// `flows.updateDraft`.
+async fn update_draft(state: &ApiState, call: Call<'_>) -> Reply {
+    let (flow_id, body) = graph_call(&call, update_draft_flow_request)?;
+    let ws = call.workspace_id;
+    async {
+        let (nodes, edges) = graph_of(state, ws, body, false).await?;
+        flow_version::update_draft_by_flow_id(&state.db, ws, flow_id, nodes, edges).await
+    }
+    .await
+    .map_err(|e| flow_error(e, super::MUTATING))?;
+    Ok(no_content())
+}
+
+/// `flows.versions`.
+async fn versions(state: &ApiState, call: Call<'_>) -> Reply {
+    let flow_id = path_id(&call)?;
+    let data = flow_version::list(&state.db, call.workspace_id, flow_id)
+        .await
+        .map_err(|e| business_error(e, super::FINDING))?;
+    Ok(json(
+        200,
+        json!({ "data": data.iter().map(flow_version_json).collect::<Vec<_>>() }),
+    ))
+}
+
+/// `flows.export`: `{ fileName, export }` (format version 2).
+async fn export(state: &ApiState, call: Call<'_>) -> Reply {
+    let mut input = Input::from_query(call.params, call.query);
+    let flow_id = input.id("id");
+    let version = input.get("version").cloned().and_then(|value| {
+        input.enum_at(
+            &key("version"),
+            Some(&value),
+            &["published", "draft"],
+            false,
+        )
+    });
+    input.finish()?;
+    let out = flow::build_export(
+        &state.db,
+        call.workspace_id,
+        flow_id.unwrap_or_default(),
+        version.as_deref() == Some("draft"),
+    )
+    .await
+    .map_err(|e| business_error(e, super::FINDING))?;
+    let fields = |rows: &[(i64, String, String)]| -> Map<String, Value> {
+        rows.iter()
+            .map(|(field_id, name, field_type)| {
+                (
+                    field_id.to_string(),
+                    json!({ "name": name, "type": field_type }),
+                )
+            })
+            .collect()
+    };
+    let envelope = json!({
+        "formatVersion": FLOW_EXPORT_FORMAT_VERSION,
+        "exportedAt": date(chatbotx_db::repo::now_ms()),
+        "source": { "workspaceId": id(out.flow.workspace_id), "flowId": id(out.flow.id) },
+        "flows": [{
+            "name": out.flow.name,
+            "active": out.flow.active,
+            "enableInInbox": out.flow.enable_in_inbox,
+            "startNodeId": id(out.version.start_node_id),
+            "nodes": out.version.nodes.0,
+            "edges": out.version.edges.0,
+        }],
+        "customFields": fields(&out.custom_fields),
+        "botFields": fields(&out.bot_fields),
+    });
+    Ok(json(
+        200,
+        json!({ "fileName": out.file_name, "export": envelope }),
+    ))
 }
