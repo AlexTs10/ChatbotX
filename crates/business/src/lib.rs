@@ -41,5 +41,6 @@ pub mod tag;
 pub mod tx;
 pub mod vendor;
 pub mod workspace_api_token;
+pub mod workspace_member;
 
 pub use errors::{BusinessError, Result};

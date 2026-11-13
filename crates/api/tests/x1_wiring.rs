@@ -413,3 +413,76 @@ async fn channel_writes_record_audit_rows() {
         ]
     );
 }
+
+#[tokio::test]
+async fn members_list_and_get_the_workspace_members() {
+    let (f, _) = wired().await;
+    f.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                r#"UPDATE "User" SET "name" = 'Owner One' WHERE "id" = 1001"#,
+                [],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role", "permissions", "createdAt", "updatedAt") VALUES (5001, ?1, 1001, 'owner', '{"superAdmin":true,"flows":true,"extra":1}', 1000, 1000)"#,
+                [WS],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role") VALUES (5002, ?1, 1002, 'agent')"#,
+                [handlers_common::OTHER_WS],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("members");
+    let (status, body) = call(&f, "workspaceMembers.list", WS, &[], None, None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["pageCount"], 1);
+    let data = body["data"].as_array().expect("data");
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0]["id"], "5001");
+    assert_eq!(data[0]["role"], "owner");
+    assert_eq!(data[0]["createdAt"], "1970-01-01T00:00:01.000Z");
+    assert_eq!(
+        data[0]["permissions"],
+        json!({ "superAdmin": true, "flows": true })
+    );
+    assert_eq!(
+        data[0]["user"],
+        json!({ "id": "1001", "name": "Owner One", "image": null })
+    );
+    let (status, body) = call(
+        &f,
+        "workspaceMembers.list",
+        WS,
+        &[],
+        Some("keyword=nobody"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(body, json!({ "data": [], "pageCount": 0 }));
+    let (status, body) = call(
+        &f,
+        "workspaceMembers.get",
+        WS,
+        &[("memberId", "5001")],
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["userId"], "1001");
+    let (status, body) = call(
+        &f,
+        "workspaceMembers.get",
+        WS,
+        &[("memberId", "5002")],
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, 404, "{body}");
+    assert_eq!(body["message"], "Member not found");
+}

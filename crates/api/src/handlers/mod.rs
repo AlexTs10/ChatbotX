@@ -27,6 +27,7 @@ pub mod reflinks;
 pub mod sequences;
 pub mod tags;
 pub mod webchats;
+pub mod workspace_members;
 
 use std::sync::Arc;
 
@@ -390,6 +391,8 @@ async fn route(
         qr_codes::handle(state, route_id, call).await
     } else if reflinks::ROUTES.contains(&route_id) {
         reflinks::handle(state, route_id, call).await
+    } else if workspace_members::ROUTES.contains(&route_id) {
+        workspace_members::handle(state, route_id, call).await
     } else {
         return None;
     };
