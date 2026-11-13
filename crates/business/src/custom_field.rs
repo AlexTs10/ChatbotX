@@ -273,3 +273,14 @@ pub async fn delete(db: &Db, workspace_id: i64, ids: &[i64]) -> Result<()> {
     })
     .await
 }
+
+/// `findManyByKeys`: each distinct key (id, by value, then name) to its
+/// field; unknown keys are absent (P3.6-D2 slice contact custom-field values).
+pub fn find_many_by_keys_in(
+    conn: &Connection,
+    workspace_id: i64,
+    keys: &[String],
+) -> Result<std::collections::HashMap<String, CustomField>> {
+    let _ = (conn, workspace_id, keys);
+    todo!("P3.6-D2")
+}

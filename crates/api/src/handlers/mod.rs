@@ -5,6 +5,7 @@
 pub mod analytics;
 pub mod channels;
 pub mod connections;
+pub mod contact_custom_fields;
 pub mod contact_notes;
 pub mod contact_sequences;
 pub mod contacts;
@@ -237,6 +238,8 @@ pub async fn dispatch_as(
         contact_sequences::handle(state, route_id, call).await
     } else if sequences::ROUTES.contains(&route_id) {
         sequences::handle(state, route_id, call).await
+    } else if contact_custom_fields::ROUTES.contains(&route_id) {
+        contact_custom_fields::handle(state, route_id, call).await
     } else if contact_notes::ROUTES.contains(&route_id) {
         contact_notes::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {

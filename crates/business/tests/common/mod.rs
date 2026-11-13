@@ -398,3 +398,33 @@ pub async fn linked_tag_ids(db: &Db, contact_id: i64) -> Vec<i64> {
     .await
     .expect("linked tags")
 }
+
+/// Inserts a `ContactCustomField` value (P3.6-D2 contact custom-field values).
+pub fn custom_field_value(
+    tx: &Connection,
+    id: i64,
+    contact_id: i64,
+    custom_field_id: i64,
+    value: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "ContactCustomField" ("id", "contactId", "customFieldId", "value") VALUES (?1, ?2, ?3, ?4)"#,
+        params![id, contact_id, custom_field_id, value],
+    )?;
+    Ok(id)
+}
+
+/// The stored `(customFieldId, value)` pairs of a contact, by field id.
+pub async fn custom_field_values(db: &Db, contact_id: i64) -> Vec<(i64, String)> {
+    db.read(move |conn| {
+        let mut stmt = conn.prepare(
+            r#"SELECT "customFieldId", "value" FROM "ContactCustomField" WHERE "contactId" = ?1 ORDER BY "customFieldId""#,
+        )?;
+        let out = stmt
+            .query_map(params![contact_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(out)
+    })
+    .await
+    .expect("custom field values read")
+}
