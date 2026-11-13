@@ -5,6 +5,7 @@
 
 pub mod connection;
 pub mod contact;
+pub mod contact_custom_field;
 pub mod discount_code;
 pub mod ecommerce_open_hours;
 pub mod ecommerce_settings;
