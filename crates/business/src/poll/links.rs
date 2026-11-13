@@ -26,5 +26,18 @@ pub fn build_poll_links(
     inboxes: &[LinkInbox],
     poll_id: i64,
 ) -> PollLinks {
-    todo!("P3.6-D1")
+    let links = get_inbox_links(app_url, inboxes, Some(&RefConfig::Poll { poll_id }))
+        .into_iter()
+        .filter(|(inbox, _)| can_receive_ref(&inbox.channel))
+        .map(|(inbox, url)| PollLink {
+            inbox_id: inbox.id,
+            channel: inbox.channel,
+            name: inbox.name,
+            url,
+        })
+        .collect();
+    PollLinks {
+        omnichannel_url: format!("{app_url}/l/{workspace_id}/p/{poll_id}"),
+        links,
+    }
 }

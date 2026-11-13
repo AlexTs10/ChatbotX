@@ -67,5 +67,47 @@ pub fn compute_poll_analytics(
     candidates: &[AnalyticsCandidate],
     breakdown: &[VoteBreakdownRow],
 ) -> PollAnalytics {
-    todo!("P3.6-D1")
+    let mut gender = GenderVotes::default();
+    let mut per_candidate: Vec<(i64, GenderVotes)> = Vec::new();
+    for row in breakdown {
+        gender.add(&row.gender, row.votes);
+        match per_candidate
+            .iter_mut()
+            .find(|(id, _)| *id == row.candidate_id)
+        {
+            Some((_, entry)) => entry.add(&row.gender, row.votes),
+            None => {
+                let mut entry = GenderVotes::default();
+                entry.add(&row.gender, row.votes);
+                per_candidate.push((row.candidate_id, entry));
+            }
+        }
+    }
+    let total_votes = gender.total();
+    PollAnalytics {
+        total_votes,
+        gender,
+        candidates: candidates
+            .iter()
+            .map(|candidate| {
+                let votes = per_candidate
+                    .iter()
+                    .find(|(id, _)| *id == candidate.id)
+                    .map(|(_, votes)| *votes)
+                    .unwrap_or_default();
+                let candidate_total = votes.total();
+                PollCandidateAnalytics {
+                    id: candidate.id,
+                    name: candidate.name.clone(),
+                    image_url: candidate.image_url.clone(),
+                    total_votes: candidate_total,
+                    total_percent: percent(candidate_total, total_votes),
+                    male_votes: votes.male,
+                    male_percent: percent(votes.male, gender.male),
+                    female_votes: votes.female,
+                    female_percent: percent(votes.female, gender.female),
+                }
+            })
+            .collect(),
+    }
 }

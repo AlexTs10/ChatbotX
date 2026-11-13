@@ -38,5 +38,34 @@ fn b62(value: &str) -> String {
 
 /// `encodeRef`.
 pub fn encode_ref(config: &RefConfig) -> String {
-    todo!("P3.6-D1")
+    match config {
+        RefConfig::Flow { flow_id, node_id } => {
+            let node = node_id
+                .as_deref()
+                .filter(|n| !n.is_empty())
+                .map(|n| format!("_{}", b62(n)))
+                .unwrap_or_default();
+            format!("f_{}{node}", b62(&flow_id.to_string()))
+        }
+        RefConfig::Draft { flow_id } => format!("d_{}", b62(&flow_id.to_string())),
+        RefConfig::MinigameShare {
+            minigame_id,
+            referrer_contact_id,
+        } => format!(
+            "mg_{}_{}",
+            b62(&minigame_id.to_string()),
+            b62(&referrer_contact_id.to_string())
+        ),
+        RefConfig::Leaderboard {
+            leaderboard_id,
+            contact_id,
+        } => format!(
+            "lb_{}_{}",
+            b62(&leaderboard_id.to_string()),
+            b62(&contact_id.to_string())
+        ),
+        RefConfig::Poll { poll_id } => format!("pl_{}", b62(&poll_id.to_string())),
+        RefConfig::QrCode { name } => format!("qr_{name}"),
+        RefConfig::Reflink { name } => name.clone(),
+    }
 }

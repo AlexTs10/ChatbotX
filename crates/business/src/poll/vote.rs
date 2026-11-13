@@ -47,5 +47,59 @@ fn resolve_after_vote_flow(
 
 /// `pollVoteService.castVote` at time `now` (epoch ms).
 pub async fn cast_vote(db: &Db, input: VoteInput, now: i64) -> Result<CastVoteOutcome> {
-    todo!("P3.6-D1")
+    let found = tx::read(db, move |conn| {
+        Ok(poll::find_with_candidates(
+            conn,
+            input.workspace_id,
+            input.poll_id,
+        )?)
+    })
+    .await?;
+    let Some(found) = found else {
+        return Ok(CastVoteOutcome::PollNotFound);
+    };
+    if get_poll_state(found.poll.starts_at, found.poll.ends_at, now) != PollState::Running {
+        return Ok(CastVoteOutcome::NotRunning(found));
+    }
+    if !found.candidates.iter().any(|c| c.id == input.candidate_id) {
+        return Ok(CastVoteOutcome::CandidateNotFound(found));
+    }
+    let flow_id = found.poll.after_vote_flow_id;
+    let voted = tx::write(db, move |conn| {
+        let vote = poll::upsert_vote(conn, &input)?;
+        let after_vote_flow_id =
+            resolve_after_vote_flow(conn, input.workspace_id, vote, flow_id, now)?;
+        Ok((vote, after_vote_flow_id))
+    })
+    .await;
+    match voted {
+        Ok((vote, after_vote_flow_id)) => Ok(CastVoteOutcome::Voted {
+            result: vote.result,
+            after_vote_flow_job_id: match (after_vote_flow_id, vote.voted_at) {
+                (Some(_), Some(voted_at)) => Some(format!(
+                    "poll-vote-flow-{}-{}-{voted_at}",
+                    input.poll_id, input.contact_id
+                )),
+                _ => None,
+            },
+            after_vote_flow_id,
+        }),
+        Err(BusinessError::Repo(error))
+            if is_foreign_key_violation_error(&error, Some(CANDIDATE_FOREIGN_KEY)) =>
+        {
+            let fresh = tx::read(db, move |conn| {
+                Ok(poll::find_with_candidates(
+                    conn,
+                    input.workspace_id,
+                    input.poll_id,
+                )?)
+            })
+            .await?;
+            Ok(fresh.map_or(
+                CastVoteOutcome::PollNotFound,
+                CastVoteOutcome::CandidateNotFound,
+            ))
+        }
+        Err(error) => Err(error),
+    }
 }
