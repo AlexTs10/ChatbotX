@@ -3,11 +3,11 @@
 
 use std::collections::BTreeMap;
 
-use chatbotx_business::pipeline::PipelineAccessScope;
 use chatbotx_business::pipeline::currency::PipelineView;
 use chatbotx_business::pipeline::item::{
     self, CreateItem, ItemFields, ItemView, TransferItem, UpdateItem,
 };
+use chatbotx_business::pipeline::members;
 use chatbotx_business::pipeline::mutation::{PipelineActor, major_units};
 use chatbotx_business::pipeline::service::{self, CreatePipeline, UpdatePipeline, stored_settings};
 use chatbotx_business::pipeline::settings::{
@@ -16,7 +16,8 @@ use chatbotx_business::pipeline::settings::{
 use chatbotx_business::pipeline::structure::{
     self, FieldPatch, FieldValues, StageValues, is_color,
 };
-use chatbotx_db::repo::models::{PipelineField, PipelineStage};
+use chatbotx_business::pipeline::{PipelineAccessScope, PipelinePermissions};
+use chatbotx_db::repo::models::{PipelineField, PipelineMember, PipelineStage};
 use chatbotx_db::repo::partials::pipeline::{PIPELINE_REFERENCE_NAME_MAX, PipelineType};
 use chatbotx_db::repo::pipeline_item_content::AttachmentWithFile;
 use serde_json::{Value, json};
@@ -602,8 +603,56 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         | "pipelines.moveItem"
         | "pipelines.transferItem"
         | "pipelines.deleteItem" => handle_item(state, route_id, call).await,
-        "pipelines.listMembers" | "pipelines.setMember" | "pipelines.removeMember" => {
-            todo!("P3.6-D1p")
+        "pipelines.listMembers" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let pipeline_id = input.id("id");
+            input.finish()?;
+            let rows = members::list_members(db, ws, pipeline_id.unwrap_or_default(), TOKEN)
+                .await
+                .map_err(|e| business_error(e, FINDING))?;
+            ok(
+                200,
+                json!({ "items": rows.iter().map(member_json).collect::<Vec<_>>() }),
+            )
+        }
+        "pipelines.setMember" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            let member_id = input.id("workspaceMemberId");
+            let permissions = PipelinePermissions {
+                can_view: input.bool("canView").unwrap_or(false),
+                can_edit: input.opt_bool("canEdit").unwrap_or(false),
+                can_delete: input.opt_bool("canDelete").unwrap_or(false),
+                can_manage_settings: input.opt_bool("canManageSettings").unwrap_or(false),
+            };
+            input.finish()?;
+            let row = members::set_member(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                member_id.unwrap_or_default(),
+                TOKEN,
+                permissions,
+            )
+            .await
+            .map_err(mutating)?;
+            ok(200, member_json(&row))
+        }
+        "pipelines.removeMember" => {
+            let mut input = delete_input(&call);
+            let pipeline_id = input.id("id");
+            let member_id = input.id("workspaceMemberId");
+            input.finish()?;
+            members::remove_member(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                member_id.unwrap_or_default(),
+                TOKEN,
+            )
+            .await
+            .map_err(mutating)?;
+            Ok(no_content())
         }
         _ => Err(super::internal_error(route_id)),
     }
@@ -973,4 +1022,15 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
         }
         _ => Err(super::internal_error(route_id)),
     }
+}
+
+/// `toPublicMember`.
+fn member_json(row: &PipelineMember) -> Value {
+    json!({
+        "workspaceMemberId": id(row.workspace_member_id),
+        "canView": row.can_view,
+        "canEdit": row.can_edit,
+        "canDelete": row.can_delete,
+        "canManageSettings": row.can_manage_settings,
+    })
 }
