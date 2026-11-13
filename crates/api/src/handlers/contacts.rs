@@ -525,7 +525,7 @@ async fn read_public(
     Ok(json(200, public_contact_json(state, &contact, resolve)))
 }
 
-async fn resolve(
+pub(super) async fn resolve(
     state: &ApiState,
     call: &Call<'_>,
     errors: ErrorMap,
