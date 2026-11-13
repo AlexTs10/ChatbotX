@@ -4,7 +4,11 @@
 // Methods are added as the P3.6 domain ports need them; the others throw.
 
 import { DatabaseSync } from "node:sqlite"
-import type { P112Fixtures, P112PollVoteInput } from "../../../src/fixtures/ext/p1-12.ts"
+import type {
+  P112Fixtures,
+  P112MetaCatalogConnectionInput,
+  P112PollVoteInput,
+} from "../../../src/fixtures/ext/p1-12.ts"
 
 const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
 // Same place id as the original p1-12 extension (DECISIONS 2026-11-12).
@@ -50,7 +54,6 @@ class SqliteP112Fixtures implements P112Fixtures {
   createMiniAppSubmission = notPorted("createMiniAppSubmission")
   createMinigamePlayer = notPorted("createMinigamePlayer")
   createMinigamePlay = notPorted("createMinigamePlay")
-  createMetaCatalogConnection = notPorted("createMetaCatalogConnection")
   createQuestionnaireSubmission = notPorted("createQuestionnaireSubmission")
 
   async createPollVote(input: P112PollVoteInput): Promise<{ voteId: string }> {
@@ -72,6 +75,43 @@ class SqliteP112Fixtures implements P112Fixtures {
         input.contactInboxId == null ? null : BigInt(input.contactInboxId),
       )
     return { voteId: voteId.toString() }
+  }
+
+  // `encryptedAuth` holds the plain `{accessToken, version}` JSON: the Rust
+  // port reads only the catalog binding so far (products.listSendable). The
+  // Meta catalog slice must store it the way its Rust decrypt expects.
+  async createMetaCatalogConnection(
+    input: P112MetaCatalogConnectionInput,
+  ): Promise<{ connectionId: string; integrationId: string }> {
+    const integrationId = createId()
+    const connectionId = createId()
+    const db = this.open()
+    db.exec("BEGIN IMMEDIATE")
+    try {
+      db.prepare(`INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (?, ?, 'metaCatalog')`).run(
+        integrationId,
+        BigInt(input.workspaceId),
+      )
+      db.prepare(
+        `INSERT INTO "IntegrationMetaCatalog"
+           ("id", "workspaceId", "integrationId", "catalogId", "catalogName", "businessId", "encryptedAuth",
+            "authMode", "tokenExpiresAt", "status")
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'oauth', NULL, 'active')`,
+      ).run(
+        connectionId,
+        BigInt(input.workspaceId),
+        integrationId,
+        input.catalogId ?? null,
+        input.catalogName ?? null,
+        input.businessId ?? null,
+        JSON.stringify({ accessToken: input.accessToken, version: "v23.0" }),
+      )
+      db.exec("COMMIT")
+    } catch (error) {
+      db.exec("ROLLBACK")
+      throw error
+    }
+    return { connectionId: connectionId.toString(), integrationId: integrationId.toString() }
   }
 
   async close(): Promise<void> {

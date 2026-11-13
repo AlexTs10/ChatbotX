@@ -519,4 +519,38 @@ impl Input {
             self.issue(&[], "custom", "Send at least one field to update.");
         }
     }
+    /// A `.nullish()` string key: absent = `None`, `null` = `Some(None)`.
+    pub fn nullish_string(&mut self, name: &str, spec: Str) -> Option<Option<String>> {
+        match self.obj.get(name).cloned() {
+            None => None,
+            Some(Value::Null) => Some(None),
+            Some(value) => self
+                .string_at(&key(name), Some(&value), spec, true)
+                .map(Some),
+        }
+    }
+
+    /// A `.nullish()` `z.string().trim().url()` key (`new URL()` must parse it).
+    pub fn nullish_url(&mut self, name: &str, max: usize) -> Option<Option<String>> {
+        let out = self.nullish_string(name, Str::trimmed(0, max))?;
+        if let Some(text) = &out
+            && url::Url::parse(text).is_err()
+        {
+            self.issue(&key(name), "invalid_format", "Invalid URL");
+            return None;
+        }
+        Some(out)
+    }
+
+    /// An optional boolean key.
+    pub fn opt_bool(&mut self, name: &str) -> Option<bool> {
+        let value = self.obj.get(name).cloned();
+        self.bool_at(&key(name), value.as_ref(), false)
+    }
+
+    /// A required boolean key.
+    pub fn bool(&mut self, name: &str) -> Option<bool> {
+        let value = self.obj.get(name).cloned();
+        self.bool_at(&key(name), value.as_ref(), true)
+    }
 }
