@@ -70,7 +70,7 @@ fn value_json(row: &ContactCustomFieldWithDefinition) -> Value {
 }
 
 /// `ianaTimezoneSchema.optional()` at `path`.
-fn client_timezone(input: &mut Input) -> Option<String> {
+pub(super) fn client_timezone(input: &mut Input) -> Option<String> {
     let path = key("clientTimezone");
     let value = input.get("clientTimezone").cloned();
     let zone = input.string_at(&path, value.as_ref(), Str::trimmed(1, 255), false)?;
@@ -86,7 +86,7 @@ fn id_or_name(input: &mut Input) -> Option<String> {
     input.string("idOrName", NON_EMPTY)
 }
 
-fn received(value: &Value) -> &'static str {
+pub(super) fn received(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
         Value::Bool(_) => "boolean",

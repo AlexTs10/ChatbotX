@@ -860,12 +860,20 @@ fn bot_field_key(keyword: &str, allow_bot_fields: bool) -> Option<String> {
 /// `setValueByKey`: the stored contact changes (empty for a bot field).
 pub async fn set_value_by_key(db: &Db, input: SetValueByKeyInput) -> Result<Vec<FieldChange>> {
     if let Some(key) = bot_field_key(&input.keyword, input.allow_bot_fields) {
-        let _ = key;
-        return Err(BusinessError::exception(
-            "Bot fields are not ported yet",
-            "businessError",
-            400,
-        ));
+        crate::bot_field::apply_value_operation(
+            db,
+            input.workspace_id,
+            crate::bot_field::ValueOperation {
+                key,
+                operation: input.operation.unwrap_or(FieldOperationType::Set),
+                value: input.value,
+                source_timezone_override: input.source_timezone_override,
+                temporal_input_parsing: input.temporal_input_parsing,
+                fill_empty_temporal_with_now: input.fill_empty_temporal_with_now,
+            },
+        )
+        .await?;
+        return Ok(Vec::new());
     }
     let (workspace_id, keyword) = (input.workspace_id, input.keyword.clone());
     let (custom_field_id, _) = tx::read(db, move |conn| {
@@ -917,12 +925,8 @@ pub async fn delete_by_key(
     allow_bot_fields: bool,
 ) -> Result<Option<FieldChange>> {
     if let Some(key) = bot_field_key(keyword, allow_bot_fields) {
-        let _ = key;
-        return Err(BusinessError::exception(
-            "Bot fields are not ported yet",
-            "businessError",
-            400,
-        ));
+        crate::bot_field::clear_value_by_key(db, workspace_id, &key).await?;
+        return Ok(None);
     }
     let keyword = keyword.to_string();
     tx::write(db, move |tx| {
