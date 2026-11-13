@@ -22,7 +22,9 @@ use chatbotx_db::repo::partials::pipeline::{PIPELINE_REFERENCE_NAME_MAX, Pipelin
 use chatbotx_db::repo::pipeline_item_content::AttachmentWithFile;
 use serde_json::{Value, json};
 
+mod content;
 mod query;
+pub use content::activity_groups_query;
 pub use query::{item_filter_query, item_list_query};
 
 use super::custom_fields::CUSTOM_FIELD_TYPES;
@@ -337,6 +339,9 @@ pub const ROUTES: &[&str] = &[
     "pipelines.listMembers",
     "pipelines.setMember",
     "pipelines.removeMember",
+    "pipelines.listItems",
+    "pipelines.stageTotals",
+    "pipelines.listContactItems",
 ];
 
 /// Runs one of [`ROUTES`].
@@ -606,6 +611,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         | "pipelines.moveItem"
         | "pipelines.transferItem"
         | "pipelines.deleteItem" => handle_item(state, route_id, call).await,
+        "pipelines.listItems" | "pipelines.stageTotals" | "pipelines.listContactItems" => {
+            query::handle(state, route_id, call).await
+        }
         "pipelines.listMembers" => {
             let mut input = Input::from_query(call.params, call.query);
             let pipeline_id = input.id("id");
