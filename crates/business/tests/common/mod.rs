@@ -105,3 +105,95 @@ pub async fn two_workspaces() -> TestDb {
     .await;
     db
 }
+
+/// Inserts a `ProductCategory` (`parent` = its top-level parent).
+pub fn category(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    parent: Option<i64>,
+    name: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "ProductCategory" ("id", "workspaceId", "parentId", "name") VALUES (?1, ?2, ?3, ?4)"#,
+        params![id, workspace_id, parent, name],
+    )?;
+    Ok(id)
+}
+
+/// Inserts a `Vendor`.
+pub fn vendor(tx: &Connection, id: i64, workspace_id: i64, name: &str) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Vendor" ("id", "workspaceId", "name") VALUES (?1, ?2, ?3)"#,
+        params![id, workspace_id, name],
+    )?;
+    Ok(id)
+}
+
+/// Inserts a `Product` filed under a category / sub-category.
+pub fn product(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    category: Option<i64>,
+    subcategory: Option<i64>,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Product" ("id", "workspaceId", "name", "categoryId", "subcategoryId") VALUES (?1, ?2, ?3, ?4, ?5)"#,
+        params![id, workspace_id, format!("Product {id}"), category, subcategory],
+    )?;
+    Ok(id)
+}
+
+/// Inserts an active `DiscountCode` (`applies_to` = `category` / `products`).
+pub fn discount_code(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    applies_to: &str,
+    category: Option<i64>,
+    product_ids: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "DiscountCode" ("id", "workspaceId", "code", "discountType", "appliesTo", "categoryId", "productIds")
+           VALUES (?1, ?2, ?3, 'percentage', ?4, ?5, ?6)"#,
+        params![id, workspace_id, format!("CODE{id}"), applies_to, category, product_ids],
+    )?;
+    Ok(id)
+}
+
+/// Inserts an `EcommerceOpenHours` schedule.
+pub fn open_hours(tx: &Connection, id: i64, workspace_id: i64) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "EcommerceOpenHours" ("id", "workspaceId", "name", "ranges") VALUES (?1, ?2, 'Hours', '[]')"#,
+        params![id, workspace_id],
+    )?;
+    Ok(id)
+}
+
+/// Sets the workspace's store source (`EcommerceSettings.storeSource`).
+pub fn store_source(tx: &Connection, workspace_id: i64, source: &str) -> Result<(), DbError> {
+    tx.execute(
+        r#"INSERT INTO "EcommerceSettings" ("id", "workspaceId", "storeSource", "orderingAvailable",
+             "webshopProductView", "searchProducts", "productButtons", "productImageSize", "allowRateOrders",
+             "notifyOnCartStatusChange", "paymentMethods", "currency", "currencyPosition", "serviceFeePercent",
+             "shippingType", "shippingCountries", "deliveryCost", "checkoutMode", "minimumOrderValue",
+             "requireName", "requireEmail", "requirePhone", "requireState", "requireZip")
+           VALUES (?1, ?1, ?2, 1, 'list', 1, '[]', 'bigSquare', 0, 0, '[]', 'USD', 'left', 0,
+             'none', '[]', 0, 'default', 0, 0, 0, 0, 0, 0)"#,
+        params![workspace_id, source],
+    )?;
+    Ok(())
+}
+
+/// One text column of one row (or `None`).
+pub async fn scalar_text(db: &Db, sql: &'static str, id: i64) -> Option<String> {
+    db.read(move |conn| {
+        Ok(conn
+            .query_row(sql, params![id], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten())
+    })
+    .await
+    .expect("scalar read")
+}

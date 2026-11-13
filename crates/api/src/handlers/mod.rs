@@ -6,6 +6,9 @@ pub mod input;
 pub mod open_hours;
 pub mod places;
 pub mod polls;
+pub mod product_categories;
+pub mod product_vendors;
+pub mod products;
 
 use std::sync::Arc;
 
@@ -153,6 +156,12 @@ pub async fn dispatch(state: &ApiState, route_id: &str, call: Call<'_>) -> Optio
         open_hours::handle(state, route_id, call).await
     } else if polls::ROUTES.contains(&route_id) {
         polls::handle(state, route_id, call).await
+    } else if product_categories::ROUTES.contains(&route_id) {
+        product_categories::handle(state, route_id, call).await
+    } else if product_vendors::ROUTES.contains(&route_id) {
+        product_vendors::handle(state, route_id, call).await
+    } else if products::ROUTES.contains(&route_id) {
+        products::handle(state, route_id, call).await
     } else {
         return None;
     };
