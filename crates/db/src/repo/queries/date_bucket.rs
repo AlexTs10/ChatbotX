@@ -13,7 +13,7 @@ pub fn zoned_date_key(column_sql: &str, timezone: &str) -> Sql {
 
 /// `occurrenceBucketGranularities` (`partials/broadcast.ts`): the supported bucket units.
 pub fn occurrence_bucket_granularities() -> [&'static str; 3] {
-    todo!("P3.2b")
+    ["day", "week", "month"]
 }
 
 /// Bucket granularity of `zonedBucketKey` (`OccurrenceBucketGranularity`).
