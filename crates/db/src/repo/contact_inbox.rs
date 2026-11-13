@@ -6,7 +6,7 @@ use rusqlite::Connection;
 use rusqlite::types::Value;
 use serde_json::{Value as J, json};
 
-use super::models::ContactInbox;
+use super::models::{Contact, ContactInbox, Conversation};
 use super::partials::thread_control::{events_outranked_by, transition};
 use super::queries::ad_referral::ad_conversation_predicate;
 use super::sql::Sql;
@@ -559,4 +559,424 @@ pub fn identity_history(row: &ContactInbox) -> J {
     row.source_identity_history
         .clone()
         .map_or_else(|| J::Array(Vec::new()), |Json(v)| v)
+}
+
+/// One `listWithInboxNameByContactId` row (the selected columns + `inbox.name`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithInboxNameRow {
+    pub id: i64,
+    pub contact_id: i64,
+    pub inbox_id: i64,
+    pub channel: String,
+    pub source: String,
+    pub source_id: String,
+    pub source_user_id: Option<String>,
+    pub source_username: Option<String>,
+    pub language: Option<String>,
+    pub last_incoming_message_at: Option<i64>,
+    pub contact_last_read_at: Option<i64>,
+    pub inbox_name: String,
+}
+
+/// `listWithInboxNameByContactId`: the contact's rows whose inbox is in the workspace, by id.
+pub fn list_with_inbox_name_by_contact_id(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<Vec<WithInboxNameRow>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT ci.\"id\", ci.\"contactId\", ci.\"inboxId\", ci.\"channel\", ci.\"source\", ci.\"sourceId\", \
+         ci.\"sourceUserId\", ci.\"sourceUsername\", ci.\"language\", ci.\"lastIncomingMessageAt\", ci.\"contactLastReadAt\", i.\"name\" \
+         FROM \"ContactInbox\" AS ci JOIN \"Inbox\" AS i ON i.\"id\" = ci.\"inboxId\" AND i.\"workspaceId\" = ?2 \
+         WHERE ci.\"contactId\" = ?1 ORDER BY ci.\"id\" ASC",
+    )?;
+    let rows = stmt
+        .query_map([contact_id, workspace_id], |r| {
+            Ok(WithInboxNameRow {
+                id: r.get(0)?,
+                contact_id: r.get(1)?,
+                inbox_id: r.get(2)?,
+                channel: r.get(3)?,
+                source: r.get(4)?,
+                source_id: r.get(5)?,
+                source_user_id: r.get(6)?,
+                source_username: r.get(7)?,
+                language: r.get(8)?,
+                last_incoming_message_at: r.get(9)?,
+                contact_last_read_at: r.get(10)?,
+                inbox_name: r.get(11)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// `(contactId, contactInboxId)` of the identity finders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContactAndInbox {
+    pub contact_id: i64,
+    pub contact_inbox_id: i64,
+}
+
+/// The `Contact` identity column of [`find_latest_by_inbox_and_contact_identity`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityField {
+    PhoneNumber,
+    Email,
+}
+
+/// `findLatestByInboxAndContactIdentity`: the inbox's row whose workspace contact has that
+/// phone number / email, most recent message first.
+pub fn find_latest_by_inbox_and_contact_identity(
+    conn: &Connection,
+    workspace_id: i64,
+    inbox_id: i64,
+    field: IdentityField,
+    value: &str,
+) -> Result<Option<ContactAndInbox>> {
+    let column = match field {
+        IdentityField::PhoneNumber => "phoneNumber",
+        IdentityField::Email => "email",
+    };
+    let sql = format!(
+        "SELECT ci.\"contactId\", ci.\"id\" FROM \"ContactInbox\" AS ci JOIN \"Contact\" AS c ON c.\"id\" = ci.\"contactId\" \
+         WHERE ci.\"inboxId\" = ?1 AND c.\"workspaceId\" = ?2 AND c.\"{column}\" = ?3 \
+         ORDER BY ci.\"lastMessageAt\" DESC NULLS LAST LIMIT 1"
+    );
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let mut rows = stmt.query_map(rusqlite::params![inbox_id, workspace_id, value], |r| {
+        Ok(ContactAndInbox {
+            contact_id: r.get(0)?,
+            contact_inbox_id: r.get(1)?,
+        })
+    })?;
+    Ok(rows.next().transpose()?)
+}
+
+/// `normalizedFullNameSql`: runs of white space collapsed to one space, trimmed.
+const NORMALIZED_FULL_NAME: &str =
+    "trim(regexp_replace(c.\"fullName\", '[ \\t\\n\\v\\f\\r]+', ' ', 'g'))";
+
+/// `findByInboxAndFullName`: at most 2 people (one row per contact, their most recent row)
+/// of the inbox whose normalized full name equals `full_name`, most recently active first.
+pub fn find_by_inbox_and_full_name(
+    conn: &Connection,
+    workspace_id: i64,
+    inbox_id: i64,
+    full_name: &str,
+) -> Result<Vec<ContactAndInbox>> {
+    let sql = format!(
+        "SELECT x.\"contactId\", x.\"id\" FROM (SELECT ci.\"contactId\", ci.\"id\", ci.\"lastMessageAt\", \
+         row_number() OVER (PARTITION BY ci.\"contactId\" ORDER BY ci.\"lastMessageAt\" DESC NULLS LAST, ci.\"id\" DESC) AS rn, \
+         max(ci.\"lastMessageAt\") OVER (PARTITION BY ci.\"contactId\") AS active \
+         FROM \"ContactInbox\" AS ci JOIN \"Contact\" AS c ON c.\"id\" = ci.\"contactId\" \
+         WHERE ci.\"inboxId\" = ?1 AND c.\"workspaceId\" = ?2 AND {NORMALIZED_FULL_NAME} = ?3) AS x \
+         WHERE x.rn = 1 ORDER BY x.active DESC NULLS LAST, x.\"contactId\" LIMIT 2"
+    );
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params![inbox_id, workspace_id, full_name], |r| {
+            Ok(ContactAndInbox {
+                contact_id: r.get(0)?,
+                contact_inbox_id: r.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// `SELECT <ContactInbox> FROM "ContactInbox" AS ci JOIN "Inbox" AS i (workspace) WHERE ..`.
+fn scoped_models(conn: &Connection, workspace_id: i64, tail: Sql) -> Result<Vec<ContactInbox>> {
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"ContactInbox\" AS ci JOIN \"Inbox\" AS i ON i.\"id\" = ci.\"inboxId\" AND i.\"workspaceId\" = ",
+        ContactInbox::columns_sql(Some("ci"))
+    ));
+    q.push_bind(workspace_id);
+    q.push(" WHERE ");
+    q.append(tail);
+    q.models(conn)
+}
+
+fn workspace_row(ci: ContactInbox) -> WorkspaceRow {
+    WorkspaceRow {
+        id: ci.id,
+        channel: ci.channel,
+        inbox_id: ci.inbox_id,
+        source_id: ci.source_id,
+    }
+}
+
+/// `findFullByIdForWorkspace`: the full row when its inbox is in the workspace.
+pub fn find_full_by_id_for_workspace(
+    conn: &Connection,
+    workspace_id: i64,
+    id: i64,
+) -> Result<Option<ContactInbox>> {
+    let tail = Sql::bind("ci.\"id\" = ", id).closed(" LIMIT 1");
+    Ok(scoped_models(conn, workspace_id, tail)?.into_iter().next())
+}
+
+/// `findByIdForContact`: the contact's row (inbox in the workspace).
+pub fn find_by_id_for_contact(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_id: i64,
+    id: i64,
+) -> Result<Option<WorkspaceRow>> {
+    let mut tail = Sql::bind("ci.\"id\" = ", id);
+    tail.push(" AND ci.\"contactId\" = ");
+    tail.push_bind(contact_id);
+    tail.push(" LIMIT 1");
+    Ok(scoped_models(conn, workspace_id, tail)?
+        .into_iter()
+        .next()
+        .map(workspace_row))
+}
+
+/// `findMostRecentByContact`: the contact's row with the most recent message.
+pub fn find_most_recent_by_contact(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<Option<WorkspaceRow>> {
+    let tail = Sql::bind("ci.\"contactId\" = ", contact_id)
+        .closed(" ORDER BY ci.\"lastMessageAt\" DESC NULLS LAST LIMIT 1");
+    Ok(scoped_models(conn, workspace_id, tail)?
+        .into_iter()
+        .next()
+        .map(workspace_row))
+}
+
+/// `GoogleClickInboxRow`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GoogleClickInboxRow {
+    pub id: i64,
+    pub channel: String,
+    pub contact_id: i64,
+    pub referral: Option<Json>,
+    pub source_id: String,
+}
+
+/// `googleClickPredicate` over `ci`.
+const GOOGLE_CLICK: &str =
+    "(ci.\"referral\"->>'gclid' IS NOT NULL OR ci.\"referral\"->>'gbraid' IS NOT NULL)";
+
+fn google_click_row(ci: ContactInbox) -> GoogleClickInboxRow {
+    GoogleClickInboxRow {
+        id: ci.id,
+        channel: ci.channel,
+        contact_id: ci.contact_id,
+        referral: ci.referral,
+        source_id: ci.source_id,
+    }
+}
+
+/// `findGoogleClickAttribution`: the row when it carries a Google click (gclid / gbraid).
+pub fn find_google_click_attribution(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_inbox_id: i64,
+) -> Result<Option<GoogleClickInboxRow>> {
+    let tail =
+        Sql::bind("ci.\"id\" = ", contact_inbox_id).closed(&format!(" AND {GOOGLE_CLICK} LIMIT 1"));
+    Ok(scoped_models(conn, workspace_id, tail)?
+        .into_iter()
+        .next()
+        .map(google_click_row))
+}
+
+/// `findLatestGoogleClickInboxByContact`: the contact's Google-click row with the latest
+/// `googleClickReceivedAt` (ISO text order, as the TS).
+pub fn find_latest_google_click_inbox_by_contact(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<Option<GoogleClickInboxRow>> {
+    let tail = Sql::bind("ci.\"contactId\" = ", contact_id).closed(&format!(
+        " AND {GOOGLE_CLICK} ORDER BY ci.\"referral\"->>'googleClickReceivedAt' DESC NULLS LAST LIMIT 1"
+    ));
+    Ok(scoped_models(conn, workspace_id, tail)?
+        .into_iter()
+        .next()
+        .map(google_click_row))
+}
+
+/// A contact inbox with its contact (and the contact's conversation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WithContact {
+    pub contact_inbox: ContactInbox,
+    pub contact: Contact,
+    /// Loaded by [`find_with_conversation_and_contact`] only.
+    pub conversation: Option<Conversation>,
+}
+
+fn first_where(conn: &Connection, filter: &Sql) -> Result<Option<ContactInbox>> {
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"ContactInbox\" WHERE ",
+        ContactInbox::columns_sql(None)
+    ));
+    q.append(filter.clone());
+    q.push(" LIMIT 1");
+    q.model(conn)
+}
+
+fn by_id<M: Model>(conn: &Connection, column: &str, id: i64) -> Result<Option<M>> {
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM {} WHERE \"{column}\" = ",
+        M::columns_sql(None),
+        M::TABLE
+    ));
+    q.push_bind(id);
+    q.push(" ORDER BY \"id\" LIMIT 1");
+    q.model(conn)
+}
+
+/// `findWithConversationAndContact`: the first row matching `filter` (over
+/// `"ContactInbox"`) with its contact and the contact's conversation. The full row is
+/// returned (the TS left out `sourceIdentityHistory`).
+pub fn find_with_conversation_and_contact(
+    conn: &Connection,
+    filter: &Sql,
+) -> Result<Option<WithContact>> {
+    let Some(contact_inbox) = first_where(conn, filter)? else {
+        return Ok(None);
+    };
+    let Some(contact) = by_id::<Contact>(conn, "id", contact_inbox.contact_id)? else {
+        return Ok(None);
+    };
+    Ok(Some(WithContact {
+        conversation: by_id(conn, "contactId", contact_inbox.contact_id)?,
+        contact_inbox,
+        contact,
+    }))
+}
+
+/// `findWithContact`: as [`find_with_conversation_and_contact`] without the conversation.
+pub fn find_with_contact(conn: &Connection, filter: &Sql) -> Result<Option<WithContact>> {
+    let Some(contact_inbox) = first_where(conn, filter)? else {
+        return Ok(None);
+    };
+    Ok(
+        by_id::<Contact>(conn, "id", contact_inbox.contact_id)?.map(|contact| WithContact {
+            contact_inbox,
+            contact,
+            conversation: None,
+        }),
+    )
+}
+
+/// `listIdsByInboxAndSourceIds`: `(id, contactId, sourceId)` of the inbox's rows.
+pub fn list_ids_by_inbox_and_source_ids(
+    conn: &Connection,
+    inbox_id: i64,
+    source_ids: &[String],
+) -> Result<Vec<(i64, i64, String)>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT \"id\", \"contactId\", \"sourceId\" FROM \"ContactInbox\" WHERE \"inboxId\" = ?1 \
+         AND \"sourceId\" IN (SELECT value FROM json_each(?2)) ORDER BY \"id\"",
+    )?;
+    let rows = stmt
+        .query_map(rusqlite::params![inbox_id, text_list(source_ids)], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// `listIdentityColumnsByInboxAndSourceIds`: `(id, sourceId, lastIncomingMessageAt,
+/// createdAt)` rows of the inbox ([`BySourceIdRow`] shape, unfiltered).
+pub fn list_identity_columns_by_inbox_and_source_ids(
+    conn: &Connection,
+    inbox_id: i64,
+    source_ids: &[String],
+) -> Result<Vec<BySourceIdRow>> {
+    if source_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"ContactInbox\" WHERE \"inboxId\" = ",
+        ContactInbox::columns_sql(None)
+    ));
+    q.push_bind(inbox_id);
+    q.push(" AND \"sourceId\" IN (SELECT value FROM json_each(");
+    q.push_bind(text_list(source_ids));
+    q.push(")) ORDER BY \"id\"");
+    let rows: Vec<ContactInbox> = q.models(conn)?;
+    Ok(rows
+        .into_iter()
+        .map(|ci| BySourceIdRow {
+            id: ci.id,
+            source_id: ci.source_id,
+            last_incoming_message_at: ci.last_incoming_message_at,
+            created_at: ci.created_at,
+        })
+        .collect())
+}
+
+/// A contact inbox with the contact's conversation (`findByIdWithConversation`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WithConversation {
+    pub contact_inbox: ContactInbox,
+    pub conversation: Option<Conversation>,
+}
+
+/// `findByIdWithConversation` (not workspace-scoped, as the TS).
+pub fn find_by_id_with_conversation(
+    conn: &Connection,
+    id: i64,
+) -> Result<Option<WithConversation>> {
+    let Some(contact_inbox) = by_id::<ContactInbox>(conn, "id", id)? else {
+        return Ok(None);
+    };
+    Ok(Some(WithConversation {
+        conversation: by_id(conn, "contactId", contact_inbox.contact_id)?,
+        contact_inbox,
+    }))
+}
+
+/// `listByInboxPage`: one keyset page of the inbox's rows (`id > after_id`), by id.
+pub fn list_by_inbox_page(
+    conn: &Connection,
+    inbox_id: i64,
+    after_id: Option<i64>,
+    limit: i64,
+) -> Result<Vec<ContactInbox>> {
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"ContactInbox\" WHERE \"inboxId\" = ",
+        ContactInbox::columns_sql(None)
+    ));
+    q.push_bind(inbox_id);
+    if let Some(after) = after_id {
+        q.push(" AND \"id\" > ");
+        q.push_bind(after);
+    }
+    q.push(" ORDER BY \"id\" ASC LIMIT ");
+    q.push_bind(limit);
+    q.models(conn)
+}
+
+/// `listContactIdsByIds`: the `contactId` of each row of `ids`.
+pub fn list_contact_ids_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<i64>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT \"contactId\" FROM \"ContactInbox\" WHERE \"id\" IN (SELECT value FROM json_each(?1)) ORDER BY \"id\"",
+    )?;
+    let rows = stmt
+        .query_map([id_list(ids)], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(rows)
+}
+
+/// `listByContactId`: the contact's rows, by id (full rows; the TS left out
+/// `sourceIdentityHistory`).
+pub fn list_by_contact_id(conn: &Connection, contact_id: i64) -> Result<Vec<ContactInbox>> {
+    let mut q = Sql::raw(format!(
+        "SELECT {} FROM \"ContactInbox\" WHERE \"contactId\" = ",
+        ContactInbox::columns_sql(None)
+    ));
+    q.push_bind(contact_id);
+    q.push(" ORDER BY \"id\"");
+    q.models(conn)
 }

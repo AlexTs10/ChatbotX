@@ -437,3 +437,130 @@ async fn appointment_calendar_crud() {
         .expect("find");
     assert!(kept.is_some_and(|c| c.deleted_at.is_some()));
 }
+
+#[tokio::test]
+async fn contact_inbox_relational_finders() {
+    use chatbotx_db::repo::contact_inbox::{self as ci, IdentityField};
+    let (db, s) = contact_db().await;
+    let ws = s.workspace_id;
+    db.write(move |tx| {
+        tx.execute(
+            r#"UPDATE "Contact" SET "lastName" = 'Lovelace', "phoneNumber" = '+1' WHERE "id" = ?1"#,
+            params![s.contact_id],
+        )?;
+        tx.execute(
+            r#"UPDATE "ContactInbox" SET "lastMessageAt" = 5, "referral" = '{"gclid":"g1","googleClickReceivedAt":"2026-01-01T00:00:00.000Z"}' WHERE "id" = 80"#,
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("fixture");
+    let named = repo::read(&db, move |c| {
+        ci::list_with_inbox_name_by_contact_id(c, ws, s.contact_id)
+    })
+    .await
+    .expect("named");
+    assert_eq!((named.len(), named[0].inbox_name.as_str()), (1, "Inbox"));
+    let by_phone = repo::read(&db, move |c| {
+        ci::find_latest_by_inbox_and_contact_identity(
+            c,
+            ws,
+            s.inbox_id,
+            IdentityField::PhoneNumber,
+            "+1",
+        )
+    })
+    .await
+    .expect("phone");
+    assert_eq!(by_phone.map(|r| r.contact_inbox_id), Some(80));
+    let by_name = repo::read(&db, move |c| {
+        ci::find_by_inbox_and_full_name(c, ws, s.inbox_id, "Ada Lovelace")
+    })
+    .await
+    .expect("name");
+    assert_eq!(
+        by_name.iter().map(|r| r.contact_id).collect::<Vec<_>>(),
+        vec![s.contact_id]
+    );
+    let full = repo::read(&db, move |c| ci::find_full_by_id_for_workspace(c, ws, 80))
+        .await
+        .expect("full");
+    assert!(full.is_some());
+    let foreign = repo::read(&db, move |c| {
+        ci::find_full_by_id_for_workspace(c, ws + 1, 80)
+    })
+    .await
+    .expect("foreign");
+    assert!(foreign.is_none());
+    let for_contact = repo::read(&db, move |c| {
+        ci::find_by_id_for_contact(c, ws, s.contact_id, 80)
+    })
+    .await
+    .expect("for contact");
+    assert_eq!(for_contact.map(|r| r.inbox_id), Some(s.inbox_id));
+    let recent = repo::read(&db, move |c| {
+        ci::find_most_recent_by_contact(c, ws, s.contact_id)
+    })
+    .await
+    .expect("recent");
+    assert_eq!(recent.map(|r| r.id), Some(80));
+    let click = repo::read(&db, move |c| ci::find_google_click_attribution(c, ws, 80))
+        .await
+        .expect("click");
+    assert_eq!(click.map(|r| r.contact_id), Some(s.contact_id));
+    let latest = repo::read(&db, move |c| {
+        ci::find_latest_google_click_inbox_by_contact(c, ws, s.contact_id)
+    })
+    .await
+    .expect("latest");
+    assert_eq!(latest.map(|r| r.id), Some(80));
+    let with = repo::read(&db, move |c| {
+        ci::find_with_conversation_and_contact(c, &Sql::bind("\"ContactInbox\".\"id\" = ", 80))
+    })
+    .await
+    .expect("with")
+    .expect("a row");
+    assert_eq!(
+        (with.contact.id, with.conversation.map(|c| c.id)),
+        (s.contact_id, Some(90))
+    );
+    let only = repo::read(&db, move |c| {
+        ci::find_with_contact(c, &Sql::bind("\"ContactInbox\".\"id\" = ", 80))
+    })
+    .await
+    .expect("with contact")
+    .expect("a row");
+    assert!(only.conversation.is_none());
+    let ids = repo::read(&db, move |c| {
+        ci::list_ids_by_inbox_and_source_ids(c, s.inbox_id, &["psid-1".to_owned()])
+    })
+    .await
+    .expect("ids");
+    assert_eq!(ids, vec![(80, s.contact_id, "psid-1".to_owned())]);
+    let identity = repo::read(&db, move |c| {
+        ci::list_identity_columns_by_inbox_and_source_ids(c, s.inbox_id, &["psid-1".to_owned()])
+    })
+    .await
+    .expect("identity");
+    assert_eq!(identity.len(), 1);
+    let conv = repo::read(&db, move |c| ci::find_by_id_with_conversation(c, 80))
+        .await
+        .expect("conv")
+        .expect("row");
+    assert_eq!(conv.conversation.map(|c| c.id), Some(90));
+    let page = repo::read(&db, move |c| {
+        ci::list_by_inbox_page(c, s.inbox_id, Some(80), 10)
+    })
+    .await
+    .expect("page");
+    assert!(page.is_empty());
+    let contact_ids = repo::read(&db, move |c| ci::list_contact_ids_by_ids(c, &[80]))
+        .await
+        .expect("contact ids");
+    assert_eq!(contact_ids, vec![s.contact_id]);
+    let by_contact = repo::read(&db, move |c| ci::list_by_contact_id(c, s.contact_id))
+        .await
+        .expect("by contact");
+    assert_eq!(by_contact.len(), 1);
+}
