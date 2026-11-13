@@ -330,6 +330,9 @@ pub const ROUTES: &[&str] = &[
     "pipelines.moveItem",
     "pipelines.transferItem",
     "pipelines.deleteItem",
+    "pipelines.listMembers",
+    "pipelines.setMember",
+    "pipelines.removeMember",
 ];
 
 /// Runs one of [`ROUTES`].
@@ -599,6 +602,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         | "pipelines.moveItem"
         | "pipelines.transferItem"
         | "pipelines.deleteItem" => handle_item(state, route_id, call).await,
+        "pipelines.listMembers" | "pipelines.setMember" | "pipelines.removeMember" => {
+            todo!("P3.6-D1p")
+        }
         _ => Err(super::internal_error(route_id)),
     }
 }

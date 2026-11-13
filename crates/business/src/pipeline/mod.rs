@@ -8,6 +8,7 @@ pub mod assignees;
 pub mod currency;
 pub mod events;
 pub mod item;
+pub mod members;
 pub mod mutation;
 pub mod naming;
 pub mod service;
