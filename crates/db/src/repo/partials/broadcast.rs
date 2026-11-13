@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::shared::ZodError;
+use super::shared::{Issues, ZodError, deserialize};
 
 /// `broadcastStatuses`.
 pub const BROADCAST_STATUSES: &[&str] = &[
@@ -71,14 +71,12 @@ pub const BROADCAST_SUBACTION_AUDIENCE_RULES: &[(&str, bool)] = &[
 
 /// `isRecurringTemplate`: a `recurring` broadcast without `occurrenceAt`.
 pub fn is_recurring_template(row: &Value) -> bool {
-    let _ = row;
-    todo!("P3.2b")
+    row.get("schedulesType").and_then(Value::as_str) == Some("recurring") && !is_recurrence_run(row)
 }
 
 /// `isRecurrenceRun`: a broadcast with an `occurrenceAt`.
 pub fn is_recurrence_run(row: &Value) -> bool {
-    let _ = row;
-    todo!("P3.2b")
+    row.get("occurrenceAt").is_some_and(|v| !v.is_null())
 }
 
 /// `BROADCAST_FAILED_RATE_THRESHOLD`.
@@ -91,20 +89,29 @@ pub fn resolve_broadcast_terminal_status(
     contact_count: Option<i64>,
     failed_count: i64,
 ) -> &'static str {
-    let _ = (contact_count, failed_count);
-    todo!("P3.2b")
+    match contact_count {
+        Some(count)
+            if count > 0
+                && failed_count as f64 / count as f64 >= BROADCAST_FAILED_RATE_THRESHOLD =>
+        {
+            "failed"
+        }
+        _ => "sent",
+    }
 }
 
 /// `isBroadcastOutcomeGraceElapsed`.
 pub fn is_broadcast_outcome_grace_elapsed(handoff_completed_at: i64, now: i64) -> bool {
-    let _ = (handoff_completed_at, now);
-    todo!("P3.2b")
+    now - handoff_completed_at >= BROADCAST_OUTCOME_GRACE_MS
 }
 
 /// `requiresRecentInteractionWindow` (`None` is `null` / `undefined`).
 pub fn requires_recent_interaction_window(subaction: Option<&str>) -> bool {
-    let _ = subaction;
-    todo!("P3.2b")
+    subaction.is_some_and(|subaction| {
+        BROADCAST_SUBACTION_AUDIENCE_RULES
+            .iter()
+            .any(|(name, requires)| *name == subaction && *requires)
+    })
 }
 
 /// `BroadcastChannelCapability`.
@@ -166,38 +173,46 @@ pub const BROADCAST_CHANNEL_CAPABILITIES: &[BroadcastChannelCapability] = &[
 pub fn find_broadcast_channel_capability(
     channel: &str,
 ) -> Option<&'static BroadcastChannelCapability> {
-    let _ = channel;
-    todo!("P3.2b")
+    BROADCAST_CHANNEL_CAPABILITIES
+        .iter()
+        .find(|capability| capability.channel == channel)
 }
 
 /// `usesBroadcastTargets`: `targetMode == "targets"` when set, else a non-empty `targets`.
 pub fn uses_broadcast_targets(broadcast: &Value) -> bool {
-    let _ = broadcast;
-    todo!("P3.2b")
+    match broadcast.get("targetMode") {
+        Some(mode) if !mode.is_null() => mode.as_str() == Some("targets"),
+        _ => !targets(broadcast).is_empty(),
+    }
 }
 
 /// `broadcastSendsFlow`.
 pub fn broadcast_sends_flow(broadcast: &Value) -> bool {
-    let _ = broadcast;
-    todo!("P3.2b")
+    truthy(broadcast.get("flowId")) || targets(broadcast).iter().any(|t| truthy(t.get("flowId")))
 }
 
 /// `broadcastSendsTemplate`.
 pub fn broadcast_sends_template(broadcast: &Value) -> bool {
-    let _ = broadcast;
-    todo!("P3.2b")
+    truthy(broadcast.get("templateId"))
+        || targets(broadcast)
+            .iter()
+            .any(|t| truthy(t.get("templateId")))
 }
 
 /// `isTargetsTemplateSendWithoutTemplate`.
 pub fn is_targets_template_send_without_template(broadcast: &Value) -> bool {
-    let _ = broadcast;
-    todo!("P3.2b")
+    uses_broadcast_targets(broadcast)
+        && !broadcast_sends_flow(broadcast)
+        && !targets(broadcast)
+            .iter()
+            .any(|t| truthy(t.get("templateId")))
 }
 
 /// `isTargetsFlowSendWithoutFlow`.
 pub fn is_targets_flow_send_without_flow(broadcast: &Value) -> bool {
-    let _ = broadcast;
-    todo!("P3.2b")
+    uses_broadcast_targets(broadcast)
+        && !broadcast_sends_template(broadcast)
+        && !targets(broadcast).iter().any(|t| truthy(t.get("flowId")))
 }
 
 /// `BROADCAST_DEFAULT_SEND_RATE_PER_MINUTE`.
@@ -223,8 +238,38 @@ pub struct BroadcastSendLimit {
 
 /// `broadcastSendLimitSchema.safeParse`.
 pub fn parse_broadcast_send_limit(value: &Value) -> Result<BroadcastSendLimit, ZodError> {
-    let _ = value;
-    todo!("P3.2b")
+    let limit: BroadcastSendLimit = deserialize(value)?;
+    let mut issues = Issues::default();
+    for (path, field, max) in [
+        ("audienceRangeStart", limit.audience_range_start, None),
+        ("audienceRangeEnd", limit.audience_range_end, None),
+        (
+            "sendRatePerMinute",
+            limit.send_rate_per_minute,
+            Some(BROADCAST_MAX_SEND_RATE_PER_MINUTE),
+        ),
+    ] {
+        let min = if path == "sendRatePerMinute" {
+            1
+        } else {
+            BROADCAST_AUDIENCE_POSITION_MIN
+        };
+        match field {
+            Some(value) if value < min => {
+                issues.add(path, format!("Too small: expected number to be >={min}"));
+            }
+            Some(value) if max.is_some_and(|max| value > max) => {
+                issues.add(
+                    path,
+                    format!(
+                        "Too big: expected number to be <={BROADCAST_MAX_SEND_RATE_PER_MINUTE}"
+                    ),
+                );
+            }
+            _ => {}
+        }
+    }
+    issues.finish(limit)
 }
 
 /// `broadcastSendLimitIssues.rangeEndBeforeStart`.
@@ -233,8 +278,10 @@ pub const BROADCAST_SEND_LIMIT_ISSUE_RANGE_END_BEFORE_START: &str =
 
 /// `isAudienceRangeOrdered`.
 pub fn is_audience_range_ordered(start: Option<i64>, end: Option<i64>) -> bool {
-    let _ = (start, end);
-    todo!("P3.2b")
+    match (start, end) {
+        (Some(start), Some(end)) => start <= end,
+        _ => true,
+    }
 }
 
 /// `BroadcastAudienceRange` (`size` `None` is open-ended).
@@ -249,14 +296,23 @@ pub fn resolve_broadcast_audience_range(
     start: Option<i64>,
     end: Option<i64>,
 ) -> Option<BroadcastAudienceRange> {
-    let _ = (start, end);
-    todo!("P3.2b")
+    if start.is_none() && end.is_none() {
+        return None;
+    }
+    let offset = start.map_or(0, |start| start - 1);
+    Some(BroadcastAudienceRange {
+        offset,
+        size: end.map(|end| (end - offset).max(0)),
+    })
 }
 
 /// `clampAudienceCountToRange`.
 pub fn clamp_audience_count_to_range(total: i64, range: Option<BroadcastAudienceRange>) -> i64 {
-    let _ = (total, range);
-    todo!("P3.2b")
+    let Some(range) = range else {
+        return total;
+    };
+    let remaining = (total - range.offset).max(0);
+    range.size.map_or(remaining, |size| remaining.min(size))
 }
 
 /// A count that may be a lower bound (`{ total, capped }`).
@@ -271,8 +327,18 @@ pub fn clamp_capped_audience_count(
     counted: CappedCount,
     range: Option<BroadcastAudienceRange>,
 ) -> CappedCount {
-    let _ = (counted, range);
-    todo!("P3.2b")
+    let total = clamp_audience_count_to_range(counted.total, range);
+    if !counted.capped {
+        return CappedCount {
+            total,
+            capped: false,
+        };
+    }
+    let window_end = range.and_then(|range| range.size.map(|size| range.offset + size));
+    CappedCount {
+        total,
+        capped: window_end.is_none_or(|end| end > counted.total),
+    }
 }
 
 /// The result of `resolveAudiencePageWindow`.
@@ -288,20 +354,33 @@ pub fn resolve_audience_page_window(
     per_page: i64,
     range: Option<BroadcastAudienceRange>,
 ) -> Option<PageWindow> {
-    let _ = (page, per_page, range);
-    todo!("P3.2b")
+    let page_offset = (page - 1) * per_page;
+    let Some(range) = range else {
+        return Some(PageWindow {
+            offset: page_offset,
+            limit: per_page,
+        });
+    };
+    if range.size.is_some_and(|size| page_offset >= size) {
+        return None;
+    }
+    let limit = range
+        .size
+        .map_or(per_page, |size| per_page.min(size - page_offset));
+    Some(PageWindow {
+        offset: range.offset + page_offset,
+        limit,
+    })
 }
 
 /// `normalizeBroadcastSendLimit` (the Rust `None` is already `null`).
 pub fn normalize_broadcast_send_limit(input: BroadcastSendLimit) -> BroadcastSendLimit {
-    let _ = input;
-    todo!("P3.2b")
+    input
 }
 
 /// `resolveBroadcastSendRatePerMinute`.
 pub fn resolve_broadcast_send_rate_per_minute(send_rate_per_minute: Option<i64>) -> i64 {
-    let _ = send_rate_per_minute;
-    todo!("P3.2b")
+    send_rate_per_minute.unwrap_or(BROADCAST_DEFAULT_SEND_RATE_PER_MINUTE)
 }
 
 /// `resolveActivationSendRate`: `submitted` `None` is `undefined` (keep `stored`),
@@ -310,13 +389,30 @@ pub fn resolve_activation_send_rate(
     submitted: Option<Option<i64>>,
     stored: Option<i64>,
 ) -> Option<i64> {
-    let _ = (submitted, stored);
-    todo!("P3.2b")
+    submitted.unwrap_or(stored)
 }
 
 /// `resolveSubmittedSendRatePatch`: `None` for `undefined`, else the patch value
 /// (`Some(None)` clears the rate).
 pub fn resolve_submitted_send_rate_patch(submitted: Option<Option<i64>>) -> Option<Option<i64>> {
-    let _ = submitted;
-    todo!("P3.2b")
+    submitted
+}
+
+/// The `targets` array (`?? []`).
+fn targets(broadcast: &Value) -> &[Value] {
+    broadcast
+        .get("targets")
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice)
+}
+
+/// JS `Boolean(value)` of a JSON value (`None` is `undefined`).
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64().is_some_and(|n| n != 0.0 && !n.is_nan()),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(_) => true,
+    }
 }

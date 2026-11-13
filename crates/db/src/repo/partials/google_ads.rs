@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::shared::ZodError;
+use super::shared::{Issues, ZodError, deserialize, js_length};
 
 /// `googleAdsUploadMethodSchema`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,16 +46,61 @@ pub struct GoogleAdsSettingsDocument {
 
 /// `googleAdsConsentSchema.safeParse`.
 pub fn parse_google_ads_consent(value: &serde_json::Value) -> Result<GoogleAdsConsent, ZodError> {
-    let _ = value;
-    todo!("P3.2b")
+    let object = value
+        .as_object()
+        .ok_or_else(|| ZodError::one("", "Invalid input: expected object"))?;
+    let mut issues = Issues::default();
+    let mut sources = Vec::with_capacity(2);
+    for key in ["adUserData", "adPersonalization"] {
+        match parse_consent_source(object.get(key).unwrap_or(&serde_json::Value::Null)) {
+            Ok(source) => sources.push(source),
+            Err(error) => {
+                for issue in error.issues {
+                    let path = if issue.path.is_empty() {
+                        key.to_owned()
+                    } else {
+                        format!("{key}.{}", issue.path)
+                    };
+                    issues.add(path, issue.message);
+                }
+            }
+        }
+    }
+    if !issues.0.is_empty() {
+        return Err(ZodError { issues: issues.0 });
+    }
+    let ad_personalization = sources.pop().unwrap_or(GoogleAdsConsentSource::NotProvided);
+    let ad_user_data = sources.pop().unwrap_or(GoogleAdsConsentSource::NotProvided);
+    Ok(GoogleAdsConsent {
+        ad_user_data,
+        ad_personalization,
+    })
 }
 
 /// `googleAdsSettingsDocumentSchema.safeParse`.
 pub fn parse_google_ads_settings_document(
     value: &serde_json::Value,
 ) -> Result<GoogleAdsSettingsDocument, ZodError> {
-    let _ = value;
-    todo!("P3.2b")
+    let version = value.get("version").and_then(serde_json::Value::as_i64);
+    if version != Some(1) {
+        return Err(ZodError::one("version", "Invalid input"));
+    }
+    let consent =
+        parse_google_ads_consent(value.get("consent").unwrap_or(&serde_json::Value::Null))
+            .map_err(|error| ZodError {
+                issues: error
+                    .issues
+                    .into_iter()
+                    .map(|issue| super::shared::ZodIssue {
+                        path: format!("consent.{}", issue.path),
+                        message: issue.message,
+                    })
+                    .collect(),
+            })?;
+    Ok(GoogleAdsSettingsDocument {
+        version: 1,
+        consent,
+    })
 }
 
 /// `googleAdsIdentityPolicyValues`.
@@ -199,6 +244,77 @@ pub struct GoogleAdsEventOptions {
 pub fn parse_google_ads_event_options(
     value: &serde_json::Value,
 ) -> Result<GoogleAdsEventOptions, ZodError> {
-    let _ = value;
-    todo!("P3.2b")
+    let version = value.get("version").and_then(serde_json::Value::as_i64);
+    if !matches!(version, Some(1 | 2)) {
+        return Err(ZodError::one("version", "Invalid input"));
+    }
+    let mut options: GoogleAdsEventOptions = deserialize(value)?;
+    if options.version == 1 {
+        // zod strips the v2-only keys from a v1 document.
+        options.matching = None;
+        options.customer_properties = None;
+    }
+    let mut issues = Issues::default();
+    if options.identity.version != 1 {
+        issues.add("identity.version", "Invalid input: expected 1");
+    }
+    if let Some(id) = &options.identity.id {
+        check_length(&mut issues, "identity.id", id, 64);
+    }
+    if let Some(matching) = &options.matching {
+        for (path, template) in [
+            ("matching.email", &matching.email),
+            ("matching.phone", &matching.phone),
+        ] {
+            if let Some(template) = template {
+                check_length(&mut issues, path, template, 200);
+            }
+        }
+    }
+    issues.finish(options)
+}
+
+/// `z.string().min(1).max(max)`.
+fn check_length(issues: &mut Issues, path: &str, text: &str, max: usize) {
+    let length = js_length(text);
+    if length < 1 {
+        issues.add(path, "Too small: expected string to have >=1 characters");
+    } else if length > max {
+        issues.add(
+            path,
+            format!("Too big: expected string to have <={max} characters"),
+        );
+    }
+}
+
+/// `containsVariablePlaceholder` (`@chatbotx.io/utils/variables`; the same regex as
+/// `chatbotx_core::utils::variables`, which crates/db cannot depend on).
+fn contains_variable_placeholder(value: &str) -> bool {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\{\{(coupon:[^{}\n]+|raw:[^{}\n]+|[^{}\n]+)\}\}")
+            .expect("placeholder pattern")
+    });
+    RE.is_match(value)
+}
+
+/// `googleAdsConsentSourceSchema.safeParse` (a non-variable source drops a leftover
+/// `template`).
+fn parse_consent_source(value: &serde_json::Value) -> Result<GoogleAdsConsentSource, ZodError> {
+    let source: GoogleAdsConsentSource = deserialize(value)?;
+    let GoogleAdsConsentSource::Variable { template } = source else {
+        return Ok(source);
+    };
+    let template = template.trim().to_owned();
+    let length = js_length(&template);
+    let mut issues = Issues::default();
+    if length < 1 {
+        issues.add("template", "googleAds.consent.validation.templateRequired");
+    }
+    if length > 200 {
+        issues.add("template", "googleAds.consent.validation.templateTooLong");
+    }
+    if !contains_variable_placeholder(&template) {
+        issues.add("template", "googleAds.consent.validation.templateRequired");
+    }
+    issues.finish(GoogleAdsConsentSource::Variable { template })
 }
