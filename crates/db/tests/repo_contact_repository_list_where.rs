@@ -155,7 +155,9 @@ fn build_contact_list_where_ands_keyword_search_with_or_contact_filter_without_o
         }))),
         ..base()
     });
-    has(&q, "ilike(\"Contact\".\"email\", ?)");
+    // The TS mock searched email too; the real keyword builder reads only the names and
+    // the exact sourceId for plain text (`repo_contact_filter_part2.rs`, ts:4229).
+    lacks(&q, "ilike(\"Contact\".\"email\", ?)");
     has(&q, "ilike(\"Contact\".\"fullName\", ?)");
     assert_eq!(
         q.params,

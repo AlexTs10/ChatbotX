@@ -150,8 +150,25 @@ pub struct ContactInboxScope {
 /// `buildContactInboxScopeWhere`: a contact inbox in `inbox_ids` (none = no row) and / or
 /// with an inbound message in the last 24 h.
 pub fn build_contact_inbox_scope_where(scope: &ContactInboxScope, now: i64) -> Sql {
-    let _ = (scope, now);
-    todo!("P3.2b")
+    let ids = scope.inbox_ids.as_ref().map(|ids| {
+        if ids.is_empty() {
+            Sql::raw("FALSE")
+        } else {
+            in_list(
+                "\"ContactInbox\".\"inboxId\"",
+                ids.iter().copied().map(Value::Integer).collect(),
+                false,
+            )
+        }
+    });
+    let recent = scope.require_recent_interaction.then(|| {
+        Sql::bind(
+            "\"ContactInbox\".\"lastIncomingMessageAt\" >= ",
+            now - 86_400_000,
+        )
+    });
+    let predicate = (ids.is_some() || recent.is_some()).then(|| Sql::and([ids, recent]));
+    contact_inbox_exists(predicate, false)
 }
 
 /// `ConversationAssigneeSelection`.
