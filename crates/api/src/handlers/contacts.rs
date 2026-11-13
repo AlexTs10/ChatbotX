@@ -32,6 +32,9 @@ pub const ROUTES: &[&str] = &[
     "contacts.unblock",
     "contacts.upsert",
     "contacts.findByCustomField",
+    "contacts.list",
+    "contacts.search",
+    "contacts.count",
 ];
 
 /// `possibleErrorsOnCreatingContact`.
@@ -91,6 +94,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "contacts.unblock" => block(state, call, false).await,
         "contacts.upsert" => upsert(state, call).await,
         "contacts.findByCustomField" => find_by_custom_field(state, call).await,
+        "contacts.list" => list(state, call, false).await,
+        "contacts.search" => list(state, call, true).await,
+        "contacts.count" => count(state, call).await,
         _ => Err(crate::routes::not_ported_error()),
     }
 }
@@ -685,4 +691,19 @@ async fn find_by_custom_field(state: &ApiState, call: Call<'_>) -> Reply {
         .map(|contact| public_contact_json(state, contact, false))
         .collect();
     Ok(json(200, json!({ "data": data })))
+}
+
+// ---- list / search / count ------------------------------------------------
+
+/// `contacts.list` (GET, query) / `contacts.search` (POST, body):
+/// `listContactsPublicRequest`, the avatars resolved as public URLs.
+async fn list(state: &ApiState, call: Call<'_>, from_body: bool) -> Reply {
+    let _ = (state, call, from_body);
+    todo!("P3.6-D2")
+}
+
+/// `contacts.count`: `countContactsPublicRequest`.
+async fn count(state: &ApiState, call: Call<'_>) -> Reply {
+    let _ = (state, call);
+    todo!("P3.6-D2")
 }

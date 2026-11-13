@@ -10,6 +10,7 @@ pub mod contacts;
 pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod flows;
+pub mod folders;
 pub mod input;
 pub mod open_hours;
 pub mod places;
@@ -240,6 +241,8 @@ pub async fn dispatch_as(
         custom_fields::handle(state, route_id, call).await
     } else if ecommerce_settings::ROUTES.contains(&route_id) {
         ecommerce_settings::handle(state, route_id, call).await
+    } else if folders::ROUTES.contains(&route_id) {
+        folders::handle(state, route_id, call).await
     } else if flows::ROUTES.contains(&route_id) {
         flows::handle(state, route_id, call).await
     } else if webchats::ROUTES.contains(&route_id) {

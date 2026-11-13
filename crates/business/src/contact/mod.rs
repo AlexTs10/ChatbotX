@@ -5,6 +5,7 @@
 pub mod avatar;
 pub mod create;
 pub mod identifier;
+pub mod list;
 pub mod phone;
 pub mod service;
 pub mod update_fields;
