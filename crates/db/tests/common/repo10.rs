@@ -224,3 +224,51 @@ pub fn put_session(
         ],
     )?)
 }
+
+/// The seeded graph, `OTHER_WS` and contact inbox 3101 (`wa-1`, seeded contact / inbox).
+pub async fn click_db() -> TestDb {
+    let db = fresh_db().await;
+    let s = seed(&db).await;
+    seed_workspace(&db, 1002, OTHER_WS).await;
+    db.write(move |tx| crate::common::insert_contact_inbox(tx, s, 3101, "wa-1", None, None))
+        .await
+        .expect("contact inbox");
+    db
+}
+
+/// Sets the `referral` of contact inbox `id` (`None` = SQL NULL).
+pub async fn seed_referral(db: &Db, id: i64, referral: Option<serde_json::Value>) {
+    let text = referral.map(|v| v.to_string());
+    db.write(move |tx| {
+        Ok(tx.execute(
+            r#"UPDATE "ContactInbox" SET "referral" = ?2 WHERE "id" = ?1"#,
+            params![id, text],
+        )?)
+    })
+    .await
+    .expect("seed referral");
+}
+
+/// Applies `newestGoogleClickReferralMerge(incoming)` to contact inbox `id` and reads the
+/// stored `referral` back (panics when the merge is `None`).
+pub async fn merge_referral(db: &Db, id: i64, incoming: serde_json::Value) -> serde_json::Value {
+    use chatbotx_db::repo::queries::google_click::newest_google_click_referral_merge;
+    let map = incoming.as_object().cloned().expect("an object");
+    let merge = newest_google_click_referral_merge(&map).expect("expected a guarded merge");
+    write(db, move |c| {
+        let mut q = chatbotx_db::repo::sql::Sql::raw(r#"UPDATE "ContactInbox" SET "referral" = "#);
+        q.append(merge);
+        q.push(r#" WHERE "id" = "#);
+        q.push_bind(id);
+        q.execute(c)
+    })
+    .await;
+    let text = crate::repo_common::scalar_text(
+        db,
+        r#"SELECT "referral" FROM "ContactInbox" WHERE "id" = ?1"#,
+        vec![chatbotx_db::rusqlite::types::Value::Integer(id)],
+    )
+    .await
+    .expect("referral");
+    serde_json::from_str(&text).expect("referral JSON")
+}

@@ -5,3 +5,4 @@ pub mod contact_filter;
 pub mod conversation_unread;
 pub mod ctwa_retarget;
 pub mod date_bucket;
+pub mod google_click;
