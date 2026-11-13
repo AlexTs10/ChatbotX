@@ -261,17 +261,19 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                     .map(|ws| Caller::Workspace(ws, principal))
             })
         }
-        RouteAuth::ChannelToken => authenticate_channel_api_token(deps, headers)
-            .await
-            .map(|context| {
-                match (context.inbox_id.parse(), context.workspace.id.parse()) {
-                    (Ok(inbox_id), Ok(workspace_id)) => Some(Caller::Channel(ChannelCall {
-                        inbox_id,
-                        workspace_id,
-                    })),
-                    _ => None,
-                }
-            }),
+        RouteAuth::ChannelToken => {
+            authenticate_channel_api_token(deps, headers)
+                .await
+                .map(
+                    |context| match (context.inbox_id.parse(), context.workspace.id.parse()) {
+                        (Ok(inbox_id), Ok(workspace_id)) => Some(Caller::Channel(ChannelCall {
+                            inbox_id,
+                            workspace_id,
+                        })),
+                        _ => None,
+                    },
+                )
+        }
         // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
         RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
             Err(invalid_access_token_error())

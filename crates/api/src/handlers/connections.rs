@@ -88,7 +88,11 @@ const VERIFYING: ErrorMap = &[
 
 fn with_idempotency(errors: ErrorMap, error: BusinessError) -> OrpcError {
     let mut out = business_error(error, errors);
-    if !out.defined && IDEMPOTENCY.iter().any(|(c, s)| *c == out.code && *s == out.status) {
+    if !out.defined
+        && IDEMPOTENCY
+            .iter()
+            .any(|(c, s)| *c == out.code && *s == out.status)
+    {
         out.defined = true;
     }
     out
@@ -324,8 +328,9 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
     }
     let provider = provider.unwrap_or_default();
     let config = config.unwrap_or_default();
-    if let Err(error) = providers::assert_token_scope_for_provider(principal.scopes.as_deref(), &provider)
-        .and_then(|()| providers::assert_generic_provider_allowed(&provider))
+    if let Err(error) =
+        providers::assert_token_scope_for_provider(principal.scopes.as_deref(), &provider)
+            .and_then(|()| providers::assert_generic_provider_allowed(&provider))
     {
         return Some(Err(with_idempotency(CREATING, error)));
     }
@@ -355,7 +360,13 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
     let created = match provider.as_str() {
         "api" => {
             let mut cfg = Input::from_object(config);
-            let name = cfg.string("name", Str { min: Some(1), ..Str::max(40) });
+            let name = cfg.string(
+                "name",
+                Str {
+                    min: Some(1),
+                    ..Str::max(40)
+                },
+            );
             let callback_url = cfg.nullish_url("callbackUrl", usize::MAX);
             if let Err(error) = config_error(cfg) {
                 return Some(Err(error));
@@ -383,9 +394,16 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
             let Some(data) = data else {
                 return Some(Err(super::internal_error("webchat config parse")));
             };
-            integration_webchat::create(&state.db, call.workspace_id, None, data, &state.app_url, now)
-                .await
-                .map(|(_, row)| (row, None))
+            integration_webchat::create(
+                &state.db,
+                call.workspace_id,
+                None,
+                data,
+                &state.app_url,
+                now,
+            )
+            .await
+            .map(|(_, row)| (row, None))
         }
         _ => {
             let _ = meta;

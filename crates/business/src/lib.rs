@@ -5,8 +5,8 @@
 
 pub mod connection;
 pub mod discount_code;
-pub mod ecommerce_settings;
 pub mod ecommerce_open_hours;
+pub mod ecommerce_settings;
 pub mod errors;
 pub mod inbox;
 pub mod integration_api;

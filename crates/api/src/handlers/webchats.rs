@@ -47,14 +47,14 @@ fn is_hostname(text: &str) -> bool {
                 && label.len() <= 63
                 && !label.starts_with('-')
                 && !label.ends_with('-')
-                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         })
 }
 
 fn is_brand_color(text: &str) -> bool {
-    text.len() == 7
-        && text.starts_with('#')
-        && text[1..].bytes().all(|b| b.is_ascii_hexdigit())
+    text.len() == 7 && text.starts_with('#') && text[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// `z.array(z.hostname())`.
@@ -71,11 +71,7 @@ fn domains(input: &mut Input, value: &Value) -> Option<Vec<String>> {
         match item {
             Value::String(text) if is_hostname(text) => out.push(text.clone()),
             Value::String(_) => input.issue(&item_path, "invalid_format", "Invalid hostname"),
-            _ => input.issue(
-                &item_path,
-                "invalid_type",
-                "Invalid input: expected string",
-            ),
+            _ => input.issue(&item_path, "invalid_type", "Invalid input: expected string"),
         }
     }
     Some(out)
@@ -93,11 +89,7 @@ fn items(input: &mut Input, name: &str, value: &Value, types: &[&str]) -> Option
         let mut item_path = path.clone();
         item_path.push(Seg::Index(index));
         let Value::Object(map) = item else {
-            input.issue(
-                &item_path,
-                "invalid_type",
-                "Invalid input: expected object",
-            );
+            input.issue(&item_path, "invalid_type", "Invalid input: expected object");
             continue;
         };
         let kind = input.enum_at(&child(&item_path, "type"), map.get("type"), types, true);
@@ -116,12 +108,19 @@ fn items(input: &mut Input, name: &str, value: &Value, types: &[&str]) -> Option
         }
         match kind.as_deref() {
             Some("flow") => {
-                if let Some(flow_id) = input.id_at(&child(&item_path, "flowId"), map.get("flowId"), true) {
+                if let Some(flow_id) =
+                    input.id_at(&child(&item_path, "flowId"), map.get("flowId"), true)
+                {
                     clean.insert("flowId".into(), Value::String(flow_id.to_string()));
                 }
             }
             Some("url") => {
-                let url = input.string_at(&child(&item_path, "url"), map.get("url"), Str::default(), true);
+                let url = input.string_at(
+                    &child(&item_path, "url"),
+                    map.get("url"),
+                    Str::default(),
+                    true,
+                );
                 if let Some(url) = url {
                     if url::Url::parse(&url).is_err() {
                         input.issue(&child(&item_path, "url"), "invalid_format", "Invalid URL");
@@ -186,7 +185,8 @@ fn parse_fields(input: &mut Input, public: bool, create: bool) -> WebchatPatch {
     }
     match input.obj.get("conversationStarters").cloned() {
         Some(value) => {
-            patch.conversation_starters = items(input, "conversationStarters", &value, STARTER_TYPES);
+            patch.conversation_starters =
+                items(input, "conversationStarters", &value, STARTER_TYPES);
         }
         None if required => input.issue(
             &key("conversationStarters"),

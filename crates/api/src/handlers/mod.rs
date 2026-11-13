@@ -142,6 +142,7 @@ pub fn business_error(error: BusinessError, errors: ErrorMap) -> OrpcError {
             data,
             ..
         } => {
+            let message = display_message(&message, &code, data.as_ref());
             let mut out = OrpcError::new(&code, Some(status), Some(&message));
             out.defined = errors.iter().any(|(c, s)| *c == code && *s == status)
                 || common_api_error(&code).is_some_and(|d| d.status == status);
@@ -150,6 +151,48 @@ pub fn business_error(error: BusinessError, errors: ErrorMap) -> OrpcError {
         }
         BusinessError::Repo(error) => internal_error(&error.message()),
     }
+}
+
+/// JS `String(value)`.
+fn js_string(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Null => "null".to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Number(n) => n
+            .as_f64()
+            .map_or_else(|| n.to_string(), |f| number(f).to_string()),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                if item.is_null() {
+                    String::new()
+                } else {
+                    js_string(item)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::Object(_) => "[object Object]".to_string(),
+    }
+}
+
+/// `toDisplayMessage` (`apps/builder/src/orpc.ts`): a `ChatbotXException`
+/// with `data` shows it as ` (key=value, ...)`. A 422 `invalidRequestData`
+/// carries zod issues (a `ZodError` in the original), so it is left as it is.
+fn display_message(message: &str, code: &str, data: Option<&Value>) -> String {
+    let Some(Value::Object(map)) = data else {
+        return message.to_string();
+    };
+    if code == "invalidRequestData" || map.is_empty() {
+        return message.to_string();
+    }
+    let params = map
+        .iter()
+        .map(|(key, value)| format!("{key}={}", js_string(value)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{message} ({params})")
 }
 
 /// `500 INTERNAL_SERVER_ERROR` (the cause is logged, not sent).
