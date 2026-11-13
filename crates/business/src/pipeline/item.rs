@@ -29,6 +29,7 @@ use super::mutation::{
 use super::service::{require_access, require_access_in, stored_settings};
 use crate::contact_custom_field::normalize_value_for_storage;
 use crate::errors::{BusinessError, Result};
+use crate::events::TriggerEvent;
 use crate::tx;
 
 pub(crate) const ITEM_NOT_FOUND: &str = "Item not found";
@@ -311,7 +312,30 @@ pub(crate) fn done<T>(value: T, effects: &[PipelineEffect]) -> ItemMutation<T> {
     ItemMutation {
         value,
         events: realtime_events(effects),
+        triggers: trigger_events(effects),
     }
+}
+
+/// The `PipelineEffect::Event`s as bus trigger events.
+pub fn trigger_events(effects: &[PipelineEffect]) -> Vec<TriggerEvent> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            PipelineEffect::Event {
+                event_type,
+                workspace_id,
+                contact_id,
+                metadata,
+            } => Some(crate::events::trigger::pipeline_item(
+                event_type,
+                &workspace_id.to_string(),
+                &contact_id.to_string(),
+                metadata.as_object().cloned().unwrap_or_default(),
+                None,
+            )),
+            PipelineEffect::Realtime(_) => None,
+        })
+        .collect()
 }
 
 /// The item write fields (`PipelineItemWriteFields`); `Some(None)` clears.
@@ -371,6 +395,8 @@ pub struct TransferItem {
 pub struct ItemMutation<T> {
     pub value: T,
     pub events: Vec<PipelineItemChanged>,
+    /// The flow-trigger events (`emitPipelineItemEvent`), in order.
+    pub triggers: Vec<TriggerEvent>,
 }
 
 /// `PipelineItemView`.

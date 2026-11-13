@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use chatbotx_business::pipeline::currency::PipelineView;
 use chatbotx_business::pipeline::item::{
-    self, CreateItem, ItemFields, ItemView, TransferItem, UpdateItem,
+    self, CreateItem, ItemFields, ItemMutation, ItemView, TransferItem, UpdateItem,
 };
 use chatbotx_business::pipeline::members;
 use chatbotx_business::pipeline::mutation::{PipelineActor, major_units};
@@ -395,6 +395,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(mutating)?;
+            state
+                .record_audit("create", &format!("created pipeline {}", view.pipeline.id))
+                .await;
             let detail = service::get(db, ws, view.pipeline.id, TOKEN)
                 .await
                 .map_err(mutating)?;
@@ -437,24 +440,35 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(mutating)?;
+            state
+                .record_audit("update", &format!("updated pipeline {}", view.pipeline.id))
+                .await;
             ok(200, pipeline_json(&view))
         }
         "pipelines.delete" => {
             let mut input = delete_input(&call);
             let pipeline_id = input.id("id");
             input.finish()?;
-            service::delete(db, ws, pipeline_id.unwrap_or_default(), TOKEN)
+            let pipeline_id = pipeline_id.unwrap_or_default();
+            service::delete(db, ws, pipeline_id, TOKEN)
                 .await
                 .map_err(mutating)?;
+            state
+                .record_audit("delete", &format!("deleted pipeline {pipeline_id}"))
+                .await;
             Ok(no_content())
         }
         "pipelines.duplicate" => {
             let mut input = Input::from_body(call.params, call.body);
             let pipeline_id = input.id("id");
             input.finish()?;
-            let view = service::duplicate(db, ws, pipeline_id.unwrap_or_default(), TOKEN, None)
+            let pipeline_id = pipeline_id.unwrap_or_default();
+            let view = service::duplicate(db, ws, pipeline_id, TOKEN, None)
                 .await
                 .map_err(mutating)?;
+            state
+                .record_audit("create", &format!("duplicated pipeline {pipeline_id}"))
+                .await;
             let detail = service::get(db, ws, view.pipeline.id, TOKEN)
                 .await
                 .map_err(mutating)?;
@@ -514,6 +528,16 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(mutating)?;
+            state
+                .record_audit(
+                    "delete",
+                    &format!(
+                        "deleted stage {} of pipeline {}",
+                        stage_id.unwrap_or_default(),
+                        pipeline_id.unwrap_or_default()
+                    ),
+                )
+                .await;
             ok(
                 200,
                 json!({ "queued": result.queued, "jobId": result.job_id }),
@@ -663,6 +687,16 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(mutating)?;
+            state
+                .record_audit(
+                    "update",
+                    &format!(
+                        "set pipeline {} permissions of member {}",
+                        pipeline_id.unwrap_or_default(),
+                        member_id.unwrap_or_default()
+                    ),
+                )
+                .await;
             ok(200, member_json(&row))
         }
         "pipelines.removeMember" => {
@@ -679,6 +713,16 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(mutating)?;
+            state
+                .record_audit(
+                    "update",
+                    &format!(
+                        "removed member {} from pipeline {}",
+                        member_id.unwrap_or_default(),
+                        pipeline_id.unwrap_or_default()
+                    ),
+                )
+                .await;
             Ok(no_content())
         }
         _ => Err(super::internal_error(route_id)),
@@ -864,6 +908,12 @@ fn item_fields(input: &mut Input, title_required: bool) -> ItemFields {
     }
 }
 
+/// Publishes a write's realtime events and sends its flow-trigger events.
+async fn publish<T>(state: &ApiState, mutation: &ItemMutation<T>) {
+    state.publish_pipeline_changes(&mutation.events).await;
+    state.emit_triggers(mutation.triggers.clone()).await;
+}
+
 /// `tokenActor` (`actorSourceId` = the API token id).
 fn token_actor(call: &Call<'_>) -> PipelineActor {
     PipelineActor {
@@ -955,6 +1005,7 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
             )
             .await
             .map_err(mutating)?;
+            publish(state, &created).await;
             let mut out = read_item(state, ws, pipeline_id, created.value.id).await?;
             *out.status_mut() = axum::http::StatusCode::CREATED;
             Ok(out)
@@ -996,7 +1047,7 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
                 item_fields(&mut input, false)
             };
             input.finish()?;
-            item::update(
+            let updated = item::update(
                 db,
                 UpdateItem {
                     workspace_id: ws,
@@ -1009,6 +1060,7 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
             )
             .await
             .map_err(mutating)?;
+            publish(state, &updated).await;
             read_item(state, ws, pipeline_id, item_id).await
         }
         "pipelines.transferItem" => {
@@ -1035,6 +1087,15 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
             )
             .await
             .map_err(mutating)?;
+            publish(state, &moved).await;
+            state
+                .record_audit(
+                    "update",
+                    &format!(
+                        "transferred pipeline {pipeline_id} item {item_id} to pipeline {destination}"
+                    ),
+                )
+                .await;
             read_item(state, ws, moved.value.pipeline_id, moved.value.id).await
         }
         "pipelines.deleteItem" => {
@@ -1042,9 +1103,16 @@ async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply 
             let pipeline_id = input.id("id").unwrap_or_default();
             let item_id = input.id("itemId").unwrap_or_default();
             input.finish()?;
-            item::delete(db, ws, pipeline_id, item_id, TOKEN, token_actor(&call))
+            let deleted = item::delete(db, ws, pipeline_id, item_id, TOKEN, token_actor(&call))
                 .await
                 .map_err(mutating)?;
+            publish(state, &deleted).await;
+            state
+                .record_audit(
+                    "delete",
+                    &format!("deleted pipeline {pipeline_id} item {item_id}"),
+                )
+                .await;
             Ok(no_content())
         }
         _ => Err(super::internal_error(route_id)),

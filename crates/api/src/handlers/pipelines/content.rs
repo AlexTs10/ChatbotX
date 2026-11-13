@@ -10,7 +10,7 @@ use super::super::input::{Input, Seg, Str, key};
 use super::super::{
     ApiState, Call, FINDING, Reply, business_error, date, id, no_content, opt_date, opt_id,
 };
-use super::{IDEMPOTENCY_KEY, MUTATING_PIPELINE, TOKEN, money, no_nul, ok, token_actor};
+use super::{IDEMPOTENCY_KEY, MUTATING_PIPELINE, TOKEN, money, no_nul, ok, publish, token_actor};
 use crate::orpc::OrpcError;
 
 /// `PIPELINE_LIMITS.comment`.
@@ -157,6 +157,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(mutating)?;
+            publish(state, &added).await;
             ok(201, comment_json(&added.value))
         }
         "pipelines.deleteComment" => {
@@ -164,9 +165,15 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let item = target(ws, input.id("id"), input.id("itemId"));
             let comment_id = input.id("commentId");
             input.finish()?;
-            content::delete_comment(db, item, token_actor(&call), comment_id.unwrap_or_default())
-                .await
-                .map_err(mutating)?;
+            let done = content::delete_comment(
+                db,
+                item,
+                token_actor(&call),
+                comment_id.unwrap_or_default(),
+            )
+            .await
+            .map_err(mutating)?;
+            publish(state, &done).await;
             Ok(no_content())
         }
         "pipelines.addAttachment" => {
@@ -174,7 +181,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let item = target(ws, input.id("id"), input.id("itemId"));
             let file_id = input.id("mediaLibraryFileId");
             input.finish()?;
-            content::add_attachments(
+            let done = content::add_attachments(
                 db,
                 item,
                 token_actor(&call),
@@ -182,6 +189,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(mutating)?;
+            publish(state, &done).await;
             Ok(no_content())
         }
         "pipelines.removeAttachment" => {
@@ -189,9 +197,15 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let item = target(ws, input.id("id"), input.id("itemId"));
             let file_id = input.id("mediaLibraryFileId");
             input.finish()?;
-            content::remove_attachment(db, item, token_actor(&call), file_id.unwrap_or_default())
-                .await
-                .map_err(mutating)?;
+            let done = content::remove_attachment(
+                db,
+                item,
+                token_actor(&call),
+                file_id.unwrap_or_default(),
+            )
+            .await
+            .map_err(mutating)?;
+            publish(state, &done).await;
             Ok(no_content())
         }
         "pipelines.listActivity" => {
