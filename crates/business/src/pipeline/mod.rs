@@ -9,6 +9,7 @@ pub mod assignees;
 pub mod content;
 pub mod currency;
 pub mod events;
+pub mod flow_actions;
 pub mod flow_publish_check;
 pub mod item;
 pub mod members;

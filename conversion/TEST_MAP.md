@@ -643,7 +643,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/pipeline-mutation-invalidation.test.tsx` | B | - | todo | Pipelines (CRM deals); builder jsdom |
 | `apps/builder/__tests__/pipeline-public-activity.test.ts` | B | - | todo | Pipelines (CRM deals); builder jsdom |
 | `apps/builder/__tests__/pipeline-realtime-refetch.test.tsx` | B | - | todo | Pipelines (CRM deals); builder jsdom |
-| `apps/builder/__tests__/pipelines-actions-parity.test.ts` | C | tbd | todo | Pipelines (CRM deals); builder server code |
+| `apps/builder/__tests__/pipelines-actions-parity.test.ts` | C | - | todo | Pipelines (CRM deals); builder server code; P3.6-D1p: deferred to Phase 4 (server actions become Rust routes; no Rust code to test yet), DECISIONS 2026-11-13 |
 | `apps/builder/__tests__/pipelines-activity-filter.test.ts` | B | - | todo | Pipelines (CRM deals); builder jsdom |
 | `apps/builder/__tests__/pipelines-media-scope.test.ts` | C | tbd | todo | Pipelines (CRM deals); builder server code |
 | `apps/builder/__tests__/pipelines-public-api.test.ts` | C | tbd | todo | Pipelines (CRM deals); builder server code |
@@ -2355,14 +2355,14 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/pipeline-currency-refresh-import-order.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/business/__tests__/pipeline-currency-refresh.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/business/__tests__/pipeline-currency.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/business/__tests__/pipeline-flow-actions.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
+| `packages/business/__tests__/pipeline-flow-actions.test.ts` | C | `crates/business/tests/pipeline_flow_actions.rs` | ported | Pipelines (CRM deals); P3.6-D1p: 44 tests (2 ported, 42 adapted to real rows), see specs/P3.6-D1p-test-map.tsv |
 | `packages/business/__tests__/pipeline-flow-publish-check.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/business/__tests__/pipeline-item-assignees.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/business/__tests__/pipeline-item-base.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/business/__tests__/pipeline-mutation-engine.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/business/__tests__/pipeline-naming.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `packages/business/__tests__/pipeline-update-lock.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `packages/business/__tests__/pipeline-variable-targets-light.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
+| `packages/business/__tests__/pipeline-variable-targets-light.test.ts` | C | - | not-applicable | Pipelines (CRM deals); P3.6-D1p: JS module import graph (Rust has no lazy module loading) |
 | `packages/business/__tests__/platform-admin-bootstrap.test.ts` | C | tbd | todo | Platform admin |
 | `packages/business/__tests__/platform-admin.service.test.ts` | C | tbd | todo | Platform admin |
 | `packages/business/__tests__/platform-credential-service.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
