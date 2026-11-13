@@ -8,6 +8,9 @@ use std::sync::Arc;
 use chatbotx_api::auth::LiveAuthDeps;
 use chatbotx_api::mail::{Mailer, NoMailer, SmtpMailer};
 use chatbotx_api::session::{AuthSettings, AuthState, TrustedOriginSettings};
+use chatbotx_business::audit::AuditService;
+use chatbotx_business::events::cache::ActiveCache;
+use chatbotx_business::events::emitter::QueueEmitter;
 use chatbotx_db::Db;
 use chatbotx_kv::{Clock, Kv, KvConfig, SystemClock};
 use chatbotx_rt::{KvPresence, NoRevokeRetry, Realtime, RtConfig};
@@ -149,6 +152,11 @@ fn now_ms() -> i64 {
     SystemClock.now_ms()
 }
 
+/// `NEXT_PUBLIC_EDITION` (default `community`).
+fn edition() -> String {
+    env_or("NEXT_PUBLIC_EDITION", "community")
+}
+
 /// `isCloud()`: `NEXT_PUBLIC_EDITION=cloud`.
 fn is_cloud() -> bool {
     std::env::var("NEXT_PUBLIC_EDITION").is_ok_and(|edition| edition == "cloud")
@@ -213,9 +221,26 @@ async fn api_state(
     let app_url = env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
         .trim_end_matches('/')
         .to_string();
+    let jobs: Arc<dyn chatbotx_jobs::Enqueuer> = Arc::new(jobs);
+    // The flow-trigger and webhook emitters queue `evaluate-triggers` /
+    // `evaluate-webhooks` jobs for the (later) trigger and webhook workers.
+    let events = chatbotx_business::events::EventBus::new();
+    events.subscribe(Arc::new(QueueEmitter::trigger(
+        Arc::clone(&jobs),
+        Arc::new(ActiveCache::triggers(Arc::clone(&shared.db))),
+    )));
+    events.subscribe(Arc::new(QueueEmitter::webhook(
+        Arc::clone(&jobs),
+        Arc::new(ActiveCache::webhooks(Arc::clone(&shared.db))),
+    )));
+    // Audit rows are written in the request (the `sendAuditLog` handler);
+    // the community edition writes none, as the original handler.
+    let audit = AuditService::direct(Arc::clone(&shared.db), edition() != "community");
     let mut state = chatbotx_api::handlers::ApiState::new(Arc::clone(&shared.db), app_url)
         .with_kv(Arc::clone(&shared.kv))
-        .with_jobs(Arc::new(jobs));
+        .with_jobs(jobs)
+        .with_events(events)
+        .with_audit(audit);
     if let Some(realtime) = realtime {
         state = state.with_realtime(realtime.clone());
     }

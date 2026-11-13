@@ -35,8 +35,15 @@ pub fn tag_applied(
     tag_id: &str,
     contact_inbox_id: Option<&str>,
 ) -> TriggerEvent {
-    let _ = (workspace_id, contact_id, tag_id, contact_inbox_id);
-    todo!("P3.6-X1")
+    let mut metadata = Map::new();
+    metadata.insert("sourceId".into(), Value::from(tag_id));
+    metadata.insert("tagId".into(), Value::from(tag_id));
+    event(
+        "tagApplied",
+        workspace_id,
+        contact_id,
+        with_inbox(metadata, contact_inbox_id),
+    )
 }
 
 /// `tagRemoved`: metadata `{ sourceId: tagId, tagId }`.
@@ -46,8 +53,15 @@ pub fn tag_removed(
     tag_id: &str,
     contact_inbox_id: Option<&str>,
 ) -> TriggerEvent {
-    let _ = (workspace_id, contact_id, tag_id, contact_inbox_id);
-    todo!("P3.6-X1")
+    let mut metadata = Map::new();
+    metadata.insert("sourceId".into(), Value::from(tag_id));
+    metadata.insert("tagId".into(), Value::from(tag_id));
+    event(
+        "tagRemoved",
+        workspace_id,
+        contact_id,
+        with_inbox(metadata, contact_inbox_id),
+    )
 }
 
 /// `customFieldChanged` (type `customFieldValueChanged`): metadata
@@ -86,15 +100,18 @@ pub fn contact_created(
     email: Option<&str>,
     contact_inbox_id: Option<&str>,
 ) -> TriggerEvent {
-    let _ = (
+    let mut metadata = Map::new();
+    for (key, value) in [("name", name), ("phone", phone), ("email", email)] {
+        if let Some(value) = value {
+            metadata.insert(key.into(), Value::from(value));
+        }
+    }
+    event(
+        "newContact",
         workspace_id,
         contact_id,
-        name,
-        phone,
-        email,
-        contact_inbox_id,
-    );
-    todo!("P3.6-X1")
+        with_inbox(metadata, contact_inbox_id),
+    )
 }
 
 /// `shoppingCartSent`: the metadata as it is (no `sourceId`).
@@ -104,8 +121,12 @@ pub fn shopping_cart_sent(
     metadata: Map<String, Value>,
     contact_inbox_id: Option<&str>,
 ) -> TriggerEvent {
-    let _ = (workspace_id, contact_id, metadata, contact_inbox_id);
-    todo!("P3.6-X1")
+    event(
+        "shoppingCartSent",
+        workspace_id,
+        contact_id,
+        with_inbox(metadata, contact_inbox_id),
+    )
 }
 
 /// `userAskedAboutProduct`: the metadata as it is (no `sourceId`).
@@ -115,8 +136,12 @@ pub fn user_asked_about_product(
     metadata: Map<String, Value>,
     contact_inbox_id: Option<&str>,
 ) -> TriggerEvent {
-    let _ = (workspace_id, contact_id, metadata, contact_inbox_id);
-    todo!("P3.6-X1")
+    event(
+        "userAskedAboutProduct",
+        workspace_id,
+        contact_id,
+        with_inbox(metadata, contact_inbox_id),
+    )
 }
 
 /// `orderStatus(eventType, ...)`: one of `ORDER_STATUS_EVENT_TYPES`.
@@ -177,8 +202,32 @@ pub fn cart_item_changed_events(
     metadata: &Map<String, Value>,
     contact_inbox_id: Option<&str>,
 ) -> Vec<TriggerEvent> {
-    let _ = (workspace_id, contact_id, metadata, contact_inbox_id);
-    todo!("P3.6-X1")
+    let change = metadata
+        .get("change")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let build = |event_type: &str| {
+        cart_item_changed(
+            event_type,
+            workspace_id,
+            contact_id,
+            metadata.clone(),
+            contact_inbox_id,
+        )
+    };
+    if change < 0.0 {
+        return vec![build("productRemovedFromCart")];
+    }
+    let mut events = vec![build("productAddedToCart")];
+    let has_category = metadata
+        .get("product")
+        .and_then(|product| product.get("categoryIds"))
+        .and_then(Value::as_array)
+        .is_some_and(|ids| !ids.is_empty());
+    if has_category {
+        events.push(build("categoryAddedToCart"));
+    }
+    events
 }
 
 /// `emitCartItemChanged`: publishes [`cart_item_changed_events`] in order.

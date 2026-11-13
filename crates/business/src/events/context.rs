@@ -29,8 +29,7 @@ pub fn run_with_webhook_execution_context<T>(
     context: WebhookExecutionContext,
     callback: impl FnOnce() -> T,
 ) -> T {
-    let _ = (context, callback);
-    todo!("P3.6-X1")
+    WEBHOOK_CONTEXT.sync_scope(context, callback)
 }
 
 /// `runWithWebhookExecutionContext` for a future.
@@ -43,7 +42,9 @@ pub async fn with_webhook_execution_context<F: Future>(
 
 /// `isWebhookContext`.
 pub fn is_webhook_context() -> bool {
-    todo!("P3.6-X1")
+    WEBHOOK_CONTEXT
+        .try_with(|context| context.source.as_deref() == Some("webhook"))
+        .unwrap_or(false)
 }
 
 /// `webhookChannelOrigin`: `Some("channel")` inside a webhook context.

@@ -12,6 +12,8 @@ path = "src/main.rs"
 [dependencies]
 axum.workspace = true
 chatbotx-api.workspace = true
+# Event-bus subscribers and the audit writer behind `ApiState` (P3.6-X1).
+chatbotx-business.workspace = true
 # Realtime gateway (P2.8): the revoke marker lives in SQLite (`kv.durable`).
 chatbotx-db.workspace = true
 # The job store behind `ApiState` (jobs enqueue, audit records; P3.6-X1).
