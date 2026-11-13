@@ -140,6 +140,20 @@ impl Default for SmartKeywordOptions {
     }
 }
 
+/// `ContactInboxScope`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContactInboxScope {
+    pub inbox_ids: Option<Vec<i64>>,
+    pub require_recent_interaction: bool,
+}
+
+/// `buildContactInboxScopeWhere`: a contact inbox in `inbox_ids` (none = no row) and / or
+/// with an inbound message in the last 24 h.
+pub fn build_contact_inbox_scope_where(scope: &ContactInboxScope, now: i64) -> Sql {
+    let _ = (scope, now);
+    todo!("P3.2b")
+}
+
 /// `ConversationAssigneeSelection`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConversationAssigneeSelection {

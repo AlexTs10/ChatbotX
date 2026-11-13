@@ -533,6 +533,7 @@ pub mod contact;
 pub mod contact_activity;
 pub mod contact_custom_field;
 pub mod contact_inbox;
+pub mod contact_list_where;
 pub mod conversation_ai_context;
 pub mod external_store;
 pub mod inbox;
