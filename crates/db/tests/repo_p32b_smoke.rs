@@ -1446,3 +1446,53 @@ async fn facebook_marketing_message_recipient_and_audience_functions() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn whatsapp_signup_session_create_and_purge() {
+    use chatbotx_db::repo::whatsapp_signup_session::{self as wss, CreateInput};
+    use repo11::{WS, put_signup_session, read, two_ws_db, write};
+    let db = two_ws_db().await;
+    let created = write(&db, |c| {
+        wss::create_signup_session(
+            c,
+            &CreateInput {
+                user_id: 1001,
+                owner_id: 1002,
+                workspace_id: Some(WS),
+                waba_id: "waba".to_owned(),
+                business_id: "biz".to_owned(),
+                encrypted_access_token: serde_json::json!({ "iv": "x" }),
+                api_version: "v21.0".to_owned(),
+                candidate_phone_number_ids: vec!["pn-1".to_owned()],
+                now: 1_000,
+            },
+        )
+    })
+    .await;
+    assert_eq!(
+        created.expires_at,
+        1_000 + wss::WHATSAPP_SIGNUP_SESSION_TTL_MS
+    );
+    let id = created.id;
+    assert!(
+        read(&db, move |c| wss::find_active_signup_session_for_user(
+            c, id, 1001, 1_000
+        ))
+        .await
+        .is_some()
+    );
+    put_signup_session(&db, 2, &["pn-1"], &[], 500).await;
+    put_signup_session(&db, 3, &["pn-1"], &[], 900_000).await;
+    // Session 2 expired at 500; the new session expires after 700 000; session 3 is live.
+    assert_eq!(
+        write(&db, |c| wss::purge_finished_signup_sessions(c, 700_000, 10)).await,
+        2
+    );
+    assert!(
+        read(&db, |c| wss::find_active_signup_session_for_user(
+            c, 3, 1001, 700_000
+        ))
+        .await
+        .is_some()
+    );
+}
