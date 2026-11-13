@@ -6,6 +6,7 @@ pub mod analytics;
 pub mod channels;
 pub mod connections;
 pub mod contact_notes;
+pub mod contact_sequences;
 pub mod contacts;
 pub mod custom_fields;
 pub mod ecommerce_settings;
@@ -20,6 +21,7 @@ pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
 pub mod reflinks;
+pub mod sequences;
 pub mod tags;
 pub mod webchats;
 
@@ -231,6 +233,10 @@ pub async fn dispatch_as(
         connections::handle(state, route_id, call, principal).await?
     } else if analytics::ROUTES.contains(&route_id) {
         analytics::handle(state, route_id, call).await
+    } else if contact_sequences::ROUTES.contains(&route_id) {
+        contact_sequences::handle(state, route_id, call).await
+    } else if sequences::ROUTES.contains(&route_id) {
+        sequences::handle(state, route_id, call).await
     } else if contact_notes::ROUTES.contains(&route_id) {
         contact_notes::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {
