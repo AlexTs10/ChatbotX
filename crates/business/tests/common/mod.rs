@@ -492,3 +492,20 @@ pub fn workspace_member(
     )?;
     Ok(id)
 }
+
+/// A `"PipelineField"` row (`shortText`, reference name `f_<id>`).
+pub fn pipeline_field_row(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    pipeline_id: i64,
+    name: &str,
+    required: bool,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "PipelineField" ("id", "workspaceId", "pipelineId", "name", "referenceName", "type", "required", "position")
+           VALUES (?1, ?2, ?3, ?4, ?5, 'shortText', ?6, ?1)"#,
+        params![id, workspace_id, pipeline_id, name, format!("f_{id}"), required],
+    )?;
+    Ok(id)
+}

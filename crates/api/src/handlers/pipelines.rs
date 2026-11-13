@@ -24,8 +24,10 @@ use serde_json::{Value, json};
 
 mod content;
 mod query;
+mod stats;
 pub use content::activity_groups_query;
 pub use query::{item_filter_query, item_list_query};
+pub use stats::stats_query;
 
 use super::custom_fields::CUSTOM_FIELD_TYPES;
 use super::input::{Input, Num, Seg, Str, child, key};
