@@ -541,6 +541,7 @@ pub mod conversation_ai_context;
 pub mod external_store;
 pub mod file;
 pub mod flow;
+pub mod google_ads_conversion_event;
 pub mod google_ads_settings;
 pub mod inbound_webhook;
 pub mod inbox;
