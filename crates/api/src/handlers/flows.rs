@@ -58,7 +58,11 @@ async fn create(state: &ApiState, call: Call<'_>) -> Reply {
         None => None,
         Some(Value::Object(map)) => Some(Value::Object(map)),
         Some(_) => {
-            input.issue(&key("spec"), "invalid_type", "Invalid input: expected object");
+            input.issue(
+                &key("spec"),
+                "invalid_type",
+                "Invalid input: expected object",
+            );
             None
         }
     };
@@ -77,16 +81,14 @@ async fn create(state: &ApiState, call: Call<'_>) -> Reply {
     let db = &state.db;
     let name = name.unwrap_or_default();
     async {
-        let graph = flow::resolve_graph_input(
-            db,
-            ws,
-            FlowGraphInput { spec, nodes, edges },
-            publish,
-        )
-        .await?;
+        let graph =
+            flow::resolve_graph_input(db, ws, FlowGraphInput { spec, nodes, edges }, publish)
+                .await?;
         let node_ids = graph.as_ref().and_then(|g| g.node_ids.clone());
         let flow_id = match graph {
-            Some(graph) if publish => flow::create_published(db, ws, &name, folder_id, graph).await?,
+            Some(graph) if publish => {
+                flow::create_published(db, ws, &name, folder_id, graph).await?
+            }
             graph => flow::create_draft(db, ws, &name, folder_id, graph).await?,
         };
         Ok::<_, BusinessError>((flow_id, node_ids))
