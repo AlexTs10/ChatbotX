@@ -4,6 +4,7 @@
 //! original JSON shapes.
 
 pub mod connection;
+pub mod contact;
 pub mod discount_code;
 pub mod ecommerce_open_hours;
 pub mod ecommerce_settings;

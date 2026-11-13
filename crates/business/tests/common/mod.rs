@@ -245,3 +245,109 @@ pub fn reflink_row(
     )?;
     Ok(id)
 }
+
+/// Sets `Workspace.targetCountry` (P3.6-D2 contacts).
+pub fn target_country(tx: &Connection, workspace_id: i64, country: &str) -> Result<(), DbError> {
+    tx.execute(
+        r#"UPDATE "Workspace" SET "targetCountry" = ?2 WHERE "id" = ?1"#,
+        params![workspace_id, country],
+    )?;
+    Ok(())
+}
+
+/// Inserts a `Contact` with a first name, an email and a phone number.
+pub fn contact_with(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    first_name: Option<&str>,
+    email: Option<&str>,
+    phone: Option<&str>,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Contact" ("id", "firstName", "email", "phoneNumber", "workspaceId") VALUES (?1, ?2, ?3, ?4, ?5)"#,
+        params![id, first_name, email, phone, workspace_id],
+    )?;
+    Ok(id)
+}
+
+/// Inserts a `ContactInbox` (`source` = `direct`).
+pub fn contact_inbox(
+    tx: &Connection,
+    id: i64,
+    contact_id: i64,
+    inbox_id: i64,
+    channel: &str,
+    source_id: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "ContactInbox" ("id", "originalContactId", "contactId", "inboxId", "channel", "source", "sourceId")
+           VALUES (?1, ?2, ?2, ?3, ?4, 'direct', ?5)"#,
+        params![id, contact_id, inbox_id, channel, source_id],
+    )?;
+    Ok(id)
+}
+
+/// Inserts a `Conversation` of a contact.
+pub fn conversation(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId") VALUES (?1, ?2, ?3)"#,
+        params![id, workspace_id, contact_id],
+    )?;
+    Ok(id)
+}
+
+/// Inserts a `CustomField` of a type.
+pub fn custom_field(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    name: &str,
+    kind: &str,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "CustomField" ("id", "workspaceId", "name", "type") VALUES (?1, ?2, ?3, ?4)"#,
+        params![id, workspace_id, name, kind],
+    )?;
+    Ok(id)
+}
+
+/// The rows of a query as JSON objects (column name -> value; integers,
+/// reals, text and `null`).
+pub async fn rows(
+    db: &Db,
+    sql: &'static str,
+    id: i64,
+) -> Vec<serde_json::Map<String, serde_json::Value>> {
+    db.read(move |conn| {
+        let mut stmt = conn.prepare(sql)?;
+        let names: Vec<String> = stmt.column_names().map(|n| n.to_string()).collect();
+        let out = stmt
+            .query_map(params![id], |r| {
+                let mut row = serde_json::Map::new();
+                for (i, name) in names.iter().enumerate() {
+                    use chatbotx_db::rusqlite::types::ValueRef;
+                    let value = match r.get_ref(i)? {
+                        ValueRef::Null => serde_json::Value::Null,
+                        ValueRef::Integer(n) => serde_json::Value::from(n),
+                        ValueRef::Real(f) => serde_json::Value::from(f),
+                        ValueRef::Text(t) => {
+                            serde_json::Value::from(String::from_utf8_lossy(t).into_owned())
+                        }
+                        ValueRef::Blob(_) => serde_json::Value::Null,
+                    };
+                    row.insert(name.clone(), value);
+                }
+                Ok(row)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(out)
+    })
+    .await
+    .expect("rows read")
+}

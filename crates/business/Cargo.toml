@@ -17,6 +17,8 @@ chatbotx-db = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
+# P3.6-D2 contacts: E.164 normalization (libphonenumber-js).
+phonenumber = { workspace = true }
 # SSRF guard DoH lookup (`fetch("https://1.1.1.1/dns-query")`); same client as crates/files.
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 # Random token bytes (`crypto.getRandomValues`).
