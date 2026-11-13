@@ -428,3 +428,36 @@ pub async fn custom_field_values(db: &Db, contact_id: i64) -> Vec<(i64, String)>
     .await
     .expect("custom field values read")
 }
+
+/// Inserts a `BotField` (P3.6-D2 bot fields; `createdAt` = `updatedAt` =
+/// `at`).
+pub fn bot_field(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    name: &str,
+    kind: &str,
+    value: Option<&str>,
+    at: i64,
+) -> Result<i64, DbError> {
+    tx.execute(
+        r#"INSERT INTO "BotField" ("id", "workspaceId", "name", "type", "value", "createdAt", "updatedAt") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)"#,
+        params![id, workspace_id, name, kind, value, at],
+    )?;
+    Ok(id)
+}
+
+/// The stored `value` of a `BotField` (`None` = no row; `Some(None)` = `null`).
+pub async fn bot_field_value(db: &Db, id: i64) -> Option<Option<String>> {
+    db.read(move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT "value" FROM "BotField" WHERE "id" = ?1"#,
+                params![id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .ok())
+    })
+    .await
+    .expect("bot field read")
+}

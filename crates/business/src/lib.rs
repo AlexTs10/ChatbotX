@@ -3,6 +3,7 @@
 //! (`crates/api`) maps their results and [`errors::BusinessError`]s to the
 //! original JSON shapes.
 
+pub mod bot_field;
 pub mod connection;
 pub mod contact;
 pub mod contact_custom_field;
