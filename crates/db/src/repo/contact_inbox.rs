@@ -980,3 +980,55 @@ pub fn list_by_contact_id(conn: &Connection, contact_id: i64) -> Result<Vec<Cont
     q.push(" ORDER BY \"id\"");
     q.models(conn)
 }
+
+/// `BulkAiContactInboxRow`: the contact inbox with its direct-message conversation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BulkAiContactInboxRow {
+    pub contact_inbox: ContactInbox,
+    pub assigned_inbox_team_id: Option<i64>,
+    pub assigned_user_id: Option<i64>,
+    pub conversation_id: i64,
+}
+
+/// Input of [`list_bulk_ai_page`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BulkAiPageInput {
+    pub eligibility: super::queries::ai_handover_bulk_eligibility::BulkEligibilityInput,
+    pub workspace_id: i64,
+    pub inbox_id: i64,
+    pub after_id: Option<i64>,
+    pub limit: i64,
+}
+
+/// `listBulkAiPage`: one keyset page (by contact-inbox id) of the eligible threads of an
+/// inbox, each joined to the contact's direct-message conversation of the workspace.
+pub fn list_bulk_ai_page(
+    conn: &Connection,
+    input: &BulkAiPageInput,
+) -> Result<Vec<BulkAiContactInboxRow>> {
+    let _ = (conn, input);
+    todo!("P3.2b")
+}
+
+/// `listStillBulkAiEligible`: of `ids`, those still eligible (empty `ids`: no query).
+pub fn list_still_bulk_ai_eligible(
+    conn: &Connection,
+    input: &super::queries::ai_handover_bulk_eligibility::BulkEligibilityInput,
+    workspace_id: i64,
+    ids: &[i64],
+) -> Result<Vec<i64>> {
+    let _ = (conn, input, workspace_id, ids);
+    todo!("P3.2b")
+}
+
+/// `countBulkAiEligible`: eligible threads of one inbox after `after_id` (all when `None`).
+pub fn count_bulk_ai_eligible(
+    conn: &Connection,
+    input: &super::queries::ai_handover_bulk_eligibility::BulkEligibilityInput,
+    workspace_id: i64,
+    inbox_id: i64,
+    after_id: Option<i64>,
+) -> Result<i64> {
+    let _ = (conn, input, workspace_id, inbox_id, after_id);
+    todo!("P3.2b")
+}
