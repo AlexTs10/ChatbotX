@@ -178,7 +178,15 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     let mut app = chatbotx_api::router()
         .merge(chatbotx_api::rpc::rpc_router(Arc::clone(&sessions)))
         .merge(chatbotx_api::session::auth_router(sessions))
-        .merge(chatbotx_api::routes::public_api_router(auth));
+        .merge(chatbotx_api::routes::public_api_router_with(
+            auth,
+            Arc::new(chatbotx_api::handlers::ApiState {
+                db: Arc::clone(&shared.db),
+                app_url: env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
+                    .trim_end_matches('/')
+                    .to_string(),
+            }),
+        ));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }

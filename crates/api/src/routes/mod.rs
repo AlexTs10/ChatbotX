@@ -7,6 +7,7 @@ mod table;
 use std::sync::{Arc, OnceLock};
 
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
@@ -17,6 +18,7 @@ use crate::auth::{
     TokenAuthRequest, WorkspaceTokenDeps, authenticate_channel_api_token,
     authorize_workspace_token_for_scope, invalid_access_token_error,
 };
+use crate::handlers::{ApiState, Call, dispatch};
 use crate::orpc::OrpcError;
 
 /// The auth chain of an operation (the oRPC builder it is declared with).
@@ -188,14 +190,27 @@ fn plain_not_found() -> Response {
         .into_response()
 }
 
-/// Answer one request under `/api`: match the route, run its auth, then the
-/// handler (none are ported yet: [`not_ported_error`]). An unknown route is a
-/// plain-text `404 Not found`, like the original handler.
+/// Answer one request under `/api` without handlers (every authenticated call
+/// is [`not_ported_error`]). See [`handle_public_request_with`].
 pub async fn handle_public_request<D: WorkspaceTokenDeps>(
     deps: &D,
     method: &Method,
     uri: &Uri,
     headers: &HeaderMap,
+) -> Response {
+    handle_public_request_with(deps, None, method, uri, headers, &[]).await
+}
+
+/// Answer one request under `/api`: match the route, run its auth, then the
+/// ported handler ([`crate::handlers::dispatch`]) or [`not_ported_error`]. An
+/// unknown route is a plain-text `404 Not found`, like the original handler.
+pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
+    deps: &D,
+    handlers: Option<&ApiState>,
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    body: &[u8],
 ) -> Response {
     let Some(path) = uri
         .path()
@@ -224,39 +239,95 @@ pub async fn handle_public_request<D: WorkspaceTokenDeps>(
                 &mut res_headers,
             )
             .await
-            .map(|_| ())
+            .map(|context| context.workspace.id.parse::<i64>().ok())
         }
         RouteAuth::ChannelToken => authenticate_channel_api_token(deps, headers)
             .await
-            .map(|_| ()),
+            .map(|_| None),
         // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
         RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
             Err(invalid_access_token_error())
         }
     };
     let mut response = match outcome {
-        Ok(()) => not_ported_error().into_response(),
+        Ok(workspace_id) => {
+            let call = workspace_id.map(|workspace_id| Call {
+                workspace_id,
+                params: &matched.params,
+                query: uri.query(),
+                body,
+            });
+            let handled = match (handlers, call) {
+                (Some(state), Some(call)) => dispatch(state, route.id, call).await,
+                _ => None,
+            };
+            handled.unwrap_or_else(|| not_ported_error().into_response())
+        }
         Err(error) => error.into_response(),
     };
     response.headers_mut().extend(res_headers);
     response
 }
 
+/// Router state: the auth deps and the handlers (`None` = none ported).
+struct PublicState<D> {
+    deps: Arc<D>,
+    handlers: Option<Arc<ApiState>>,
+}
+
+impl<D> Clone for PublicState<D> {
+    fn clone(&self) -> Self {
+        PublicState {
+            deps: Arc::clone(&self.deps),
+            handlers: self.handlers.clone(),
+        }
+    }
+}
+
 async fn public_api_fallback<D: WorkspaceTokenDeps + Send + Sync + 'static>(
-    State(deps): State<Arc<D>>,
+    State(state): State<PublicState<D>>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
+    body: Bytes,
 ) -> Response {
-    handle_public_request(deps.as_ref(), &method, &uri, &headers).await
+    handle_public_request_with(
+        state.deps.as_ref(),
+        state.handlers.as_deref(),
+        &method,
+        &uri,
+        &headers,
+        &body,
+    )
+    .await
+}
+
+/// The router of the public API without handlers (auth only).
+pub fn public_api_router<D: WorkspaceTokenDeps + Send + Sync + 'static>(deps: Arc<D>) -> Router {
+    router_with_state(PublicState {
+        deps,
+        handlers: None,
+    })
 }
 
 /// The router of the public API: a fallback that serves every `/api/...` path
-/// no other route took.
-pub fn public_api_router<D: WorkspaceTokenDeps + Send + Sync + 'static>(deps: Arc<D>) -> Router {
+/// no other route took, with the ported handlers.
+pub fn public_api_router_with<D: WorkspaceTokenDeps + Send + Sync + 'static>(
+    deps: Arc<D>,
+    handlers: Arc<ApiState>,
+) -> Router {
+    router_with_state(PublicState {
+        deps,
+        handlers: Some(handlers),
+    })
+}
+
+fn router_with_state<D: WorkspaceTokenDeps + Send + Sync + 'static>(
+    state: PublicState<D>,
+) -> Router {
     Router::new()
         .fallback(public_api_fallback::<D>)
-        .with_state(deps)
+        .with_state(state)
 }
 
 #[cfg(test)]

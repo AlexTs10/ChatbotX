@@ -1,0 +1,22 @@
+[package]
+name = "chatbotx-business"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Business services (`packages/business/src/<domain>`), one module per domain (P3.6+).
+[dependencies]
+chatbotx-core = { workspace = true }
+chatbotx-db = { workspace = true }
+chatbotx-jobs = { workspace = true }
+chatbotx-kv = { workspace = true }
+chatbotx-rt = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 # Internal crates.
 chatbotx-api = { path = "crates/api" }
+chatbotx-business = { path = "crates/business" }
 chatbotx-core = { path = "crates/core" }
 chatbotx-db = { path = "crates/db" }
 chatbotx-files = { path = "crates/files" }

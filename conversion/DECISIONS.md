@@ -256,3 +256,10 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
 ## 2026-11-13 — P3.2b implementer (orchestrator-delegated, recommended option)
 
 - Orchestrator-delegated, recommended option: P3.2b runs small slices first (slice 1 = `date-bucket`, `conversation-unread`, `inbox-team-member-repository`), not the contact-filter family first. Reason: the contact-filter family is about 4,300 source and 7,200 test lines and does not fit in one agent context next to other work; a fresh agent should take it as one unit. Slice list and the open rest: `conversion/specs/P3.2b.md`.
+
+## 2026-11-13 — P3.6-D1 business batch 1 (implementer; orchestrator-delegated, recommended options)
+
+- Orchestrator-delegated, recommended option: inside p1-13 the places slice (placeCategories, placeLocations) goes first, then polls, then pipelines (split core / items). Places is the smallest domain and needs no unported domain, so the new crate, the handler wiring and the input validation are built and proven on it first. Spec: `conversion/specs/P3.6-D1.md`.
+- Orchestrator-delegated, recommended option: public handlers live in `crates/api/src/handlers/<router>.rs` and run through `handlers::dispatch(ApiState, route_id, Call)` after the P3.5 route auth; `routes::public_api_router_with` replaces `public_api_router` in the server. Request schemas are hand-written zod checks (`handlers::input`), one `422 invalidRequestData` with all issues; `defined` = the code and status are in the route's error map or `commonApiErrors`.
+- Orchestrator-delegated, recommended option: queries the services need that `crates/db` does not have yet are private queries in `crates/business` (listed in the spec, §"Private queries"); they move to `crates/db` later.
+- Orchestrator-delegated, recommended option: the template edit locks (`withTemplateLockedTransaction`, `assertReferencable`, `assertResourceEditable`) are not ported in D1 (template unit). Their tests are `n-a` here and move to the template unit; without them a template-installed poll / pipeline can be edited like any other.

@@ -237,6 +237,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "chatbotx-business",
  "chatbotx-core",
  "chatbotx-db",
  "chatbotx-kv",
@@ -250,6 +251,20 @@ dependencies = [
  "tower",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "chatbotx-business"
+version = "0.1.0"
+dependencies = [
+ "chatbotx-core",
+ "chatbotx-db",
+ "chatbotx-jobs",
+ "chatbotx-kv",
+ "chatbotx-rt",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
