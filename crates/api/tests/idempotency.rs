@@ -7,8 +7,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::{HeaderMap, HeaderValue};
+use axum::response::Response;
 use chatbotx_api::idempotency::{
     BROADCAST_AUDIENCE_PREVIEW_TOKEN_PATH, Claim, IN_FLIGHT_TTL_MS, MAX_STORED_OUTPUT_BYTES,
     MiddlewareCall, Scope, api_idempotency_middleware, claim_idempotency_key,
@@ -566,7 +566,8 @@ async fn completes_a_claimed_key_with_the_handler_output() {
 async fn releases_a_claimed_key_when_the_handler_throws() {
     let (_clock, kv) = store();
     let calls = AtomicUsize::new(0);
-    let failure = (StatusCode::INTERNAL_SERVER_ERROR, "failed").into_response();
+    // Orchestrator fix (P3.6-D2): a JSON 500 body, so `body_json` can read it.
+    let failure = chatbotx_api::handlers::json(500, json!({ "message": "failed" }));
     let (status, _, _) = run(
         &kv,
         req(
