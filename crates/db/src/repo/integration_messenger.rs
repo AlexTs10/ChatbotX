@@ -3,8 +3,24 @@
 
 use rusqlite::Connection;
 
-use super::Result;
 use super::models::IntegrationMessenger;
+use super::{Json, Result};
+
+/// One row of `listPersonasByWorkspaceId`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessengerPersonas {
+    pub name: String,
+    pub personas: Json,
+}
+
+/// `listPersonasByWorkspaceId`: `name` and `personas` of the workspace's pages, by `createdAt`.
+pub fn list_personas_by_workspace_id(
+    conn: &Connection,
+    workspace_id: i64,
+) -> Result<Vec<MessengerPersonas>> {
+    let _ = (conn, workspace_id);
+    todo!("P3.2b")
+}
 
 /// `updateHandoverResumeFlow` (`None` clears the flow); `None` when the integration is
 /// not in the workspace.

@@ -176,3 +176,51 @@ pub async fn exec(db: &Db, sql: &'static str) {
 pub fn run_table() -> &'static str {
     CoexistSyncRun::TABLE
 }
+
+/// Inserts one `Integration` (id `id + 1000`, googleAds) and one `IntegrationGoogleAds` of
+/// `workspace_id` on it.
+pub fn put_google_ads(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    customer_id: &str,
+) -> Result<usize, DbError> {
+    tx.execute(
+        r#"INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (?1, ?2, 'googleAds')"#,
+        params![id + 1000, workspace_id],
+    )?;
+    Ok(tx.execute(
+        r#"INSERT INTO "IntegrationGoogleAds" ("id", "workspaceId", "integrationId", "auth", "customerId")
+           VALUES (?1, ?2, ?3, '{}', ?4)"#,
+        params![id, workspace_id, id + 1000, customer_id],
+    )?)
+}
+
+/// Inserts one `connect` `ConnectSession` of `workspace_id` (`createdAt` = `at`); a
+/// `cancelled` one gets `consumedAt` = `at`.
+pub fn put_session(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    provider: &str,
+    status: &str,
+    at: i64,
+    expires_at: i64,
+) -> Result<usize, DbError> {
+    let consumed = (status == "cancelled").then_some(at);
+    Ok(tx.execute(
+        r#"INSERT INTO "ConnectSession" ("id", "createdAt", "updatedAt", "workspaceId", "provider",
+               "purpose", "stateNonceHash", "status", "expiresAt", "consumedAt")
+           VALUES (?1, ?2, ?2, ?3, ?4, 'connect', ?5, ?6, ?7, ?8)"#,
+        params![
+            id,
+            at,
+            workspace_id,
+            provider,
+            format!("nonce-{id}"),
+            status,
+            expires_at,
+            consumed
+        ],
+    )?)
+}
