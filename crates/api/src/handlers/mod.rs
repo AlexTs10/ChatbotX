@@ -7,6 +7,7 @@ pub mod bot_fields;
 pub mod channels;
 pub mod connections;
 pub mod contact_custom_fields;
+pub mod contact_filter;
 pub mod contact_notes;
 pub mod contact_sequences;
 pub mod contacts;
@@ -28,7 +29,6 @@ pub mod sequences;
 pub mod tags;
 pub mod webchats;
 pub mod workspace_members;
-pub mod contact_filter;
 
 use std::sync::Arc;
 

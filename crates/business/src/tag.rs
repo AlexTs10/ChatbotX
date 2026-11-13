@@ -347,6 +347,29 @@ pub async fn soft_delete(db: &Db, workspace_id: i64, ids: &[i64]) -> Result<Vec<
     .await
 }
 
+/// `findManyByIds`: the live tags of a workspace among `ids` (id order;
+/// unknown ids are absent).
+pub async fn find_many_by_ids(db: &Db, workspace_id: i64, ids: &[i64]) -> Result<Vec<Tag>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let list = serde_json::to_string(ids).unwrap_or_else(|_| "[]".into());
+    tx::read(db, move |conn| {
+        let sql = format!(
+            r#"{} WHERE "workspaceId" = ?1 AND "deletedAt" IS NULL AND "id" IN (SELECT value FROM json_each(?2)) ORDER BY "id""#,
+            Tag::select_sql()
+        );
+        let mut stmt = conn.prepare(&sql).map_err(repo_err)?;
+        let rows = stmt
+            .query_map(params![workspace_id, list], Tag::from_row)
+            .map_err(repo_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(repo_err)?;
+        Ok(rows)
+    })
+    .await
+}
+
 /// `findByKey`: a numeric key is tried as a live tag id first, then as a name.
 pub async fn find_by_key(db: &Db, workspace_id: i64, key: &str) -> Result<Option<Tag>> {
     let key = key.to_string();

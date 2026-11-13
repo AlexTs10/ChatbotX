@@ -251,7 +251,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/contacts-crud-public-api.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/contacts-export-files-public-api.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/contacts-export-public-api.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
-| `apps/builder/__tests__/contacts-filter-fields-public-api.test.ts` | C | `crates/api/tests/contacts_filter_fields_public_api.rs` | ported | Contact filters and segments; builder server code |
+| `apps/builder/__tests__/contacts-filter-fields-public-api.test.ts` | C | `crates/api/tests/contacts_filter_fields_public_api.rs` | passing | Contact filters and segments; builder server code |
 | `apps/builder/__tests__/contacts-import-public-api.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/contacts-import-template-route.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/contacts-import-template.test.ts` | B | - | todo | Template marketplace (install/share/sync); builder node-env, client logic |
