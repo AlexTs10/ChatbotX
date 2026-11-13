@@ -487,7 +487,30 @@ fn ctwa_retarget_where(c: &FilterCondition, ctx: &Ctx) -> Option<Sql> {
     ))
 }
 
-const GOOGLE_CLICK: &str = "(\"ContactInbox\".\"referral\" ->> 'gclid' IS NOT NULL OR \"ContactInbox\".\"referral\" ->> 'gbraid' IS NOT NULL)";
+fn commented_on_post_where(
+    operator: &str,
+    value: Option<&Json>,
+    workspace_id: Option<i64>,
+) -> Option<Sql> {
+    let _ = (operator, value, workspace_id);
+    todo!("P3.2b")
+}
+
+fn leaderboard_score_where(
+    leaderboard_id: Option<&str>,
+    operator: &str,
+    value: Option<&Json>,
+) -> Option<Sql> {
+    let _ = (leaderboard_id, operator, value);
+    todo!("P3.2b")
+}
+
+fn working_hours_where(operator: &str, value: Option<&Json>, ctx: &Ctx) -> Option<Sql> {
+    let _ = (operator, value, ctx.working_hours_zone);
+    todo!("P3.2b")
+}
+
+const GOOGLE_CLICK: &str = "(\"ContactInbox\".\"referral\"->>'gclid' IS NOT NULL OR \"ContactInbox\".\"referral\"->>'gbraid' IS NOT NULL)";
 
 /// `buildConditionWhere`. Fields of the later slices (Instagram comments, activity,
 /// commerce, pipeline items, leaderboards, working hours) compile to `None` until ported.
@@ -606,9 +629,9 @@ fn condition_where(c: &FilterCondition, ctx: &Ctx) -> Option<Sql> {
             op,
             v,
         ),
-        _ => {
-            let _ = ctx.working_hours_zone;
-            None
-        }
+        "commentedOnPost" => commented_on_post_where(op, v, ctx.workspace_id),
+        "leaderboardScore" => leaderboard_score_where(c.leaderboard_id.as_deref(), op, v),
+        "isWithinWorkingHours" => working_hours_where(op, v, ctx),
+        _ => None,
     }
 }
