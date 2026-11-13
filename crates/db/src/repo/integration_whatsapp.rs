@@ -36,3 +36,31 @@ pub fn list_by_display_phone_digits(
         })
     })
 }
+
+/// One row of `findAllConnectedForWebhookSubscription`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WebhookSubscriptionRow {
+    pub id: i64,
+    pub workspace_id: i64,
+    pub waba_id: String,
+    pub auth: super::Json,
+}
+
+/// `updateHandoverResumeFlow` (`None` clears the flow); `None` when the integration is
+/// not in the workspace.
+pub fn update_handover_resume_flow(
+    _conn: &Connection,
+    _id: i64,
+    _workspace_id: i64,
+    _handover_resume_flow_id: Option<i64>,
+) -> Result<Option<super::models::IntegrationWhatsapp>> {
+    todo!("P3.2b")
+}
+
+/// `findAllConnectedForWebhookSubscription`: integrations whose inbox is `connected`
+/// (every workspace, by id).
+pub fn find_all_connected_for_webhook_subscription(
+    _conn: &Connection,
+) -> Result<Vec<WebhookSubscriptionRow>> {
+    todo!("P3.2b")
+}
