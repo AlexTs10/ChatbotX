@@ -31,7 +31,9 @@ use serde_json::{Value, json};
 use sha2::Sha256;
 
 use super::{
-    AuthApiError, NewUser, SignUpGateDeps, email_request_before, request_cookie, user_create_before,
+    AuthApiError, CustomDomainSource, NewUser, OriginCheckRequest, SignUpGateDeps,
+    TrustedOriginSettings, context_trusted_origins, email_request_before, form_csrf_check,
+    origin_check, request_cookie, trusted_origins, user_create_before,
 };
 use crate::auth::decode_query_component;
 use crate::iso8601;
@@ -58,6 +60,10 @@ pub struct AuthSettings {
     pub base_url: String,
     /// `AUTH_DISABLE_SIGNUP`.
     pub sign_up_disabled: bool,
+    /// The environment of the `trustedOrigins` thunk.
+    pub trusted_origins: TrustedOriginSettings,
+    /// `BETTER_AUTH_TRUSTED_ORIGINS` (comma list).
+    pub extra_trusted_origins: Option<String>,
 }
 
 /// State of the auth router.
@@ -97,6 +103,62 @@ impl SignUpGateDeps for AuthState {
             })
             .await
             .unwrap_or(false)
+    }
+}
+
+impl CustomDomainSource for AuthState {
+    async fn list_active_domains(&self) -> Vec<String> {
+        self.db
+            .read(|conn| {
+                let mut statement = conn.prepare_cached(
+                    r#"SELECT "domain" FROM "CustomDomain" WHERE "status" = 'active'"#,
+                )?;
+                let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+                Ok(rows.collect::<Result<Vec<_>, _>>()?)
+            })
+            .await
+            .unwrap_or_else(|error| {
+                tracing::error!(error = %error, "cannot list active custom domains");
+                Vec::new()
+            })
+    }
+}
+
+impl AuthState {
+    /// `ctx.context.trustedOrigins` of one request (better-auth resolves the
+    /// `trustedOrigins` thunk per request).
+    pub async fn request_trusted_origins(&self) -> Vec<String> {
+        let app = trusted_origins(&self.settings.trusted_origins, self).await;
+        context_trusted_origins(
+            &self.settings.base_url,
+            app,
+            self.settings.extra_trusted_origins.as_deref(),
+        )
+    }
+
+    /// `originCheckMiddleware`, plus `formCsrfMiddleware` when `form_csrf`.
+    async fn check_origins(
+        &self,
+        headers: &HeaderMap,
+        uri: &Uri,
+        body: Option<&Value>,
+        form_csrf: bool,
+    ) -> Result<(), AuthApiError> {
+        let trusted = self.request_trusted_origins().await;
+        let query_callback_url = query_value(uri, "callbackURL");
+        origin_check(
+            &OriginCheckRequest {
+                method: "POST",
+                headers,
+                body,
+                query_callback_url: query_callback_url.as_deref(),
+            },
+            &trusted,
+        )?;
+        if form_csrf {
+            form_csrf_check(headers, &trusted)?;
+        }
+        Ok(())
     }
 }
 
@@ -425,10 +487,11 @@ fn verification_url(settings: &AuthSettings, headers: &HeaderMap, token: &str) -
 
 async fn sign_up_email(
     State(state): State<Arc<AuthState>>,
+    uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    match sign_up(&state, &headers, &body).await {
+    match sign_up(&state, &uri, &headers, &body).await {
         Ok(user) => json_response(
             StatusCode::OK,
             &json!({ "token": null, "user": user.to_json() }),
@@ -439,10 +502,12 @@ async fn sign_up_email(
 
 async fn sign_up(
     state: &AuthState,
+    uri: &Uri,
     headers: &HeaderMap,
     body: &Bytes,
 ) -> Result<UserRow, AuthApiError> {
     let body = body_json(body)?;
+    state.check_origins(headers, uri, Some(&body), true).await?;
     let email = body["email"].as_str().unwrap_or_default().to_lowercase();
     email_request_before(state, "/sign-up/email", Some(&email), headers).await?;
     let password = body["password"].as_str().unwrap_or_default().to_string();
@@ -531,10 +596,11 @@ async fn send_verification_mail(state: &AuthState, headers: &HeaderMap, user: &U
 
 async fn sign_in_email(
     State(state): State<Arc<AuthState>>,
+    uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    match sign_in(&state, &headers, &body).await {
+    match sign_in(&state, &uri, &headers, &body).await {
         Ok((token, user)) => {
             let mut response = json_response(
                 StatusCode::OK,
@@ -560,10 +626,12 @@ fn invalid_credentials() -> AuthApiError {
 
 async fn sign_in(
     state: &AuthState,
+    uri: &Uri,
     headers: &HeaderMap,
     body: &Bytes,
 ) -> Result<(String, UserRow), AuthApiError> {
     let body = body_json(body)?;
+    state.check_origins(headers, uri, Some(&body), true).await?;
     let email = body["email"].as_str().unwrap_or_default().to_lowercase();
     let password = body["password"].as_str().unwrap_or_default().to_string();
     email_request_before(state, "/sign-in/email", Some(&email), headers).await?;
@@ -735,7 +803,19 @@ fn redirect(location: &str) -> Response {
     response
 }
 
-async fn sign_out(State(state): State<Arc<AuthState>>, headers: HeaderMap) -> Response {
+async fn sign_out(
+    State(state): State<Arc<AuthState>>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let body = serde_json::from_slice::<Value>(&body).ok();
+    if let Err(error) = state
+        .check_origins(&headers, &uri, body.as_ref(), false)
+        .await
+    {
+        return error.into_response();
+    }
     if let Some(token) = request_cookie(&headers, SESSION_COOKIE)
         .and_then(|raw| verify_signed_cookie(&raw, &state.settings.secret))
     {

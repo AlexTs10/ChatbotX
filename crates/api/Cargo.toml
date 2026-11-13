@@ -27,6 +27,8 @@ sha2.workspace = true
 # SMTP client (mail) and blocking scrypt work.
 tokio = { workspace = true, features = ["io-util", "net", "rt"] }
 tracing.workspace = true
+# Origin parsing of the trusted-origin checks (WHATWG URL origins).
+url.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

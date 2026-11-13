@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use chatbotx_api::auth::LiveAuthDeps;
 use chatbotx_api::mail::{Mailer, NoMailer, SmtpMailer};
-use chatbotx_api::session::{AuthSettings, AuthState};
+use chatbotx_api::session::{AuthSettings, AuthState, TrustedOriginSettings};
 use chatbotx_db::Db;
 use chatbotx_kv::{Clock, Kv, KvConfig, SystemClock};
 use chatbotx_rt::{KvPresence, NoRevokeRetry, Realtime, RtConfig};
@@ -116,7 +116,8 @@ fn env_or(name: &str, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-/// `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `AUTH_DISABLE_SIGNUP`.
+/// `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `AUTH_DISABLE_SIGNUP`, the trusted origins
+/// (`NEXT_PUBLIC_BROKER_URL`, `NEXT_PUBLIC_BUILDER_URL`, `NEXT_PHASE`, `BETTER_AUTH_TRUSTED_ORIGINS`).
 fn auth_settings() -> AuthSettings {
     AuthSettings {
         secret: env_or("BETTER_AUTH_SECRET", ""),
@@ -124,6 +125,14 @@ fn auth_settings() -> AuthSettings {
             .trim_end_matches('/')
             .to_string(),
         sign_up_disabled: env_or("AUTH_DISABLE_SIGNUP", "false") == "true",
+        trusted_origins: TrustedOriginSettings {
+            broker_url: std::env::var("NEXT_PUBLIC_BROKER_URL")
+                .ok()
+                .filter(|url| !url.is_empty()),
+            builder_url: env_or("NEXT_PUBLIC_BUILDER_URL", ""),
+            next_phase: std::env::var("NEXT_PHASE").ok(),
+        },
+        extra_trusted_origins: std::env::var("BETTER_AUTH_TRUSTED_ORIGINS").ok(),
     }
 }
 
