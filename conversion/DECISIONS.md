@@ -271,3 +271,17 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
 - 2026-11-13 P3.6-D1 item 2 (paymentProviders, orders), orchestrator-delegated, recommended option: deferred after items 3-5 to its own unit. Reasons: (1) the Rust parity server has no outbound HTTP yet (no `parity-upstream` network, DNS or `SSL_CERT_FILE` test CA in `stacks/rust/compose.yml`; decision P1 item 5 plans it) and `crates/business` has no HTTP client; (2) the slice needs Stripe (account, webhook endpoints, Connect OAuth) and PayPal client ports, platform credentials, kv states and the order guard (33 payment-provider tests, ~2,700 lines of order tests); (3) it does not fit one implementer context together with items 3-5, which are self-contained.
 - 2026-11-13 P3.6-D1 (orchestrator): new helper functions appended to a shared test helper (`crates/business/tests/common/mod.rs`, 478ae7eda) in a later slice's stage 1 are allowed: no existing line changed, so the locked tests behave the same. Changing or removing existing helper lines stays forbidden.
 - 2026-11-13 batch D2 (orchestrator, recommended option): parity setups need `POST /v1/flows`, `/v1/contacts`, `/v1/webchats`, `/v1/connections`, `/v1/ecommerce/settings`, and the Rust parity stack has no `parity-upstream` network / DNS / test CA. D2 order: (1) Rust stack upstream network like the original stack; (2) channels + connections + webchats (p1-05); (3) ecommerce settings (p1-08 part); (4) flows (p1-09 flows part); (5) contacts (p1-06). Payment providers + orders become unit P3.6-D1o (needs the upstream network and Stripe/PayPal clients).
+- 2026-11-13 P3.2b slices C2/D2 + untested functions (orchestrator-delegated, recommended option; copied from specs/P3.2b.md by the orchestrator):
+    `contactInbox.findWithContact`, ..) is a `Sql` filter over the unaliased table
+    (`"Contact"` / `"ContactInbox"`), as `build_contact_list_where` / `build_contact_where` give.
+    `with` relations are loaded per row and ordered by id (the TS left them unordered); lists
+    without a TS `orderBy` are ordered by id.
+  - `contactInboxOperationalColumns` (all columns but `sourceIdentityHistory`) returns the full
+    `ContactInbox` row; callers ignore the extra column.
+  - The activity filters kill switch is read once (`LazyLock<Keys>`); tests pass `Keys` to
+    `apply_contact_filter_with_keys` instead of mutating the env.
+  - `appointmentCalendar.listNamesWithPrefix` compares the prefix exactly (`substr`): Postgres
+    `LIKE` is case-sensitive, SQLite `LIKE` is not. `update` / `inbox.updateConnectionMirror`
+    take a `Patch` limited to the TS input keys and always set `updatedAt`.
+  - `findByInboxAndFullName` drops the `md5(..)` index helper (equality on the normalized name
+    only) and picks each contact's row with `row_number()` instead of `array_agg(..)[1]`.
