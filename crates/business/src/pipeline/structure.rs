@@ -7,11 +7,13 @@ use chatbotx_db::repo::models::{PipelineField, PipelineStage};
 use chatbotx_db::repo::partials::pipeline::PIPELINE_LIMITS;
 use chatbotx_db::repo::patch::Patch;
 use chatbotx_db::repo::pipeline::{self as pipeline_repo, PipelineFieldInsert, StripFieldKeyInput};
+use chatbotx_db::repo::pipeline_item::{self as item_repo, MoveStageItemsInput};
 use chatbotx_db::repo::pipeline_stage::{self as stage_repo, PipelineStageInsert};
 use chatbotx_db::rusqlite::Connection;
 use chatbotx_db::rusqlite::types::Value;
 
 use super::access::{PipelineAccessScope, PipelineAction};
+use super::mutation::{ActivityContext, PipelineActor, activity_row_for};
 use super::naming::next_field_position;
 use super::service::require_access_in;
 use crate::errors::{BusinessError, Result};
@@ -324,8 +326,9 @@ pub struct DeleteStageResult {
     pub job_id: Option<String>,
 }
 
-/// `pipelineStageBulkService.deleteStage`. Slice 1: the checks and the empty
-/// stage; a stage with items is refused until the item drain (slice 2).
+/// `pipelineStageBulkService.deleteStage`: the checks, the item drain (moved
+/// or deleted, always in the request: no background job), the row delete and
+/// the position compaction.
 pub async fn delete_stage(
     db: &Db,
     workspace_id: i64,
@@ -333,8 +336,17 @@ pub async fn delete_stage(
     stage_id: i64,
     move_items_to_stage_id: Option<i64>,
     scope: PipelineAccessScope,
+    actor: PipelineActor,
 ) -> Result<DeleteStageResult> {
-    with_structure(db, workspace_id, pipeline_id, scope, move |conn| {
+    tx::write(db, move |tx| {
+        let conn: &Connection = tx;
+        let (_, permissions) = require_access_in(
+            conn,
+            workspace_id,
+            pipeline_id,
+            &scope,
+            PipelineAction::ManageSettings,
+        )?;
         let stages = stage_repo::list_by_pipeline(conn, workspace_id, pipeline_id)?;
         let stage = stages
             .iter()
@@ -386,13 +398,22 @@ pub async fn delete_stage(
             pipeline_id,
             stage_id,
         )?;
-        if count > 0 {
-            return Err(BusinessError::exception(
-                "Deleting a stage that holds items is not ported yet",
-                "businessError",
-                400,
-            ));
+        let needed = if move_items_to_stage_id.is_some() {
+            PipelineAction::Edit
+        } else {
+            PipelineAction::Delete
+        };
+        if count > 0 && !super::access::permits_pipeline_action(&permissions, needed) {
+            return Err(super::service::forbidden());
         }
+        drain_stage(
+            conn,
+            workspace_id,
+            pipeline_id,
+            stage_id,
+            move_items_to_stage_id,
+            &actor,
+        )?;
         stage_repo::delete(conn, workspace_id, pipeline_id, stage_id)?;
         let remaining: Vec<i64> = stage_repo::list_by_pipeline(conn, workspace_id, pipeline_id)?
             .iter()
@@ -405,4 +426,68 @@ pub async fn delete_stage(
         })
     })
     .await
+}
+
+/// `drain`: moves (with a `stageChanged` row each) or deletes (with a
+/// `deleted` row each) the stage's items in batches of `bulkSyncItems`.
+fn drain_stage(
+    conn: &Connection,
+    workspace_id: i64,
+    pipeline_id: i64,
+    stage_id: i64,
+    move_to: Option<i64>,
+    actor: &PipelineActor,
+) -> Result<()> {
+    let limit = PIPELINE_LIMITS.bulk_sync_items as i64;
+    loop {
+        let now = chatbotx_db::repo::now_ms();
+        let rows = match move_to {
+            Some(to_stage_id) => item_repo::move_stage_items_batch(
+                conn,
+                &MoveStageItemsInput {
+                    workspace_id,
+                    pipeline_id,
+                    from_stage_id: stage_id,
+                    to_stage_id,
+                    limit,
+                    now,
+                },
+            )?,
+            None => item_repo::delete_stage_items_batch(
+                conn,
+                workspace_id,
+                pipeline_id,
+                stage_id,
+                limit,
+            )?,
+        };
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let activity: Vec<_> = rows
+            .iter()
+            .map(|item| {
+                let context = ActivityContext {
+                    item,
+                    actor,
+                    now,
+                    from_pipeline_id: None,
+                };
+                let mut row = activity_row_for(
+                    if move_to.is_some() {
+                        "stageChanged"
+                    } else {
+                        "deleted"
+                    },
+                    &context,
+                );
+                row.from_stage_id = Some(stage_id);
+                if move_to.is_some() {
+                    row.to_stage_id = Some(item.stage_id);
+                }
+                row
+            })
+            .collect();
+        chatbotx_db::repo::pipeline_activity::insert_many(conn, &activity)?;
+    }
 }

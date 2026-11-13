@@ -1,8 +1,14 @@
 //! `features/pipelines/api/public.ts` + `public-items.ts`: `pipelines.*`.
 //! A workspace token acts with `PIPELINE_TOKEN_SCOPE` (bypasses the ACL).
 
+use std::collections::BTreeMap;
+
 use chatbotx_business::pipeline::PipelineAccessScope;
 use chatbotx_business::pipeline::currency::PipelineView;
+use chatbotx_business::pipeline::item::{
+    self, CreateItem, ItemFields, ItemView, TransferItem, UpdateItem,
+};
+use chatbotx_business::pipeline::mutation::{PipelineActor, major_units};
 use chatbotx_business::pipeline::service::{self, CreatePipeline, UpdatePipeline, stored_settings};
 use chatbotx_business::pipeline::settings::{
     CardElementsPatch, PipelineSettingsPatch, StatusLabelsPatch, VisibleFeaturesPatch,
@@ -12,12 +18,14 @@ use chatbotx_business::pipeline::structure::{
 };
 use chatbotx_db::repo::models::{PipelineField, PipelineStage};
 use chatbotx_db::repo::partials::pipeline::{PIPELINE_REFERENCE_NAME_MAX, PipelineType};
+use chatbotx_db::repo::pipeline_item_content::AttachmentWithFile;
 use serde_json::{Value, json};
 
 use super::custom_fields::CUSTOM_FIELD_TYPES;
 use super::input::{Input, Num, Seg, Str, child, key};
 use super::{
     ApiState, Call, ErrorMap, FINDING, LISTING, Reply, business_error, date, id, json, no_content,
+    number, opt_date, opt_id,
 };
 
 /// `PIPELINE_TOKEN_SCOPE`.
@@ -481,6 +489,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 stage_id.unwrap_or_default(),
                 move_to,
                 TOKEN,
+                token_actor(),
             )
             .await
             .map_err(mutating)?;
@@ -589,7 +598,373 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         | "pipelines.updateItem"
         | "pipelines.moveItem"
         | "pipelines.transferItem"
-        | "pipelines.deleteItem" => todo!("P3.6-D1p"),
+        | "pipelines.deleteItem" => handle_item(state, route_id, call).await,
+        _ => Err(super::internal_error(route_id)),
+    }
+}
+
+// --- items ----------------------------------------------------------------
+
+/// `PIPELINE_LIMITS.itemValue` (major units).
+const ITEM_VALUE_MAX: f64 = 999_999_999_999_999.0;
+const TITLE: Str = Str {
+    pattern: Some(no_nul),
+    ..Str::trimmed(1, 200)
+};
+const ITEM_DESCRIPTION: Str = Str {
+    pattern: Some(no_nul),
+    ..Str::max(5000)
+};
+const IDEMPOTENCY_KEY: Str = Str {
+    trim: false,
+    min: Some(1),
+    max: Some(128),
+    pattern: Some(no_nul),
+};
+const FIELD_VALUE: Str = Str {
+    pattern: Some(no_nul),
+    ..Str::max(MAX_FIELD_VALUE_LENGTH)
+};
+/// `MAX_FIELD_VALUES` / `MAX_FIELD_VALUE_LENGTH`.
+const MAX_FIELD_VALUES: usize = 100;
+const MAX_FIELD_VALUE_LENGTH: usize = 2000;
+const PRIORITIES: &[&str] = &["low", "medium", "high"];
+const STATUSES: &[&str] = &["open", "won", "lost"];
+/// `boundedDate`: 1900-01-01 .. 2200-01-01.
+const DATE_MIN: i64 = -2_208_988_800_000;
+const DATE_MAX: i64 = 7_258_118_400_000;
+
+/// Major units -> the stored x 10,000 integer (`storedValue`).
+fn stored_value(value: f64) -> i64 {
+    (value * 10_000.0).round() as i64
+}
+
+fn bounded_date_at(input: &mut Input, name: &str) -> Option<Option<i64>> {
+    let path = key(name);
+    match input.get(name).cloned() {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(value) => {
+            let text = input.string_at(&path, Some(&value), Str::default(), true)?;
+            match chatbotx_db::repo::parse_iso(&text) {
+                Some(ms) if (DATE_MIN..DATE_MAX).contains(&ms) => Some(Some(ms)),
+                Some(_) => {
+                    input.issue(&path, "custom", "Date is out of range");
+                    None
+                }
+                None => {
+                    input.issue(&path, "invalid_format", "Invalid ISO datetime");
+                    None
+                }
+            }
+        }
+    }
+}
+
+fn opt_id_list(input: &mut Input, name: &str, max: usize) -> Option<Vec<i64>> {
+    if !input.has(name) {
+        return None;
+    }
+    let path = key(name);
+    let Some(Value::Array(items)) = input.get(name).cloned() else {
+        input.issue(&path, "invalid_type", "Invalid input: expected array");
+        return None;
+    };
+    if items.len() > max {
+        input.issue(
+            &path,
+            "too_big",
+            &format!("Too big: expected array to have <={max} items"),
+        );
+        return None;
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let mut item_path = path.clone();
+        item_path.push(Seg::Index(index));
+        out.push(input.id_at(&item_path, Some(item), true));
+    }
+    out.into_iter().collect()
+}
+
+fn field_values_at(input: &mut Input) -> Option<BTreeMap<String, Option<String>>> {
+    let path = key("fieldValues");
+    let value = input.get("fieldValues").cloned()?;
+    let Value::Object(map) = value else {
+        input.issue(&path, "invalid_type", "Invalid input: expected record");
+        return None;
+    };
+    let mut out = BTreeMap::new();
+    let mut ok = true;
+    for (field_id, raw) in &map {
+        let key_path = child(&path, field_id);
+        if !super::input::is_bigint_id(field_id) {
+            input.issue(&key_path, "invalid_key", "Invalid key in record");
+            ok = false;
+            continue;
+        }
+        match raw {
+            Value::Null => {
+                out.insert(field_id.clone(), None);
+            }
+            other => match input.string_at(&key_path, Some(other), FIELD_VALUE, true) {
+                Some(text) => {
+                    out.insert(field_id.clone(), Some(text));
+                }
+                None => ok = false,
+            },
+        }
+    }
+    if map.len() > MAX_FIELD_VALUES {
+        input.issue(&path, "custom", "Too many field values");
+        ok = false;
+    }
+    ok.then_some(out)
+}
+
+/// `itemWriteFields` (+ `title`).
+fn item_fields(input: &mut Input, title_required: bool) -> ItemFields {
+    let title = if title_required {
+        input.string("title", TITLE)
+    } else {
+        input.opt_string("title", TITLE)
+    };
+    let value = match input.get("value").cloned() {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(v) => input
+            .number_at(
+                &key("value"),
+                Some(&v),
+                Num::range(0.0, ITEM_VALUE_MAX),
+                true,
+            )
+            .map(|n| Some(stored_value(n))),
+    };
+    let priority = input.enum_at(
+        &key("priority"),
+        input.get("priority").cloned().as_ref(),
+        PRIORITIES,
+        false,
+    );
+    let status = input.enum_at(
+        &key("status"),
+        input.get("status").cloned().as_ref(),
+        STATUSES,
+        false,
+    );
+    let stage_id = match input.get("stageId").cloned() {
+        None => None,
+        Some(v) => input.id_at(&key("stageId"), Some(&v), true),
+    };
+    let timezone = input.opt_string("fieldValuesTimezone", Str::max(64));
+    if let Some(zone) = &timezone
+        && !chatbotx_core::utils::tz::is_intl_time_zone(zone)
+    {
+        input.issue(
+            &key("fieldValuesTimezone"),
+            "custom",
+            "Invalid IANA time zone",
+        );
+    }
+    ItemFields {
+        title,
+        description: input.nullish_string("description", ITEM_DESCRIPTION),
+        value,
+        status,
+        priority,
+        due_date: bounded_date_at(input, "dueDate"),
+        stage_id,
+        field_values: field_values_at(input),
+        field_values_timezone: timezone,
+        assignee_member_ids: opt_id_list(input, "assigneeMemberIds", 20),
+        assignee_inbox_team_ids: opt_id_list(input, "assigneeInboxTeamIds", 20),
+    }
+}
+
+/// `tokenActor`.
+fn token_actor() -> PipelineActor {
+    PipelineActor {
+        kind: "workspaceToken".to_string(),
+        user_id: None,
+        source_id: None,
+    }
+}
+
+fn money(value: Option<i64>) -> Value {
+    value.map_or(Value::Null, |v| number(major_units(v)))
+}
+
+/// `toPublicItem`.
+pub fn item_json(view: &ItemView) -> Value {
+    let item = &view.item;
+    json!({
+        "id": id(item.id),
+        "pipelineId": id(item.pipeline_id),
+        "stageId": id(item.stage_id),
+        "contactId": id(item.contact_id),
+        "contactName": view.contact.as_ref().and_then(|c| c.full_name.clone()),
+        "number": item.number,
+        "title": item.title,
+        "description": item.description,
+        "value": money(item.value),
+        "status": item.status,
+        "priority": item.priority,
+        "dueDate": opt_date(item.due_date),
+        "fieldValues": item.field_values.0,
+        "assigneeMemberIds": view.assignees.workspace_member_ids.iter().map(|v| id(*v)).collect::<Vec<_>>(),
+        "assigneeInboxTeamIds": view.assignees.inbox_team_ids.iter().map(|v| id(*v)).collect::<Vec<_>>(),
+        "commentCount": view.comment_count,
+        "createdById": opt_id(item.created_by_id),
+        "stageEnteredAt": date(item.stage_entered_at),
+        "closedAt": opt_date(item.closed_at),
+        "lastCommentAt": opt_date(item.last_comment_at),
+        "createdAt": date(item.created_at),
+        "updatedAt": date(item.updated_at),
+    })
+}
+
+/// `toPublicAttachment` (attachments whose file is gone are skipped).
+fn attachment_json(row: &AttachmentWithFile) -> Option<Value> {
+    let file = row.media_library_file.as_ref()?;
+    Some(json!({
+        "mediaLibraryFileId": id(file.id),
+        "name": file.name,
+        "mimeType": file.mime_type,
+        "size": file.size,
+        "path": file.path,
+    }))
+}
+
+/// `readItem`: the item as `getItem` shows it, without attachments.
+async fn read_item(state: &ApiState, ws: i64, pipeline_id: i64, item_id: i64) -> Reply {
+    let detail = item::get_item(&state.db, ws, pipeline_id, item_id, TOKEN)
+        .await
+        .map_err(|e| business_error(e, MUTATING_PIPELINE))?;
+    ok(200, item_json(&detail.view))
+}
+
+async fn handle_item(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
+    let db = &state.db;
+    let ws = call.workspace_id;
+    let mutating = |e| business_error(e, MUTATING_PIPELINE);
+    match route_id {
+        "pipelines.createItem" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id");
+            let contact_id = input.id("contactId");
+            let fields = item_fields(&mut input, true);
+            let files = opt_id_list(&mut input, "mediaLibraryFileIds", 20);
+            let idempotency_key = input.opt_string("idempotencyKey", IDEMPOTENCY_KEY);
+            input.finish()?;
+            let pipeline_id = pipeline_id.unwrap_or_default();
+            let created = item::create(
+                db,
+                CreateItem {
+                    workspace_id: ws,
+                    pipeline_id,
+                    contact_id: contact_id.unwrap_or_default(),
+                    scope: TOKEN,
+                    actor: token_actor(),
+                    fields,
+                    media_library_file_ids: files.unwrap_or_default(),
+                    idempotency_key,
+                },
+            )
+            .await
+            .map_err(mutating)?;
+            let mut out = read_item(state, ws, pipeline_id, created.value.id).await?;
+            *out.status_mut() = axum::http::StatusCode::CREATED;
+            Ok(out)
+        }
+        "pipelines.getItem" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let pipeline_id = input.id("id");
+            let item_id = input.id("itemId");
+            input.finish()?;
+            let detail = item::get_item(
+                db,
+                ws,
+                pipeline_id.unwrap_or_default(),
+                item_id.unwrap_or_default(),
+                TOKEN,
+            )
+            .await
+            .map_err(|e| business_error(e, FINDING))?;
+            let mut out = item_json(&detail.view);
+            out["attachments"] = Value::Array(
+                detail
+                    .attachments
+                    .iter()
+                    .filter_map(attachment_json)
+                    .collect(),
+            );
+            ok(200, out)
+        }
+        "pipelines.updateItem" | "pipelines.moveItem" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id").unwrap_or_default();
+            let item_id = input.id("itemId").unwrap_or_default();
+            let fields = if route_id == "pipelines.moveItem" {
+                ItemFields {
+                    stage_id: input.id("stageId"),
+                    ..ItemFields::default()
+                }
+            } else {
+                item_fields(&mut input, false)
+            };
+            input.finish()?;
+            item::update(
+                db,
+                UpdateItem {
+                    workspace_id: ws,
+                    pipeline_id,
+                    item_id,
+                    scope: TOKEN,
+                    actor: token_actor(),
+                    fields,
+                },
+            )
+            .await
+            .map_err(mutating)?;
+            read_item(state, ws, pipeline_id, item_id).await
+        }
+        "pipelines.transferItem" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let pipeline_id = input.id("id").unwrap_or_default();
+            let item_id = input.id("itemId").unwrap_or_default();
+            let destination = input.id("destinationPipelineId").unwrap_or_default();
+            let destination_stage_id = match input.get("destinationStageId").cloned() {
+                None => None,
+                Some(v) => input.id_at(&key("destinationStageId"), Some(&v), true),
+            };
+            input.finish()?;
+            let moved = item::transfer(
+                db,
+                TransferItem {
+                    workspace_id: ws,
+                    pipeline_id,
+                    item_id,
+                    destination_pipeline_id: destination,
+                    destination_stage_id,
+                    scope: TOKEN,
+                    actor: token_actor(),
+                },
+            )
+            .await
+            .map_err(mutating)?;
+            read_item(state, ws, moved.value.pipeline_id, moved.value.id).await
+        }
+        "pipelines.deleteItem" => {
+            let mut input = delete_input(&call);
+            let pipeline_id = input.id("id").unwrap_or_default();
+            let item_id = input.id("itemId").unwrap_or_default();
+            input.finish()?;
+            item::delete(db, ws, pipeline_id, item_id, TOKEN, token_actor())
+                .await
+                .map_err(mutating)?;
+            Ok(no_content())
+        }
         _ => Err(super::internal_error(route_id)),
     }
 }
