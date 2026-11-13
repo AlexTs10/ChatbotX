@@ -5,6 +5,7 @@
 //! summary-only list rows (the list row types have no payload / token / config fields).
 //! The `integrationWhatsappRepository` and `contactInboxRepository` cases of the file are
 //! ported here too. "Now" is the fixed [`NOW`].
+#![allow(clippy::manual_async_fn)] // P3.2b orchestrator: style lint in locked ported test
 
 mod common;
 #[macro_use]

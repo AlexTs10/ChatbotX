@@ -1,5 +1,6 @@
 //! Port of `packages/database/__tests__/integration/flow-current-version-nodes.test.ts`
 //! (P3.2b). Real SQL on a migrated temp file, one fresh file per test.
+#![allow(clippy::manual_async_fn)] // P3.2b orchestrator: style lint in locked ported test
 
 mod common;
 #[macro_use]

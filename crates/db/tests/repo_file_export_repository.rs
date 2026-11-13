@@ -4,6 +4,7 @@
 //! scope, the order, the `limit + 1` and the `(createdAt, id)` keyset. `createdAt` holds
 //! unix ms, so `createdAtCursor` is the `toISOString()` text (no microseconds); a cursor
 //! with microseconds is read at ms precision.
+#![allow(clippy::manual_async_fn)] // P3.2b orchestrator: style lint in locked ported test
 
 mod common;
 #[macro_use]

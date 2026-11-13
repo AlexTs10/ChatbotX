@@ -2,6 +2,7 @@
 //! The TS mocks `db` and checks the `eq(id)` / `eq(workspaceId)` calls; here the queries
 //! run on a migrated temp file (adapted): file 81 of workspace 2001 and file 91 of another
 //! workspace 2002, so both fences show in the rows.
+#![allow(clippy::manual_async_fn)] // P3.2b orchestrator: style lint in locked ported test
 
 mod common;
 #[macro_use]

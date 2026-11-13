@@ -3,6 +3,7 @@
 //! here the queries run on a migrated temp file (adapted): flows of workspace 2001 and of
 //! another workspace 2002, with draft, latest and older versions, so the filters show in
 //! the rows.
+#![allow(clippy::manual_async_fn)] // P3.2b orchestrator: style lint in locked ported test
 
 mod common;
 #[macro_use]
