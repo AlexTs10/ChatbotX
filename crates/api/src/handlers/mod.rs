@@ -2,6 +2,7 @@
 //! one module per builder router. [`dispatch`] runs the handler of a route after
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
+pub mod analytics;
 pub mod channels;
 pub mod connections;
 pub mod contact_notes;
@@ -227,6 +228,8 @@ pub async fn dispatch_as(
 ) -> Option<Response> {
     let reply = if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
+    } else if analytics::ROUTES.contains(&route_id) {
+        analytics::handle(state, route_id, call).await
     } else if contact_notes::ROUTES.contains(&route_id) {
         contact_notes::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {

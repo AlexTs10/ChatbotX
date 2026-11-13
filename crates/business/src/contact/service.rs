@@ -116,9 +116,81 @@ pub async fn find_public_contact_or_fail(
 /// `blockAndRecord`: sets `blockedAt` to `now_ms`.
 pub async fn block_and_record(db: &Db, workspace_id: i64, id: i64, now_ms: i64) -> Result<Contact> {
     tx::write(db, move |tx| {
-        set_blocked_at(tx, workspace_id, id, Some(now_ms))
+        let contact = set_blocked_at(tx, workspace_id, id, Some(now_ms))?;
+        record_blocked_event(tx, workspace_id, &contact, now_ms)?;
+        Ok(contact)
     })
     .await
+}
+
+/// `(inboxId, channel, source, sourceId)` of one analytics event row.
+type Attribution = (Option<i64>, Option<String>, Option<String>, Option<String>);
+
+/// The `contact:blocked` dashboard event, written in the same transaction
+/// (the original emits it on the event bus; its consumer writes one
+/// `"AnalyticsContactEvent"` row per contact-inbox attribution, or one
+/// unattributed row).
+fn record_blocked_event(
+    tx: &Connection,
+    workspace_id: i64,
+    contact: &Contact,
+    now_ms: i64,
+) -> Result<()> {
+    let occurred_at = contact.blocked_at.unwrap_or(now_ms);
+    let attributions: Vec<Attribution> =
+        chatbotx_db::repo::contact_inbox::list_analytics_attribution_by_contact(
+            tx,
+            workspace_id,
+            contact.id,
+        )
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| {
+                    (
+                        Some(row.inbox_id),
+                        Some(row.channel),
+                        Some(row.source),
+                        Some(row.source_id),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let attributions = if attributions.is_empty() {
+        vec![(None, None, None, None)]
+    } else {
+        attributions
+    };
+    let metadata = serde_json::json!({
+        "triggerContext": {
+            "triggerSource": "api",
+            "triggerHandler": "blockContactAction",
+            "triggerType": "contact_blocked",
+            "origin": "manual",
+        }
+    })
+    .to_string();
+    for (inbox_id, channel, source, source_id) in attributions {
+        tx.execute(
+            r#"INSERT INTO "AnalyticsContactEvent" ("eventId", "workspaceId", "contactId", "eventType",
+                   "occurredAt", "source", "sourceId", "channel", "inboxId", "country", "metadata")
+               VALUES (?1, ?2, ?3, 'contact_blocked', ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+            params![
+                chatbotx_db::repo::new_id().to_string(),
+                workspace_id,
+                contact.id,
+                occurred_at,
+                source,
+                source_id,
+                channel,
+                inbox_id,
+                contact.country,
+                metadata
+            ],
+        )
+        .map_err(|error| BusinessError::Repo(error.into()))?;
+    }
+    Ok(())
 }
 
 /// `unblockAndRecord`: clears `blockedAt`.
