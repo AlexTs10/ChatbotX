@@ -1,0 +1,295 @@
+//! `features/polls/api/public.ts` (+ `lib/operations.ts`, `lib/serialize.ts`,
+//! `lib/poll-links.ts`): `polls.*`.
+
+use chatbotx_business::inbox::links::list_connected_link_inboxes;
+use chatbotx_business::poll::service::{
+    self, CreatePoll, ListPolls, PollWithVoteCounts, UpdatePoll, UpdatePollCandidate,
+};
+use chatbotx_business::poll::{build_poll_links, get_poll_state};
+use chatbotx_business::tx;
+use chatbotx_db::repo::models::Poll;
+use chatbotx_db::repo::now_ms;
+use chatbotx_db::repo::poll::PollCandidateInput;
+use serde_json::{Value, json};
+
+use super::input::{Input, Num, Path, Seg, Str, child, key};
+use super::{ApiState, Call, Reply, business_error, date, id, json, no_content, number, opt_id};
+
+/// The routes of this module.
+pub const ROUTES: &[&str] = &[
+    "polls.list",
+    "polls.get",
+    "polls.create",
+    "polls.update",
+    "polls.delete",
+    "polls.bulkDelete",
+    "polls.getLinks",
+    "polls.getAnalytics",
+];
+
+const POLL_NAME_MAX: usize = 80;
+const POLL_CANDIDATE_NAME_MAX: usize = 60;
+const POLL_CANDIDATE_DESCRIPTION_MAX: usize = 500;
+/// `maxLimit` of `publicListRequest`.
+const PUBLIC_LIST_MAX_PER_PAGE: f64 = 50.0;
+const POLL_FIELDS: &[&str] = &[
+    "name",
+    "imageUrl",
+    "startsAt",
+    "endsAt",
+    "afterVoteFlowId",
+    "candidates",
+];
+
+/// `toBase` of `lib/serialize.ts`.
+fn poll_base(poll: &Poll, now: i64) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
+    out.insert("id".into(), id(poll.id));
+    out.insert("name".into(), json!(poll.name));
+    out.insert("imageUrl".into(), json!(poll.image_url));
+    out.insert("startsAt".into(), date(poll.starts_at));
+    out.insert("endsAt".into(), date(poll.ends_at));
+    out.insert("afterVoteFlowId".into(), opt_id(poll.after_vote_flow_id));
+    out.insert(
+        "state".into(),
+        json!(get_poll_state(poll.starts_at, poll.ends_at, now).as_str()),
+    );
+    out.insert("createdAt".into(), date(poll.created_at));
+    out.insert("updatedAt".into(), date(poll.updated_at));
+    out
+}
+
+/// `toPollResource`.
+fn poll_json(poll: &PollWithVoteCounts) -> Value {
+    let mut out = poll_base(&poll.poll, now_ms());
+    out.insert(
+        "candidates".into(),
+        Value::Array(
+            poll.candidates
+                .iter()
+                .map(|c| {
+                    json!({
+                        "id": id(c.candidate.id),
+                        "position": c.candidate.position,
+                        "name": c.candidate.name,
+                        "description": c.candidate.description,
+                        "imageUrl": c.candidate.image_url,
+                        "votesCount": c.votes_count,
+                    })
+                })
+                .collect(),
+        ),
+    );
+    Value::Object(out)
+}
+
+/// `z.iso.datetime({ offset: true })`: `YYYY-MM-DDTHH:MM[:SS[.s+]](Z|±HH[[:]MM])`.
+fn is_iso_datetime(text: &str) -> bool {
+    let b = text.as_bytes();
+    let digits = |range: std::ops::Range<usize>| {
+        b.get(range)
+            .is_some_and(|s| s.iter().all(u8::is_ascii_digit))
+    };
+    if b.len() < 17
+        || !digits(0..4)
+        || b[4] != b'-'
+        || !digits(5..7)
+        || b[7] != b'-'
+        || !digits(8..10)
+        || b[10] != b'T'
+        || !digits(11..13)
+        || b[13] != b':'
+        || !digits(14..16)
+    {
+        return false;
+    }
+    let mut i = 16;
+    if b.get(i) == Some(&b':') {
+        if !digits(i + 1..i + 3) {
+            return false;
+        }
+        i += 3;
+        if b.get(i) == Some(&b'.') {
+            let start = i + 1;
+            i = start;
+            while b.get(i).is_some_and(u8::is_ascii_digit) {
+                i += 1;
+            }
+            if i == start {
+                return false;
+            }
+        }
+    }
+    match b.get(i) {
+        Some(b'Z') => i + 1 == b.len(),
+        Some(b'+' | b'-') => {
+            let rest = &text[i + 1..];
+            let r = rest.as_bytes();
+            let all_digits = |s: &[u8]| s.iter().all(u8::is_ascii_digit);
+            match r.len() {
+                2 | 4 => all_digits(r),
+                5 => r[2] == b':' && all_digits(&r[..2]) && all_digits(&r[3..]),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+fn datetime_at(input: &mut Input, name: &str, required: bool) -> Option<i64> {
+    let value = input.get(name).cloned();
+    let text = input.string_at(&key(name), value.as_ref(), Str::default(), required)?;
+    let parsed = if is_iso_datetime(&text) {
+        chatbotx_core::js::parse_date(&text)
+    } else {
+        None
+    };
+    if parsed.is_none() {
+        input.issue(&key(name), "invalid_format", "Invalid ISO datetime");
+    }
+    parsed
+}
+
+fn url_at(input: &mut Input, path: &Path, value: Option<&Value>, required: bool) -> Option<String> {
+    let text = input.string_at(path, value, Str::default(), required)?;
+    if url::Url::parse(&text).is_err() {
+        input.issue(path, "invalid_format", "Invalid URL");
+        return None;
+    }
+    Some(text)
+}
+
+/// `pollCandidateRequest` items of `candidates`.
+fn candidates_at(input: &mut Input, required: bool) -> Option<Vec<UpdatePollCandidate>> {
+    let path = key("candidates");
+    let items = match input.get("candidates").cloned() {
+        None => {
+            if required {
+                input.issue(
+                    &path,
+                    "invalid_type",
+                    "Invalid input: expected array, received undefined",
+                );
+            }
+            return None;
+        }
+        Some(Value::Array(items)) => items,
+        Some(_) => {
+            input.issue(&path, "invalid_type", "Invalid input: expected array");
+            return None;
+        }
+    };
+    let mut out = Vec::new();
+    let mut ok = true;
+    for (index, item) in items.iter().enumerate() {
+        let mut at = path.clone();
+        at.push(Seg::Index(index));
+        let Some(obj) = item.as_object() else {
+            input.issue(&at, "invalid_type", "Invalid input: expected object");
+            ok = false;
+            continue;
+        };
+        let candidate_id = match obj.get("id") {
+            None => None,
+            Some(value) => match input.id_at(&child(&at, "id"), Some(value), true) {
+                Some(v) => Some(v),
+                None => {
+                    ok = false;
+                    None
+                }
+            },
+        };
+        let name = input.string_at(
+            &child(&at, "name"),
+            obj.get("name"),
+            Str::trimmed(1, POLL_CANDIDATE_NAME_MAX),
+            true,
+        );
+        let description = match obj.get("description") {
+            None | Some(Value::Null) => None,
+            Some(value) => input.string_at(
+                &child(&at, "description"),
+                Some(value),
+                Str {
+                    trim: true,
+                    ..Str::max(POLL_CANDIDATE_DESCRIPTION_MAX)
+                },
+                true,
+            ),
+        };
+        let image_url = match obj.get("imageUrl") {
+            None | Some(Value::Null) => None,
+            Some(value) => url_at(input, &child(&at, "imageUrl"), Some(value), true),
+        };
+        match name {
+            Some(name) if ok => out.push(UpdatePollCandidate {
+                id: candidate_id,
+                candidate: PollCandidateInput {
+                    name,
+                    description,
+                    image_url,
+                },
+            }),
+            _ => ok = false,
+        }
+    }
+    ok.then_some(out)
+}
+
+/// The fields of `pollFormRequest` (`partial` = `pollPatchRequest`).
+struct PollForm {
+    name: Option<String>,
+    image_url: Option<String>,
+    starts_at: Option<i64>,
+    ends_at: Option<i64>,
+    after_vote_flow_id: Option<Option<i64>>,
+    candidates: Option<Vec<UpdatePollCandidate>>,
+}
+
+fn poll_form(input: &mut Input, partial: bool) -> PollForm {
+    let required = !partial;
+    let name = {
+        let value = input.get("name").cloned();
+        input.string_at(
+            &key("name"),
+            value.as_ref(),
+            Str::trimmed(1, POLL_NAME_MAX),
+            required,
+        )
+    };
+    let image_url = {
+        let value = input.get("imageUrl").cloned();
+        url_at(input, &key("imageUrl"), value.as_ref(), required)
+    };
+    let starts_at = datetime_at(input, "startsAt", required);
+    let ends_at = datetime_at(input, "endsAt", required);
+    let after_vote_flow_id = input.nullish_id("afterVoteFlowId");
+    let candidates = candidates_at(input, required);
+    PollForm {
+        name,
+        image_url,
+        starts_at,
+        ends_at,
+        after_vote_flow_id,
+        candidates,
+    }
+}
+
+/// Runs one of [`ROUTES`].
+pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
+    todo!("P3.6-D1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_iso_datetime;
+
+    #[test]
+    fn iso_datetime_with_offset() {
+        assert!(is_iso_datetime("2026-01-01T00:00:00+02:00"));
+        assert!(is_iso_datetime("2099-01-01T00:00:00.000Z"));
+        assert!(is_iso_datetime("2026-01-01T00:00Z"));
+        assert!(!is_iso_datetime("2026-01-01"));
+        assert!(!is_iso_datetime("2026-01-01T00:00:00"));
+    }
+}

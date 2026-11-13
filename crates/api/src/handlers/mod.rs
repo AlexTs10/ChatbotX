@@ -4,6 +4,7 @@
 
 pub mod input;
 pub mod places;
+pub mod polls;
 
 use std::sync::Arc;
 
@@ -147,6 +148,8 @@ pub fn internal_error(cause: &str) -> OrpcError {
 pub async fn dispatch(state: &ApiState, route_id: &str, call: Call<'_>) -> Option<Response> {
     let reply = if places::ROUTES.contains(&route_id) {
         places::handle(state, route_id, call).await
+    } else if polls::ROUTES.contains(&route_id) {
+        polls::handle(state, route_id, call).await
     } else {
         return None;
     };

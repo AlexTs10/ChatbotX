@@ -4,7 +4,10 @@
 //! original JSON shapes.
 
 pub mod errors;
+pub mod inbox;
 pub mod place_near_me;
+pub mod poll;
+pub mod referral;
 pub mod tx;
 
 pub use errors::{BusinessError, Result};
