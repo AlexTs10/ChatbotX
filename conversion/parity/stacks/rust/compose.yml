@@ -6,6 +6,11 @@
 # The SQLite database lives in the `rust-data` volume; the parity runner
 # mounts the same volume and writes fixture rows with `node:sqlite`
 # (stacks/rust/fixtures.ts).
+#
+# Like the original stack (DECISIONS P1 item 5), the server joins the
+# `parity-upstream` network, resolves DNS through the fake upstream
+# (`dns: [1.1.1.1]`) and trusts its test CA (`SSL_CERT_FILE`, read by the
+# rustls native root store), so every third-party name reaches the fake.
 
 services:
 
@@ -14,6 +19,10 @@ services:
     init: true
     env_file:
       - ./stacks/rust/rust.env
+    environment:
+      SSL_CERT_FILE: /parity-tls/ca.crt
+    dns:
+      - 1.1.1.1
     entrypoint: ["/usr/local/bin/chatbotx-server"]
     volumes:
       - ../../target/release/chatbotx-server:/usr/local/bin/chatbotx-server:ro
@@ -21,6 +30,10 @@ services:
       - parity-tls:/parity-tls:ro
     networks:
       - parity-internal
+      - parity-upstream
+    depends_on:
+      fake-upstream:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 1s
