@@ -183,3 +183,49 @@ pub fn event_values(
 pub fn event_options() -> serde_json::Value {
     serde_json::from_str(GOOGLE_ADS_EVENT_OPTIONS).expect("options")
 }
+
+/// Inserts one `FacebookMarketingMessage` of `workspace_id` (`campaignId` = `meta-<id>`,
+/// ad account `act_1`, page `page-1`, USD daily budget 100, content `{"v":0}`) with
+/// `status`, then applies `set` (an SQL SET list, empty for none).
+pub async fn put_campaign(db: &Db, id: i64, workspace_id: i64, status: &str, set: &str) {
+    let mut sql = format!(
+        r#"INSERT INTO "FacebookMarketingMessage" ("id", "workspaceId", "name", "pageId", "adAccountId", "currency", "currencyOffset", "budgetType", "budgetMinorUnits", "content", "campaignId", "status") VALUES ({id}, {workspace_id}, 'c{id}', 'page-1', 'act_1', 'USD', 100, 'daily', 100, '{{"v":0}}', 'meta-{id}', '{status}');"#
+    );
+    if !set.is_empty() {
+        sql.push_str(&format!(
+            r#"UPDATE "FacebookMarketingMessage" SET {set} WHERE "id" = {id};"#
+        ));
+    }
+    exec(db, sql).await;
+}
+
+/// Inserts one `FacebookMarketingMessageRecipient` of `campaign_row_id` (workspace `WS`,
+/// `subscriptionToken` = `tok-<id>`) with `status`, then applies `set`.
+pub async fn put_recipient(db: &Db, id: i64, campaign_row_id: i64, status: &str, set: &str) {
+    let mut sql = format!(
+        r#"INSERT INTO "FacebookMarketingMessageRecipient" ("id", "workspaceId", "campaignRowId", "subscriptionToken", "status") VALUES ({id}, {WS}, {campaign_row_id}, 'tok-{id}', '{status}');"#
+    );
+    if !set.is_empty() {
+        sql.push_str(&format!(
+            r#"UPDATE "FacebookMarketingMessageRecipient" SET {set} WHERE "id" = {id};"#
+        ));
+    }
+    exec(db, sql).await;
+}
+
+/// The stored `FacebookMarketingMessage` `id`.
+pub async fn campaign(db: &Db, id: i64) -> chatbotx_db::repo::models::FacebookMarketingMessage {
+    read(db, move |c| repo::find_one(c, "\"id\" = ?1", &[&id]))
+        .await
+        .expect("campaign row")
+}
+
+/// The stored `FacebookMarketingMessageRecipient` `id`.
+pub async fn recipient(
+    db: &Db,
+    id: i64,
+) -> chatbotx_db::repo::models::FacebookMarketingMessageRecipient {
+    read(db, move |c| repo::find_one(c, "\"id\" = ?1", &[&id]))
+        .await
+        .expect("recipient row")
+}
