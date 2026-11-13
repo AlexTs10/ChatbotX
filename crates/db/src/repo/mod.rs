@@ -526,6 +526,7 @@ pub mod broadcast;
 pub mod broadcast_purge;
 pub mod broadcast_recurrence;
 pub mod chunked_purge;
+pub mod coexist_sync_run;
 pub mod comment_automation_event;
 pub mod connect_session;
 pub mod connection;
