@@ -1,6 +1,7 @@
 //! `apps/builder/src/features/tags/api/public.ts` (`tagsPublicRouter`) and
 //! the tag routes of `features/contacts/api/public/tags.ts`.
 
+use chatbotx_business::events::trigger;
 use chatbotx_business::tag::{self as service, ListTags};
 use chatbotx_db::repo::SortItem;
 use chatbotx_db::repo::models::Tag;
@@ -246,14 +247,21 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             input.finish()?;
             let contact_id = super::contacts::resolve(state, &call, MUTATING).await?;
             let ids = ids.unwrap_or_default();
-            let result = if route_id == "contacts.addTags" {
+            let applied = route_id == "contacts.addTags";
+            let changed = if applied {
                 service::attach_to_contact(db, ws, contact_id, &ids).await
             } else {
                 service::detach_from_contact(db, ws, contact_id, &ids).await
+            }
+            .map_err(|e| business_error(e, MUTATING))?;
+            // `emitTagApplied` / `emitTagRemoved` per newly linked / removed tag.
+            let (added, removed) = if applied {
+                (changed, Vec::new())
+            } else {
+                (Vec::new(), changed)
             };
-            result
-                .map(|_| no_content())
-                .map_err(|e| business_error(e, MUTATING))
+            emit_tag_changes(state, ws, contact_id, &added, &removed).await;
+            Ok(no_content())
         }
         "contacts.addTagsByName" | "contacts.removeTagsByName" | "contacts.setTags" => {
             let mut input = Input::from_body(call.params, call.body);
@@ -262,6 +270,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             input.finish()?;
             let contact_id = super::contacts::resolve(state, &call, MUTATING).await?;
             let names = names.unwrap_or_default();
+            let before = tag_ids_of(state, ws, contact_id).await?;
             match route_id {
                 "contacts.addTagsByName" => {
                     service::attach_by_names_to_contacts(db, ws, &[contact_id], &names)
@@ -277,9 +286,55 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                     .await
                     .map(|_| ()),
             }
-            .map(|()| no_content())
-            .map_err(|e| business_error(e, MUTATING))
+            .map_err(|e| business_error(e, MUTATING))?;
+            let after = tag_ids_of(state, ws, contact_id).await?;
+            let added: Vec<i64> = after
+                .iter()
+                .copied()
+                .filter(|id| !before.contains(id))
+                .collect();
+            let removed: Vec<i64> = before
+                .iter()
+                .copied()
+                .filter(|id| !after.contains(id))
+                .collect();
+            emit_tag_changes(state, ws, contact_id, &added, &removed).await;
+            Ok(no_content())
         }
         _ => Err(crate::routes::not_ported_error()),
     }
+}
+
+/// The tag ids of a contact (before / after a by-name write: the services
+/// do not return the changed pairs).
+async fn tag_ids_of(
+    state: &ApiState,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<Vec<i64>, crate::orpc::OrpcError> {
+    service::list_for_contact(&state.db, workspace_id, contact_id)
+        .await
+        .map(|tags| tags.iter().map(|tag| tag.id).collect())
+        .map_err(|e| business_error(e, MUTATING))
+}
+
+/// `emitTagApplied` for each added tag, then `emitTagRemoved` for each
+/// removed one.
+async fn emit_tag_changes(
+    state: &ApiState,
+    workspace_id: i64,
+    contact_id: i64,
+    added: &[i64],
+    removed: &[i64],
+) {
+    let (ws, contact) = (workspace_id.to_string(), contact_id.to_string());
+    let events = added
+        .iter()
+        .map(|tag| trigger::tag_applied(&ws, &contact, &tag.to_string(), None))
+        .chain(
+            removed
+                .iter()
+                .map(|tag| trigger::tag_removed(&ws, &contact, &tag.to_string(), None)),
+        );
+    state.emit_triggers(events.collect::<Vec<_>>()).await;
 }

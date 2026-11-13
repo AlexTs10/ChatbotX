@@ -237,7 +237,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let field = custom_field::find_by_key_or_fail(db, ws, &key.unwrap_or_default())
                 .await
                 .map_err(|e| business_error(e, WRITING_FIELDS))?;
-            service::set_value_for_contact(
+            let changes = service::set_value_for_contact(
                 db,
                 ws,
                 contact_id,
@@ -246,8 +246,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 zone.as_deref(),
             )
             .await
-            .map(|_| no_content())
-            .map_err(|e| business_error(e, WRITING_FIELDS))
+            .map_err(|e| business_error(e, WRITING_FIELDS))?;
+            emit_field_changes(state, ws, changes).await;
+            Ok(no_content())
         }
         "contacts.setCustomFieldLegacy" => {
             let mut input = Input::from_body(call.params, call.body);
@@ -255,7 +256,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let value = input.string("value", TRIMMED);
             input.finish()?;
             let contact_id = super::contacts::resolve(state, &call, MUTATING).await?;
-            service::set_value_for_contact(
+            let changes = service::set_value_for_contact(
                 db,
                 ws,
                 contact_id,
@@ -264,8 +265,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 None,
             )
             .await
-            .map(|_| no_content())
-            .map_err(|e| business_error(e, MUTATING))
+            .map_err(|e| business_error(e, MUTATING))?;
+            emit_field_changes(state, ws, changes).await;
+            Ok(no_content())
         }
         "contacts.applyCustomFieldOperations" => {
             let mut input = Input::from_body(call.params, call.body);
@@ -291,20 +293,23 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                     value,
                 });
             }
-            service::apply_operations(db, ws, contact_id, ops, zone.as_deref())
+            let changes = service::apply_operations(db, ws, contact_id, ops, zone.as_deref())
                 .await
-                .map(|_| no_content())
-                .map_err(|e| business_error(e, WRITING_FIELDS))
+                .map_err(|e| business_error(e, WRITING_FIELDS))?;
+            emit_field_changes(state, ws, changes).await;
+            Ok(no_content())
         }
         "contacts.clearCustomField" => {
             let mut input = Input::from_query(call.params, call.query);
             let key = id_or_name(&mut input);
             input.finish()?;
             let contact_id = super::contacts::resolve(state, &call, MUTATING).await?;
-            service::delete_by_key(db, ws, contact_id, &key.unwrap_or_default(), false)
-                .await
-                .map(|_| no_content())
-                .map_err(|e| business_error(e, MUTATING))
+            let changes =
+                service::delete_by_key(db, ws, contact_id, &key.unwrap_or_default(), false)
+                    .await
+                    .map_err(|e| business_error(e, MUTATING))?;
+            emit_field_changes(state, ws, changes).await;
+            Ok(no_content())
         }
         "contacts.clearCustomFields" => {
             let contact_id = super::contacts::resolve(state, &call, MUTATING).await?;
@@ -330,4 +335,29 @@ fn bigint_param(input: &mut Input, name: &str) -> Option<i64> {
         return None;
     }
     Some(text.parse().unwrap_or(-1))
+}
+
+/// `emitCustomFieldChanges`: one `customFieldChanged` trigger event per
+/// change (the `FieldChange` list the service returns).
+async fn emit_field_changes(
+    state: &ApiState,
+    workspace_id: i64,
+    changes: impl IntoIterator<Item = service::FieldChange>,
+) {
+    let ws = workspace_id.to_string();
+    let events: Vec<_> = changes
+        .into_iter()
+        .map(|change| {
+            chatbotx_business::events::trigger::custom_field_changed(
+                &ws,
+                &change.contact_id.to_string(),
+                &change.custom_field_id.to_string(),
+                &change.custom_field_name,
+                change.old_value.map_or(Value::Null, Value::String),
+                change.new_value.map_or(Value::Null, Value::String),
+                None,
+            )
+        })
+        .collect();
+    state.emit_triggers(events).await;
 }

@@ -6,7 +6,7 @@ mod handlers_common;
 use std::sync::Arc;
 
 use chatbotx_business::audit::{AuditActor, AuditService, with_audit_context};
-use chatbotx_business::events::{EventBus, RecordingSubscriber, TriggerEvent};
+use chatbotx_business::events::{EventBus, RecordingSubscriber};
 use handlers_common::{Fixture, WS, call, fixture};
 use serde_json::{Value, json};
 
@@ -69,20 +69,17 @@ fn details(rows: &[(String, String, Option<String>)]) -> Vec<String> {
         .collect()
 }
 
-#[allow(dead_code)]
-fn trigger_types(recorder: &RecordingSubscriber) -> Vec<String> {
-    recorder
-        .trigger_events()
-        .into_iter()
-        .map(|event: TriggerEvent| event.event_type)
-        .collect()
-}
-
 #[tokio::test]
 async fn flows_write_the_audit_rows_of_the_flow_service() {
     let (f, _) = wired().await;
-    let (status, body) =
-        as_token(&f, "flows.create", &[], None, Some(json!({ "name": "F", "folderId": null }))).await;
+    let (status, body) = as_token(
+        &f,
+        "flows.create",
+        &[],
+        None,
+        Some(json!({ "name": "F", "folderId": null })),
+    )
+    .await;
     assert_eq!(status, 201, "{body}");
     let id = body["id"].as_str().expect("id").to_string();
     let (status, _) = as_token(
@@ -129,4 +126,153 @@ async fn no_audit_row_without_the_token_actor() {
     .await;
     assert_eq!(status, 201);
     assert!(audit_rows(&f).await.is_empty());
+}
+
+/// Contact 10 with tag 1; tags 2 and 3; text custom field 50 (`city`).
+async fn seed_contact(f: &Fixture) {
+    f.state
+        .db
+        .write(|tx| {
+            for (id, name) in [(1_i64, "vip"), (2, "gold"), (3, "basic")] {
+                tx.execute(
+                    r#"INSERT INTO "Tag" ("id", "workspaceId", "name") VALUES (?1, ?2, ?3)"#,
+                    chatbotx_db::rusqlite::params![id, WS, name],
+                )?;
+            }
+            tx.execute(
+                r#"INSERT INTO "Contact" ("id", "firstName", "workspaceId") VALUES (10, 'Ada', ?1)"#,
+                [WS],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "ContactToTag" ("contactId", "tagId") VALUES (10, 1)"#,
+                [],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "CustomField" ("id", "workspaceId", "name", "type") VALUES (50, ?1, 'city', 'shortText')"#,
+                [WS],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("seed");
+}
+
+const CONTACT: (&str, &str) = ("identifier", "id:10");
+
+fn tag_events(recorder: &RecordingSubscriber) -> Vec<String> {
+    recorder
+        .trigger_events()
+        .into_iter()
+        .map(|event| format!("{} {}", event.event_type, event.metadata["tagId"]))
+        .collect()
+}
+
+#[tokio::test]
+async fn tag_routes_emit_tag_applied_and_tag_removed() {
+    let (f, recorder) = wired().await;
+    seed_contact(&f).await;
+    let (status, _) = as_token(
+        &f,
+        "contacts.addTags",
+        &[CONTACT],
+        None,
+        Some(json!({ "tagIds": ["2", "1"] })),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let (status, _) = as_token(
+        &f,
+        "contacts.removeTags",
+        &[CONTACT],
+        None,
+        Some(json!({ "tagIds": ["1"] })),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let (status, _) = as_token(
+        &f,
+        "contacts.setTags",
+        &[CONTACT],
+        None,
+        Some(json!({ "tags": ["basic"] })),
+    )
+    .await;
+    assert_eq!(status, 204);
+    assert_eq!(
+        tag_events(&recorder),
+        [
+            "tagApplied \"2\"",
+            "tagRemoved \"1\"",
+            "tagApplied \"3\"",
+            "tagRemoved \"2\"",
+        ]
+    );
+    let first = &recorder.trigger_events()[0];
+    assert_eq!(first.workspace_id, WS.to_string());
+    assert_eq!(first.contact_id, "10");
+    assert_eq!(first.source_id(), Some("2"));
+}
+
+#[tokio::test]
+async fn custom_field_writes_emit_custom_field_value_changed() {
+    let (f, recorder) = wired().await;
+    seed_contact(&f).await;
+    let field = ("idOrName", "city");
+    let (status, body) = as_token(
+        &f,
+        "contacts.setCustomField",
+        &[CONTACT, field],
+        None,
+        Some(json!({ "value": "Oslo" })),
+    )
+    .await;
+    assert_eq!(status, 204, "{body}");
+    // The same value again is no change.
+    let (status, _) = as_token(
+        &f,
+        "contacts.setCustomField",
+        &[CONTACT, field],
+        None,
+        Some(json!({ "value": "Oslo" })),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let (status, _) = as_token(
+        &f,
+        "contacts.clearCustomField",
+        &[CONTACT, field],
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, 204);
+    let events = recorder.trigger_events();
+    let seen: Vec<(String, Value, Value)> = events
+        .iter()
+        .map(|e| {
+            (
+                e.event_type.clone(),
+                e.metadata["oldValue"].clone(),
+                e.metadata["newValue"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (
+                "customFieldValueChanged".to_string(),
+                Value::Null,
+                json!("Oslo")
+            ),
+            (
+                "customFieldValueChanged".to_string(),
+                json!("Oslo"),
+                Value::Null
+            ),
+        ]
+    );
+    assert_eq!(events[0].metadata["customFieldId"], "50");
+    assert_eq!(events[0].metadata["customFieldName"], "city");
+    assert_eq!(events[0].source_id(), Some("50"));
 }
