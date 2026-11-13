@@ -36,13 +36,42 @@ pub struct CommentReply {
 
 /// `resolveReplyTexts`: `values` (else the legacy `value`), trimmed, blanks dropped.
 pub fn resolve_reply_texts(reply: &CommentReply) -> Vec<String> {
-    let _ = reply;
-    todo!("P3.2b")
+    let texts: Vec<&str> = match &reply.values {
+        Some(values) => values.iter().map(|item| item.value.as_str()).collect(),
+        None => vec![reply.value.as_deref().unwrap_or("")],
+    };
+    texts
+        .into_iter()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// `normalizeReplyTexts`: a `text` reply gets `value` = the first message and `values`
 /// built from a legacy `value`; other replies are returned as they are.
 pub fn normalize_reply_texts(reply: CommentReply) -> CommentReply {
-    let _ = reply;
-    todo!("P3.2b")
+    if reply.type_ != CommentReplyType::Text {
+        return reply;
+    }
+    match reply.values {
+        Some(values) => {
+            let first = values
+                .first()
+                .map(|item| item.value.clone())
+                .unwrap_or_default();
+            CommentReply {
+                value: Some(first),
+                values: Some(values),
+                ..reply
+            }
+        }
+        None => {
+            let value = reply.value.clone().unwrap_or_default();
+            CommentReply {
+                values: Some(vec![CommentReplyText { value }]),
+                ..reply
+            }
+        }
+    }
 }

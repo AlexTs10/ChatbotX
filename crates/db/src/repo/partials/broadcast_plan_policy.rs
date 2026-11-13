@@ -6,7 +6,7 @@ use super::broadcast::{
     BROADCAST_TRIAL_DISPLAYED_SEND_RATE_PER_MINUTE, BROADCAST_TRIAL_MAX_ACTIVE,
     BROADCAST_TRIAL_SEND_RATE_PER_MINUTE, BROADCAST_TRIAL_UPGRADE_SPEED_MULTIPLIER,
 };
-use super::shared::ZodError;
+use super::shared::{ZodError, deserialize};
 
 /// The display values of a restricted policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -83,14 +83,19 @@ pub fn resolve_applicable_policy<'a>(
     policy: &'a BroadcastPlanPolicy,
     channel: &str,
 ) -> Option<&'a RestrictedBroadcastPlanPolicy> {
-    let _ = (policy, channel);
-    todo!("P3.2b")
+    match policy {
+        BroadcastPlanPolicy::Unrestricted => None,
+        BroadcastPlanPolicy::Restricted(restricted) => {
+            restricted.channels.contains(&channel).then_some(restricted)
+        }
+    }
 }
 
 /// `isChannelRestrictedByAnyPolicy`.
 pub fn is_channel_restricted_by_any_policy(channel: &str) -> bool {
-    let _ = channel;
-    todo!("P3.2b")
+    RESTRICTED_BROADCAST_PLAN_POLICIES
+        .iter()
+        .any(|policy| policy.channels.contains(&channel))
 }
 
 /// `exceedsPlanSendRate`.
@@ -98,8 +103,7 @@ pub fn exceeds_plan_send_rate(
     policy: &RestrictedBroadcastPlanPolicy,
     send_rate_per_minute: Option<i64>,
 ) -> bool {
-    let _ = (policy, send_rate_per_minute);
-    todo!("P3.2b")
+    send_rate_per_minute.is_some_and(|rate| rate > policy.max_send_rate_per_minute)
 }
 
 /// `resolveSendRateOverride` result.
@@ -114,14 +118,14 @@ pub fn resolve_send_rate_override(
     policy: &RestrictedBroadcastPlanPolicy,
     send_rate_per_minute: Option<i64>,
 ) -> SendRateOverride {
-    let _ = (policy, send_rate_per_minute);
-    todo!("P3.2b")
+    SendRateOverride {
+        send_rate_per_minute: send_rate_per_minute.unwrap_or(policy.max_send_rate_per_minute),
+    }
 }
 
 /// `broadcastPlanLimitDataSchema.safeParse`.
 pub fn parse_broadcast_plan_limit_data(
     value: &serde_json::Value,
 ) -> Result<BroadcastPlanLimitData, ZodError> {
-    let _ = value;
-    todo!("P3.2b")
+    deserialize(value)
 }

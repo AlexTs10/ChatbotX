@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::shared::ZodError;
+use super::shared::{ZodError, deserialize};
 
 /// `z.union([z.string(), z.number()])`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,6 +36,5 @@ pub struct WhatsappRegistrationError {
 pub fn parse_whatsapp_registration_error(
     value: &serde_json::Value,
 ) -> Result<WhatsappRegistrationError, ZodError> {
-    let _ = value;
-    todo!("P3.2b")
+    deserialize(value)
 }

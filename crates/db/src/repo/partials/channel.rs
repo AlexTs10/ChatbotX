@@ -8,6 +8,9 @@ pub fn resolve_channel_conversation_id(
     source_id: Option<&str>,
     additional_attributes: Option<&Value>,
 ) -> Option<String> {
-    let _ = (source_id, additional_attributes);
-    todo!("P3.2b")
+    let stored = additional_attributes
+        .and_then(|attributes| attributes.get("channelConversationId"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty());
+    stored.or(source_id).map(str::to_owned)
 }

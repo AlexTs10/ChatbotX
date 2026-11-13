@@ -125,3 +125,8 @@ impl Issues {
         }
     }
 }
+
+/// The JS `string.length` (UTF-16 code units), which zod `min` / `max` count.
+pub fn js_length(text: &str) -> usize {
+    text.encode_utf16().count()
+}

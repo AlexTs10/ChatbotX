@@ -38,12 +38,27 @@ pub struct KeywordCondition {
 
 /// `isValuelessKeywordConditionOperator`.
 pub fn is_valueless_keyword_condition_operator(operator: KeywordConditionOperator) -> bool {
-    let _ = operator;
-    todo!("P3.2b")
+    use KeywordConditionOperator::*;
+    matches!(
+        operator,
+        ContainsPhone | ContainsEmail | ContainsImage | ContainsVideo | ContainsLink | IsThumbsUp
+    )
 }
 
 /// `flattenKeywordConditionValues`: the trigger words, each once, in condition order.
 pub fn flatten_keyword_condition_values(conditions: &[KeywordCondition]) -> Vec<String> {
-    let _ = conditions;
-    todo!("P3.2b")
+    use KeywordConditionOperator::*;
+    let mut seen = std::collections::HashSet::new();
+    conditions
+        .iter()
+        .filter(|condition| {
+            matches!(
+                condition.operator,
+                Is | SimilarTo | Contains | ContainsWholeWord | BeginsWith | EndsWith
+            )
+        })
+        .flat_map(|condition| condition.values.iter())
+        .filter(|value| seen.insert(value.as_str()))
+        .cloned()
+        .collect()
 }
