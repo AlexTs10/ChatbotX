@@ -1,14 +1,15 @@
 //! `features/contacts/api/public/crud.ts` (P3.6-D2 slice contacts core):
 //! `contacts.get / create / update / updateLegacy / delete / block /
-//! unblock / upsert`. The list, count, search, import and sub-resource
+//! unblock / upsert / findByCustomField`. The list, count, search, import and sub-resource
 //! routes are not ported yet.
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::contact::avatar::{AvatarInbox, TenantUrls, resolve_contact_avatar_url};
 use chatbotx_business::contact::{
     CreateContactInput, CreateOptions, UpsertData, block_and_record, create_with_inbox,
-    delete_and_record, find_public_contact_or_fail, resolve_id_by_identifier, unblock_and_record,
-    update_fields_and_custom_fields, upsert_by_identifier,
+    delete_and_record, find_public_contact_or_fail, list_by_custom_field_value,
+    resolve_id_by_identifier, unblock_and_record, update_fields_and_custom_fields,
+    upsert_by_identifier,
 };
 use chatbotx_db::repo::contact::{ContactInboxWithInbox, ConversationWithAssignees, PublicContact};
 use chatbotx_db::repo::models::{Contact, ContactCustomField, Inbox, Tag};
@@ -30,6 +31,7 @@ pub const ROUTES: &[&str] = &[
     "contacts.block",
     "contacts.unblock",
     "contacts.upsert",
+    "contacts.findByCustomField",
 ];
 
 /// `possibleErrorsOnCreatingContact`.
@@ -88,6 +90,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "contacts.block" => block(state, call, true).await,
         "contacts.unblock" => block(state, call, false).await,
         "contacts.upsert" => upsert(state, call).await,
+        "contacts.findByCustomField" => find_by_custom_field(state, call).await,
         _ => Err(crate::routes::not_ported_error()),
     }
 }
@@ -661,4 +664,25 @@ async fn upsert(state: &ApiState, call: Call<'_>) -> Reply {
         false,
     )
     .await
+}
+
+/// `contacts.findByCustomField` (deprecated): `{ data }` without the avatar
+/// resolution.
+async fn find_by_custom_field(state: &ApiState, call: Call<'_>) -> Reply {
+    let mut input = Input::from_query(call.params, call.query);
+    let custom_field_id = input.string("customFieldId", Str::default());
+    let value = input.string("value", Str::default());
+    input.finish()?;
+    let (Some(custom_field_id), Some(value)) = (custom_field_id, value) else {
+        return Err(crate::routes::not_ported_error());
+    };
+    let contacts =
+        list_by_custom_field_value(&state.db, call.workspace_id, &custom_field_id, &value)
+            .await
+            .map_err(|e| business_error(e, super::LISTING))?;
+    let data: Vec<Value> = contacts
+        .iter()
+        .map(|contact| public_contact_json(state, contact, false))
+        .collect();
+    Ok(json(200, json!({ "data": data })))
 }

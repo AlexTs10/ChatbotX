@@ -5,8 +5,12 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chatbotx_db::Db;
-use chatbotx_db::repo::contact::{PublicContact, find_id_by_identity_where, find_public_by_id};
+use chatbotx_db::repo::contact::{
+    PublicContact, find_id_by_identity_where, find_public_by_id, list_public_by_custom_field,
+};
 use chatbotx_db::repo::models::Contact;
+use chatbotx_db::repo::sql::Sql;
+use chatbotx_db::repo::utils::SortDir;
 use chatbotx_db::rusqlite::{Connection, OptionalExtension as _, params, params_from_iter};
 
 use super::create::{
@@ -373,6 +377,35 @@ pub async fn list_by_custom_field_value(
     custom_field_id: &str,
     value: &str,
 ) -> Result<Vec<PublicContact>> {
-    let _ = (db, workspace_id, custom_field_id, value);
-    todo!("P3.6-D2")
+    let custom_field_id = custom_field_id.to_string();
+    let value = value.to_string();
+    tx::read(db, move |conn| {
+        let mut filter = Sql::bind("\"Contact\".\"workspaceId\" = ", workspace_id);
+        match custom_field_id.as_str() {
+            "email" => {
+                filter.push(" AND \"Contact\".\"email\" = ");
+                filter.push_bind(value);
+            }
+            "phone" => {
+                filter.push(" AND \"Contact\".\"phoneNumber\" = ");
+                filter.push_bind(value);
+            }
+            _ => {
+                filter.push(
+                    " AND \"Contact\".\"id\" IN (SELECT \"contactId\" FROM \"ContactCustomField\" WHERE \"customFieldId\" = ",
+                );
+                filter.push_bind(custom_field_id);
+                filter.push(" AND \"value\" = ");
+                filter.push_bind(value);
+                filter.push(")");
+            }
+        }
+        Ok(list_public_by_custom_field(
+            conn,
+            &filter,
+            100,
+            &[("updatedAt".to_string(), SortDir::Desc)],
+        )?)
+    })
+    .await
 }
