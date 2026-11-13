@@ -4,6 +4,7 @@
 //! layer converts it to major units.
 
 pub mod access;
+pub mod analytics;
 pub mod assignees;
 pub mod content;
 pub mod currency;

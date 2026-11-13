@@ -350,6 +350,7 @@ pub const ROUTES: &[&str] = &[
     "pipelines.addAttachment",
     "pipelines.removeAttachment",
     "pipelines.listActivity",
+    "pipelines.getStats",
 ];
 
 /// Runs one of [`ROUTES`].
@@ -628,6 +629,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         | "pipelines.addAttachment"
         | "pipelines.removeAttachment"
         | "pipelines.listActivity" => content::handle(state, route_id, call).await,
+        "pipelines.getStats" => stats::handle(state, call).await,
         "pipelines.listMembers" => {
             let mut input = Input::from_query(call.params, call.query);
             let pipeline_id = input.id("id");

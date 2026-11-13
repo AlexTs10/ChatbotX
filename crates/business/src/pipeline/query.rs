@@ -93,7 +93,7 @@ fn scope_search(mut filter: PipelineItemFilter, scope: &PipelineAccessScope) -> 
     filter
 }
 
-fn workspace_timezone(conn: &Connection, workspace_id: i64) -> Result<Option<String>> {
+pub(crate) fn workspace_timezone(conn: &Connection, workspace_id: i64) -> Result<Option<String>> {
     let zone: Option<Option<String>> = conn
         .query_row(
             r#"SELECT "timezone" FROM "Workspace" WHERE "id" = ?1"#,
