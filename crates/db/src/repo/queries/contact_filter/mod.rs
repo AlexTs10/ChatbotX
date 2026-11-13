@@ -41,6 +41,7 @@ mod commerce;
 mod continents;
 mod field_value;
 pub mod permission;
+mod pipeline_item;
 mod predicates;
 mod relation_sets;
 mod sqlx;
@@ -773,6 +774,7 @@ fn condition_where(c: &FilterCondition, ctx: &Ctx) -> Option<Sql> {
         | "shoppingCartIsEmpty" | "shoppingCartTotal" | "shoppingCartSubtotal" => {
             commerce::commerce_where(&c.field, op, v, zone)
         }
+        "pipelineItem" => Some(pipeline_item::pipeline_item_where(c, ctx.workspace_id)),
         "sentMessage" => Some(activity::sent_message_where(
             op,
             v,
