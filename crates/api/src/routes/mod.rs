@@ -20,13 +20,15 @@ use crate::auth::{
 };
 use crate::handlers::channels::{self, ChannelCall};
 use crate::handlers::{ApiState, Call, Principal, dispatch_as};
+use crate::idempotency::{MiddlewareCall, api_idempotency_middleware, procedure_input};
+use chatbotx_kv::{DurableKv, SystemClock};
 
 /// Who passed a route's auth.
 enum Caller {
-    /// A workspace token: the workspace id and the token.
-    Workspace(i64, Principal),
-    /// A channel (`cbx_api_`) token.
-    Channel(ChannelCall),
+    /// A workspace token: the workspace id, the token and `apiCredentialId`.
+    Workspace(i64, Principal, String),
+    /// A channel (`cbx_api_`) token and `apiCredentialId`.
+    Channel(ChannelCall, String),
 }
 use crate::orpc::OrpcError;
 
@@ -233,68 +235,85 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
     };
     let route = matched.route;
     let mut res_headers = HeaderMap::new();
-    let outcome = match route.auth {
-        RouteAuth::WorkspaceToken(scopes) => {
-            let url = uri.to_string();
-            authorize_workspace_token_for_scope(
-                deps,
-                TokenAuthRequest {
-                    headers,
-                    url: Some(&url),
-                    method: Some(route.method),
-                    path: Some(route.path),
-                },
-                scopes,
-                &mut res_headers,
-            )
-            .await
-            .map(|context| {
-                let principal = Principal {
-                    token_id: context.api_token.id.parse().ok(),
-                    scopes: context.api_token.scopes.clone(),
-                };
-                context
-                    .workspace
-                    .id
-                    .parse::<i64>()
-                    .ok()
-                    .map(|ws| Caller::Workspace(ws, principal))
-            })
-        }
-        RouteAuth::ChannelToken => {
-            authenticate_channel_api_token(deps, headers)
-                .await
-                .map(
-                    |context| match (context.inbox_id.parse(), context.workspace.id.parse()) {
-                        (Ok(inbox_id), Ok(workspace_id)) => Some(Caller::Channel(ChannelCall {
-                            inbox_id,
-                            workspace_id,
-                        })),
-                        _ => None,
+    let outcome =
+        match route.auth {
+            RouteAuth::WorkspaceToken(scopes) => {
+                let url = uri.to_string();
+                authorize_workspace_token_for_scope(
+                    deps,
+                    TokenAuthRequest {
+                        headers,
+                        url: Some(&url),
+                        method: Some(route.method),
+                        path: Some(route.path),
                     },
+                    scopes,
+                    &mut res_headers,
                 )
-        }
-        // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
-        RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
-            Err(invalid_access_token_error())
-        }
-    };
+                .await
+                .map(|context| {
+                    let principal = Principal {
+                        token_id: context.api_token.id.parse().ok(),
+                        scopes: context.api_token.scopes.clone(),
+                    };
+                    context.workspace.id.parse::<i64>().ok().map(|ws| {
+                        Caller::Workspace(ws, principal, context.api_credential_id.clone())
+                    })
+                })
+            }
+            RouteAuth::ChannelToken => {
+                authenticate_channel_api_token(deps, headers)
+                    .await
+                    .map(
+                        |context| match (context.inbox_id.parse(), context.workspace.id.parse()) {
+                            (Ok(inbox_id), Ok(workspace_id)) => Some(Caller::Channel(
+                                ChannelCall {
+                                    inbox_id,
+                                    workspace_id,
+                                },
+                                context.api_credential_id.clone(),
+                            )),
+                            _ => None,
+                        },
+                    )
+            }
+            // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
+            RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
+                Err(invalid_access_token_error())
+            }
+        };
     let mut response = match outcome {
         Ok(caller) => {
             let handled = match (handlers, caller) {
-                (Some(state), Some(Caller::Workspace(workspace_id, principal))) => {
+                (Some(state), Some(Caller::Workspace(workspace_id, principal, credential_id))) => {
                     let call = Call {
                         workspace_id,
                         params: &matched.params,
                         query: uri.query(),
                         body,
                     };
-                    dispatch_as(state, route.id, call, &principal).await
+                    let input = procedure_input(&matched.params, body);
+                    let store = DurableKv::new(Arc::clone(&state.db), Arc::new(SystemClock));
+                    api_idempotency_middleware(
+                        &store,
+                        idempotency_call(headers, route, &credential_id, &input),
+                        || dispatch_as(state, route.id, call, &principal),
+                    )
+                    .await
                 }
-                (Some(state), Some(Caller::Channel(call))) => {
-                    channels::handle(state, route.id, call)
-                        .await
-                        .map(|reply| reply.unwrap_or_else(IntoResponse::into_response))
+                (Some(state), Some(Caller::Channel(call, credential_id))) => {
+                    let input = procedure_input(&matched.params, body);
+                    let store = DurableKv::new(Arc::clone(&state.db), Arc::new(SystemClock));
+                    api_idempotency_middleware(
+                        &store,
+                        idempotency_call(headers, route, &credential_id, &input),
+                        || async {
+                            channels::handle(state, route.id, call)
+                                .await
+                                .map(|reply| reply.unwrap_or_else(IntoResponse::into_response))
+                        },
+                    )
+                    .await
                 }
                 _ => None,
             };
@@ -304,6 +323,23 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
     };
     response.headers_mut().extend(res_headers);
     response
+}
+
+/// The middleware view of one authenticated public call.
+fn idempotency_call<'a>(
+    headers: &'a HeaderMap,
+    route: &'a PublicRoute,
+    credential_id: &'a str,
+    input: &'a serde_json::Value,
+) -> MiddlewareCall<'a> {
+    MiddlewareCall {
+        headers,
+        method: route.method,
+        route_path: Some(route.path),
+        procedure_path: route.id,
+        credential_id,
+        input,
+    }
 }
 
 /// Router state: the auth deps and the handlers (`None` = none ported).
