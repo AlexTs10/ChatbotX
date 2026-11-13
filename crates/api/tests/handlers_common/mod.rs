@@ -59,10 +59,7 @@ pub async fn fixture() -> Fixture {
     .await
     .expect("seed workspaces");
     Fixture {
-        state: ApiState {
-            db: Arc::new(db),
-            app_url: "http://app".to_string(),
-        },
+        state: ApiState::new(Arc::new(db), "http://app"),
         dir,
     }
 }

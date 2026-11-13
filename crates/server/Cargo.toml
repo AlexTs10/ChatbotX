@@ -14,6 +14,8 @@ axum.workspace = true
 chatbotx-api.workspace = true
 # Realtime gateway (P2.8): the revoke marker lives in SQLite (`kv.durable`).
 chatbotx-db.workspace = true
+# The job store behind `ApiState` (jobs enqueue, audit records; P3.6-X1).
+chatbotx-jobs.workspace = true
 chatbotx-kv.workspace = true
 chatbotx-rt.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal"] }

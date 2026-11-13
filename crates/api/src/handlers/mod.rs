@@ -33,18 +33,82 @@ use std::sync::Arc;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chatbotx_business::BusinessError;
+use chatbotx_business::audit::AuditService;
+use chatbotx_business::events::EventBus;
 use chatbotx_db::Db;
+use chatbotx_jobs::Enqueuer;
+use chatbotx_kv::Kv;
+use chatbotx_rt::Realtime;
 use serde_json::Value;
 
 use crate::orpc::{OrpcError, common_api_error};
 
-/// What the handlers need: the database and the public app URL (later: kv,
-/// jobs, realtime).
+/// What the handlers need: the database, the public app URL and the
+/// cross-cutting services (P3.6-X1). Build it with [`ApiState::new`] and the
+/// `with_*` methods; a service that is not given is off (no realtime, no kv,
+/// no jobs: audit records are dropped, the event bus has no subscribers).
 #[derive(Clone)]
 pub struct ApiState {
     pub db: Arc<Db>,
     /// The tenant `appUrl` (`NEXT_PUBLIC_BUILDER_URL`, no trailing `/`).
     pub app_url: String,
+    /// The realtime producer (`publishWorkspaceRealtimeEvent`); `None` = the
+    /// gateway is off (`REALTIME_BROADCAST_SECRET` unset, tests).
+    pub realtime: Option<Realtime>,
+    /// The kv store (caches, rate limits).
+    pub kv: Option<Arc<Kv>>,
+    /// The job store (`queue.add`).
+    pub jobs: Option<Arc<dyn Enqueuer>>,
+    /// The in-process event bus (flow triggers, custom-field changes, ...).
+    pub events: EventBus,
+    /// The audit log writer (`auditService`).
+    pub audit: AuditService,
+}
+
+impl ApiState {
+    /// The database and the app URL; every other service is off.
+    pub fn new(db: Arc<Db>, app_url: impl Into<String>) -> ApiState {
+        ApiState {
+            db,
+            app_url: app_url.into(),
+            realtime: None,
+            kv: None,
+            jobs: None,
+            events: EventBus::new(),
+            audit: AuditService::disabled(),
+        }
+    }
+
+    /// Publishes realtime events through `realtime`.
+    pub fn with_realtime(mut self, realtime: Realtime) -> ApiState {
+        self.realtime = Some(realtime);
+        self
+    }
+
+    /// Uses `kv`.
+    pub fn with_kv(mut self, kv: Arc<Kv>) -> ApiState {
+        self.kv = Some(kv);
+        self
+    }
+
+    /// Enqueues jobs on `jobs`; the audit writer uses it too.
+    pub fn with_jobs(mut self, jobs: Arc<dyn Enqueuer>) -> ApiState {
+        self.audit = AuditService::new(Arc::clone(&jobs));
+        self.jobs = Some(jobs);
+        self
+    }
+
+    /// Uses `events` as the event bus.
+    pub fn with_events(mut self, events: EventBus) -> ApiState {
+        self.events = events;
+        self
+    }
+
+    /// Uses `audit` as the audit writer.
+    pub fn with_audit(mut self, audit: AuditService) -> ApiState {
+        self.audit = audit;
+        self
+    }
 }
 
 /// One authenticated call of a public route.
@@ -58,6 +122,19 @@ pub struct Call<'a> {
     pub query: Option<&'a str>,
     /// The raw request body.
     pub body: &'a [u8],
+}
+
+tokio::task_local! {
+    /// `context.apiToken.id` of the running dispatch ([`dispatch_as`]).
+    static TOKEN_ID: Option<i64>;
+}
+
+impl Call<'_> {
+    /// `context.apiToken.id` (`actorSourceId`): the token of the running
+    /// [`dispatch_as`]; `None` outside it or for [`dispatch`].
+    pub fn token_id(&self) -> Option<i64> {
+        TOKEN_ID.try_with(|id| *id).ok().flatten()
+    }
 }
 
 /// The calling workspace token (`context.apiToken`). The default (no token
@@ -227,6 +304,17 @@ pub async fn dispatch(state: &ApiState, route_id: &str, call: Call<'_>) -> Optio
 
 /// Runs the handler of `route_id` for `principal`; `None` = not ported yet.
 pub async fn dispatch_as(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    principal: &Principal,
+) -> Option<Response> {
+    TOKEN_ID
+        .scope(principal.token_id, route(state, route_id, call, principal))
+        .await
+}
+
+async fn route(
     state: &ApiState,
     route_id: &str,
     call: Call<'_>,

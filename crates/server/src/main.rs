@@ -180,12 +180,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         .merge(chatbotx_api::session::auth_router(sessions))
         .merge(chatbotx_api::routes::public_api_router_with(
             auth,
-            Arc::new(chatbotx_api::handlers::ApiState {
-                db: Arc::clone(&shared.db),
-                app_url: env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
-                    .trim_end_matches('/')
-                    .to_string(),
-            }),
+            Arc::new(api_state(&shared, realtime.as_ref()).await?),
         ));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
@@ -202,6 +197,29 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         .await?;
     tracing::info!("shutdown complete");
     Ok(())
+}
+
+/// The handler state: the database, the app URL and the cross-cutting
+/// services (realtime producer, kv, job store for jobs and audit records,
+/// the in-process event bus).
+async fn api_state(
+    shared: &Shared,
+    realtime: Option<&Realtime>,
+) -> std::io::Result<chatbotx_api::handlers::ApiState> {
+    let jobs =
+        chatbotx_jobs::JobStore::open(Arc::clone(&shared.db), Arc::new(chatbotx_jobs::SystemClock))
+            .await
+            .map_err(std::io::Error::other)?;
+    let app_url = env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
+        .trim_end_matches('/')
+        .to_string();
+    let mut state = chatbotx_api::handlers::ApiState::new(Arc::clone(&shared.db), app_url)
+        .with_kv(Arc::clone(&shared.kv))
+        .with_jobs(Arc::new(jobs));
+    if let Some(realtime) = realtime {
+        state = state.with_realtime(realtime.clone());
+    }
+    Ok(state)
 }
 
 /// Resolve on SIGINT (Ctrl-C) or SIGTERM, after the realtime drain

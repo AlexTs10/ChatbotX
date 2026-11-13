@@ -15,8 +15,12 @@ chatbotx-business.workspace = true
 chatbotx-core.workspace = true
 # Token scope names (`WORKSPACE_API_TOKEN_SCOPES`) and the auth repositories.
 chatbotx-db.workspace = true
+# Jobs enqueue (audit log, trigger queue) behind `ApiState` (P3.6-X1).
+chatbotx-jobs.workspace = true
 # API rate limits (`assertApiNotRateLimited`) and the clock.
 chatbotx-kv.workspace = true
+# Realtime publish (`pipelineItemChanged`, ...) behind `ApiState` (P3.6-X1).
+chatbotx-rt.workspace = true
 # better-auth cookie signatures and the email verification JWT (HS256); same version as crates/rt.
 hmac = "0.13"
 # Session tokens and password salts (OS randomness).
