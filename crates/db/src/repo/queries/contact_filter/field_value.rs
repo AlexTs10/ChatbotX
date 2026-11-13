@@ -22,7 +22,6 @@ use crate::repo::sql::Sql;
 use crate::repo::utils::{escape_like_pattern, like_contains};
 
 const TRUTHY: &str = "'t', 'true', 'y', 'yes', 'on', '1'";
-const FALSY: &str = "'f', 'false', 'n', 'no', 'off', '0'";
 const BOOLEAN_LITERAL_PATTERN: &str = "^(t|true|y|yes|on|1|f|false|n|no|off|0)$";
 
 /// `resolveFieldValueNegation`.
@@ -124,11 +123,16 @@ fn boolean_predicate(col: &str, operator: &str, value: Option<&Json>) -> Option<
     let Some(b) = canonical_boolean(s) else {
         return Some(Sql::raw("FALSE"));
     };
+    // `NULLIF(lower(btrim(v)), '')::boolean = <b>`: the guard admits only the literals,
+    // so the cast is "is a truthy literal".
     let norm = format!("lower_u(trim({col}))");
-    let set = if b { TRUTHY } else { FALSY };
-    Some(Sql::raw(format!(
-        "(regexp('{BOOLEAN_LITERAL_PATTERN}', {norm}) AND {norm} IN ({set}))"
-    )))
+    Some(
+        Sql::bind(
+            format!("(regexp('{BOOLEAN_LITERAL_PATTERN}', {norm}) AND ({norm} IN ({TRUTHY})) = "),
+            i64::from(b),
+        )
+        .closed(")"),
+    )
 }
 
 fn text_predicate(col: &str, operator: &str, value: Option<&Json>) -> Option<Sql> {
@@ -360,11 +364,13 @@ fn legacy_temporal(id: &str, operator: &str, value: Option<&Json>, zone: Tz) -> 
     let date = temporal_branch(CF_VALUE, operator, value, true, zone)?;
     let datetime = temporal_branch(CF_VALUE, operator, value, false, zone)?;
     let is_date = || {
-        Sql::bind(
+        let mut s = Sql::bind(
             "EXISTS (SELECT 1 FROM \"CustomField\" WHERE \"CustomField\".\"id\" = ",
             id_value(id),
-        )
-        .closed(" AND \"CustomField\".\"type\" = 'date')")
+        );
+        s.push(" AND \"CustomField\".\"type\" = ");
+        s.push_bind("date".to_owned());
+        s.closed(")")
     };
     let mut out = Sql::raw("((");
     out.append(is_date());

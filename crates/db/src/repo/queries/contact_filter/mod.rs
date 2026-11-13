@@ -41,6 +41,7 @@ mod predicates;
 mod relation_sets;
 mod sqlx;
 pub mod value_format;
+mod working_hours;
 
 pub use permission::{
     EMAIL_PHONE_FILTER_FIELDS, contact_filter_uses_field, prune_contact_filter_fields,
@@ -487,27 +488,112 @@ fn ctwa_retarget_where(c: &FilterCondition, ctx: &Ctx) -> Option<Sql> {
     ))
 }
 
+/// `buildCommentedOnPostWhere`: 1-100 distinct positive bigint post ids; anything else
+/// (and a missing workspace) matches nobody.
 fn commented_on_post_where(
     operator: &str,
     value: Option<&Json>,
     workspace_id: Option<i64>,
 ) -> Option<Sql> {
-    let _ = (operator, value, workspace_id);
-    todo!("P3.2b")
+    let nobody = Some(Sql::raw("FALSE"));
+    let Some(ws) = workspace_id else {
+        return nobody;
+    };
+    let any_comment = || {
+        Sql::bind(
+            "SELECT 1 FROM \"ContactInbox\" ci JOIN \"ContactInboxPost\" p ON p.\"workspaceId\" = ",
+            ws,
+        )
+        .closed(" AND p.\"contactInboxId\" = ci.\"id\" WHERE ci.\"contactId\" = \"Contact\".\"id\"")
+    };
+    if operator == "isEmpty" {
+        return Some(exists(any_comment(), true));
+    }
+    if !matches!(operator, "eq" | "ne") {
+        return nobody;
+    }
+    let Some(Json::Array(items)) = value else {
+        return nobody;
+    };
+    if items.is_empty() || items.len() > 100 {
+        return nobody;
+    }
+    let mut ids: Vec<i64> = Vec::new();
+    for item in items {
+        let Json::String(s) = item else {
+            return nobody;
+        };
+        let canonical =
+            !s.is_empty() && !s.starts_with('0') && s.bytes().all(|b| b.is_ascii_digit());
+        match s.parse::<i64>() {
+            Ok(id) if canonical && id > 0 => {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+            _ => return nobody,
+        }
+    }
+    let mut inner = any_comment();
+    inner.push(" AND ");
+    inner.append(in_list(
+        "p.\"postId\"",
+        ids.into_iter().map(Value::Integer).collect(),
+        false,
+    ));
+    Some(exists(inner, operator == "ne"))
 }
 
+/// JS `Number(value)` truncated (`toScore`); `None` when not finite.
+fn to_score(value: Option<&Json>) -> Option<i64> {
+    let n = match value? {
+        Json::Number(n) => n.as_f64()?,
+        Json::String(s) if s.trim().is_empty() => 0.0,
+        Json::String(s) => s.trim().parse::<f64>().ok()?,
+        Json::Bool(b) => f64::from(u8::from(*b)),
+        Json::Null => 0.0,
+        _ => return None,
+    };
+    #[allow(clippy::cast_possible_truncation)] // `Math.trunc` of a finite JS number
+    n.is_finite().then(|| n.trunc() as i64)
+}
+
+/// `buildLeaderboardScoreWhere`: the score (0 without a participant row) compared.
 fn leaderboard_score_where(
     leaderboard_id: Option<&str>,
     operator: &str,
     value: Option<&Json>,
 ) -> Option<Sql> {
-    let _ = (leaderboard_id, operator, value);
-    todo!("P3.2b")
+    let symbol = match operator {
+        "eq" => "=",
+        "lt" => "<",
+        "lte" => "<=",
+        "gt" => ">",
+        "gte" => ">=",
+        _ => return None,
+    };
+    let leaderboard_id = leaderboard_id.filter(|l| !l.is_empty())?;
+    let score = to_score(value)?;
+    let lp = "\"LeaderboardParticipant\"";
+    let mut out = Sql::bind(
+        format!("COALESCE((SELECT {lp}.\"score\" FROM {lp} WHERE {lp}.\"leaderboardId\" = "),
+        id_value(leaderboard_id),
+    );
+    out.push(&format!(
+        " AND {lp}.\"contactId\" = \"Contact\".\"id\" AND {lp}.\"workspaceId\" = \"Contact\".\"workspaceId\"), 0) {symbol} "
+    ));
+    out.push_bind(score);
+    Some(out)
 }
 
 fn working_hours_where(operator: &str, value: Option<&Json>, ctx: &Ctx) -> Option<Sql> {
-    let _ = (operator, value, ctx.working_hours_zone);
-    todo!("P3.2b")
+    working_hours::working_hours_where(
+        operator,
+        value,
+        ctx.workspace_id,
+        ctx.working_hours_zone,
+        ctx.now,
+    )
 }
 
 const GOOGLE_CLICK: &str = "(\"ContactInbox\".\"referral\"->>'gclid' IS NOT NULL OR \"ContactInbox\".\"referral\"->>'gbraid' IS NOT NULL)";
