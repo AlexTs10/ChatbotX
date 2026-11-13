@@ -6,6 +6,7 @@
 pub mod connection;
 pub mod contact;
 pub mod contact_custom_field;
+pub mod contact_filter;
 pub mod contact_note;
 pub mod custom_field;
 pub mod discount_code;
