@@ -2,5 +2,5 @@
 //! use (the zod validation schemas themselves are not ported in this batch, see
 //! `conversion/specs/P3.2.md`).
 
-pub mod thread_control;
 pub mod contact_activity;
+pub mod thread_control;

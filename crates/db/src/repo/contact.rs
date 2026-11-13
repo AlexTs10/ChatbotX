@@ -1,6 +1,6 @@
 //! Port of `repositories/contact/repository.ts` (part: `backdateCreatedAt`,
-//! `blockManyIfNotBlocked`, `listForExportPage`; the filter-based functions wait for the
-//! contact-filter port, see `conversion/specs/P3.2.md`).
+//! `blockManyIfNotBlocked`, `listForExportPage`, `findIdsMatchingFilter`; the rest is
+//! listed in `conversion/specs/P3.2b.md`).
 
 use rusqlite::Connection;
 
@@ -158,11 +158,30 @@ pub fn list_for_export_page(
 /// `findIdsMatchingFilter`: the ids of `contact_ids` (one broadcast audience scan page) of
 /// the workspace that match the filter (`buildContactFilterMatchSQL`); `[]` for an empty page.
 pub fn find_ids_matching_filter(
-    _conn: &Connection,
-    _workspace_id: i64,
-    _contact_ids: &[i64],
-    _criteria: &crate::repo::queries::contact_filter::FilterCriteria,
-    _now: i64,
+    conn: &Connection,
+    workspace_id: i64,
+    contact_ids: &[i64],
+    criteria: &crate::repo::queries::contact_filter::FilterCriteria,
+    now: i64,
 ) -> Result<Vec<i64>> {
-    todo!("P3.2b")
+    if contact_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut q = Sql::new(
+        "SELECT \"Contact\".\"id\" FROM \"Contact\" WHERE \"Contact\".\"workspaceId\" = ? \
+         AND \"Contact\".\"id\" IN (SELECT value FROM json_each(?)) AND ",
+        vec![workspace_id.into(), id_list(contact_ids).into()],
+    );
+    q.append(
+        crate::repo::queries::contact_filter::build_contact_filter_match_sql(
+            workspace_id,
+            criteria,
+            now,
+        ),
+    );
+    let mut stmt = conn.prepare(&q.text)?;
+    let ids = stmt
+        .query_map(rusqlite::params_from_iter(q.params.iter()), |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(ids)
 }
