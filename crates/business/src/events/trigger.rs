@@ -242,3 +242,52 @@ pub async fn emit_cart_item_changed(
     bus.publish_all(events.into_iter().map(Event::Trigger))
         .await;
 }
+
+/// `contactInfoUpdated`: metadata `{ sourceId: infoType, infoType, oldValue,
+/// newValue }` (`infoType` = `phone` / `email`).
+pub fn contact_info_updated(
+    workspace_id: &str,
+    contact_id: &str,
+    info_type: &str,
+    old_value: Option<&str>,
+    new_value: &str,
+) -> TriggerEvent {
+    let mut metadata = Map::new();
+    metadata.insert("sourceId".into(), Value::from(info_type));
+    metadata.insert("infoType".into(), Value::from(info_type));
+    metadata.insert(
+        "oldValue".into(),
+        old_value.map_or(Value::Null, Value::from),
+    );
+    metadata.insert("newValue".into(), Value::from(new_value));
+    event(
+        "contactInfoUpdated",
+        workspace_id,
+        contact_id,
+        Some(metadata),
+    )
+}
+
+/// `collectContactInfoChanges` + the events of `emitContactInfoChangeEvents`:
+/// a phone / email (trimmed, empty = none) that is set and differs.
+pub fn contact_info_changes(
+    workspace_id: &str,
+    contact_id: &str,
+    before: [Option<&str>; 2],
+    after: [Option<&str>; 2],
+) -> Vec<TriggerEvent> {
+    ["phone", "email"]
+        .into_iter()
+        .zip(before.into_iter().zip(after))
+        .filter_map(|(info_type, (old, new))| {
+            let (old, new) = (trimmed(old), trimmed(new)?);
+            (Some(new) != old)
+                .then(|| contact_info_updated(workspace_id, contact_id, info_type, old, new))
+        })
+        .collect()
+}
+
+/// `normalizeContactInfoValue`: trimmed, empty = none.
+fn trimmed(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|v| !v.is_empty())
+}

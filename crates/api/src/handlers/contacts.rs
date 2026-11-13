@@ -17,6 +17,7 @@ use chatbotx_business::contact::{
 };
 use chatbotx_business::contact_filter::{parse_strict_param, to_filter_criteria};
 use chatbotx_business::count_mode::CountMode;
+use chatbotx_business::events::trigger;
 use chatbotx_db::repo::SortItem;
 use chatbotx_db::repo::contact::{ContactInboxWithInbox, ConversationWithAssignees, PublicContact};
 use chatbotx_db::repo::models::{Contact, ContactCustomField, Inbox, Tag};
@@ -571,6 +572,24 @@ async fn create(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, CREATING_CONTACT))?;
+    // `createWithInbox`: the audit record, then `emitContactCreated`.
+    let contact = &created.contact;
+    state
+        .record_audit(
+            "create",
+            &format!("created a new contact (#{})", contact.id),
+        )
+        .await;
+    state
+        .emit_triggers([trigger::contact_created(
+            &call.workspace_id.to_string(),
+            &contact.id.to_string(),
+            non_empty(contact.first_name.as_deref()),
+            non_empty(contact.phone_number.as_deref()),
+            non_empty(contact.email.as_deref()),
+            Some(&created.contact_inbox.id.to_string()),
+        )])
+        .await;
     read_public(
         state,
         call.workspace_id,
@@ -611,17 +630,62 @@ async fn update(state: &ApiState, call: Call<'_>, errors: ErrorMap) -> Reply {
     }
     input.finish()?;
     let contact_id = resolve(state, &call, errors).await?;
-    update_fields_and_custom_fields(&state.db, call.workspace_id, contact_id, fields)
+    let ws = call.workspace_id;
+    let before = contact_info(state, ws, contact_id).await;
+    let outcome = update_fields_and_custom_fields(&state.db, ws, contact_id, fields)
         .await
         .map_err(|e| business_error(e, errors))?;
+    if !outcome.has_real_change() {
+        return Ok(no_content());
+    }
+    // `updateFieldsAndCustomFields`: the audit record, the contact-info
+    // events (standard fields changed), then the custom-field events.
+    state
+        .record_audit("update", &format!("updated a contact (#{contact_id})"))
+        .await;
+    let (ws_text, contact_text) = (ws.to_string(), contact_id.to_string());
+    let mut events = Vec::new();
+    if !outcome.contact_fields.is_empty() {
+        let after = contact_info(state, ws, contact_id).await;
+        events.extend(trigger::contact_info_changes(
+            &ws_text,
+            &contact_text,
+            [before[0].as_deref(), before[1].as_deref()],
+            [after[0].as_deref(), after[1].as_deref()],
+        ));
+    }
+    events.extend(outcome.custom_field_changes.iter().map(|change| {
+        trigger::custom_field_changed(
+            &ws_text,
+            &contact_text,
+            &change.custom_field_id.to_string(),
+            &change.custom_field_name,
+            change.old_value.clone().map_or(Value::Null, Value::String),
+            Value::String(change.new_value.clone()),
+            None,
+        )
+    }));
+    state.emit_triggers(events).await;
     Ok(no_content())
 }
 
 async fn delete(state: &ApiState, call: Call<'_>) -> Reply {
     let contact_id = resolve(state, &call, MUTATING).await?;
-    delete_and_record(&state.db, call.workspace_id, &[contact_id])
+    let outcome = delete_and_record(&state.db, call.workspace_id, &[contact_id])
         .await
         .map_err(|e| business_error(e, MUTATING))?;
+    let deleted = &outcome.processed_contact_ids;
+    if !deleted.is_empty() {
+        let list = deleted
+            .iter()
+            .map(|id| format!("#{id}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let plural = if deleted.len() > 1 { "s" } else { "" };
+        state
+            .record_audit("delete", &format!("deleted contact{plural} ({list})"))
+            .await;
+    }
     Ok(no_content())
 }
 
@@ -669,6 +733,20 @@ async fn upsert(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, UPSERTING_CONTACT))?;
+    if outcome.is_new {
+        // `upsertByIdentifier` (new contact): `emitContactCreated`.
+        let contact = &outcome.contact;
+        state
+            .emit_triggers([trigger::contact_created(
+                &call.workspace_id.to_string(),
+                &contact.id.to_string(),
+                non_empty(contact.first_name.as_deref()),
+                non_empty(contact.phone_number.as_deref()),
+                non_empty(contact.email.as_deref()),
+                None,
+            )])
+            .await;
+    }
     read_public(
         state,
         call.workspace_id,
@@ -990,4 +1068,28 @@ async fn count(state: &ApiState, call: Call<'_>) -> Reply {
         body["countCap"] = json!(cap);
     }
     Ok(json(200, body))
+}
+
+/// JS `value || undefined`.
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.filter(|v| !v.is_empty())
+}
+
+/// `[phoneNumber, email]` of a contact (the contact-info snapshot).
+async fn contact_info(state: &ApiState, workspace_id: i64, contact_id: i64) -> [Option<String>; 2] {
+    state
+        .db
+        .read(move |conn| {
+            use chatbotx_db::rusqlite::OptionalExtension as _;
+            Ok(conn
+                .query_row(
+                    r#"SELECT "phoneNumber", "email" FROM "Contact" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+                    [contact_id, workspace_id],
+                    |row| Ok([row.get(0)?, row.get(1)?]),
+                )
+                .optional()?
+                .unwrap_or_default())
+        })
+        .await
+        .unwrap_or_default()
 }

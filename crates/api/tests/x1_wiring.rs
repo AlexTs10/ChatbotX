@@ -276,3 +276,79 @@ async fn custom_field_writes_emit_custom_field_value_changed() {
     assert_eq!(events[0].metadata["customFieldName"], "city");
     assert_eq!(events[0].source_id(), Some("50"));
 }
+
+#[tokio::test]
+async fn contact_writes_record_audit_rows_and_trigger_events() {
+    let (f, recorder) = wired().await;
+    seed_contact(&f).await;
+    f.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                r#"INSERT INTO "Inbox" ("id", "workspaceId", "name", "channel", "sourceId") VALUES (60, ?1, 'Chat', 'webchat', 'src-60')"#,
+                [WS],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("inbox");
+    let (status, body) = as_token(
+        &f,
+        "contacts.create",
+        &[],
+        None,
+        Some(json!({
+            "firstName": "Grace",
+            "inboxId": "60",
+            "channel": "webchat",
+            "email": "",
+            "gender": "unknown",
+        })),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let created = body["id"].as_str().expect("id").to_string();
+    let (status, body) = as_token(
+        &f,
+        "contacts.update",
+        &[CONTACT],
+        None,
+        Some(json!({ "email": "ada@example.com", "50": "Bergen" })),
+    )
+    .await;
+    assert_eq!(status, 204, "{body}");
+    let identifier = format!("id:{created}");
+    let (status, _) = as_token(
+        &f,
+        "contacts.delete",
+        &[("identifier", &identifier)],
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, 204);
+    assert_eq!(
+        details(&audit_rows(&f).await),
+        [
+            format!("create: created a new contact (#{created})"),
+            "update: updated a contact (#10)".to_string(),
+            format!("delete: deleted contact (#{created})"),
+        ]
+    );
+    let events = recorder.trigger_events();
+    let types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+    assert_eq!(
+        types,
+        [
+            "newContact",
+            "contactInfoUpdated",
+            "customFieldValueChanged"
+        ]
+    );
+    assert_eq!(events[0].metadata["name"], "Grace");
+    assert!(events[0].metadata.get("email").is_none());
+    assert!(events[0].metadata.get("contactInboxId").is_some());
+    assert_eq!(events[1].metadata["infoType"], "email");
+    assert_eq!(events[1].metadata["newValue"], "ada@example.com");
+    assert_eq!(events[2].metadata["newValue"], "Bergen");
+}
