@@ -522,7 +522,9 @@ async fn pipeline_changes_are_published_as_realtime_frames() {
         contact_id: None,
         change: "moved",
     };
-    f.state.publish_pipeline_changes(std::slice::from_ref(&change)).await;
+    f.state
+        .publish_pipeline_changes(std::slice::from_ref(&change))
+        .await;
     let state = f.state.clone().with_realtime(realtime.clone());
     state.publish_pipeline_changes(&[change]).await;
     let buffered = realtime.hub().buffered(&WS.to_string());
