@@ -49,18 +49,59 @@ pub struct WebhookSubscriptionRow {
 /// `updateHandoverResumeFlow` (`None` clears the flow); `None` when the integration is
 /// not in the workspace.
 pub fn update_handover_resume_flow(
-    _conn: &Connection,
-    _id: i64,
-    _workspace_id: i64,
-    _handover_resume_flow_id: Option<i64>,
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    handover_resume_flow_id: Option<i64>,
 ) -> Result<Option<super::models::IntegrationWhatsapp>> {
-    todo!("P3.2b")
+    update_flow(
+        "IntegrationWhatsapp",
+        conn,
+        id,
+        workspace_id,
+        handover_resume_flow_id,
+    )
 }
 
 /// `findAllConnectedForWebhookSubscription`: integrations whose inbox is `connected`
 /// (every workspace, by id).
 pub fn find_all_connected_for_webhook_subscription(
-    _conn: &Connection,
+    conn: &Connection,
 ) -> Result<Vec<WebhookSubscriptionRow>> {
-    todo!("P3.2b")
+    Sql::raw(
+        "SELECT w.\"id\", w.\"workspaceId\", w.\"wabaId\", w.\"auth\" FROM \"IntegrationWhatsapp\" AS w \
+         INNER JOIN \"Inbox\" AS i ON i.\"id\" = w.\"inboxId\" WHERE i.\"status\" = 'connected' ORDER BY w.\"id\"",
+    )
+    .query_map(conn, |r| {
+        Ok(WebhookSubscriptionRow {
+            id: r.get(0)?,
+            workspace_id: r.get(1)?,
+            waba_id: r.get(2)?,
+            auth: r.get(3)?,
+        })
+    })
+}
+
+/// `updateHandoverResumeFlow` of an integration table (scoped by id and workspace).
+pub(crate) fn update_flow<M: super::Model>(
+    table: &str,
+    conn: &Connection,
+    id: i64,
+    workspace_id: i64,
+    flow_id: Option<i64>,
+) -> Result<Option<M>> {
+    Sql::new(
+        format!(
+            "UPDATE \"{table}\" SET \"handoverResumeFlowId\" = ?, \"updatedAt\" = ? \
+             WHERE \"id\" = ? AND \"workspaceId\" = ? RETURNING {}",
+            M::columns_sql(None)
+        ),
+        vec![
+            super::sql::opt_int(flow_id),
+            Value::Integer(super::now_ms()),
+            Value::Integer(id),
+            Value::Integer(workspace_id),
+        ],
+    )
+    .model(conn)
 }
