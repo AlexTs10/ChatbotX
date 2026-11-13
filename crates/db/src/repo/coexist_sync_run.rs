@@ -658,6 +658,8 @@ fn set_enabled<M: Model>(
         q.push(", \"coexistAiReadsSyncedHistory\" = ");
         q.push_bind(ai);
     }
+    q.push(", \"updatedAt\" = ");
+    q.push_bind(now_ms());
     q.push(" WHERE \"id\" = ");
     q.push_bind(integration_id);
     q.push(" AND \"workspaceId\" = ");

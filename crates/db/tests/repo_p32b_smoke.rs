@@ -891,3 +891,197 @@ async fn coexist_sync_run_untested_readers_and_terminal_writes() {
         vec![4, 5]
     );
 }
+
+// ---------------------------------------------------------------------------
+// integration-messenger (slice G1): functions without a TS test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn integration_messenger_untested_readers_and_capi_writes() {
+    use chatbotx_db::repo::Json;
+    use chatbotx_db::repo::integration_messenger as im;
+    use repo10::{MESSENGER, OTHER_WS, WS, coexist_db, read, write};
+    let db = coexist_db().await;
+    db.write(|tx| {
+        repo3::integration_messenger(tx, 67, OTHER_WS, 3067, "[]")?;
+        tx.execute_batch(
+            r#"UPDATE "Inbox" SET "status" = 'connected' WHERE "id" IN (3061, 3067)"#,
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("pages");
+    let refs = read(&db, |c| im::list_by_workspace_id(c, WS)).await;
+    assert_eq!(
+        refs.iter()
+            .map(|r| (r.id, r.page_id.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(MESSENGER, "page-61")]
+    );
+    assert!(
+        read(&db, |c| im::find_workspace_integration(
+            c, MESSENGER, OTHER_WS
+        ))
+        .await
+        .is_none()
+    );
+    assert_eq!(
+        read(&db, |c| im::find_workspace_integration_by_inbox_id(
+            c, WS, 3061
+        ))
+        .await,
+        Some(MESSENGER)
+    );
+    assert_eq!(
+        read(&db, |c| im::find_by_id(c, 67))
+            .await
+            .map(|r| r.workspace_id),
+        Some(OTHER_WS)
+    );
+    assert_eq!(
+        read(&db, |c| im::find_by_page_id_unscoped(c, "page-67"))
+            .await
+            .map(|r| r.id),
+        Some(67)
+    );
+    assert_eq!(
+        read(&db, |c| im::find_by_inbox_id(c, 3061))
+            .await
+            .map(|r| r.id),
+        Some(MESSENGER)
+    );
+    assert_eq!(
+        read(&db, |c| im::list_by_workspace(c, OTHER_WS))
+            .await
+            .len(),
+        1
+    );
+    // Scope-cache compare-and-set: a stale expectation returns the current row unchanged.
+    let row = write(&db, |c| {
+        im::update_capi_scope_cache(c, MESSENGER, WS, true, Some(500), None)
+    })
+    .await
+    .expect("row");
+    assert_eq!(
+        (row.has_capi_scope, row.capi_scope_checked_at),
+        (true, Some(500))
+    );
+    let row = write(&db, |c| {
+        im::update_capi_scope_cache(c, MESSENGER, WS, false, Some(600), None)
+    })
+    .await
+    .expect("row");
+    assert_eq!(
+        (row.has_capi_scope, row.capi_scope_checked_at),
+        (true, Some(500))
+    );
+    assert!(
+        write(&db, |c| im::claim_capi_scope_cache_refresh(
+            c, MESSENGER, WS, 700, None
+        ))
+        .await
+        .is_none()
+    );
+    let row = write(&db, |c| {
+        im::claim_capi_scope_cache_refresh(c, MESSENGER, WS, 700, Some(500))
+    })
+    .await
+    .expect("row");
+    assert_eq!(row.capi_scope_checked_at, Some(700));
+    // Dataset: only-if-null, then unconditional.
+    assert_eq!(
+        write(&db, |c| im::update_dataset_id_if_null(
+            c, MESSENGER, WS, "d1"
+        ))
+        .await
+        .and_then(|r| r.dataset_id),
+        Some("d1".to_owned())
+    );
+    assert!(
+        write(&db, |c| im::update_dataset_id_if_null(
+            c, MESSENGER, WS, "d2"
+        ))
+        .await
+        .is_none()
+    );
+    assert_eq!(
+        write(&db, |c| im::update_dataset_id(c, MESSENGER, WS, "d3"))
+            .await
+            .and_then(|r| r.dataset_id),
+        Some("d3".to_owned())
+    );
+    assert_eq!(
+        write(&db, |c| im::update_capi_test_event_code(
+            c,
+            MESSENGER,
+            WS,
+            Some("T1")
+        ))
+        .await
+        .and_then(|r| r.capi_test_event_code),
+        Some("T1".to_owned())
+    );
+    let token = Json(serde_json::json!({ "iv": "a", "data": "b" }));
+    let t = token.clone();
+    assert_eq!(
+        write(&db, move |c| im::update_capi_access_token(
+            c, MESSENGER, WS, &t
+        ))
+        .await
+        .and_then(|r| r.capi_access_token),
+        Some(token.clone())
+    );
+    let row = write(&db, |c| im::set_capi_disconnected_at(c, MESSENGER, WS, 900))
+        .await
+        .expect("row");
+    assert_eq!(
+        (row.capi_disconnected_at, row.capi_access_token),
+        (Some(900), None)
+    );
+    let t = token.clone();
+    let row = write(&db, move |c| {
+        im::connect_custom_capi(c, MESSENGER, WS, "d4", &t)
+    })
+    .await
+    .expect("row");
+    assert_eq!(
+        (
+            row.dataset_id.as_deref(),
+            row.capi_disconnected_at,
+            row.capi_access_token
+        ),
+        (Some("d4"), None, Some(token))
+    );
+    assert_eq!(
+        write(&db, |c| im::clear_capi_access_token(c, MESSENGER, WS))
+            .await
+            .and_then(|r| r.capi_access_token),
+        None
+    );
+    write(&db, |c| im::set_capi_disconnected_at(c, MESSENGER, WS, 901)).await;
+    assert_eq!(
+        write(&db, |c| im::clear_capi_disconnected_at(c, MESSENGER, WS))
+            .await
+            .and_then(|r| r.capi_disconnected_at),
+        None
+    );
+    assert!(
+        write(&db, |c| im::clear_capi_access_token(c, MESSENGER, OTHER_WS))
+            .await
+            .is_none()
+    );
+    // Webhook targets: connected inboxes only, keyset by id.
+    let all = read(&db, |c| {
+        im::list_connected_for_webhook_subscription(c, None, 10)
+    })
+    .await;
+    assert_eq!(
+        all.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![MESSENGER, 67]
+    );
+    let after = read(&db, |c| {
+        im::list_connected_for_webhook_subscription(c, Some(MESSENGER), 10)
+    })
+    .await;
+    assert_eq!(after.iter().map(|t| t.id).collect::<Vec<_>>(), vec![67]);
+}
