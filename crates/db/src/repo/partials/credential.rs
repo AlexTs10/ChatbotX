@@ -10,20 +10,20 @@ const LEGACY_AAD_SUFFIX: &str = "false";
 
 /// `userCredentialAad`.
 pub fn user_credential_aad(user_id: &str, credential_type: &str) -> String {
-    let _ = (user_id, credential_type, LEGACY_AAD_SUFFIX);
-    todo!("P3.2b")
+    format!("user:{user_id}:{credential_type}:{LEGACY_AAD_SUFFIX}")
 }
 
 /// `platformCredentialAad`.
 pub fn platform_credential_aad(credential_type: &str) -> String {
-    let _ = credential_type;
-    todo!("P3.2b")
+    format!("platform:{credential_type}:{LEGACY_AAD_SUFFIX}")
 }
 
 /// `credentialAadFor`: the platform AAD without a `user_id`, else the user AAD.
 pub fn credential_aad_for(user_id: Option<&str>, credential_type: &str) -> String {
-    let _ = (user_id, credential_type);
-    todo!("P3.2b")
+    match user_id {
+        None => platform_credential_aad(credential_type),
+        Some(user_id) => user_credential_aad(user_id, credential_type),
+    }
 }
 
 /// `whatsappCredentialSchema`.
@@ -115,46 +115,92 @@ pub struct MessengerCredentialUpdate {
     pub marketing_messages_config_id: Option<String>,
 }
 
+/// A zod object parse: unknown keys are dropped, a wrong or missing field is an error.
+fn deserialize<T: serde::de::DeserializeOwned>(value: &serde_json::Value) -> Result<T> {
+    serde_json::from_value(value.clone()).map_err(|e| Error::msg(e.to_string()))
+}
+
+/// `z.string().trim().min(1)`.
+fn trim_min1(path: &str, field: &mut String) -> Result<()> {
+    *field = field.trim().to_owned();
+    if field.is_empty() {
+        return Err(Error::msg(format!(
+            "{path}: Too small: expected string to have >=1 characters"
+        )));
+    }
+    Ok(())
+}
+
+/// `z.string().trim().optional()`.
+fn trim_opt(field: &mut Option<String>) {
+    if let Some(value) = field {
+        *value = value.trim().to_owned();
+    }
+}
+
 /// `whatsappCredentialSchema.parse`.
 pub fn parse_whatsapp_credential(value: &serde_json::Value) -> Result<WhatsappCredential> {
-    let _ = (value, Error::msg(""));
-    todo!("P3.2b")
+    deserialize(value)
 }
 
 /// `whatsappCredentialPublicSchema.parse` (strips the secrets).
 pub fn parse_whatsapp_credential_public(
     value: &serde_json::Value,
 ) -> Result<WhatsappCredentialPublic> {
-    let _ = value;
-    todo!("P3.2b")
+    deserialize(value)
 }
 
 /// `whatsappCredentialUpdateSchema.parse`.
 pub fn parse_whatsapp_credential_update(
     value: &serde_json::Value,
 ) -> Result<WhatsappCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    let mut v: WhatsappCredentialUpdate = deserialize(value)?;
+    for (path, field) in [
+        ("clientId", &mut v.client_id),
+        ("version", &mut v.version),
+        ("configId", &mut v.config_id),
+        ("systemUserId", &mut v.system_user_id),
+        ("businessName", &mut v.business_name),
+        ("verifyToken", &mut v.verify_token),
+    ] {
+        trim_min1(path, field)?;
+    }
+    for field in [
+        &mut v.business_id,
+        &mut v.client_secret,
+        &mut v.system_user_token,
+        &mut v.capi_config_id,
+    ] {
+        trim_opt(field);
+    }
+    Ok(v)
 }
 
 /// `messengerCredentialSchema.parse`.
 pub fn parse_messenger_credential(value: &serde_json::Value) -> Result<MessengerCredential> {
-    let _ = value;
-    todo!("P3.2b")
+    deserialize(value)
 }
 
 /// `messengerCredentialPublicSchema.parse` (strips the secret).
 pub fn parse_messenger_credential_public(
     value: &serde_json::Value,
 ) -> Result<MessengerCredentialPublic> {
-    let _ = value;
-    todo!("P3.2b")
+    deserialize(value)
 }
 
 /// `messengerCredentialUpdateSchema.parse`.
 pub fn parse_messenger_credential_update(
     value: &serde_json::Value,
 ) -> Result<MessengerCredentialUpdate> {
-    let _ = value;
-    todo!("P3.2b")
+    let mut v: MessengerCredentialUpdate = deserialize(value)?;
+    for (path, field) in [
+        ("clientId", &mut v.client_id),
+        ("version", &mut v.version),
+        ("verifyToken", &mut v.verify_token),
+        ("clientSecret", &mut v.client_secret),
+    ] {
+        trim_min1(path, field)?;
+    }
+    trim_opt(&mut v.marketing_messages_config_id);
+    Ok(v)
 }

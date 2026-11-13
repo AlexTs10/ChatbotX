@@ -26,7 +26,12 @@ pub enum WhatsappCallOutcome {
 impl WhatsappCallOutcome {
     /// The stored text.
     pub fn as_str(self) -> &'static str {
-        todo!("P3.2b")
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Rejected => "rejected",
+            Self::Canceled => "canceled",
+        }
     }
 }
 
@@ -43,8 +48,12 @@ pub fn resolve_whatsapp_call_outcome(
     status: WhatsappCallTerminalStatus,
     canceled_by_business: bool,
 ) -> WhatsappCallOutcome {
-    let _ = (status, canceled_by_business);
-    todo!("P3.2b")
+    match status {
+        WhatsappCallTerminalStatus::Completed => WhatsappCallOutcome::Completed,
+        WhatsappCallTerminalStatus::Rejected => WhatsappCallOutcome::Rejected,
+        WhatsappCallTerminalStatus::Failed if canceled_by_business => WhatsappCallOutcome::Canceled,
+        WhatsappCallTerminalStatus::Failed => WhatsappCallOutcome::Failed,
+    }
 }
 
 /// `resolveWhatsappCallTerminalOutcomePair`: `(status, outcome)`.
@@ -52,13 +61,20 @@ pub fn resolve_whatsapp_call_terminal_outcome_pair(
     status: WhatsappCallTerminalStatus,
     canceled_by_business: bool,
 ) -> (WhatsappCallTerminalStatus, WhatsappCallOutcome) {
-    let _ = (status, canceled_by_business);
-    todo!("P3.2b")
+    (
+        status,
+        resolve_whatsapp_call_outcome(status, canceled_by_business),
+    )
 }
 
 /// `resolveDisplayCallOutcome`: `coalesce(outcome, status)` for terminal rows; `None`
 /// while ringing / accepted (texts as stored).
 pub fn resolve_display_call_outcome(status: &str, outcome: Option<&str>) -> Option<String> {
-    let _ = (status, outcome);
-    todo!("P3.2b")
+    if let Some(outcome) = outcome.filter(|o| !o.is_empty()) {
+        return Some(outcome.to_owned());
+    }
+    OUTCOME_BY_TERMINAL_STATUS
+        .iter()
+        .any(|(terminal, _)| *terminal == status)
+        .then(|| status.to_owned())
 }

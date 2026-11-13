@@ -1,6 +1,6 @@
 //! Port of `repositories/contact-inbox/repository.ts` (identity, attribution, ad
-//! eligibility and thread-control writes; the bulk-AI eligibility and the relational
-//! finders are listed as not ported yet in `conversion/specs/P3.2.md`).
+//! eligibility, thread-control writes, the bulk-AI eligibility trio and the relational
+//! finders).
 
 use rusqlite::Connection;
 use rusqlite::types::Value;
