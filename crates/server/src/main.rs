@@ -183,13 +183,12 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         mailer: mailer(),
         now_ms,
     });
+    let api = Arc::new(api_state(&shared, realtime.as_ref()).await?);
     let mut app = chatbotx_api::router()
         .merge(chatbotx_api::rpc::rpc_router(Arc::clone(&sessions)))
         .merge(chatbotx_api::session::auth_router(sessions))
-        .merge(chatbotx_api::routes::public_api_router_with(
-            auth,
-            Arc::new(api_state(&shared, realtime.as_ref()).await?),
-        ));
+        .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
+        .merge(chatbotx_api::routes::public_api_router_with(auth, api));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
