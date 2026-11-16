@@ -56,7 +56,7 @@ async fn does_not_read_the_touches_of_a_contact_the_caller_cannot_open() {
         .await
         .expect_err("contact of another workspace");
     assert_eq!(error.code(), Some("notFound"));
-    assert_eq!(error.to_string(), "Contact not found");
+    assert_eq!(error.message(), "Contact not found"); // orchestrator fix: Display is "code: message"
 }
 
 #[tokio::test]

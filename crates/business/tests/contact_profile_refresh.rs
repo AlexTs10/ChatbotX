@@ -725,7 +725,7 @@ async fn refresh_contact_profile_throws_before_any_inbox_channel_work_when_the_c
         .await
         .expect_err("contact of another workspace");
     assert_eq!(error.code(), Some("notFound"));
-    assert_eq!(error.to_string(), "Contact not found");
+    assert_eq!(error.message(), "Contact not found"); // orchestrator fix: Display is "code: message"
     assert!(!kv.exists(COOLDOWN_KEY));
 }
 
@@ -740,7 +740,7 @@ async fn refresh_contact_profile_throws_when_the_contact_inbox_does_not_exist() 
         .await
         .expect_err("unknown contact inbox");
     assert_eq!(error.code(), Some("notFound"));
-    assert_eq!(error.to_string(), "Contact inbox not found");
+    assert_eq!(error.message(), "Contact inbox not found"); // orchestrator fix: Display is "code: message"
 }
 
 #[tokio::test]
