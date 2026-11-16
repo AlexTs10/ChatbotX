@@ -145,20 +145,17 @@ async fn post_messages_hands_a_product_message_to_createoutgoing_unchanged() {
         }),
     )
     .await;
-    assert_eq!(status, 204, "{body}");
-    let attributes = scalar(
-        &f,
-        r#"SELECT "contentAttributes" FROM "Message" WHERE "conversationId" = ?1"#,
-        70,
-    )
-    .await;
-    assert!(
-        attributes
-            .as_ref()
-            .and_then(Value::as_str)
-            .is_some_and(|text| text.contains("\"1\"")),
-        "{attributes:?}"
+    // Orchestrator fix (P3.6-D3): only WhatsApp has a product catalog source
+    // (packages/business/src/product-message/catalog-sources.ts:169), so the real
+    // `prepareOutgoing` refuses a product message on this webchat inbox.
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(body["code"], json!("productMessageUnresolvable"), "{body}");
+    assert_eq!(
+        body["data"]["reason"],
+        json!("channelUnsupported"),
+        "{body}"
     );
+    assert_eq!(stored_texts(&f, 70).await, Vec::<String>::new());
 }
 
 /// Adapted: an unknown product is what makes the product message
