@@ -46,6 +46,7 @@ async fn fixture() -> common::TestDb {
         inbox(tx, 1, WS, "messenger")?;
         inbox(tx, 2, WS, "webchat")?;
         contact(tx, CONTACT, WS)?;
+        contact_name(tx, CONTACT, None, None, None)?;
         contact(tx, 20, OTHER_WS)?;
         contact_inbox(tx, CONTACT_INBOX, CONTACT, 1, "messenger", "psid-10")?;
         contact_inbox(tx, 12, CONTACT, 2, "webchat", "web-10")?;
