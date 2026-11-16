@@ -415,7 +415,7 @@ fn assigned_id(input: &mut Input) -> Option<Option<String>> {
 
 // ---- handlers -------------------------------------------------------------
 
-async fn queue_jobs(state: &ApiState, job: Option<actions::ActionJob>) {
+pub(super) async fn queue_jobs(state: &ApiState, job: Option<actions::ActionJob>) {
     let (Some(jobs), Some(job)) = (&state.jobs, job) else {
         return;
     };
@@ -424,7 +424,7 @@ async fn queue_jobs(state: &ApiState, job: Option<actions::ActionJob>) {
         ..JobOptions::default()
     };
     if let Err(error) = jobs.add(job.queue, job.name, job.data, opts).await {
-        tracing::warn!(%error, "conversation-assigned notification enqueue failed");
+        tracing::warn!(%error, "conversation action job enqueue failed");
     }
 }
 

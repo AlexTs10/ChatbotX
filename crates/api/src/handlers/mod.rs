@@ -22,6 +22,7 @@ pub mod flows;
 pub mod folders;
 pub mod input;
 pub mod keywords;
+pub mod messages;
 pub mod minigames;
 pub mod open_hours;
 pub mod pipelines;
@@ -411,6 +412,8 @@ async fn route(
         contact_messages::handle(state, route_id, call).await
     } else if conversations::ROUTES.contains(&route_id) {
         conversations::handle(state, route_id, call).await
+    } else if messages::ROUTES.contains(&route_id) {
+        messages::handle(state, route_id, call).await
     } else if keywords::ROUTES.contains(&route_id) {
         keywords::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {

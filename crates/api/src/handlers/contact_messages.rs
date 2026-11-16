@@ -99,7 +99,7 @@ fn parse_id(value: Option<&Value>) -> Option<i64> {
 }
 
 /// Adds the jobs and publishes the realtime `messageCreated` event.
-async fn deliver(state: &ApiState, conversation: &Conversation, outgoing: Outgoing) {
+pub(super) async fn deliver(state: &ApiState, conversation: &Conversation, outgoing: Outgoing) {
     if let Some(payload) = outgoing.realtime {
         let route = route_for_conversation(
             Some(&ConversationRoute {
@@ -148,6 +148,17 @@ async fn send(
 
 async fn send_message(state: &ApiState, call: Call<'_>) -> Reply {
     let input = Input::from_body(call.params, call.body);
+    let outgoing = outgoing_input(input, SENDING)?;
+    send(state, &call, outgoing.inbox_id, outgoing, SENDING).await
+}
+
+/// Validates a `createMessageRequest` body (the other `input` checks are
+/// already queued) and maps it to the ported part of `createOutgoing`.
+/// Media library / device files: 501 `notPorted`.
+pub(super) fn outgoing_input(
+    input: Input,
+    errors: ErrorMap,
+) -> Result<OutgoingInput, crate::orpc::OrpcError> {
     let body = Value::Object(input.obj.clone());
     let parsed = create_message_request().safe_parse(&body);
     let mut input = input;
@@ -169,10 +180,10 @@ async fn send_message(state: &ApiState, call: Call<'_>) -> Reply {
     {
         return Err(business_error(
             not_ported("Media library and device files"),
-            SENDING,
+            errors,
         ));
     }
-    let outgoing = OutgoingInput {
+    Ok(OutgoingInput {
         flow_id: parse_id(data.get("flowId")),
         node_id: data
             .get("nodeId")
@@ -199,12 +210,11 @@ async fn send_message(state: &ApiState, call: Call<'_>) -> Reply {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         ..OutgoingInput::default()
-    };
-    send(state, &call, outgoing.inbox_id, outgoing, SENDING).await
+    })
 }
 
 /// `decodeCursor` (`null` for an invalid cursor: the first page).
-fn decode_cursor(text: &str) -> Option<PaginationCursor> {
+pub(super) fn decode_cursor(text: &str) -> Option<PaginationCursor> {
     let bytes = super::contact_inboxes::lenient_base64(text)?;
     let value: Value = serde_json::from_slice(&bytes).ok()?;
     let object = value.as_object()?;
@@ -235,7 +245,7 @@ fn decode_cursor(text: &str) -> Option<PaginationCursor> {
 }
 
 /// `encodeCursor({ direction: "prev", createdAt, id, shardId })`.
-fn encode_cursor(cursor: &PaginationCursor) -> String {
+pub(super) fn encode_cursor(cursor: &PaginationCursor) -> String {
     let mut text = format!(
         r#"{{"direction":"prev","createdAt":"{}","id":"{}""#,
         chatbotx_db::repo::iso(cursor.created_at),

@@ -32,6 +32,7 @@ pub mod inbox;
 pub mod integration_api;
 pub mod integration_webchat;
 pub mod message;
+pub mod message_actions;
 pub mod minigame;
 pub mod net;
 pub mod pipeline;
