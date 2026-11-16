@@ -157,6 +157,13 @@ fn edition() -> String {
     env_or("NEXT_PUBLIC_EDITION", "community")
 }
 
+/// `resolveBroadcastSecret()`: `REALTIME_BROADCAST_SECRET` when set.
+fn realtime_secret() -> Option<String> {
+    std::env::var("REALTIME_BROADCAST_SECRET")
+        .ok()
+        .filter(|secret| !secret.is_empty())
+}
+
 /// `isCloud()`: `NEXT_PUBLIC_EDITION=cloud`.
 fn is_cloud() -> bool {
     std::env::var("NEXT_PUBLIC_EDITION").is_ok_and(|edition| edition == "cloud")
@@ -185,7 +192,13 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     });
     let api = Arc::new(api_state(&shared, realtime.as_ref()).await?);
     let mut app = chatbotx_api::router()
-        .merge(chatbotx_api::rpc::rpc_router(Arc::clone(&sessions)))
+        .merge(chatbotx_api::rpc::rpc_router_with(
+            chatbotx_api::rpc::RpcState {
+                auth: Arc::clone(&sessions),
+                api: Some(Arc::clone(&api)),
+                realtime_secret: realtime_secret(),
+            },
+        ))
         .merge(chatbotx_api::session::auth_router(sessions))
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
         .merge(chatbotx_api::routes::public_api_router_with(auth, api));
