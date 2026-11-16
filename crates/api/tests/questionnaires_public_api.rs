@@ -45,7 +45,15 @@ async fn seed_submissions(f: &Fixture, qid: i64, count: i64, completed: i64) {
                 params![WS],
             )?;
             for n in 0..count {
-                let status = if n < completed { "completed" } else { "inProgress" };
+                // Orchestrator fix (P3.6-D1): at most one open submission per contact
+            // (`QuestionnaireSubmission_workspaceId_contactId_active_key`).
+            let status = if n < completed {
+                "completed"
+            } else if n < completed + 2 {
+                "inProgress"
+            } else {
+                "cancelled"
+            };
                 tx.execute(
                     r#"INSERT INTO "QuestionnaireSubmission"
                          ("id", "createdAt", "updatedAt", "workspaceId", "questionnaireId", "contactId", "status",
