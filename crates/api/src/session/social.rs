@@ -190,7 +190,7 @@ pub fn trusted_providers(env: &GenericOAuthEnv) -> Vec<String> {
 }
 
 /// `z.stringbool()` truthy values (`normalizeBoolean`); unset / empty = false.
-fn env_bool(value: Option<&str>) -> bool {
+pub(super) fn env_bool(value: Option<&str>) -> bool {
     value.is_some_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),
