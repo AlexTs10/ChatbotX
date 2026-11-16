@@ -32,6 +32,7 @@ pub const ROUTES: &[&str] = &[
     "flows.updateDraft",
     "flows.versions",
     "flows.export",
+    "flows.import",
 ];
 
 /// Runs one of [`ROUTES`].
@@ -49,6 +50,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "flows.updateDraft" => update_draft(state, call).await,
         "flows.versions" => versions(state, call).await,
         "flows.export" => export(state, call).await,
+        "flows.import" => import(state, call).await,
         _ => Err(crate::routes::not_ported_error()),
     }
 }
@@ -707,4 +709,51 @@ async fn export(state: &ApiState, call: Call<'_>) -> Reply {
         200,
         json!({ "fileName": out.file_name, "export": envelope }),
     ))
+}
+
+/// `flows.import`: `startFlowImport` (`userId: null`), then the import job,
+/// run in the request (no default-queue worker), and `202 { importId }`.
+async fn import(state: &ApiState, call: Call<'_>) -> Reply {
+    use chatbotx_business::flow::import::{
+        StartFlowImportRefusal, run_flow_import, start_flow_import,
+    };
+    let mut input = Input::from_body(call.params, call.body);
+    let file_id = input.id("fileId");
+    // `zodBigintAsString().nullable()`: required, `null` allowed.
+    let folder_id = match input.get("folderId").cloned() {
+        Some(Value::Null) => None,
+        value => input.id_at(&key("folderId"), value.as_ref(), true),
+    };
+    input.finish()?;
+    let refusal = |message: &str| {
+        business_error(
+            BusinessError::validation("fileId", message),
+            super::CREATING,
+        )
+    };
+    let started = start_flow_import(
+        &state.db,
+        call.workspace_id,
+        None,
+        file_id.unwrap_or_default(),
+        folder_id,
+    )
+    .await
+    .map_err(|e| business_error(e, super::CREATING))?;
+    let import_id = match started {
+        Ok(import_id) => import_id,
+        Err(StartFlowImportRefusal::FileNotFound) => return Err(refusal("File not found")),
+        Err(StartFlowImportRefusal::NotAFlowImport) => {
+            return Err(refusal("File is not a flow import"));
+        }
+    };
+    match state.files.as_deref() {
+        Some(files) => {
+            if let Err(error) = run_flow_import(&state.db, files, import_id).await {
+                tracing::error!(%error, import_id, "flow import run failed");
+            }
+        }
+        None => tracing::error!(import_id, "file storage is not configured; import not run"),
+    }
+    Ok(json(202, json!({ "importId": import_id.to_string() })))
 }

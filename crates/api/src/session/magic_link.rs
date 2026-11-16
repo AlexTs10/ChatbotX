@@ -309,6 +309,7 @@ pub(super) async fn magic_link_verify(
                            VALUES (?1, ?2, ?3, 1, ?4)"#,
                         params![id, name, email, ROOT_TENANT_ID],
                     )?;
+                    super::email_password::on_user_created(tx, &email, false)?;
                     Ok(())
                 })
                 .await;

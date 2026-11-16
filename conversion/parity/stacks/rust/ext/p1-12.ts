@@ -4,7 +4,11 @@
 // Methods are added as the P3.6 domain ports need them; the others throw.
 // Times are stored as unix ms (the Rust schema), JSON as text.
 
+import { createCipheriv, randomBytes } from "node:crypto"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { DatabaseSync } from "node:sqlite"
+import { fileURLToPath } from "node:url"
 import type {
   P112Fixtures,
   P112MetaCatalogConnectionInput,
@@ -14,6 +18,42 @@ import type {
   P112PollVoteInput,
   P112QuestionnaireSubmissionInput,
 } from "../../../src/fixtures/ext/p1-12.ts"
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+
+/** `ENCRYPTION_KEY` of `stacks/rust/rust.env` (the server's key). */
+const readEnvFile = (): Record<string, string> => {
+  const text = readFileSync(path.resolve(here, "../rust.env"), "utf8")
+  const values: Record<string, string> = {}
+  for (const line of text.split("\n")) {
+    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim())
+    if (match?.[1]) {
+      values[match[1]] = match[2] ?? ""
+    }
+  }
+  return values
+}
+
+const env = readEnvFile()
+const ENCRYPTION_KEY = Buffer.from(env.ENCRYPTION_KEY ?? "", "hex")
+const ENCRYPTION_KEY_ID = env.ENCRYPTION_KEY_ID || "default"
+
+/** encryptUtils.encryptObject of the app (no AAD); same as stacks/original/ext/p1-12.ts. */
+const encryptObject = (value: unknown) => {
+  if (ENCRYPTION_KEY.length !== 32) {
+    throw new Error("p1-12 fixtures: ENCRYPTION_KEY must be 32 bytes of hex")
+  }
+  const iv = randomBytes(12)
+  const cipher = createCipheriv("aes-256-gcm", ENCRYPTION_KEY, iv, { authTagLength: 16 })
+  const text = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()])
+  return {
+    v: 1,
+    kid: ENCRYPTION_KEY_ID,
+    iv: iv.toString("hex"),
+    text: text.toString("hex"),
+    tag: cipher.getAuthTag().toString("hex"),
+  }
+}
 
 const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
 // Same place id as the original p1-12 extension (DECISIONS 2026-11-12).
@@ -247,7 +287,7 @@ class SqliteP112Fixtures implements P112Fixtures {
         input.catalogId ?? null,
         input.catalogName ?? null,
         input.businessId ?? null,
-        JSON.stringify({ accessToken: input.accessToken, version: "v23.0" }),
+        JSON.stringify(encryptObject({ accessToken: input.accessToken, version: "v23.0" })),
       )
       db.exec("COMMIT")
     } catch (error) {

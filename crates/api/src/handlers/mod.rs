@@ -7,6 +7,7 @@ pub mod bot_fields;
 pub mod channels;
 pub mod connections;
 pub mod contact_custom_fields;
+pub mod contact_exports;
 pub mod contact_filter;
 pub mod contact_imports;
 pub mod contact_inboxes;
@@ -20,6 +21,8 @@ pub mod ecommerce_settings;
 pub mod flows;
 pub mod folders;
 pub mod input;
+pub mod media_library;
+pub mod meta_catalog;
 pub mod minigames;
 pub mod open_hours;
 pub mod pipelines;
@@ -437,6 +440,10 @@ async fn route(
         products::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
+    } else if meta_catalog::ROUTES.contains(&route_id) {
+        meta_catalog::handle(state, route_id, call).await
+    } else if media_library::ROUTES.contains(&route_id) {
+        media_library::handle(state, route_id, call).await
     } else if minigames::ROUTES.contains(&route_id) {
         minigames::handle(state, route_id, call).await
     } else if questionnaires::ROUTES.contains(&route_id) {
@@ -445,6 +452,10 @@ async fn route(
         reflinks::handle(state, route_id, call).await
     } else if workspace_members::ROUTES.contains(&route_id) {
         workspace_members::handle(state, route_id, call).await
+    } else if contact_exports::ROUTES.contains(&route_id) {
+        contact_exports::handle(state, route_id, call).await
+    } else if contact_imports::ROUTES.contains(&route_id) {
+        contact_imports::handle(state, route_id, call).await
     } else if contact_filter::ROUTES.contains(&route_id) {
         contact_filter::handle(state, route_id, call).await
     } else {
