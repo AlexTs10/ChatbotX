@@ -92,7 +92,7 @@ fn ad_referral_json(touch: &ContactAdTouch) -> Value {
 
 /// `Buffer.from(text, "base64")`: base64 or base64url, invalid characters
 /// skipped, no padding check.
-fn lenient_base64(text: &str) -> Option<Vec<u8>> {
+pub(super) fn lenient_base64(text: &str) -> Option<Vec<u8>> {
     const LENIENT: GeneralPurpose = GeneralPurpose::new(
         &base64::alphabet::STANDARD,
         GeneralPurposeConfig::new()
