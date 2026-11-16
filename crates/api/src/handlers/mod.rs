@@ -15,6 +15,7 @@ pub mod contact_notes;
 pub mod contact_sequences;
 pub mod contacts;
 pub mod contacts_bulk;
+pub mod conversations;
 pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod flows;
@@ -408,6 +409,8 @@ async fn route(
         contact_notes::handle(state, route_id, call).await
     } else if contact_messages::ROUTES.contains(&route_id) {
         contact_messages::handle(state, route_id, call).await
+    } else if conversations::ROUTES.contains(&route_id) {
+        conversations::handle(state, route_id, call).await
     } else if keywords::ROUTES.contains(&route_id) {
         keywords::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {

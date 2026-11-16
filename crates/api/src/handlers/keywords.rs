@@ -147,6 +147,11 @@ fn conditions(input: &mut Input) -> Option<Value> {
                 s.parse::<usize>()
                     .map_or_else(|_| Seg::Key(s.to_string()), Seg::Index)
             }));
+            // serde reports an unknown operator on the condition; zod on its `operator`.
+            if issue.message.starts_with("unknown variant") && issue.message.contains("`similarTo`")
+            {
+                path.push(Seg::Key("operator".into()));
+            }
             input.issue(&path, "custom", &issue.message);
         }
         return None;

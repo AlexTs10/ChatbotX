@@ -14,6 +14,8 @@ pub mod contact_note;
 pub mod contact_referral_event;
 pub mod contact_sequence;
 pub mod conversation;
+pub mod conversation_actions;
+pub mod conversation_list;
 pub mod copy_name;
 pub mod count_mode;
 pub mod custom_field;
