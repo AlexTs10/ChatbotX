@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// biome-ignore-all lint/performance/useTopLevelRegex: a one-shot dev script
 // Writes the P4 inventories (conversion/specs/P4-*.tsv) from apps/builder,
 // apps/web and crates/api:
 //   P4-routes.tsv      Next.js page -> SPA path -> ported in apps/web?
@@ -35,8 +36,13 @@ const webText = webFiles.map((file) => readFileSync(file, "utf8")).join("\n")
 // The generated `rpc/table.rs` lists every procedure, ported or not: skip it.
 const rustText = execFileSync(
   "grep",
-  ["-rhoE", "--exclude=table.rs", '"[A-Za-z0-9_.-]+"', join(repo, "crates/api/src")],
-  { encoding: "utf8", maxBuffer: 1 << 28 },
+  [
+    "-rhoE",
+    "--exclude=table.rs",
+    '"[A-Za-z0-9_.-]+"',
+    join(repo, "crates/api/src"),
+  ],
+  { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
 )
 const rustStrings = new Set(rustText.split("\n").map((s) => s.slice(1, -1)))
 
@@ -68,18 +74,26 @@ for (const file of builderFiles) {
   }
   const rel = relative(builderSrc, file)
   const matches = [
-    ...source.matchAll(/^export\s+(?:(?:async\s+)?function\s+(\w+)|const\s+(\w+))/gm),
+    ...source.matchAll(
+      /^export\s+(?:(?:async\s+)?function\s+(\w+)|const\s+(\w+))/gm,
+    ),
   ]
   matches.forEach((match, index) => {
     const name = match[1] ?? match[2]
     const body = source.slice(match.index, matches[index + 1]?.index)
-    const kind = /\.action\(/.test(body)
-      ? /workspaceActionClient|calling\w*ActionClient|callHistoryActionClient/.test(body)
-        ? "workspace-action"
-        : "auth-action"
-      : "function"
+    let kind = "function"
+    if (/\.action\(/.test(body)) {
+      kind =
+        /workspaceActionClient|calling\w*ActionClient|callHistoryActionClient/.test(
+          body,
+        )
+          ? "workspace-action"
+          : "auth-action"
+    }
     const rpcName =
-      name === "updateHandoverResumeFlowAction" ? `${rel.split("/")[1]}.${name}` : name
+      name === "updateHandoverResumeFlowAction"
+        ? `${rel.split("/")[1]}.${name}`
+        : name
     actionRows.push([
       rel.split("/").slice(0, 2).join("/"),
       rel,
@@ -110,12 +124,20 @@ const procedureRows = [...uses]
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([key, count]) => {
     const inWeb = webText.includes(key) ? "web" : ""
-    return [key, String(count), inWeb, rustStrings.has(key) ? "rust" : "missing"]
+    return [
+      key,
+      String(count),
+      inWeb,
+      rustStrings.has(key) ? "rust" : "missing",
+    ]
   })
 
 const tsv = (header, rows) =>
   `${[header, ...rows].map((row) => row.join("\t")).join("\n")}\n`
-writeFileSync(join(specs, "P4-routes.tsv"), tsv(["page", "spa_path", "status"], routeRows))
+writeFileSync(
+  join(specs, "P4-routes.tsv"),
+  tsv(["page", "spa_path", "status"], routeRows),
+)
 writeFileSync(
   join(specs, "P4-actions.tsv"),
   tsv(["feature", "file", "export", "kind", "rpc_path", "rust"], actionRows),

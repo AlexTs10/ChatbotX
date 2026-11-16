@@ -134,6 +134,7 @@
     {
       "includes": [
         "apps/builder/**",
+        "apps/web/**",
         "packages/ui/**",
         "packages/analytics-nextjs/**",
         "packages/minigame-ui/**"

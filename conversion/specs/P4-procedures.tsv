@@ -26,11 +26,11 @@ appointmentCalendarsAPI.getContactAvailabilityAPI	2		missing
 appointmentCalendarsAPI.listAppointmentCalendarsForFlowAPI	2		missing
 appointmentsAPI.key	1		missing
 appointmentsAPI.listContactAppointmentsAPI	1		missing
-botFieldAPIs.privateListBotFieldsAPI	2		missing
+botFieldAPIs.privateListBotFieldsAPI	2	web	missing
 broadcastAPIs.privateGetBatchBroadcastStatsAPI	1		missing
 broadcastAPIs.privateListBroadcastContactsAPI	1		missing
 broadcastAPIs.privateListBroadcastOccurrencesAPI	2		missing
-broadcastAPIs.privateListBroadcastOptionsAPI	1		missing
+broadcastAPIs.privateListBroadcastOptionsAPI	1	web	missing
 broadcastAPIs.privateListBroadcastRunGroupsAPI	2		missing
 commentAutomationsAPI.automationAccountsAPI	1		missing
 commentAutomationsAPI.moderationLogsAPI	1		missing
@@ -38,18 +38,18 @@ commentAutomationsAPI.moderationSummaryAPI	1		missing
 connectionsAPI.key	1		missing
 connectSessionsAPI.getConnectSessionAPI	1		missing
 connectSessionsAPI.key	1		missing
-contactFilterAPI.getActivityAvailabilityAPI	1		missing
-contactFilterAPI.listActivityValueOptionsAPI	1		missing
-contactFilterAPI.resolveFilterValueLabelsAPI	1		missing
+contactFilterAPI.getActivityAvailabilityAPI	1	web	missing
+contactFilterAPI.listActivityValueOptionsAPI	1	web	missing
+contactFilterAPI.resolveFilterValueLabelsAPI	1	web	missing
 contactNotesAPI.listContactNotesAuthenticatedAPI	1		missing
 contactsAPIs.countContactInboxesAuthenticatedAPI	1		missing
 contactsAPIs.countContactsAuthenticatedAPI	1		missing
 contactsAPIs.getContactAuthenticatedAPI	1		missing
-contactsAPIs.getExportFileAuthenticatedAPI	2		missing
+contactsAPIs.getExportFileAuthenticatedAPI	2	web	missing
 contactsAPIs.listContactAdReferralsAuthenticatedAPI	1		missing
 contactsAPIs.listContactInboxesAudiencePreviewAuthenticatedAPI	1		missing
-contactsAPIs.listContactsByPOSTAuthenticatedAPI	3		missing
-contactsAPIs.listExportFilesAuthenticatedAPI	2		missing
+contactsAPIs.listContactsByPOSTAuthenticatedAPI	3	web	missing
+contactsAPIs.listExportFilesAuthenticatedAPI	2	web	missing
 contactScanAPIs.getContactScanStatusAuthenticatedAPI	2		missing
 contactSequencesAPI.listContactSequencesAuthenticatedAPI	1		missing
 conversationsAPI.findConversationAuthenticatedAPI	2		missing
@@ -61,12 +61,12 @@ couponsAPI.deleteCouponTopicAPI	2		missing
 couponsAPI.getCouponExportFileAPI	1		missing
 couponsAPI.listContactCouponsAPI	1		missing
 couponsAPI.listCouponsAPI	1		missing
-couponsAPI.listCouponTopicOptionsAPI	1		missing
+couponsAPI.listCouponTopicOptionsAPI	1	web	missing
 couponsAPI.listCouponTopicsAPI	1		missing
 couponsAPI.unarchiveCouponTopicAPI	2		missing
 couponsAPI.updateCouponTopicAPI	1		missing
-customFieldsAPI.key	1		missing
-customFieldsAPI.privateListCustomFieldsAPI	1		missing
+customFieldsAPI.key	1	web	missing
+customFieldsAPI.privateListCustomFieldsAPI	1	web	missing
 decisionProfilesAPI.key	1		missing
 decisionProfilesAPI.listActiveForFlow	1		missing
 decisionProfilesAPI.listGlobalRouterDestinations	1		missing
@@ -82,18 +82,18 @@ fbCommentsAPI.facebookPostsAPI	1		missing
 fbCommentsAPI.privateListCommentAutomationContactsAPI	1		missing
 flowsAPI.privateGetFlowStatsAPI	1		missing
 flowsAPI.privateGetMessengerAdsJsonAPI	1		missing
-flowsAPI.privateListFlowsAPI	2		missing
+flowsAPI.privateListFlowsAPI	2	web	missing
 flowsAPI.privateListFlowVersionsAPI	1		missing
 flowsAPI.privateResetFlowStatsAPI	1		missing
-foldersAPI.listFoldersAuthenticatedAPI	1		missing
+foldersAPI.listFoldersAuthenticatedAPI	1	web	missing
 googleAdsAPI.getInFlightConnectSession	1		missing
 googleAdsAPI.getIntegration	1		missing
 googleAdsAPI.key	1		missing
 googleAdsAPI.listEvents	1		missing
 igCommentsAPI.instagramMediaAPI	1		missing
 igStoriesAPI.instagramStoriesAPI	1		missing
-inboxesAPI.listAllInboxesAuthenticatedAPI	2		missing
-inboxTeamsAPI.listInboxTeamsAuthenticatedAPI	2		missing
+inboxesAPI.listAllInboxesAuthenticatedAPI	2	web	missing
+inboxTeamsAPI.listInboxTeamsAuthenticatedAPI	2	web	missing
 integrationActiveCampaignAPI.listAutomations	1		missing
 integrationActiveCampaignAPI.listCustomFields	1		missing
 integrationActiveCampaignAPI.listLists	1		missing
@@ -126,7 +126,7 @@ integrationWhatsappAPIs.listIntegrationWhatsappInternalAPI	1		missing
 integrationWhatsappAPIs.listWhatsappPhoneNumbersInternalAPI	1		missing
 integrationWhatsappAPIs.setCoexistWhatsappAPI	2		missing
 integrationWhatsappAPIs.syncWhatsappRoutingRolesAPI	1		missing
-leaderboardsAPI.listLeaderboardOptionsAPI	2		missing
+leaderboardsAPI.listLeaderboardOptionsAPI	2	web	missing
 mediaLibraryAPI.listMediaLibraryFiles	1		missing
 mediaLibraryAPI.listMediaLibraryFolders	1		missing
 messagesAPI.getWhatsappFlowResponseAuthenticatedAPI	1		missing
@@ -143,7 +143,7 @@ pipelinesAPI.privateListContactItemsAPI	2		missing
 pipelinesAPI.privateListItemActivityAPI	2		missing
 pipelinesAPI.privateListItemCommentsAPI	2		missing
 pipelinesAPI.privateListPipelineMembersAPI	1		missing
-pipelinesAPI.privateListPipelineOptionsAPI	2		missing
+pipelinesAPI.privateListPipelineOptionsAPI	2	web	missing
 pipelinesAPI.privateListPipelinesAPI	3		missing
 pipelinesAPI.privateListStagePageAPI	1		missing
 placesNearMeAPI.listPlaceCategoryOptionsAPI	2		missing
@@ -154,24 +154,24 @@ pollsAPI.getPollAnalyticsAPI	1		missing
 pollsAPI.getPollLinksAPI	1		missing
 pollsAPI.key	1		missing
 pollsAPI.updatePollAPI	1		missing
-productsAPI.listProductFormOptionsAPI	4		missing
+productsAPI.listProductFormOptionsAPI	4	web	missing
 productsAPI.listProductsAuthorizedAPI	2		missing
 productsAPI.listSendableProductsAuthorizedAPI	2		missing
 questionnairesAPI.listQuestionnairesForFlowAPI	1		missing
-realtimeAPI.mintWorkspaceConnectTokenAuthenticatedAPI	1		missing
-refLinksAPI.listRefLinkOptionsAuthenticatedAPI	1		missing
+realtimeAPI.mintWorkspaceConnectTokenAuthenticatedAPI	1	web	missing
+refLinksAPI.listRefLinkOptionsAuthenticatedAPI	1	web	missing
 responseSlaAPI.getResponseSlaStatusWorkspaceAuthAPI	2		missing
 savedRepliesAPI.listSavedRepliesAuthorizedAPI	2		missing
-sequencesAPI.listSequencesWorkspaceAuthAPI	2		missing
+sequencesAPI.listSequencesWorkspaceAuthAPI	2	web	missing
 sequencesAPI.privateGetSequenceStepStatsAPI	1		missing
 sequencesAPI.privateListSequenceStepContactsAPI	1		missing
 spreadsheetsAPI.listSpreadsheetsAuthenticatedAPI	1		missing
 spreadsheetsAPI.listWorksheetHeadersAuthenticatedAPI	1		missing
 spreadsheetsAPI.listWorksheetsAuthenticatedAPI	1		missing
-tagsAPI.key	1		missing
-tagsAPI.privateListWorkspaceTagsAPI	1		missing
+tagsAPI.key	1	web	missing
+tagsAPI.privateListWorkspaceTagsAPI	1	web	missing
 templatesAPI.key	1		missing
-templatesAPI.listLockedIdsAPI	1		missing
+templatesAPI.listLockedIdsAPI	1	web	missing
 templatesAPI.listSelectableResourcesAPI	2		missing
 templatesAPI.previewDependenciesAPI	1		missing
 threadsCommentsAPI.threadsPostsAPI	1		missing
@@ -180,5 +180,5 @@ whatsappFlowAPIs.getWhatsappFlowScreensInternalAPI	2		missing
 whatsappFlowAPIs.listWhatsappFlowsInternalAPI	1		missing
 whatsappMessageTemplateAPIs.listWhatsappMessageTemplatesInternalAPI	2		missing
 whatsappMessageTemplateAPIs.searchMetaCatalogProductsAPI	2		missing
-workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI	2		missing
-workspaceMembersAPI.listWorkspaceMembersAuthenticatedAPI	2		missing
+workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI	2	web	missing
+workspaceMembersAPI.listWorkspaceMembersAuthenticatedAPI	2	web	missing

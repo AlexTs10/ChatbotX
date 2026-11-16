@@ -405,7 +405,9 @@ dependencies = [
  "chatbotx-jobs",
  "chatbotx-kv",
  "chatbotx-rt",
+ "serde_json",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]

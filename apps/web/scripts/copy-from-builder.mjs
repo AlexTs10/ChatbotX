@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// biome-ignore-all lint/performance/useTopLevelRegex: a one-shot dev script
 // Copies builder files into the SPA with their `@/` and relative imports
 // (transitive closure). Files already in apps/web are kept (they may be
 // edited) but their imports are still followed.
@@ -20,7 +21,7 @@ const EXTENSIONS = [".ts", ".tsx", "/index.ts", "/index.tsx", ""]
 // Modules that cannot run in the browser. A copied file that imports one at
 // run time needs a hand edit.
 const SERVER_ONLY =
-  /^(server-only|next\/headers|next\/server|next\/cache|next-intl\/server|@chatbotx\.io\/(business|database|database\/client|database\/repositories|redis|encryption|ai\/server|auth\/server|auth\/tenant|logger|mail|filesystem|event-bus|worker-config)(\/.*)?$|node:)/
+  /^(server-only|next\/headers|next\/server|next\/cache|next-intl\/server|node:.*|@chatbotx\.io\/(business|database|database\/(client|repositories.*)|redis.*|encryption.*|ai\/server|auth\/server|auth\/tenant|logger.*|mail.*|filesystem.*|event-bus.*|worker-config.*))$/
 
 const IMPORT_RE =
   /(?:import|export)\s+(type\s+)?(?:[^'"]*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g
@@ -70,7 +71,6 @@ function stubFor(file, source) {
   const lines = [
     `// Generated from apps/builder/${file} by apps/web/scripts/copy-from-builder.mjs.`,
     "// The server code runs in the Rust server: POST /rpc/actions/<name>.",
-    'import { serverAction, serverFunction } from "@/lib/server-action"',
     "",
   ]
   const exportRe =
@@ -89,12 +89,26 @@ function stubFor(file, source) {
     const name = match[3] ?? match[4]
     const rpcName = actionName(file, name)
     if (/ActionClient\b|\.action\(/.test(body)) {
-      const workspace = WORKSPACE_CLIENTS.test(body) ? ", { workspace: true }" : ""
-      lines.push(`export const ${name} = serverAction("${rpcName}"${workspace})`)
+      const flags = [
+        WORKSPACE_CLIENTS.test(body) && "workspace: true",
+        !/\.inputSchema\(/.test(body) && "noInput: true",
+      ].filter(Boolean)
+      const options = flags.length > 0 ? `, { ${flags.join(", ")} }` : ""
+      lines.push(`export const ${name} = serverAction("${rpcName}"${options})`)
     } else {
       lines.push(`export const ${name} = serverFunction("${rpcName}")`)
     }
   })
+  const used = ["serverAction", "serverFunction"].filter((fn) =>
+    lines.some((line) => line.includes(`= ${fn}(`)),
+  )
+  if (used.length > 0) {
+    lines.splice(
+      2,
+      0,
+      `import { ${used.join(", ")} } from "@/lib/server-action"`,
+    )
+  }
   return `${lines.join("\n")}\n`
 }
 

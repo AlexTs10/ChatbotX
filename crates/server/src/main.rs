@@ -1,6 +1,7 @@
 //! `chatbotx-server`: the single ChatbotX binary.
 
 mod config;
+mod web;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -214,14 +215,25 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     });
     let api = Arc::new(api_state(&shared, realtime.as_ref()).await?);
     let mut app = chatbotx_api::router()
+        .merge(chatbotx_api::spa::spa_router(Arc::clone(&sessions)))
         .merge(chatbotx_api::rpc::rpc_router(Arc::clone(&sessions)))
         .merge(chatbotx_api::session::auth_router(sessions))
-        .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
-        .merge(chatbotx_api::routes::public_api_router_with(auth, api));
+        .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
     app = app.merge(chatbotx_api::files::router(Arc::clone(&shared.files)));
+    // The public API and the SPA (`apps/web/dist`, P4) answer every path no
+    // route matched: the SPA takes the GETs outside the API paths.
+    let public_api = chatbotx_api::routes::public_api_router_with(auth, api);
+    let web_dir = std::path::PathBuf::from(env_or("WEB_DIR", "apps/web/dist"));
+    match web::router(web_dir.clone(), public_api.clone()) {
+        Some(web) => app = app.merge(web),
+        None => {
+            tracing::info!(dir = %web_dir.display(), "web UI off: no index.html in WEB_DIR");
+            app = app.merge(public_api);
+        }
+    }
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
     tracing::info!(
         addr = %listener.local_addr()?,

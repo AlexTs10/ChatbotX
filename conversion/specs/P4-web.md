@@ -135,19 +135,28 @@ a stub (`apps/web/src/lib/server-action.ts`):
 - `redirect()` inside an action is not supported (none of the first screens
   use it); `revalidatePath` is a no-op (the SPA refetches).
 
-### 5.2 Page loaders: `GET /rpc/pages/<name>`
+### 5.2 Page loaders: `POST /rpc/pages/<name>`
 
-For server components whose data has no oRPC procedure. Input: route params
-(+ search params when noted). Output: the props the server component passed
-to its client components. Implemented in `crates/api/src/spa.rs` (P4).
+For server components whose data has no oRPC procedure. POST (the RPCLink
+default), body `{ json: input }`, answer `{ json, meta: [] }`; errors as the
+`/rpc` errors. Input: route params (+ search params when noted). Output: the
+props the server component passed to its client components. Implemented in
+`crates/api/src/spa.rs`. Resources are the raw table rows as the builder
+serialized them: ids as strings, dates as ISO strings, flags as booleans
+(`Workspace` without `token`).
 
 | Loader | Replaces | Input | Output |
 |---|---|---|---|
-| `pages.session` | `getCurrentUser` in every protected layout | – | `{ user: { id, name, email, image, mustChangePassword } \| null }` |
-| `pages.home` | `app/page.tsx` | – | `{ user, workspaces[], ownerWorkspaceIds[], superAdminWorkspaceIds[], blocked, reason, isAtLimit, canAccessManage, isPlatformContext, isSuperAdmin, metrics, planName, planStatus, trialEndsAt }` (community: quota fields null / false) |
-| `pages.workspace` | `app/space/[workspaceId]/layout.tsx` + `page.tsx` | `{ workspaceId }` | `{ allWorkspaces[], permissions, landingSegment, canAccessManage, isSuperAdmin, scheduledForDeletion, isSupportSession, consentRequired, supportAccessUntil, quota, blocked, blockReason, tokenRefreshErrors[], realtimeGates }` |
-| `pages.authOptions` | `resolveAuthPageOptions` | – | `{ enabledProviders[], genericOAuth, signUpAllowed }` |
-| `pages.contactsAccess` | `requireContactsAccess` | `{ workspaceId }` | `{ canViewEmailAndPhone }` |
+| `pages.session` | `getCurrentUser` + `getTenantSettings` in the root layout | – | `{ user: { id, name, email, image, emailVerified, mustChangePassword } \| null, tenant: null }` (no auth needed; `tenant: null` = the SPA defaults) |
+| `pages.authOptions` | `resolveAuthPageOptions` | – | `{ enabledProviders: [], genericOAuth: null, signUpAllowed }` |
+| `pages.home` | `app/(main)/page.tsx` | – | `{ user, createdWorkspaceId, workspaces[], ownerWorkspaceIds[], superAdminWorkspaceIds[], blocked, reason, isAtLimit, canAccessManage, isPlatformContext, isSuperAdmin, metrics, planName, planStatus, trialEndsAt }`. A user with no membership gets a first workspace (`"{name}'s workspace"`, owner, full permissions) and `createdWorkspaceId`; the SPA then opens it. Community: no quota, `isAtLimit` when the user owns one workspace. |
+| `pages.workspace` | `app/space/[workspaceId]/layout.tsx` | `{ workspaceId }` | `{ allWorkspaces[], permissions, isSupportSession, scheduledForDeletion, supportAccessUntil, consentRequired, canAccessManage, isSuperAdmin, blocked, blockReason, quota, tokenRefreshErrors: [], hasCallCapableChannel: false }`. Landing segment and realtime gates are computed in the SPA (pure builder code). |
+| `pages.contactsAccess` | `requireContactsAccess` | `{ workspaceId }` | `{ canViewEmailAndPhone }` (`superAdmin \|\| emailAndPhone`) |
+| `pages.folder` | `getCurrentFolder` (`folderService.getWithParents`) | `{ id, workspaceId }` | `{ folder \| null, parents[] }` |
+| `pages.deletedWorkspaces` | `features/workspaces/deleted-workspaces.tsx` | `{ page, perPage }` | `{ data: [] }` (deletion records not ported) |
+
+Workspace loaders answer `401` when the caller is not a member.
+`/rpc/actions/<name>` answers `404 "Action not ported yet"` after auth.
 
 ## 6. Procedures the SPA needs that Rust does not have yet
 
@@ -157,16 +166,41 @@ Keep current: the SPA status per screen. "missing" = Rust answers
 | Screen | Procedure / action | Rust |
 |---|---|---|
 | sign-in / sign-up / session | `/api/auth/*` (better-auth) | yes (P3.5d) |
-| all | `pages.session`, `pages.authOptions` | P4 (`spa.rs`) |
-| workspace list | `pages.home`; action `createWorkspaceAction` | P4 / missing |
-| workspace shell | `pages.workspace` | P4 (`spa.rs`) |
-| contacts list | `contactsAPIs.listContactsByPOSTAuthenticatedAPI`, `contactsAPIs.countContactsAuthenticatedAPI`, `contactFilterAPI.*` (3), `tagsAPI.*` (2), `customFieldsAPI.*` (2), `pages.contactsAccess` | missing (P3.5f) |
+| all | `pages.session`, `pages.authOptions` | yes (P4 `spa.rs`) |
+| workspace list | `pages.home` (creates the first workspace), `pages.deletedWorkspaces`; action `createWorkspaceAction` | yes / yes (empty) / missing |
+| workspace shell | `pages.workspace` | yes (P4 `spa.rs`) |
+| contacts list | `contactsAPIs.listContactsByPOSTAuthenticatedAPI`, `contactsAPIs.countContactsAuthenticatedAPI`, `contactFilterAPI.*` (3), `tagsAPI.*` (2), `customFieldsAPI.*` (2) | procedures missing (P3.5f); `pages.contactsAccess` yes |
 | contact detail | `contactsAPIs.getContactAuthenticatedAPI`, `contactNotesAPI.listContactNotesAuthenticatedAPI`, `contactSequencesAPI.listContactSequencesAuthenticatedAPI`, `contactsAPIs.countContactInboxesAuthenticatedAPI`, `contactsAPIs.listContactAdReferralsAuthenticatedAPI`, `couponsAPI.listContactCouponsAPI`, `appointmentsAPI.listContactAppointmentsAPI`; contact actions (19, `features/contacts`) | missing (P3.5f) |
-| flows list | `flowsAPI.privateListFlowsAPI`, `foldersAPI.*`; flow actions (10, `features/flows`), folder actions (4) | missing (P3.5f) |
+| flows list | `flowsAPI.privateListFlowsAPI`, `foldersAPI.*`; flow actions (10, `features/flows`), folder actions (4) | missing (P3.5f); `pages.folder` yes |
 
 ## 7. Build and run
 
-(Filled in when the Rust static serving lands.)
+One command (repo root, after `pnpm install`):
+
+```sh
+BETTER_AUTH_SECRET=<32+ chars> pnpm --filter web serve
+```
+
+It runs `vite build` (→ `apps/web/dist`) and then
+`cargo run --release -p chatbotx-server` from the repo root. The server
+serves the SPA from `WEB_DIR` (default `apps/web/dist`): files as they are
+(`/assets/*` immutable), any other path that no API route matched →
+`index.html` with `window.__ENV` (the `NEXT_PUBLIC_*` variables) in place of
+`<!--chatbotx-env-->`. Unmatched `/api/`, `/rpc/`, `/files/`, `/realtime`
+paths stay 404. Without `WEB_DIR/index.html` the server runs API-only.
+
+Checked on the Dell (2026-11-16, release build, empty `DATA_DIR`): `GET /`
+and `GET /auth/sign-in` → 200 `index.html` with `window.__ENV`;
+`/assets/index-*.js` → 200, immutable; `GET /api/nope` → 404 (public API);
+sign-up → sign-in → `pages.session` (user) → `pages.home` (first workspace
+created) → `pages.workspace` → `pages.contactsAccess` all 200;
+`contactsAPIs.listContactsByPOSTAuthenticatedAPI` and
+`flowsAPI.privateListFlowsAPI` → 404 "Operation not ported yet" (§6). Idle
+RSS of `chatbotx-server`: 24 MB.
+
+Development: `CHATBOTX_SERVER_URL=http://localhost:3000 pnpm --filter web dev`
+(Vite on :3123, proxies `/rpc`, `/api`, `/files`, `/realtime` to the Rust
+server).
 
 ## 8. Decisions
 
