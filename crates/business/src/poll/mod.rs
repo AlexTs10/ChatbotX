@@ -5,6 +5,8 @@
 //! (`withTemplateLockedTransaction` / `assertReferencable`, template unit).
 
 pub mod analytics;
+pub mod bot_strings;
+pub mod chat_messages;
 pub mod links;
 pub mod service;
 pub mod state;
