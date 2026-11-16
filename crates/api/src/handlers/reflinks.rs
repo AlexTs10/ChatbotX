@@ -24,6 +24,8 @@ pub const ROUTES: &[&str] = &[
     "reflinks.get",
     "reflinks.update",
     "reflinks.delete",
+    "reflinks.getChatWidget",
+    "reflinks.updateChatWidget",
 ];
 
 /// `createReflinkLinkBuilder`: the linkable connected inboxes, loaded once.
@@ -192,6 +194,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .map(|()| no_content())
                 .map_err(|e| business_error(e, super::MUTATING))
         }
+        "reflinks.getChatWidget" | "reflinks.updateChatWidget" => todo!("P3.6-D1"),
         _ => Err(crate::routes::not_ported_error()),
     }
 }

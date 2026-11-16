@@ -7,6 +7,7 @@ pub mod idempotency;
 pub mod iso8601;
 pub mod mail;
 pub mod orpc;
+pub mod reflink_widget;
 pub mod routes;
 pub mod rpc;
 pub mod session;
