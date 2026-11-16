@@ -406,6 +406,8 @@ async fn route(
         contact_notes::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
+    } else if contacts_bulk::ROUTES.contains(&route_id) {
+        contacts_bulk::handle(state, route_id, call).await
     } else if contacts::ROUTES.contains(&route_id) {
         contacts::handle(state, route_id, call).await
     } else if custom_fields::ROUTES.contains(&route_id) {
