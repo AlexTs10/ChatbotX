@@ -109,7 +109,7 @@ pub fn type_name(pipeline_type: PipelineType) -> &'static str {
     }
 }
 
-fn settings_json(settings: &PipelineSettings) -> Json {
+pub(crate) fn settings_json(settings: &PipelineSettings) -> Json {
     Json(serde_json::to_value(settings).unwrap_or_default())
 }
 
@@ -119,7 +119,11 @@ fn utf16_prefix(text: &str, max: usize) -> String {
 }
 
 /// `allocateNames`: name and reference name free in the workspace.
-fn allocate_names(conn: &Connection, workspace_id: i64, name: &str) -> Result<(String, String)> {
+pub(crate) fn allocate_names(
+    conn: &Connection,
+    workspace_id: i64,
+    name: &str,
+) -> Result<(String, String)> {
     let base_name = utf16_prefix(name.trim(), PIPELINE_LIMITS.name);
     let base_reference = reference_name_from_name(&base_name, "pipeline");
     let names = pipeline_repo::list_names_starting_with(
