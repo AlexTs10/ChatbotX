@@ -9,6 +9,7 @@ pub mod connections;
 pub mod contact_custom_fields;
 pub mod contact_filter;
 pub mod contact_inboxes;
+pub mod contact_messages;
 pub mod contact_notes;
 pub mod contact_sequences;
 pub mod contacts;
@@ -389,6 +390,8 @@ async fn route(
         contact_custom_fields::handle(state, route_id, call).await
     } else if contact_inboxes::ROUTES.contains(&route_id) {
         contact_inboxes::handle(state, route_id, call).await
+    } else if contact_messages::ROUTES.contains(&route_id) {
+        contact_messages::handle(state, route_id, call).await
     } else if contact_notes::ROUTES.contains(&route_id) {
         contact_notes::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {
