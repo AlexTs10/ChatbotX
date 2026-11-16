@@ -395,5 +395,16 @@ async fn whatsapp_template_and_call_permission_are_not_ported() {
         )
         .await;
         assert_eq!(status, 501, "{route} {body}");
+        // The conversation check runs first (parity p1-11 42).
+        let (status, body) = call(
+            &f,
+            route,
+            WS,
+            &[("conversationId", "999")],
+            None,
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(status, 404, "{route} {body}");
     }
 }

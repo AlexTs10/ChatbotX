@@ -878,3 +878,25 @@ async fn keeps_cursor_or_separate_from_the_unread_predicate() {
     assert_eq!(second["nextCursor"], Value::Null);
     assert!(second["prevCursor"].is_string());
 }
+
+/// Parity p1-07 01/02: `zodBigintAsString` has no length limit, so a 19-digit
+/// unknown id is 404 (not 422), on get, the actions and the message routes.
+#[tokio::test]
+async fn a_19_digit_unknown_id_is_404_not_422() {
+    let f = fixture().await;
+    let long = "1000000000000000001";
+    let (status, body) = call(&f, "conversations.get", WS, &[("id", long)], None, None).await;
+    assert_eq!(status, 404, "{body}");
+    let (status, body) = action(&f, "conversations.archive", long).await;
+    assert_eq!(status, 404, "{body}");
+    let (status, body) = call(
+        &f,
+        "messages.list",
+        WS,
+        &[("conversationId", "99999999999999999999")],
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, 404, "{body}");
+}

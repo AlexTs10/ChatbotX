@@ -87,15 +87,15 @@ struct Target {
 
 fn target(input: &mut Input) -> Target {
     Target {
-        conversation: input.id("conversationId"),
-        message: input.id("messageId").unwrap_or(-1),
+        conversation: input.digits_id("conversationId"),
+        message: input.digits_id("messageId").unwrap_or(-1),
         created_at: created_at(input).unwrap_or(0),
     }
 }
 
 async fn list_messages(state: &ApiState, call: Call<'_>) -> Reply {
     let mut input = Input::from_query(call.params, call.query);
-    let conversation_id = input.id("conversationId");
+    let conversation_id = input.digits_id("conversationId");
     let per_page = input.opt_coerce_int("perPage", Num::range(1.0, 50.0));
     let cursor = input.opt_string("cursor", Str::default());
     input.finish()?;
@@ -147,7 +147,7 @@ async fn find_message(
 
 async fn create(state: &ApiState, call: Call<'_>) -> Reply {
     let mut input = Input::from_body(call.params, call.body);
-    let conversation_id = input.id("conversationId");
+    let conversation_id = input.digits_id("conversationId");
     let outgoing = outgoing_input(input, CREATING)?;
     let found = conversation(state, &call, conversation_id, CREATING).await?;
     let contact_inbox =
@@ -250,7 +250,20 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "messages.update" => update(state, call).await,
         "messages.delete" => delete(state, call).await,
         "messages.changeAttributes" => change_attributes(state, call).await,
-        "messages.sendWhatsappTemplate" => Err(not_ported("WhatsApp templates are", MUTATING)),
-        _ => Err(not_ported("WhatsApp call permission is", MUTATING)),
+        _ => {
+            // `assertConversationAccessForCaller` runs first: 404 / 422.
+            let mut input = Input::from_body(call.params, call.body);
+            let conversation_id = input.digits_id("conversationId");
+            input.finish()?;
+            conversation(state, &call, conversation_id, MUTATING).await?;
+            Err(not_ported(
+                if route_id == "messages.sendWhatsappTemplate" {
+                    "WhatsApp templates are"
+                } else {
+                    "WhatsApp call permission is"
+                },
+                MUTATING,
+            ))
+        }
     }
 }

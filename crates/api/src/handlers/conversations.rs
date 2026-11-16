@@ -435,7 +435,7 @@ fn success() -> Reply {
 /// The path id of an action route (422 when malformed).
 fn path_id(call: &Call<'_>) -> Result<i64, crate::orpc::OrpcError> {
     let mut input = Input::from_body(call.params, call.body);
-    let conversation = input.id("id");
+    let conversation = input.digits_id("id");
     input.finish()?;
     Ok(conversation.unwrap_or(-1))
 }
@@ -470,7 +470,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "conversations.get" => {
             let mut input = Input::from_query(call.params, call.query);
-            let conversation = input.id("id");
+            let conversation = input.digits_id("id");
             input.finish()?;
             let row = list::find(db, ws, conversation.unwrap_or(-1))
                 .await
@@ -483,7 +483,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "conversations.assign" => {
             let mut input = Input::from_body(call.params, call.body);
             let assigned = assigned_id(&mut input);
-            let conversation = input.id("id");
+            let conversation = input.digits_id("id");
             input.finish()?;
             let conversation = conversation.unwrap_or(-1);
             list::find_or_fail(db, ws, conversation)
