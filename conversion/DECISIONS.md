@@ -322,3 +322,11 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
   - One agent per domain does analysis, test port and implementation in one pass (no separate analyst / porter / verifier agents). Gate per commit: `cargo fmt --check`, clippy `-D warnings` and `cargo test` for the changed crates. Parity folders run once per domain at merge, not per slice.
   - Mini apps (P3.6-D1 rest) wait; core messaging domains go first.
   - Frontend (Phase 4) starts now in parallel: the existing builder React UI is moved to a Vite + React SPA (TanStack Router + the existing TanStack Query / oRPC client) that the Rust binary serves as static files. Server actions become calls to Rust `/rpc` procedures. No Next.js server at run time.
+
+## 2026-11-16 — P3.6-D1 media library and Meta catalog (implementer; orchestrator-delegated, recommended option)
+
+- Media library: the public storage URL (`<appUrl>/storage/<path>`) gets a Rust route `GET /storage/{*key}` in the D2 files router. It serves only `public/` keys (others 404), as the original public bucket does.
+- Media library: `createUploadUrl` adds `X-Amz-Expires=300` in business code; this duplicates `chatbotx_api::files::presigned_upload_url` (the api crate is above business). Dedupe with D2's import helper later (`ponytail:` comment in the code).
+- Media library: `deleteFolder` / `deleteFile` delete the stored objects first (best effort, warning on error), then the rows in one transaction, as the original.
+- Media library: the 8 `media-library-actions.test.ts` cases are server-action tests; they move to Phase 4 (as pipelines-actions-parity).
+- Parity Rust ext: `createMetaCatalogConnection` now stores an encrypted credential (`encryptObject`, the same AES-256-GCM format as the original ext), so the Rust server can decrypt it with `ENCRYPTION_KEY`.

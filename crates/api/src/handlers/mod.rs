@@ -20,6 +20,7 @@ pub mod ecommerce_settings;
 pub mod flows;
 pub mod folders;
 pub mod input;
+pub mod media_library;
 pub mod minigames;
 pub mod open_hours;
 pub mod pipelines;
@@ -437,6 +438,8 @@ async fn route(
         products::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
+    } else if media_library::ROUTES.contains(&route_id) {
+        media_library::handle(state, route_id, call).await
     } else if minigames::ROUTES.contains(&route_id) {
         minigames::handle(state, route_id, call).await
     } else if questionnaires::ROUTES.contains(&route_id) {
