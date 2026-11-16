@@ -458,11 +458,13 @@ dependencies = [
  "chatbotx-db",
  "chatbotx-jobs",
  "chatbotx-rt",
+ "regex",
  "reqwest",
  "ring",
  "serde_json",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]

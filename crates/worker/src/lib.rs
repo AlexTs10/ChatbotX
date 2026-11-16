@@ -12,6 +12,7 @@ pub mod chat;
 pub mod default_queue;
 pub mod flow;
 pub mod integration;
+pub mod meta_catalog;
 pub mod send_flow_step;
 
 use std::sync::Arc;

@@ -7,8 +7,8 @@ started by `chatbotx-server` (`chatbotx_worker::start`).
 
 | # | Slice | State |
 |---|-------|-------|
-| 1 | Channel send interface (`channel::Channel`, `Channels`, test double `RecordingChannel`), webchat + API channel senders, `chat` queue (send / edit / delete / like / hide / typing / flow step / chat message), `integration` queue `sendFlow` runner, server wiring (shared `JobStore`, `Shutdown`, `*_WORKER_CONCURRENCY`) | in progress |
-| 2 | `default` queue: Meta catalog import / submit / check (needs the `integration-meta-catalog` items + batch API and `metaCatalogSyncRunService`) | todo |
+| 1 | Channel send interface (`channel::Channel`, `Channels`, test double `RecordingChannel`), webchat + API channel senders, `chat` queue (send / edit / delete / like / hide / typing / flow step / chat message), `integration` queue `sendFlow` runner, server wiring (shared `JobStore`, `Shutdown`, `*_WORKER_CONCURRENCY`) | done (be107bde8) |
+| 2 | `default` queue: Meta catalog import / submit / check (`meta_catalog/`: Graph client, item mapping, run / import state, `importPage`, the error sanitizer and safe log) | done |
 | 3 | `prepareOutgoing` / `resolveInboundProducts` (18 tests, `packages/business/__tests__/product-message-service.test.ts`) and the `sendProducts` / `sendCollection` flow steps | todo |
 
 ## Channel send interface (for Q.I1–Q.I4)
@@ -47,7 +47,12 @@ JSON), the workspace, the `Db` and the realtime handle. Errors are
 | `apps/worker/__tests__/send-flow-step.test.ts` | 81 | — | todo (needs the DB VariableSources, media copy, product steps) |
 | `apps/worker/__tests__/send-message-handler.test.ts` | 52 | — | todo |
 | `apps/worker/__tests__/default-worker.test.ts` | 16 | — | todo (slice 2) |
-| `apps/worker/default/handlers/meta-catalog/__tests__/*` | 33 | — | todo (slice 2) |
+| `apps/worker/src/default/handlers/meta-catalog/__tests__/safe-error-log.test.ts` | 2 | `meta_catalog/mod.rs` tests | done (the `err.stack` checks become "no secret in the log details": no stack in Rust) |
+| `integrations/meta-catalog/__tests__/remote-product.test.ts` | 11 (19 with `each`) | `meta_catalog/items.rs` tests | done |
+| `integrations/meta-catalog/__tests__/mapper.test.ts` | 10 (31 with `each`) | `meta_catalog/items.rs` tests | done |
+| `integrations/meta-catalog/__tests__/retailer-id.test.ts` | 8 (10 with `each`) | `meta_catalog/items.rs` tests | done |
+| `integrations/meta-catalog/__tests__/items-batch.test.ts` | 6 | `meta_catalog/sync.rs` (2 own `parseBatchResults` tests) | partial: HTTP-mock cases not ported |
+| `apps/worker/__tests__/meta-catalog-{import,sync}.test.ts` | 32 | — | todo (service-mock tests; covered by parity p1-14 `22`) |
 | `packages/business/__tests__/product-message-service.test.ts` | 18 | — | todo (slice 3) |
 
 ## Decisions
@@ -72,6 +77,12 @@ JSON), the workspace, the `Db` and the realtime handle. Errors are
   analytics events (Q.W2), comment moderation log, the media copy into storage,
   `{{variable}}` resolution (spintax only), quick-reply arm / clear,
   `statusBranches`, broadcast `resetContactForResume`, getUserData branch deferral.
+- Meta catalog: the worker has its own Graph client (`x-business-use-case-usage`,
+  GET retries 3 times with a backoff up to 1 s). `toPublicErrorMessage` /
+  `sanitizePublicText` are ported in `meta_catalog/mod.rs`; the key / value
+  quote back-references are spelled out as alternatives (`regex` has none).
+  The `catalog_synced` audit is not sent: a worker job has no user, so the
+  original drops it too. `logProviderError` is not ported (ponytail).
 - Workers share the API's `JobStore` (in-process wake-ups). `Shutdown` drains
   the workers on SIGINT / SIGTERM (`WORKER_SHUTDOWN_TIMEOUT_MS`), then the
   HTTP server and the realtime hub stop.
@@ -79,6 +90,7 @@ JSON), the workspace, the `Db` and the realtime handle. Errors are
 ## State
 
 Slice 1 committed (be107bde8): fmt, clippy -D warnings, 30 tests (25 worker + 5 server) pass.
+Slice 2: 73 worker tests pass; parity p1-14 `22-meta-catalog` 6/6.
 
 Parity (`run-rust.sh`, Dell, after slice 1):
 
@@ -86,5 +98,5 @@ Parity (`run-rust.sh`, Dell, after slice 1):
 |---|---|---|---|
 | p1-06 08-messages | 7 | 0 | (sendFlow case now green) |
 | p1-11 40-messages-core | 13 | 1 | media library upload `mediaFileId` (media unit; 501 notPorted). Worker flow send and API-channel callback now green |
-| p1-14 22-meta-catalog | 4 | 2 | Meta catalog import / sync worker jobs (slice 2) |
+| p1-14 22-meta-catalog | 6 | 0 | (after slice 2) |
 | p1-08 31-mm-campaigns | 0 | 22 | no Rust seed module `stacks/rust/ext/p1-08.ts` and the marketing-message routes / worker (not Q.W1) |
