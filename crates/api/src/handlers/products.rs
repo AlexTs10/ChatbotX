@@ -1,5 +1,6 @@
 //! `features/products/api/public.ts`: the catalog routes of `products.*`
-//! (the Meta catalog and import routes are not ported yet).
+//! (the Meta catalog routes are in `meta_catalog`; the import routes are not
+//! ported yet).
 
 use chatbotx_business::product::{
     self as service, AddonInput, FullData, ImageInput, ProductData, ProductListInput, VariantInput,

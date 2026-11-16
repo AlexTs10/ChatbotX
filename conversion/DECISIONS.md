@@ -330,3 +330,8 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
 - Media library: `deleteFolder` / `deleteFile` delete the stored objects first (best effort, warning on error), then the rows in one transaction, as the original.
 - Media library: the 8 `media-library-actions.test.ts` cases are server-action tests; they move to Phase 4 (as pipelines-actions-parity).
 - Parity Rust ext: `createMetaCatalogConnection` now stores an encrypted credential (`encryptObject`, the same AES-256-GCM format as the original ext), so the Rust server can decrypt it with `ENCRYPTION_KEY`.
+- Meta catalog: the 7 routes queue `importMetaCatalogProducts` / `submitMetaCatalogSync` on the default queue through `state.jobs`, with the original payload, job ids and failure handling. The worker handlers (import, submit, poll) are not ported; they belong to the worker port. Until then a parity check that waits for a finished import or sync fails.
+- Meta catalog: a queue failure stores the generic failure text (`Meta Catalog import failed. …` / `… sync failed. …`), as the original does: it passes `reasons.queueImport` / `queueSync` as plain strings, and `toPublicErrorMessage` drops a string that is not a `ChatbotXException`. So the Rust `Reasons` keeps only `alreadyRunning`.
+- Meta catalog: the Graph client (`HttpGraph`, reqwest, bearer header, 30 s timeout) has no GET retries. The routes use the process `ENCRYPTION_KEY` (the avatar signer's `Encryption`) to read the stored credential.
+- Meta catalog: `SELECT … FOR UPDATE` of the connection is the SQLite write transaction (`BEGIN IMMEDIATE`).
+- Meta catalog: the OAuth upsert (5 tests), `completeImport` and `recordSubmission` (3 tests) are n-a here; they move with the worker / OAuth callback port.
