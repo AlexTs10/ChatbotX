@@ -74,13 +74,14 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | Q.D11 | 3 | Workspace + platform: lifecycle, quota, platform, enterprise, admin, error logs, analytics, capabilities, settings, jobs page (Bull Board replacement) | todo | P3.5f | C + A | | |
 | Q.D12 | 3 | WhatsApp domain: calls, WhatsApp flows, WhatsApp templates, thread control | todo | P3.6-D3 | C + A | | |
 | Q.D13 | 3 | Rest: leaderboards, dynamic images, decisions, inbound/external webhooks, spreadsheets, saved replies, response SLA, schemas, persistent menus | todo | P3.6-D2 | C + A | | |
-| Q.W1 | 3 | Worker core: flow execution (chat queue), integration queue routing, job context (`apps/worker` chat, integration, default) | todo | P3.6-D3 | C | | |
+| Q.W1 | 3 | Worker core: flow execution (chat queue), integration queue routing, job context (`apps/worker` chat, integration, default); incl. `prepareOutgoing` / `resolveInboundProducts` (18 tests) and the Meta catalog import/submit/poll jobs (media unit n-a rows) | todo | P3.6-D3 | C | | |
 | Q.W2 | 3 | Worker rest: events (analytics, error log, flow, message), trigger, webhook, schedule, sequence scheduler, notification, marketing message, leaderboard, questionnaires, heavy, ai-agent | todo | Q.W1 | C | | |
 | Q.I1 | 3 | Channel integrations: WhatsApp, Messenger, Instagram, Instagram-Facebook, Threads + their webhooks (P1.20, P1.21) | todo | Q.W1 | C + A | | |
 | Q.I2 | 3 | Channel integrations: Telegram, TikTok, Zalo, webchat, API channel + webhooks (P1.22) | todo | Q.W1 | C + A | | |
 | Q.I3 | 3 | Marketing/email integrations: ActiveCampaign, Drip, GetResponse, Klaviyo, Mailchimp, MailerLite, Moosend, SendGrid, SMTP | todo | Q.W1 | C | | |
 | Q.I4 | 3 | Google (Sheets, Calendar, Ads), OpenAI, payments + Shopify/WooCommerce webhooks (P1.23) | todo | Q.W1 | C + A | | |
 | Q.A1 | 3 | Auth rest from P3.5f: MCP OAuth server (authorize, token, consent, client registration, `.well-known`), mobile-token member filters on the `/v1` routes, then mobile tokens on (security: do not turn them on before the filters), rate limits | todo | P3.5f | C + A | | |
+| Q.D1i | 3 | Product imports (6 routes, parity `21-product-imports`; needs the D2 import code) — rest of the media unit, branch `feat/conversion-media` | todo | P3.6-D2 | C + A | | |
 | Q.F2+ | 4 | Frontend feature batches (cut by the web agent in `specs/P4-web.md` after the scaffold) | todo | feat/conversion-web scaffold | B | | |
 | Q.P5 | 5 | Cutover: one-command build + run, RSS measurement ≤ 200 MB, full parity run, docs | todo | all | A | | |
 
