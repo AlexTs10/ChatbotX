@@ -232,6 +232,13 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         .merge(chatbotx_api::session::oauth_router(Arc::new(
             chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,
         )))
+        .merge(chatbotx_api::presigned_upload::router(
+            chatbotx_api::presigned_upload::UploadState {
+                auth: Arc::clone(&sessions),
+                api: Arc::clone(&api),
+                is_cloud: is_cloud(),
+            },
+        ))
         .merge(chatbotx_api::session::auth_router(sessions))
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
         .merge(chatbotx_api::routes::public_api_router_with(auth, api));

@@ -1,9 +1,11 @@
-//! `features/connections/api/public.ts`: `connections.*` (P3.6-D2: the
-//! self-serve `api` and `webchat` channels). `connectionProviders.list`,
-//! credential / OAuth connects and `connectSessions.*` are not ported yet: a
-//! create for such a provider answers "Operation not ported yet".
+//! `features/connections/api/public.ts`: `connections.*` and
+//! `connectionProviders.list` (P3.6-D2: the self-serve `api` and `webchat`
+//! channels, the AI key integrations). Other credential connects, OAuth
+//! connects and `connectSessions.*` are not ported yet: a create for such a
+//! provider answers "Operation not ported yet".
 
 use chatbotx_business::BusinessError;
+use chatbotx_business::connection::credentials::{self, HttpUpstream};
 use chatbotx_business::connection::providers::{
     self, CHANNEL_TYPES, CONNECTION_KINDS, CONNECTION_STATUSES, INTEGRATION_TYPES,
 };
@@ -30,6 +32,7 @@ pub const ROUTES: &[&str] = &[
     "connections.reconnect",
     "connections.refresh",
     "connections.verify",
+    "connectionProviders.list",
 ];
 
 const IDEMPOTENCY: ErrorMap = &[
@@ -174,6 +177,7 @@ pub async fn handle(
     let ws = call.workspace_id;
     let reply = match route_id {
         "connections.list" => list(state, call, principal).await,
+        "connectionProviders.list" => list_providers(state, call, principal).await,
         "connections.get" => {
             let mut input = Input::from_query(call.params, call.query);
             let connection_id = path_id(&mut input);
@@ -228,9 +232,30 @@ pub async fn handle(
                 if route_id != "connections.verify" {
                     providers::assert_generic_provider_allowed(&row.provider)?;
                 }
-                match route_id {
-                    "connections.disconnect" => connection::disconnect(&state.db, row.id, ws).await,
-                    "connections.refresh" => connection::refresh(&state.db, row.id, ws).await,
+                let ai_key = credentials::ai_key_provider(&row.provider);
+                match (route_id, ai_key) {
+                    ("connections.disconnect", Some(_)) => {
+                        credentials::disconnect_integration(&state.db, row).await
+                    }
+                    ("connections.disconnect", None) if row.provider == "telegram" => {
+                        credentials::disconnect_telegram(&state.db, &HttpUpstream, row).await
+                    }
+                    ("connections.disconnect", None) => {
+                        connection::disconnect(&state.db, row.id, ws).await
+                    }
+                    ("connections.refresh", _) => connection::refresh(&state.db, row.id, ws).await,
+                    (_, Some(provider)) if is_live(&row.status) => {
+                        credentials::verify_ai_key_connection(
+                            &state.db,
+                            &HttpUpstream,
+                            provider,
+                            row,
+                        )
+                        .await
+                    }
+                    (_, None) if row.provider == "telegram" && is_live(&row.status) => {
+                        credentials::verify_telegram(&state.db, &HttpUpstream, row).await
+                    }
                     _ => connection::verify(&state.db, row.id, ws).await,
                 }
             }
@@ -414,17 +439,50 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
                 (row, None, detail)
             })
         }
-        _ => {
+        other => {
             let _ = meta;
-            return None;
+            if other == "telegram" {
+                return Some(
+                    credentials::connect_telegram(
+                        &state.db,
+                        &HttpUpstream,
+                        call.workspace_id,
+                        &config,
+                        None,
+                    )
+                    .await
+                    .map(|row| {
+                        json(
+                            201,
+                            json!({ "connection": connection_json(&row), "session": null, "secret": null }),
+                        )
+                    })
+                    .map_err(|e| with_idempotency(CREATING, e)),
+                );
+            }
+            let provider = credentials::ai_key_provider(other)?;
+            credentials::connect_ai_key(
+                &state.db,
+                &HttpUpstream,
+                call.workspace_id,
+                provider,
+                &config,
+                None,
+            )
+            .await
+            .map(|row| (row, None, String::new()))
         }
     };
     // `integrationApiService.connect` / `createWithWorkspace`: the audit
     // record of the created channel.
     let created = match created {
         Ok((row, token, detail)) => {
-            let action = if token.is_some() { "create" } else { "connect" };
-            state.record_audit(action, &detail).await;
+            // A token-driven credential connect has no actor user: no audit
+            // record (`connectAndPersist`).
+            if !detail.is_empty() {
+                let action = if token.is_some() { "create" } else { "connect" };
+                state.record_audit(action, &detail).await;
+            }
             Ok((row, token))
         }
         Err(error) => Err(error),
@@ -448,4 +506,103 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
 fn enum_key_required(input: &mut Input, name: &str, options: &[&str]) -> Option<String> {
     let value = input.obj.get(name).cloned();
     input.enum_at(&key(name), value.as_ref(), options, true)
+}
+
+/// `isActiveConnectionStatus`.
+fn is_live(status: &str) -> bool {
+    matches!(status, "connected" | "degraded" | "needs_reauth")
+}
+
+/// The 422 of a catalog that includes the channel-kind providers: the
+/// `chatbotx` adapter's name is not a `channelTypes` value, so the original
+/// `toChannelType` throws a `ZodError` (a bare issue array as `data`).
+fn channel_catalog_error() -> OrpcError {
+    let values: Vec<String> = CHANNEL_TYPES.iter().map(|c| format!("\"{c}\"")).collect();
+    OrpcError {
+        code: "invalidRequestData".into(),
+        status: 422,
+        message: "Invalid request data".into(),
+        data: Some(json!([{
+            "code": "invalid_value",
+            "values": CHANNEL_TYPES,
+            "path": [],
+            "message": format!("Invalid option: expected one of {}", values.join("|")),
+        }])),
+        defined: false,
+    }
+}
+
+/// `connectionProviders.list` (`listConnectionProviderResources`): the
+/// integration catalog with `available` / `unavailableReason`.
+async fn list_providers(state: &ApiState, call: Call<'_>, principal: &Principal) -> Reply {
+    let mut input = Input::from_query(call.params, call.query);
+    let kind = enum_key(&mut input, "kind", CONNECTION_KINDS);
+    input.finish()?;
+    let kind = providers::resolve_list_kind(principal.scopes.as_deref(), kind.as_deref())
+        .map_err(|e| business_error(e, super::LISTING))?;
+    if kind.as_deref() != Some("integration") {
+        return Err(channel_catalog_error());
+    }
+    let ws = call.workspace_id;
+    let live = credentials::live_providers(&state.db, ws)
+        .await
+        .map_err(|e| business_error(e, super::LISTING))?;
+    let owner_id: Option<i64> = state
+        .db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    r#"SELECT "ownerId" FROM "Workspace" WHERE "id" = ?1"#,
+                    [ws],
+                    |r| r.get(0),
+                )
+                .ok())
+        })
+        .await
+        .map_err(|e| super::internal_error(&e.to_string()))?;
+    let mut data = Vec::new();
+    for provider in INTEGRATION_TYPES {
+        let Some(meta) = providers::provider_meta(provider) else {
+            continue;
+        };
+        if *provider == "facebookAds" || meta.kind != "integration" {
+            continue;
+        }
+        // No integration provider sets `multiInstance` (the snapshot: all false).
+        let multi_instance = false;
+        let mut reason = None;
+        if !(meta.multi_account || multi_instance) && live.iter().any(|p| p == provider) {
+            reason = Some("alreadyConnected");
+        } else if let Some(credential_type) = credentials::credential_type(provider) {
+            let found = credentials::has_platform_credential(&state.db, owner_id, credential_type)
+                .await
+                .map_err(|e| business_error(e, super::LISTING))?;
+            if !found {
+                reason = Some("credentialMissing");
+            }
+        }
+        let fields: Vec<Value> = credentials::config_fields(provider)
+            .iter()
+            .map(|field| {
+                json!({
+                    "name": field.name,
+                    "type": field.kind,
+                    "required": field.required,
+                    "label": field.name,
+                })
+            })
+            .collect();
+        data.push(json!({
+            "provider": provider,
+            "kind": meta.kind,
+            "channel": null,
+            "strategy": meta.strategy,
+            "multiAccount": meta.multi_account,
+            "multiInstance": multi_instance,
+            "configFields": fields,
+            "available": reason.is_none(),
+            "unavailableReason": reason,
+        }));
+    }
+    Ok(json(200, json!({ "data": data, "pageCount": 1 })))
 }

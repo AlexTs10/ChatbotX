@@ -25,9 +25,6 @@ use chatbotx_files::{FilesError, PresignMethod, PutOptions, Uploader};
 /// The largest accepted upload body (64 MiB).
 pub const MAX_UPLOAD_BYTES: usize = 64 * 1024 * 1024;
 
-/// `X-Amz-Expires` of a presigned upload (`PRESIGNED_UPLOAD_EXPIRY`, 300 s).
-pub const PRESIGNED_UPLOAD_EXPIRES: u64 = 300;
-
 /// The `/files/{*key}` routes and the public `/storage/{*key}` read (the
 /// tenant `storageUrl` `<appUrl>/storage/`) over `files` (the same store as
 /// `ApiState::files`). A store without a URL signer (S3) answers `404`.
@@ -39,20 +36,9 @@ pub fn router(files: Arc<Uploader>) -> Router {
         .with_state(files)
 }
 
-/// `uploader.getPresignedUpload(path)`. A local URL also carries
-/// `X-Amz-Expires=300` (clients read the expiry from it, as on S3; the
-/// signature does not cover it).
-pub async fn presigned_upload_url(uploader: &Uploader, key: &str) -> Result<String, FilesError> {
-    let url = uploader.get_presigned_upload(key).await?;
-    if url.contains("X-Amz-Expires=") {
-        return Ok(url);
-    }
-    Ok(url.replacen(
-        '?',
-        &format!("?X-Amz-Expires={PRESIGNED_UPLOAD_EXPIRES}&"),
-        1,
-    ))
-}
+/// `uploader.getPresignedUpload(path)` with the `X-Amz-Expires=300` of a
+/// local URL (one rule, in the business crate).
+pub use chatbotx_business::import::presigned_upload_url;
 
 fn text(status: StatusCode, message: &str) -> Response {
     (

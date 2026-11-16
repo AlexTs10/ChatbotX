@@ -141,15 +141,26 @@ pub fn resolve_import_file_format(
     config.accepted_formats.contains(&format).then_some(format)
 }
 
-/// `handler.buildPath`: `import_<id>.<extension as given>` under the
-/// type's storage path (`fileName.split(".").pop() || "txt"`).
-fn build_path(config: &ImportConfig, workspace_id: i64, file_name: &str) -> String {
-    let extension = file_name
-        .rsplit('.')
-        .next()
-        .filter(|e| !e.is_empty())
-        .unwrap_or("txt");
-    config
+/// `handler.buildPath` of the import type: `import_<id>.<extension>` under
+/// the type's storage path. The extension is the file name's last
+/// `.`-segment (`fileName.split(".").pop() || <default>`; contacts `txt`,
+/// coupons `csv`, products `xlsx`); a flow import is always `.json`.
+pub fn import_upload_path(import_type: ImportType, workspace_id: i64, file_name: &str) -> String {
+    let default = match import_type {
+        ImportType::Contacts => "txt",
+        ImportType::Coupons => "csv",
+        ImportType::Products => "xlsx",
+        ImportType::Flow => "json",
+    };
+    let extension = match import_type {
+        ImportType::Flow => "json",
+        _ => file_name
+            .rsplit('.')
+            .next()
+            .filter(|e| !e.is_empty())
+            .unwrap_or(default),
+    };
+    config(import_type)
         .storage_path
         .replace(":workspaceId", &workspace_id.to_string())
         .replace(":fileName", &format!("import_{}.{extension}", new_id()))
@@ -220,7 +231,7 @@ pub async fn create_import_upload(
             400,
         ));
     }
-    let path = build_path(config, input.workspace_id, &input.file_name);
+    let path = import_upload_path(input.import_type, input.workspace_id, &input.file_name);
     let presigned_post_url = presigned_upload_url(uploader, &path).await?;
     let patch: chatbotx_db::repo::patch::Patch = vec![
         ("workspaceId", Sql::Integer(input.workspace_id)),

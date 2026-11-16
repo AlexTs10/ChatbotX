@@ -429,7 +429,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/ig-comments-public-api.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/ig-stories-public-api.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/import-contacts-action.test.ts` | B | - | todo | Imports and exports (contacts, products, flows); builder node-env, client logic |
-| `apps/builder/__tests__/import-upload-url-public-api.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
+| `apps/builder/__tests__/import-upload-url-public-api.test.ts` | C | `crates/api/tests/import_upload_url_public_api.rs`, `crates/api/tests/product_imports_public_api.rs` | passing | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/inbound-webhook-actions.test.ts` | C | tbd | todo | Inbound webhooks; builder server code |
 | `apps/builder/__tests__/inbound-webhook-analytics-page.test.tsx` | C | tbd | todo | Inbound webhooks; builder server code |
 | `apps/builder/__tests__/inbound-webhook-contact-lookup-section.test.tsx` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
@@ -666,7 +666,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/poll-queries.test.ts` | C | tbd | todo | Polls; builder server code |
 | `apps/builder/__tests__/polls-public-api.test.ts` | C | tbd | todo | Polls; builder server code |
 | `apps/builder/__tests__/post-preview-image.test.ts` | B | - | todo | Comment automation (FB/IG/Threads/TikTok); builder jsdom |
-| `apps/builder/__tests__/presigned-upload-route.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
+| `apps/builder/__tests__/presigned-upload-route.test.ts` | C | `crates/api/tests/presigned_upload_route.rs` | passing | Media library and file storage; builder server code |
 | `apps/builder/__tests__/preview-channels-gating.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/process-missed-comments.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/product-categories-public-api.test.ts` | C | tbd | todo | Ecommerce: products, categories, vendors; builder server code |
@@ -862,7 +862,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/update-webhook-action.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/update-webhook-settings-action.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/update-workspace-advanced-schema.test.ts` | B | - | todo | Workspaces; builder jsdom |
-| `apps/builder/__tests__/upload-handlers.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
+| `apps/builder/__tests__/upload-handlers.test.ts` | C | `crates/api/tests/presigned_upload_route.rs` | passing | Media library and file storage; builder server code |
 | `apps/builder/__tests__/upload-logo-action.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/upsert-sequence-step-schema.test.ts` | B | - | todo | Sequences; builder jsdom |
 | `apps/builder/__tests__/upsert-sequence-step.action.test.ts` | C | tbd | todo | Sequences; builder server code |
@@ -2202,7 +2202,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/ice-candidate-summary.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/business/__tests__/ig-story-automation.list.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `packages/business/__tests__/ig-story-automation.write.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
-| `packages/business/__tests__/import-column-map.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
+| `packages/business/__tests__/import-column-map.test.ts` | C | `crates/business/tests/import_column_map_and_template.rs`, `crates/business/tests/import_product_column_map.rs` | passing | Imports and exports (contacts, products, flows) |
 | `packages/business/__tests__/import-create-upload.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/business/__tests__/import-peek-headers.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/business/__tests__/import-start-contact-import.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -2573,7 +2573,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/broadcast/__tests__/broadcast-targets.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/business/src/broadcast/__tests__/broadcast.service.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/business/src/connect-session/__tests__/service.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/business/src/connection/__tests__/credential-providers.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
+| `packages/business/src/connection/__tests__/credential-providers.test.ts` | C | `crates/business/tests/connection_credentials.rs` | todo | Channel connection and OAuth connect flow; partial: AI-key verify cases ported (P3.6-D2 §32.2), email-marketing providers left |
 | `packages/business/src/connection/__tests__/provider-account-event-service.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/connection/__tests__/provider-account-events.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/connection/__tests__/record-refreshed-auth.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -2593,7 +2593,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/ecommerce-analytics/__tests__/ecommerce-analytics-service.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/business/src/ecommerce-open-hours/__tests__/ecommerce-open-hours-service.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/business/src/ecommerce-open-hours/__tests__/is-open.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
-| `packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
+| `packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts` | C | `crates/business/tests/ecommerce_settings_service.rs` | passing | Ecommerce: settings, open hours, analytics |
 | `packages/business/src/enterprise/tenant/__tests__/service.test.ts` | C | tbd | todo | Multi-tenancy (white-label tenants) |
 | `packages/business/src/inbox/__tests__/list-analytics-filter-options.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/src/inbox/__tests__/list-channel-options.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |

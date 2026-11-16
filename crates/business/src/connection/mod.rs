@@ -2,6 +2,7 @@
 //! self-serve part: `api` and `webchat` channels; P3.6-D2). The provider
 //! catalog, credential / OAuth connects and connect sessions come later.
 
+pub mod credentials;
 pub mod providers;
 
 use chatbotx_db::Db;
