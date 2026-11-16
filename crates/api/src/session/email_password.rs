@@ -171,6 +171,11 @@ pub fn auth_router(state: Arc<AuthState>) -> Router {
         .route("/api/auth/get-session", get(get_session))
         .route("/api/auth/verify-email", get(verify_email))
         .route("/api/auth/sign-out", post(sign_out))
+        .route("/api/auth/update-user", post(super::account::update_user))
+        .route(
+            "/api/auth/change-password",
+            post(super::account::change_password_endpoint),
+        )
         .route(
             "/api/auth/sign-in/magic-link",
             post(super::magic_link::sign_in_magic_link),
@@ -190,6 +195,16 @@ pub fn auth_router(state: Arc<AuthState>) -> Router {
         .route(
             "/api/auth/reset-password",
             post(super::magic_link::reset_password),
+        )
+        .route("/api/auth/jwks", get(super::mobile::get_jwks))
+        .route("/api/auth/mobile/token", post(super::mobile::mobile_token))
+        .route(
+            "/api/auth/mobile/callback",
+            get(super::mobile::mobile_callback),
+        )
+        .route(
+            "/api/auth/mobile/revoke",
+            post(super::mobile::mobile_revoke),
         )
         .with_state(state)
 }
@@ -233,7 +248,7 @@ pub(super) fn internal(error: impl std::fmt::Display) -> AuthApiError {
 // ---------------------------------------------------------------- crypto
 
 /// `count` random bytes from the OS.
-fn random_bytes(count: usize) -> Vec<u8> {
+pub(super) fn random_bytes(count: usize) -> Vec<u8> {
     let mut bytes = vec![0; count];
     SystemRandom::new()
         .fill(&mut bytes)
@@ -247,8 +262,13 @@ fn hex(bytes: &[u8]) -> String {
 
 /// better-auth `generateId(32)`: 32 characters of `a-zA-Z0-9`.
 pub fn generate_session_token() -> String {
+    random_string(32)
+}
+
+/// better-auth `generateRandomString(length)` (`a-zA-Z0-9`).
+pub(super) fn random_string(length: usize) -> String {
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    random_bytes(32)
+    random_bytes(length)
         .iter()
         .map(|byte| char::from(ALPHABET[usize::from(*byte) % ALPHABET.len()]))
         .collect()
@@ -374,9 +394,11 @@ pub(super) struct UserRow {
     pub(super) name: Option<String>,
     pub(super) email: String,
     pub(super) email_verified: bool,
-    image: Option<String>,
+    pub(super) image: Option<String>,
     created_at: i64,
     updated_at: i64,
+    is_anonymous: bool,
+    pub(super) must_change_password: bool,
 }
 
 fn iso(ms: i64) -> String {
@@ -393,12 +415,13 @@ impl UserRow {
             "image": self.image,
             "createdAt": iso(self.created_at),
             "updatedAt": iso(self.updated_at),
+            "isAnonymous": self.is_anonymous,
+            "mustChangePassword": self.must_change_password,
         })
     }
 }
 
-const USER_COLUMNS: &str =
-    r#""id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt""#;
+const USER_COLUMNS: &str = r#""id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt", "isAnonymous", "mustChangePassword""#;
 
 fn user_from_row(row: &chatbotx_db::rusqlite::Row<'_>) -> chatbotx_db::rusqlite::Result<UserRow> {
     Ok(UserRow {
@@ -409,6 +432,8 @@ fn user_from_row(row: &chatbotx_db::rusqlite::Row<'_>) -> chatbotx_db::rusqlite:
         image: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+        is_anonymous: row.get(7)?,
+        must_change_password: row.get(8)?,
     })
 }
 
@@ -435,6 +460,41 @@ pub(super) fn find_user_by_id(conn: &Connection, id: i64) -> Result<Option<UserR
             user_from_row,
         )
         .optional()?)
+}
+
+/// `onUserCreated` (`apps/builder/src/lib/auth/on-user-created.ts`), the part
+/// that runs in every edition: `platformAdminService.provisionBootstrapAdmin`
+/// (`PLATFORM_ADMIN_EMAIL`). Anonymous users are skipped. The cloud quota
+/// bootstrap belongs to the quota port.
+pub(super) fn on_user_created(
+    conn: &Connection,
+    email: &str,
+    is_anonymous: bool,
+) -> Result<(), DbError> {
+    if is_anonymous {
+        return Ok(());
+    }
+    let Some(admin_email) = platform_admin_email() else {
+        return Ok(());
+    };
+    if email.trim().to_lowercase() != admin_email {
+        return Ok(());
+    }
+    match chatbotx_db::repo::platform_admin::bootstrap_root_admin(conn, &admin_email) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            tracing::warn!(error = %error, "Failed to provision platform bootstrap administrator on sign-up");
+            Ok(())
+        }
+    }
+}
+
+/// `PLATFORM_ADMIN_EMAIL`, trimmed and lowercased.
+pub fn platform_admin_email() -> Option<String> {
+    std::env::var("PLATFORM_ADMIN_EMAIL")
+        .ok()
+        .map(|email| email.trim().to_lowercase())
+        .filter(|email| !email.is_empty())
 }
 
 pub(super) fn new_id() -> i64 {
@@ -479,7 +539,7 @@ pub(super) fn session_cookie(token: &str, secret: &str) -> HeaderValue {
     .expect("cookie is ASCII")
 }
 
-fn cleared_session_cookie() -> HeaderValue {
+pub(super) fn cleared_session_cookie() -> HeaderValue {
     HeaderValue::from_static(
         "better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax",
     )
@@ -600,6 +660,7 @@ async fn sign_up(
                    VALUES (?1, ?2, 'credential', ?3, ?4, ?5)"#,
                 params![account_id, user_id.to_string(), password_hash, user_id, ROOT_TENANT_ID],
             )?;
+            on_user_created(tx, &insert_email, false)?;
             find_user_by_id(tx, user_id)
         })
         .await
