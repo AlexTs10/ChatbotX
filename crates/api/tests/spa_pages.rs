@@ -146,3 +146,76 @@ async fn home_creates_the_first_workspace_once() {
     .await;
     assert_eq!(folder, json!({ "folder": null, "parents": [] }));
 }
+
+#[tokio::test]
+async fn flow_page_loads_the_editor_props_and_channels_create_checks_the_workspace() {
+    let state = state().await;
+    let (_, home) = page(&state, "home", true, Value::Null).await;
+    let id = home["createdWorkspaceId"]
+        .as_str()
+        .expect("created")
+        .to_string();
+    let ws: i64 = id.parse().expect("id");
+    state
+        .db
+        .write(move |tx| {
+            tx.execute(
+                r#"INSERT INTO "Flow" ("id", "name", "workspaceId") VALUES (601, 'Welcome', ?1)"#,
+                params![ws],
+            )?;
+            // Draft and published differ only in an editor-only key: no revert.
+            for (version, draft, node) in [
+                (701, 1, r#"[{"id":"1","selected":true,"data":{"forceToolbarVisible":true}}]"#),
+                (702, 0, r#"[{"id":"1","data":{}}]"#),
+            ] {
+                tx.execute(
+                    r#"INSERT INTO "FlowVersion" ("id", "workspaceId", "flowId", "nodes", "edges", "isDraft", "isLatest", "startNodeId")
+                       VALUES (?1, ?2, 601, ?3, '[]', ?4, 1, 1)"#,
+                    params![version, ws, node, draft],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("seed flow");
+
+    let (status, flow) = page(
+        &state,
+        "flow",
+        true,
+        json!({ "workspaceId": id, "id": "601" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["flow"]["name"], "Welcome");
+    assert_eq!(
+        flow["flow"]["flowVersions"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(flow["flowVersion"]["id"], "701");
+    assert_eq!(flow["hasPublishedVersion"], true);
+    assert_eq!(flow["canRevertToPublished"], false);
+    assert_eq!(flow["isTemplateLocked"], false);
+    assert_eq!(flow["openaiCompatibleIntegrations"], json!([]));
+
+    let (status, _) = page(
+        &state,
+        "flow",
+        true,
+        json!({ "workspaceId": id, "id": "999" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, channels) = page(&state, "channelsCreate", true, json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(channels["offeredChannels"], json!(["webchat", "api"]));
+    let (status, _) = page(
+        &state,
+        "channelsCreate",
+        true,
+        json!({ "workspaceId": "999" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
