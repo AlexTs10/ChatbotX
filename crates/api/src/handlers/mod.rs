@@ -8,6 +8,7 @@ pub mod channels;
 pub mod connections;
 pub mod contact_custom_fields;
 pub mod contact_filter;
+pub mod contact_imports;
 pub mod contact_inboxes;
 pub mod contact_messages;
 pub mod contact_notes;

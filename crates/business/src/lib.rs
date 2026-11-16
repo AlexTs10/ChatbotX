@@ -23,6 +23,7 @@ pub mod events;
 pub mod flow;
 pub mod flow_version;
 pub mod folder;
+pub mod import;
 pub mod inbox;
 pub mod integration_api;
 pub mod integration_webchat;
