@@ -509,3 +509,42 @@ pub fn pipeline_field_row(
     )?;
     Ok(id)
 }
+
+/// Inserts an ad `ContactReferralEvent` (`provider` meta; `metadata.adTitle`
+/// when `title` is set).
+#[allow(clippy::too_many_arguments)]
+pub fn ad_referral(
+    tx: &Connection,
+    id: i64,
+    workspace_id: i64,
+    contact_id: i64,
+    contact_inbox_id: i64,
+    occurred_at: i64,
+    ad_id: Option<&str>,
+    title: Option<&str>,
+) -> Result<i64, DbError> {
+    let metadata =
+        title.map(|t| serde_json::json!({ "adTitle": t, "adBody": "secret body" }).to_string());
+    tx.execute(
+        r#"INSERT INTO "ContactReferralEvent" ("id", "workspaceId", "contactId", "contactInboxId", "channel", "type",
+             "provider", "occurredAt", "adId", "source", "sourceUrl", "metadata", "dedupKey")
+           VALUES (?1, ?2, ?3, ?4, 'messenger', 'ad', 'meta', ?5, ?6, 'ADS', 'https://fb.me/ad', ?7, 'ad:' || ?1)"#,
+        params![id, workspace_id, contact_id, contact_inbox_id, occurred_at, ad_id, metadata],
+    )?;
+    Ok(id)
+}
+
+/// Sets the first / last name and avatar of a `Contact`.
+pub fn contact_name(
+    tx: &Connection,
+    id: i64,
+    first_name: Option<&str>,
+    last_name: Option<&str>,
+    avatar: Option<&str>,
+) -> Result<(), DbError> {
+    tx.execute(
+        r#"UPDATE "Contact" SET "firstName" = ?2, "lastName" = ?3, "avatar" = ?4 WHERE "id" = ?1"#,
+        params![id, first_name, last_name, avatar],
+    )?;
+    Ok(())
+}

@@ -14,6 +14,8 @@ chrono = { workspace = true, features = ["std"] }
 chrono-tz = { workspace = true }
 chatbotx-core = { workspace = true }
 chatbotx-db = { workspace = true }
+# Managed avatar objects of the profile refresh (`uploader.deleteObject`, P3.6-D2).
+chatbotx-files = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
@@ -33,6 +35,8 @@ url = { workspace = true }
 
 [dev-dependencies]
 chatbotx-core = { workspace = true }
+# P3.6-D2 profile refresh tests: `MemKv::ttl_secs`.
+chatbotx-kv = { workspace = true, features = ["test-util"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 # P3.6-X1 tests: log capture (replaces logger spies).

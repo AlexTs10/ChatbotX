@@ -8,6 +8,7 @@ pub mod filter_fields;
 pub mod identifier;
 pub mod list;
 pub mod phone;
+pub mod profile_refresh;
 pub mod service;
 pub mod update_fields;
 

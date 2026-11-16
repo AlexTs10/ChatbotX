@@ -7,6 +7,7 @@
 import { randomBytes } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
 import type {
+  P106AdReferralInput,
   P106ContactInput,
   P106CreatedContact,
   P106Fixtures,
@@ -76,7 +77,34 @@ class SqliteP106Fixtures implements P106Fixtures {
     }
   }
 
-  createAdReferral = notPorted("createAdReferral")
+  async createAdReferral(input: P106AdReferralInput): Promise<{ id: string }> {
+    const referralId = createId()
+    this.open()
+      .prepare(
+        `INSERT INTO "ContactReferralEvent"
+           ("id", "workspaceId", "contactId", "contactInboxId", "channel", "type", "provider", "occurredAt", "adId",
+            "campaignId", "adGroupId", "source", "sourceUrl", "metadata", "dedupKey")
+         VALUES (?, ?, ?, ?, ?, 'ad', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        referralId,
+        BigInt(input.workspaceId),
+        BigInt(input.contactId),
+        BigInt(input.contactInboxId),
+        input.channel,
+        input.provider,
+        ms(input.occurredAt),
+        input.adId,
+        input.campaignId ?? null,
+        input.adGroupId ?? null,
+        input.source ?? null,
+        input.sourceUrl ?? null,
+        input.title === undefined ? null : JSON.stringify({ adTitle: input.title }),
+        `ad:${input.adId ?? "none"}:${referralId}`,
+      )
+    return { id: referralId.toString() }
+  }
+
   insertSequenceDispatch = notPorted("insertSequenceDispatch")
 
   async createInbox(input: P106InboxInput): Promise<{ inboxId: string }> {

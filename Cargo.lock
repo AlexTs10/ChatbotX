@@ -262,6 +262,7 @@ dependencies = [
  "base64 0.22.1",
  "chatbotx-core",
  "chatbotx-db",
+ "chatbotx-files",
  "chatbotx-jobs",
  "chatbotx-kv",
  "chatbotx-rt",
