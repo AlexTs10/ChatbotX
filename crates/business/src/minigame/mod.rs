@@ -2,9 +2,10 @@
 //! `minigame-contact-service.ts` ([`contact`]). The settings groups are the
 //! JSON the HTTP layer parsed (`database/partials/minigame.ts`); the service
 //! stores them as given. The play runtime (`resolvePlayState`, `recordPlay`,
-//! referral credits, outcome messages, leaderboard awards) is not here.
+//! referral credits, outcome messages, leaderboard awards) is [`play`].
 
 pub mod contact;
+pub mod play;
 
 use std::collections::HashMap;
 

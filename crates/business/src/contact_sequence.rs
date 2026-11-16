@@ -333,6 +333,43 @@ pub async fn unsubscribe_contacts(
     contact_ids: &[i64],
     sequence_ids: &[i64],
 ) -> Result<SubscribeOutcome> {
-    let _ = (db, workspace_id, contact_ids, sequence_ids);
-    todo!("P3.6-D2")
+    let contact_ids = contact_ids.to_vec();
+    let sequence_ids = sequence_ids.to_vec();
+    tx::write(db, move |tx| {
+        assert_sequences_in_workspace(tx, workspace_id, &sequence_ids)?;
+        let mut processed: Vec<i64> = Vec::new();
+        for chunk in contact_ids.chunks(CHUNK_SIZE) {
+            let (clause, mut params) = in_list("\"id\"", chunk);
+            params.insert(0, Value::Integer(workspace_id));
+            let found: HashSet<i64> = ids_query(
+                tx,
+                &format!("SELECT \"id\" FROM \"Contact\" WHERE \"workspaceId\" = ? AND {clause}"),
+                params,
+            )?
+            .into_iter()
+            .collect();
+            let mut resolved = Vec::new();
+            for id in chunk.iter().copied().filter(|id| found.contains(id)) {
+                if !resolved.contains(&id) && !processed.contains(&id) {
+                    resolved.push(id);
+                }
+            }
+            if resolved.is_empty() {
+                continue;
+            }
+            remove_in(tx, workspace_id, &resolved, &sequence_ids)?;
+            processed.extend(resolved);
+        }
+        let done: HashSet<i64> = processed.iter().copied().collect();
+        let skipped = contact_ids
+            .iter()
+            .copied()
+            .filter(|id| !done.contains(id))
+            .collect();
+        Ok(SubscribeOutcome {
+            processed_contact_ids: processed,
+            skipped_contact_ids: skipped,
+        })
+    })
+    .await
 }

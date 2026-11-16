@@ -311,6 +311,12 @@ pub async fn create_published(
 ) -> Result<i64> {
     // `assertFlowGraphPublishable`.
     validate_publishable(&graph.nodes, &graph.edges, "invalidGraph", None)?;
+    crate::pipeline::flow_publish_check::assert_flow_pipeline_steps_publishable(
+        db,
+        workspace_id,
+        &Value::Array(graph.nodes.clone()),
+    )
+    .await?;
     let name = name.to_string();
     tx::write(db, move |tx| {
         if let Some(folder_id) = folder_id {

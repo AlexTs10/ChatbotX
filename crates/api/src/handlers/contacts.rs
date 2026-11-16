@@ -674,19 +674,25 @@ async fn delete(state: &ApiState, call: Call<'_>) -> Reply {
     let outcome = delete_and_record(&state.db, call.workspace_id, &[contact_id])
         .await
         .map_err(|e| business_error(e, MUTATING))?;
-    let deleted = &outcome.processed_contact_ids;
-    if !deleted.is_empty() {
-        let list = deleted
-            .iter()
-            .map(|id| format!("#{id}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let plural = if deleted.len() > 1 { "s" } else { "" };
-        state
-            .record_audit("delete", &format!("deleted contact{plural} ({list})"))
-            .await;
-    }
+    audit_deleted(state, &outcome.processed_contact_ids).await;
     Ok(no_content())
+}
+
+/// The `deleteAndRecord` audit record: `deleted contact(s) (#1, #2)`; none
+/// when nothing was deleted.
+pub(super) async fn audit_deleted(state: &ApiState, deleted: &[i64]) {
+    if deleted.is_empty() {
+        return;
+    }
+    let list = deleted
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let plural = if deleted.len() > 1 { "s" } else { "" };
+    state
+        .record_audit("delete", &format!("deleted contact{plural} ({list})"))
+        .await;
 }
 
 async fn block(state: &ApiState, call: Call<'_>, blocked: bool) -> Reply {
