@@ -4,6 +4,7 @@
 //! original JSON shapes.
 
 pub mod audit;
+pub mod automated_response;
 pub mod bot_field;
 pub mod connection;
 pub mod contact;
