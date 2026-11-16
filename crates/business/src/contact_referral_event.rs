@@ -3,7 +3,8 @@
 use chatbotx_db::Db;
 use chatbotx_db::repo::contact_referral_event::{ContactAdTouch, ContactAdTouchCursor};
 
-use crate::Result;
+use crate::contact::service::find_or_fail;
+use crate::{Result, tx};
 
 /// One page of a contact's ad touches, newest first.
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +23,28 @@ pub async fn list_contact_ad_touches(
     limit: i64,
     cursor: Option<ContactAdTouchCursor>,
 ) -> Result<AdTouchPage> {
-    let _ = (db, workspace_id, contact_id, limit, cursor);
-    todo!("P3.6-D2 ad referrals stage 2")
+    tx::read(db, move |conn| {
+        find_or_fail(conn, workspace_id, contact_id)?;
+        let mut data = chatbotx_db::repo::contact_referral_event::list_ad_touches_by_contact(
+            conn,
+            workspace_id,
+            contact_id,
+            limit,
+            cursor,
+        )?;
+        let has_more = i64::try_from(data.len()).unwrap_or(i64::MAX) > limit;
+        if has_more {
+            data.truncate(usize::try_from(limit).unwrap_or(0));
+        }
+        let next_cursor = if has_more {
+            data.last().map(|last| ContactAdTouchCursor {
+                occurred_at: last.occurred_at,
+                id: last.id,
+            })
+        } else {
+            None
+        };
+        Ok(AdTouchPage { data, next_cursor })
+    })
+    .await
 }

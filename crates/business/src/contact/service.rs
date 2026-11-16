@@ -481,3 +481,22 @@ pub async fn list_by_custom_field_value(
     })
     .await
 }
+
+/// `contactInboxService.listByContactIdUncached` (public `listInboxes`): the
+/// contact's rows whose inbox is in the workspace, with the inbox name.
+pub async fn list_contact_inboxes(
+    db: &Db,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<Vec<chatbotx_db::repo::contact_inbox::WithInboxNameRow>> {
+    tx::read(db, move |conn| {
+        Ok(
+            chatbotx_db::repo::contact_inbox::list_with_inbox_name_by_contact_id(
+                conn,
+                workspace_id,
+                contact_id,
+            )?,
+        )
+    })
+    .await
+}
