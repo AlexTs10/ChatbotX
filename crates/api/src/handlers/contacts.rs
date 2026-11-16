@@ -124,7 +124,7 @@ pub fn tenant_urls(state: &ApiState) -> TenantUrls {
 
 // ---- output ---------------------------------------------------------------
 
-fn contact_json(contact: &Contact) -> Map<String, Value> {
+pub(super) fn contact_json(contact: &Contact) -> Map<String, Value> {
     let mut out = Map::new();
     out.insert("id".into(), id(contact.id));
     out.insert("createdAt".into(), date(contact.created_at));

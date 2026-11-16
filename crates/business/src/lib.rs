@@ -4,6 +4,7 @@
 //! original JSON shapes.
 
 pub mod audit;
+pub mod automated_response;
 pub mod bot_field;
 pub mod connection;
 pub mod contact;
@@ -13,6 +14,9 @@ pub mod contact_filter;
 pub mod contact_note;
 pub mod contact_referral_event;
 pub mod contact_sequence;
+pub mod conversation;
+pub mod conversation_actions;
+pub mod conversation_list;
 pub mod copy_name;
 pub mod count_mode;
 pub mod custom_field;
@@ -29,6 +33,8 @@ pub mod inbox;
 pub mod integration_api;
 pub mod integration_webchat;
 pub mod media_library;
+pub mod message;
+pub mod message_actions;
 pub mod meta_catalog;
 pub mod minigame;
 pub mod net;

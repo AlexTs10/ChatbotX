@@ -507,6 +507,22 @@ impl Input {
         self.id_at(&key(name), value.as_ref(), true)
     }
 
+    /// A required `zodBigintAsString` key: digits only, no length limit. An
+    /// id past `i64` reads as `-1` (no row has it: 404, as the TS lookup).
+    pub fn digits_id(&mut self, name: &str) -> Option<i64> {
+        let value = self.obj.get(name).cloned();
+        let text = self.string_at(&key(name), value.as_ref(), Str::default(), true)?;
+        if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+            self.issue(
+                &key(name),
+                "invalid_format",
+                "Invalid string: must match pattern /^\\d+$/",
+            );
+            return None;
+        }
+        Some(text.parse().unwrap_or(-1))
+    }
+
     /// A `.nullish()` bigint id key: absent = `None`, `null` = `Some(None)`.
     pub fn nullish_id(&mut self, name: &str) -> Option<Option<i64>> {
         match self.obj.get(name).cloned() {
