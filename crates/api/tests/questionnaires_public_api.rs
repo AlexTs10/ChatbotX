@@ -157,7 +157,8 @@ async fn propagates_a_declared_not_found_error_from_get() {
     let f = fixture().await;
     let (status, body) = call(&f, "questionnaires.get", WS, &[("id", "999")], None, None).await;
     assert_eq!(status, 404);
-    assert_eq!(body["code"], json!("NOT_FOUND"));
+    // Orchestrator fix (P3.6-D1): the declared error code is "notFound" (parity expectNotFound).
+    assert_eq!(body["code"], json!("notFound"));
     assert_eq!(body["message"], json!("Questionnaire not found"));
     assert_eq!(body["defined"], json!(true));
 }
