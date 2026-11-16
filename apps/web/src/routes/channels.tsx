@@ -20,15 +20,15 @@ type ChannelsCreateData = {
 
 export function CreateChannelPage() {
   const searchParams = useSearchParams()
-  const workspaceId = searchParams.get("workspaceId") || null
+  // `getIdFromParams`: undefined (not null) when the param is missing; the
+  // channel forms keep it as their `workspaceId` default value.
+  const workspaceId = searchParams.get("workspaceId") || undefined
   const channel = searchParams.get("channel")
   const error = searchParams.get("error")
   const { data } = useSuspenseQuery({
     queryKey: ["spa", "channelsCreate", workspaceId],
     queryFn: () =>
-      loadPage<ChannelsCreateData>("channelsCreate", {
-        workspaceId: workspaceId ?? undefined,
-      }),
+      loadPage<ChannelsCreateData>("channelsCreate", { workspaceId }),
   })
   const isVisible = (type: ChannelType) => data.offeredChannels.includes(type)
 

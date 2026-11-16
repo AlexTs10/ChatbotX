@@ -228,6 +228,19 @@ created) → `pages.workspace` → `pages.contactsAccess` all 200;
 `flowsAPI.privateListFlowsAPI` → 404 "Operation not ported yet" (§6). Idle
 RSS of `chatbotx-server`: 24 MB.
 
+Browser check on the Dell (2026-11-17, release build, empty `DATA_DIR`,
+`BETTER_AUTH_URL=http://dell-5570:3456`): sign-up 200; sign-in 403 until
+the email is verified (no mail in this setup; the QA set `emailVerified` by
+hand), then 200 and `/space/<id>/dashboard` with the first workspace;
+contacts list 200 ("0 contacts", filter and actions render); Create Contact
+blocked: it needs an inbox and `inboxesAPI.listAllInboxesAuthenticatedAPI`
+is missing; flows: Create Flow → editor opens (`pages.flow` 200, start node
+rendered) → Publish 200 ("A new version has been published");
+`/channels/create?channel=api` → `createApiAction` 200 → token dialog, the
+new workspace is in `pages.home`. Without `REALTIME_SECRET` the realtime
+token call answers 500 and the shell retries (no realtime in this check).
+Main entry chunk: 595 KB (was 5.4 MB); every route is its own chunk.
+
 Development: `CHATBOTX_SERVER_URL=http://localhost:3000 pnpm --filter web dev`
 (Vite on :3123, proxies `/rpc`, `/api`, `/files`, `/realtime` to the Rust
 server).
