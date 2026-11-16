@@ -52,7 +52,7 @@ impl TenantUrls {
 /// The process media-token signer: `ENCRYPTION_KEY` (+ id / previous key),
 /// or a random per-process key when it is not set (the token then only
 /// verifies in this process).
-fn signer() -> &'static Encryption {
+pub(crate) fn signer() -> &'static Encryption {
     static SIGNER: OnceLock<Encryption> = OnceLock::new();
     SIGNER.get_or_init(|| {
         let keys = Keys::from_env(&ProcessEnv).unwrap_or_else(|error| {
