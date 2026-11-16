@@ -34,6 +34,10 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+# Q.D6 AI file tests: a fake download client (`HttpFetcher`) and its response.
+async-trait = "0.1"
+bytes = { workspace = true }
+http = { workspace = true }
 chatbotx-core = { workspace = true }
 # P3.6-D2 profile refresh tests: `MemKv::ttl_secs`.
 chatbotx-kv = { workspace = true, features = ["test-util"] }

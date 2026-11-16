@@ -237,6 +237,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "bytes",
  "chatbotx-business",
  "chatbotx-core",
  "chatbotx-db",
@@ -260,7 +261,9 @@ dependencies = [
 name = "chatbotx-business"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
+ "bytes",
  "chatbotx-core",
  "chatbotx-db",
  "chatbotx-files",
@@ -269,6 +272,7 @@ dependencies = [
  "chatbotx-rt",
  "chrono",
  "chrono-tz",
+ "http",
  "phonenumber",
  "reqwest",
  "ring",

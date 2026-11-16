@@ -9,6 +9,8 @@ publish.workspace = true
 axum.workspace = true
 # Unverified JWT `aud` peek of a mobile access token (base64url segments); same version as crates/rt.
 base64 = "0.22"
+# Multipart AI file uploads (`InputFile.bytes`, Q.D6).
+bytes.workspace = true
 # Business services behind the public handlers (P3.6+).
 chatbotx-business.workspace = true
 # File storage behind `ApiState` and the `/files/{key}` route (P3.6-D2).

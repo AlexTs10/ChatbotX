@@ -12,7 +12,7 @@ is unit Q.W2: this unit only enqueues jobs with the original payload.
 | 1 | AI functions + MCP servers | `ai_function.rs`, `ai_mcp_server.rs`, `ai/mcp_client.rs` | `aiFunctions.*`, `aiMcpServers.*` | list procedures, CRUD actions, `validateAIMcpServer` | done |
 | 2 | AI agents | `ai_agent.rs`, `ai/models.rs` (model catalog) | `aiAgents.*` | `aiAgentsAPI.listAIAgentsAPI`, create/update/delete actions | done |
 | 3 | AI provider integrations | `integration_ai_provider.rs` (key probe, find, autoReply update), `integration_openai_compatible.rs` | `integrations.getAiProvider`, `updateAiProvider` | `update<Provider>Action` (6) | done (connect / disconnect: P3.6-D2) |
-| 4 | AI files / RAG | — | `aiFiles.*` | — | todo |
+| 4 | AI files / RAG | `ai_file.rs` (DB vector scan: `ai_file_embedding::vector_search`) | `aiFiles.*` except `search` | `aiFilesAPI.*`, create / delete / reindex actions | done (`aiFiles.search`, `searchAIFilesAction`: slice 6) |
 | 5 | AI handover settings + bulk run | `ai_handover.rs` | `aiHandover.*` | `aiHandoverAPIs.*`, save / set / retry actions | done (engine / sweeper: Q.W2) |
 | 6 | `packages/ai` provider layer | — | — | — | todo |
 
@@ -81,6 +81,19 @@ Per test case: `specs/Q.D6-test-map.tsv` (file, line, name, Rust test, status, n
   copy is the `en` message (no i18n on the server). `inboxService.disconnect`
   is not in Rust yet; `ai_handover::cancel_live_in` is its hook.
 
+- AI files (slice 4): no template locks / delete guards (P3.6-D1). The
+  public `aiFiles.create` takes JSON (`url`) or multipart (`file`, `url`,
+  `name`): `Call` has no headers, so a body that is not JSON and starts with a
+  `--boundary` line is read as multipart (a small parser, no new crate). The
+  API enqueues `processAIFile` on the heavy queue (`{ type, data: { aiFileId,
+  runId } }`, job id `heavy-ai-file-<id>` / `heavy-ai-file-<id>-reindex-<run>`,
+  `getHeavyJobOptions`). No job queue (`ApiState.jobs = None`) counts as a
+  failed enqueue (`enqueueFailed`). The original's no-op `DELETE "AIEmbedding"
+  WHERE "id" = <file id>` is not ported (chunks cascade). Search / reindex
+  share the kv rate-limit buckets of the original (5 per 10 s); without a kv
+  store there is no limit. Action copy is the `en` message.
+  `createFromCopiedObject` (template install) is not ported (no templates).
+
 ## 4. State
 
-- Slices 1–3 and 5 committed (see TRACKER). 4 and 6 todo.
+- Slices 1–5 committed (see TRACKER). 6 todo (with `aiFiles.search`).

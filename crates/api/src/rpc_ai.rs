@@ -12,6 +12,7 @@ use std::sync::Arc;
 use chatbotx_business::BusinessError;
 use chatbotx_business::ai::mcp_client::EndpointGuard;
 use chatbotx_business::ai_agent::{self as agents, ListAiAgents};
+use chatbotx_business::ai_file::{self as ai_files, CreateAiFileInput};
 use chatbotx_business::ai_function as functions;
 use chatbotx_business::ai_handover::{self as handover, SaveSettingsInput, SetApplyToAllInput};
 use chatbotx_business::ai_mcp_server::{self as mcp, McpEndpointPolicy};
@@ -22,6 +23,9 @@ use chatbotx_db::repo::utils::{PaginationInput, SortItem};
 use serde_json::{Map, Value, json};
 
 use crate::handlers::ai_agents::{ai_agent_json, parse_ai_agent_input};
+use crate::handlers::ai_files::{
+    ai_file_json, check_rate_limit, deps as ai_file_deps, parse_reindex_config,
+};
 use crate::handlers::ai_functions::{ai_function_json, parse_ai_function_input};
 use crate::handlers::ai_handover::{
     apply_to_all_status_json, parse_private_set_apply_to_all, parse_private_settings, run_json,
@@ -45,6 +49,11 @@ pub const PORTED: &[&str] = &[
     "actions.createAIAgentAction",
     "actions.updateAIAgentAction",
     "actions.deleteAIAgentAction",
+    "aiFilesAPI.listAIFilesAuthenticatedAPI",
+    "aiFilesAPI.getAIFileAuthenticatedAPI",
+    "actions.createAIFileAction",
+    "actions.deleteAIFileAction",
+    "actions.reindexAIFileAction",
     "aiFunctionsAPI.listAIFunctionsAuthenticatedAPI",
     "aiMcpServerAPIs.listAIMcpServersAuthenticatedAPI",
     "aiMcpServerAPIs.validateAIMcpServerAuthenticatedAPI",
@@ -290,6 +299,31 @@ const SAVE_ERROR_COPY: &[(&str, &str)] = &[(
     "notFound",
     "The selected flow was not found or is not active.",
 )];
+
+/// `aiFiles.noEmbeddingProvider` / `aiFiles.reindex.conflict` /
+/// `aiFiles.reindex.rateLimited` (`en`).
+const NO_EMBEDDING_PROVIDER_COPY: &str = "No embedding provider configured. AI file embeddings require OpenAI or Gemini integration. DeepSeek, Claude and Muse do not support embedding models.";
+const REINDEX_CONFLICT_COPY: &str = "This file is being processed, so the new parameters were not applied. Try again when processing finishes.";
+const REINDEX_RATE_LIMITED_COPY: &str = "Too many requests. Try again shortly.";
+
+fn file_storage(api: &ApiState) -> Result<&Arc<chatbotx_files::Uploader>, OrpcError> {
+    api.files.as_ref().ok_or_else(|| {
+        OrpcError::new(
+            "INTERNAL_SERVER_ERROR",
+            Some(500),
+            Some("File storage is not configured"),
+        )
+    })
+}
+
+/// The Date meta of AI file resources (`createdAt`, `updatedAt`).
+fn ai_file_output(json: Value, rows: Option<usize>) -> RpcOutput {
+    let meta = match rows {
+        Some(rows) => date_meta(&[json!("data")], rows, TIMESTAMPS),
+        None => object_date_meta(&[], TIMESTAMPS),
+    };
+    RpcOutput { json, meta }
+}
 
 /// `assertCanManageAiHandover`: a super admin, never a support session.
 fn assert_can_manage_ai_handover(context: &RpcAiContext) -> Result<(), OrpcError> {
@@ -602,6 +636,105 @@ async fn run(
                 .await
                 .map_err(|e| translated(e, BULK_ERROR_COPY))?;
             Ok(RpcOutput::plain(Value::Null))
+        }
+        "aiFilesAPI.listAIFilesAuthenticatedAPI" => {
+            let files = file_storage(api)?;
+            let rows = ai_files::list_with_embedding_status(db, files, ws)
+                .await
+                .map_err(|e| business_error(e, LISTING))?;
+            let data: Vec<Value> = rows.iter().map(|r| ai_file_json(r, true)).collect();
+            let count = data.len();
+            Ok(ai_file_output(json!({ "data": data }), Some(count)))
+        }
+        "aiFilesAPI.getAIFileAuthenticatedAPI" => {
+            let mut parsed = Input::from_object(input.as_object().cloned().unwrap_or_default());
+            let id = parsed.id("id");
+            parsed.finish().map_err(|_| validation_failed())?;
+            let files = file_storage(api)?;
+            match ai_files::find_with_processing(db, files, ws, id.unwrap_or_default())
+                .await
+                .map_err(|e| business_error(e, FINDING))?
+            {
+                Some(row) => Ok(ai_file_output(ai_file_json(&row, true), None)),
+                None => Err(business_error(
+                    BusinessError::not_found("AI file not found"),
+                    FINDING,
+                )),
+            }
+        }
+        "actions.createAIFileAction" => {
+            let mut parsed = action_input(&args, 1);
+            let path = parsed.string("path", Str::default());
+            let name = parsed.string("name", Str::default());
+            let mime_type = parsed.string("mimeType", Str::default());
+            let size = parsed.number("size", Num::default());
+            finish_action(parsed)?;
+            let files = file_storage(api)?;
+            let upload = CreateAiFileInput::Path {
+                name: name.unwrap_or_default(),
+                path: path.unwrap_or_default(),
+                mime_type: mime_type.unwrap_or_default(),
+                size: size.unwrap_or_default() as i64,
+            };
+            let file = ai_files::create(&ai_file_deps(api, files), ws, upload)
+                .await
+                .map_err(|error| {
+                    if error.code() == Some("noEmbeddingProvider") {
+                        // `new ChatbotXException(t("noEmbeddingProvider"))`.
+                        business_error(
+                            BusinessError::exception(
+                                NO_EMBEDDING_PROVIDER_COPY,
+                                "systemError",
+                                400,
+                            ),
+                            CREATING,
+                        )
+                    } else {
+                        business_error(error, CREATING)
+                    }
+                })?;
+            let run_error = file
+                .processing_run
+                .as_ref()
+                .map_or(Value::Null, |run| run["error"].clone());
+            Ok(RpcOutput::plain(json!({
+                "id": file.file.id.to_string(),
+                "processingRunError": run_error,
+            })))
+        }
+        "actions.deleteAIFileAction" => {
+            let id = bind_id(&args, 1)?;
+            let files = file_storage(api)?;
+            ai_files::delete(&ai_file_deps(api, files), ws, id)
+                .await
+                .map_err(|e| business_error(e, MUTATING))?;
+            Ok(RpcOutput::plain(Value::Null))
+        }
+        "actions.reindexAIFileAction" => {
+            let id = bind_id(&args, 1)?;
+            let mut parsed = action_input(&args, 2);
+            let config = parse_reindex_config(&mut parsed);
+            finish_action(parsed)?;
+            if check_rate_limit(api, "reindex", ws).is_err() {
+                return Err(business_error(
+                    BusinessError::exception(REINDEX_RATE_LIMITED_COPY, "tooManyRequests", 429),
+                    MUTATING,
+                ));
+            }
+            let files = file_storage(api)?;
+            let out = ai_files::reindex(&ai_file_deps(api, files), ws, id, config)
+                .await
+                .map_err(|error| {
+                    if error.code() == Some("conflict") {
+                        business_error(
+                            BusinessError::exception(REINDEX_CONFLICT_COPY, "conflict", 409),
+                            MUTATING,
+                        )
+                    } else {
+                        business_error(error, MUTATING)
+                    }
+                })?;
+            Ok(RpcOutput::plain(json!({ "coalesced": out.coalesced })))
         }
         "aiFunctionsAPI.listAIFunctionsAuthenticatedAPI" => {
             let page = functions::list(db, ws, PaginationInput::default())
