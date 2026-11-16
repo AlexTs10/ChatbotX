@@ -238,7 +238,7 @@ pub(super) fn internal(error: impl std::fmt::Display) -> AuthApiError {
 // ---------------------------------------------------------------- crypto
 
 /// `count` random bytes from the OS.
-fn random_bytes(count: usize) -> Vec<u8> {
+pub(super) fn random_bytes(count: usize) -> Vec<u8> {
     let mut bytes = vec![0; count];
     SystemRandom::new()
         .fill(&mut bytes)
@@ -252,8 +252,13 @@ fn hex(bytes: &[u8]) -> String {
 
 /// better-auth `generateId(32)`: 32 characters of `a-zA-Z0-9`.
 pub fn generate_session_token() -> String {
+    random_string(32)
+}
+
+/// better-auth `generateRandomString(length)` (`a-zA-Z0-9`).
+pub(super) fn random_string(length: usize) -> String {
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    random_bytes(32)
+    random_bytes(length)
         .iter()
         .map(|byte| char::from(ALPHABET[usize::from(*byte) % ALPHABET.len()]))
         .collect()
@@ -447,6 +452,41 @@ pub(super) fn find_user_by_id(conn: &Connection, id: i64) -> Result<Option<UserR
         .optional()?)
 }
 
+/// `onUserCreated` (`apps/builder/src/lib/auth/on-user-created.ts`), the part
+/// that runs in every edition: `platformAdminService.provisionBootstrapAdmin`
+/// (`PLATFORM_ADMIN_EMAIL`). Anonymous users are skipped. The cloud quota
+/// bootstrap belongs to the quota port.
+pub(super) fn on_user_created(
+    conn: &Connection,
+    email: &str,
+    is_anonymous: bool,
+) -> Result<(), DbError> {
+    if is_anonymous {
+        return Ok(());
+    }
+    let Some(admin_email) = platform_admin_email() else {
+        return Ok(());
+    };
+    if email.trim().to_lowercase() != admin_email {
+        return Ok(());
+    }
+    match chatbotx_db::repo::platform_admin::bootstrap_root_admin(conn, &admin_email) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            tracing::warn!(error = %error, "Failed to provision platform bootstrap administrator on sign-up");
+            Ok(())
+        }
+    }
+}
+
+/// `PLATFORM_ADMIN_EMAIL`, trimmed and lowercased.
+pub fn platform_admin_email() -> Option<String> {
+    std::env::var("PLATFORM_ADMIN_EMAIL")
+        .ok()
+        .map(|email| email.trim().to_lowercase())
+        .filter(|email| !email.is_empty())
+}
+
 pub(super) fn new_id() -> i64 {
     chatbotx_core::utils::id::create_id()
         .parse()
@@ -610,6 +650,7 @@ async fn sign_up(
                    VALUES (?1, ?2, 'credential', ?3, ?4, ?5)"#,
                 params![account_id, user_id.to_string(), password_hash, user_id, ROOT_TENANT_ID],
             )?;
+            on_user_created(tx, &insert_email, false)?;
             find_user_by_id(tx, user_id)
         })
         .await
