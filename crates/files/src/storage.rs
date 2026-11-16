@@ -465,6 +465,15 @@ impl Uploader {
         self
     }
 
+    /// The HMAC signer of the local backend (`None` on S3 or without a
+    /// signing secret); the serving route verifies URLs with it.
+    pub fn url_signer(&self) -> Option<&LocalUrlSigner> {
+        match &self.presigner {
+            Presigner::Local(signer) => signer.as_ref(),
+            Presigner::S3 { .. } => None,
+        }
+    }
+
     /// The S3 bucket (`None` on other backends).
     pub fn bucket_name(&self) -> Option<&str> {
         self.bucket.as_deref()

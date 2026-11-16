@@ -70,6 +70,9 @@ pub struct ApiState {
     pub events: EventBus,
     /// The audit log writer (`auditService`).
     pub audit: AuditService,
+    /// The file store (`uploader`; presigned uploads, imports, exports).
+    /// `None` = off (tests that need no files).
+    pub files: Option<Arc<chatbotx_files::Uploader>>,
 }
 
 impl ApiState {
@@ -83,6 +86,7 @@ impl ApiState {
             jobs: None,
             events: EventBus::new(),
             audit: AuditService::disabled(),
+            files: None,
         }
     }
 
@@ -102,6 +106,12 @@ impl ApiState {
     pub fn with_jobs(mut self, jobs: Arc<dyn Enqueuer>) -> ApiState {
         self.audit = AuditService::new(Arc::clone(&jobs));
         self.jobs = Some(jobs);
+        self
+    }
+
+    /// Uses `files` as the file store.
+    pub fn with_files(mut self, files: Arc<chatbotx_files::Uploader>) -> ApiState {
+        self.files = Some(files);
         self
     }
 
