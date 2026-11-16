@@ -78,4 +78,13 @@ JSON), the workspace, the `Db` and the realtime handle. Errors are
 
 ## State
 
-Slice 1 committed: fmt, clippy -D warnings, 30 tests (25 worker + 5 server) pass. Parity reruns pending.
+Slice 1 committed (be107bde8): fmt, clippy -D warnings, 30 tests (25 worker + 5 server) pass.
+
+Parity (`run-rust.sh`, Dell, after slice 1):
+
+| Suite | Pass | Fail | Cause of the failures |
+|---|---|---|---|
+| p1-06 08-messages | 7 | 0 | (sendFlow case now green) |
+| p1-11 40-messages-core | 13 | 1 | media library upload `mediaFileId` (media unit; 501 notPorted). Worker flow send and API-channel callback now green |
+| p1-14 22-meta-catalog | 4 | 2 | Meta catalog import / sync worker jobs (slice 2) |
+| p1-08 31-mm-campaigns | 0 | 22 | no Rust seed module `stacks/rust/ext/p1-08.ts` and the marketing-message routes / worker (not Q.W1) |
