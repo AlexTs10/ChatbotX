@@ -16,12 +16,15 @@ pub mod contact_notes;
 pub mod contact_sequences;
 pub mod contacts;
 pub mod contacts_bulk;
+pub mod conversations;
 pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod flows;
 pub mod folders;
 pub mod input;
+pub mod keywords;
 pub mod media_library;
+pub mod messages;
 pub mod meta_catalog;
 pub mod minigames;
 pub mod open_hours;
@@ -443,6 +446,14 @@ async fn route(
         contact_inboxes::handle(state, route_id, call).await
     } else if contact_notes::ROUTES.contains(&route_id) {
         contact_notes::handle(state, route_id, call).await
+    } else if contact_messages::ROUTES.contains(&route_id) {
+        contact_messages::handle(state, route_id, call).await
+    } else if conversations::ROUTES.contains(&route_id) {
+        conversations::handle(state, route_id, call).await
+    } else if messages::ROUTES.contains(&route_id) {
+        messages::handle(state, route_id, call).await
+    } else if keywords::ROUTES.contains(&route_id) {
+        keywords::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
     } else if contacts_bulk::ROUTES.contains(&route_id) {
