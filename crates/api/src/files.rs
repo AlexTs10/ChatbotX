@@ -102,7 +102,9 @@ fn content_type_of(key: &str) -> &'static str {
         .map(|(_, ext)| ext.to_ascii_lowercase())
         .unwrap_or_default();
     match extension.as_str() {
-        "csv" => "text/csv",
+        // The CSV files this app writes are UTF-8 (`contacts.export` stores
+        // `text/csv; charset=utf-8` on S3).
+        "csv" => "text/csv; charset=utf-8",
         "json" => "application/json",
         "txt" => "text/plain",
         "png" => "image/png",
