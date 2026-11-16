@@ -62,6 +62,15 @@ phonenumber = "0.3"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+[profile.dev]
+# Speed + disk (orchestrator 2026-11-16): ~300 integration-test binaries with full
+# debug info filled the Dell disk and made linking the bottleneck. Line tables keep
+# panic locations and backtraces.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 opt-level = 3
 lto = "fat"
