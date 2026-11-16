@@ -63,6 +63,25 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | P3.6-X1 | 3 | Cross-cutting services for domains: ApiState handles (realtime publish, kv, jobs enqueue, event bus, audit log, token id in Call) + `/v1/members`; wire the events the ported domains already return | done | P3.6-D2 | C + A | Gate 2026-11-13 (orchestrator, Dell): manifest OK (frozen-tests 3219, fixtures 1); `cargo fmt --check` OK; clippy api+business `-D warnings` OK; `cargo test -p chatbotx-api -p chatbotx-business` TOTAL passed=1312 failed=0. Open items moved: pipelines wiring done in 41ab4606b (D1p); analytics bus forwarder + trigger/webhook workers → worker port (P3.6+); contacts.upsert / bulk / sequence audit → D2 | 485642757..41ab4606b |
 | P3.6-D3 | 3 | Domain batch 3: messages, conversations, keywords, automated responses (p1-11, p1-07 conversations, p1-10 keywords); incl. stage 2 of P3.6-D2 slice 08 (contact messages) | in_progress (worktree branch `feat/conversion-d3`) | P3.6-D2 | C + A | | |
 | P3.6+ | 3 | Business domains (`packages/business` 161k, `apps/builder` server 159k), worker handlers (`apps/worker` 82k), integrations (~70k). Units are cut per domain at the start of each batch; each batch must turn the matching P1 parity folders green against the Rust stack | todo | P3.5 | C + A | | |
+| Q.D1m | 3 | Mini apps (`packages/mini-app` needed part + domain + routes) | todo | P3.6-D2 | C + A | | |
+| Q.D4 | 3 | Templates (template marketplace, installations, previews, template messages; `packages/business/src/template` 23k) | todo | P3.6-D3 | C + A | | |
+| Q.D5 | 3 | Broadcasts, sequences, contact sequences, smart delay, triggers, email topics | todo | P3.6-D3 | C + A | | |
+| Q.D6 | 3 | AI: agents, files/RAG, functions, handover (+ bulk run), MCP servers, AI providers (`packages/ai`) | todo | P3.6-D3 | C + A | | |
+| Q.D7 | 3 | Ads: ads conversion/analytics/retarget, Google Ads, Meta conversions, messaging ads, Facebook marketing messages, lead ads | todo | P3.6-D2 | C + A | | |
+| Q.D8 | 3 | Ecommerce rest: Shopify, WooCommerce, webshop, carts, coupons, discount codes, ecommerce analytics | todo | P3.6-D1o | C + A | | |
+| Q.D9 | 3 | Appointments: calendars, external calendars, reminders, working hours | todo | P3.6-D2 | C + A | | |
+| Q.D10 | 3 | Comments + posts: comment automations, IG comments/stories, FB comments, Threads/TikTok comments, channel posts | todo | P3.6-D3 | C + A | | |
+| Q.D11 | 3 | Workspace + platform: lifecycle, quota, platform, enterprise, admin, error logs, analytics, capabilities, settings, jobs page (Bull Board replacement) | todo | P3.5f | C + A | | |
+| Q.D12 | 3 | WhatsApp domain: calls, WhatsApp flows, WhatsApp templates, thread control | todo | P3.6-D3 | C + A | | |
+| Q.D13 | 3 | Rest: leaderboards, dynamic images, decisions, inbound/external webhooks, spreadsheets, saved replies, response SLA, schemas, persistent menus | todo | P3.6-D2 | C + A | | |
+| Q.W1 | 3 | Worker core: flow execution (chat queue), integration queue routing, job context (`apps/worker` chat, integration, default) | todo | P3.6-D3 | C | | |
+| Q.W2 | 3 | Worker rest: events (analytics, error log, flow, message), trigger, webhook, schedule, sequence scheduler, notification, marketing message, leaderboard, questionnaires, heavy, ai-agent | todo | Q.W1 | C | | |
+| Q.I1 | 3 | Channel integrations: WhatsApp, Messenger, Instagram, Instagram-Facebook, Threads + their webhooks (P1.20, P1.21) | todo | Q.W1 | C + A | | |
+| Q.I2 | 3 | Channel integrations: Telegram, TikTok, Zalo, webchat, API channel + webhooks (P1.22) | todo | Q.W1 | C + A | | |
+| Q.I3 | 3 | Marketing/email integrations: ActiveCampaign, Drip, GetResponse, Klaviyo, Mailchimp, MailerLite, Moosend, SendGrid, SMTP | todo | Q.W1 | C | | |
+| Q.I4 | 3 | Google (Sheets, Calendar, Ads), OpenAI, payments + Shopify/WooCommerce webhooks (P1.23) | todo | Q.W1 | C + A | | |
+| Q.F2+ | 4 | Frontend feature batches (cut by the web agent in `specs/P4-web.md` after the scaffold) | todo | feat/conversion-web scaffold | B | | |
+| Q.P5 | 5 | Cutover: one-command build + run, RSS measurement ≤ 200 MB, full parity run, docs | todo | all | A | | |
 
 ## Proof
 
