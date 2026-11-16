@@ -24,7 +24,7 @@ use serde_json::{Map, Value, json};
 
 use crate::handlers::ai_agents::{ai_agent_json, parse_ai_agent_input};
 use crate::handlers::ai_files::{
-    ai_file_json, check_rate_limit, deps as ai_file_deps, parse_reindex_config,
+    ai_file_json, check_rate_limit, deps as ai_file_deps, parse_reindex_config, parse_search,
 };
 use crate::handlers::ai_functions::{ai_function_json, parse_ai_function_input};
 use crate::handlers::ai_handover::{
@@ -54,6 +54,7 @@ pub const PORTED: &[&str] = &[
     "actions.createAIFileAction",
     "actions.deleteAIFileAction",
     "actions.reindexAIFileAction",
+    "actions.searchAIFilesAction",
     "aiFunctionsAPI.listAIFunctionsAuthenticatedAPI",
     "aiMcpServerAPIs.listAIMcpServersAuthenticatedAPI",
     "aiMcpServerAPIs.validateAIMcpServerAuthenticatedAPI",
@@ -305,6 +306,8 @@ const SAVE_ERROR_COPY: &[(&str, &str)] = &[(
 const NO_EMBEDDING_PROVIDER_COPY: &str = "No embedding provider configured. AI file embeddings require OpenAI or Gemini integration. DeepSeek, Claude and Muse do not support embedding models.";
 const REINDEX_CONFLICT_COPY: &str = "This file is being processed, so the new parameters were not applied. Try again when processing finishes.";
 const REINDEX_RATE_LIMITED_COPY: &str = "Too many requests. Try again shortly.";
+/// `aiFiles.testQuery.rateLimited` (en).
+const SEARCH_RATE_LIMITED_COPY: &str = "Too many test requests. Try again shortly.";
 
 fn file_storage(api: &ApiState) -> Result<&Arc<chatbotx_files::Uploader>, OrpcError> {
     api.files.as_ref().ok_or_else(|| {
@@ -735,6 +738,21 @@ async fn run(
                     }
                 })?;
             Ok(RpcOutput::plain(json!({ "coalesced": out.coalesced })))
+        }
+        "actions.searchAIFilesAction" => {
+            let mut parsed = action_input(&args, 1);
+            let search = parse_search(&mut parsed, ws);
+            finish_action(parsed)?;
+            if check_rate_limit(api, "search", ws).is_err() {
+                return Err(business_error(
+                    BusinessError::exception(SEARCH_RATE_LIMITED_COPY, "tooManyRequests", 429),
+                    MUTATING,
+                ));
+            }
+            chatbotx_business::ai::knowledge::search_ai_files(db, api.embedder.as_ref(), search)
+                .await
+                .map(RpcOutput::plain)
+                .map_err(|e| business_error(e, MUTATING))
         }
         "aiFunctionsAPI.listAIFunctionsAuthenticatedAPI" => {
             let page = functions::list(db, ws, PaginationInput::default())

@@ -80,6 +80,9 @@ pub struct ApiState {
     /// The file store (`uploader`; presigned uploads, imports, exports).
     /// `None` = off (tests that need no files).
     pub files: Option<Arc<chatbotx_files::Uploader>>,
+    /// The query embedding client (`aiFiles.search`); the provider APIs by
+    /// default.
+    pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
 }
 
 impl ApiState {
@@ -94,7 +97,17 @@ impl ApiState {
             events: EventBus::new(),
             audit: AuditService::disabled(),
             files: None,
+            embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
         }
+    }
+
+    /// Embeds search queries with `embedder`.
+    pub fn with_embedder(
+        mut self,
+        embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
+    ) -> ApiState {
+        self.embedder = embedder;
+        self
     }
 
     /// Publishes realtime events through `realtime`.

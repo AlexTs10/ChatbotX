@@ -1,6 +1,4 @@
-//! `apps/builder/src/features/ai-files/api/public.ts` (`aiFilesPublicRouter`)
-//! without `aiFiles.search` (it embeds the query: the `packages/ai`
-//! retrieval, slice 6).
+//! `apps/builder/src/features/ai-files/api/public.ts` (`aiFilesPublicRouter`).
 //!
 //! `aiFiles.create` takes JSON (`{ name?, url }`) or `multipart/form-data`
 //! (`name`, `file`, `url`). [`Call`] carries no headers, so a body that does
@@ -13,6 +11,7 @@ use axum::http::{HeaderValue, header};
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use chatbotx_business::BusinessError;
+use chatbotx_business::ai::knowledge::{self, SearchAiFilesInput};
 use chatbotx_business::ai_file::{
     self as service, AI_FILE_MAX_UPLOAD_BYTES, AiFileDeps, AiFileWithProcessing, CreateAiFileInput,
     ListChunksInput, ReindexConfig,
@@ -39,6 +38,7 @@ pub const ROUTES: &[&str] = &[
     "aiFiles.list",
     "aiFiles.get",
     "aiFiles.create",
+    "aiFiles.search",
     "aiFiles.listChunks",
     "aiFiles.reindex",
     "aiFiles.delete",
@@ -67,6 +67,9 @@ const REINDEXING: ErrorMap = &[
     ("idempotencyKeyConflict", 409),
     ("conflict", 409),
 ];
+
+/// `possibleErrorsOnReadingWithBody`.
+const READING_WITH_BODY: ErrorMap = &[("notFound", 404), ("businessError", 400)];
 
 /// `AI_FILE_OPERATION_LIMIT`: 5 per 10-second window (about 30 a minute).
 pub const AI_FILE_OPERATION_LIMIT: u64 = 5;
@@ -327,6 +330,44 @@ pub fn parse_reindex_config(input: &mut Input) -> ReindexConfig {
     }
 }
 
+/// `searchAIFilesRequest` (with its `superRefine`).
+pub fn parse_search(input: &mut Input, workspace_id: i64) -> SearchAiFilesInput {
+    let query = input.string("query", Str::trimmed(1, 500));
+    let agent = input.get("agentId").cloned();
+    let agent_id = input.id_at(&key("agentId"), agent.as_ref(), false);
+    let file_ids = if input.has("fileIds") {
+        super::contacts_bulk::ids(input, "fileIds", 1, 20)
+    } else {
+        None
+    };
+    let limit = input.opt_number("limit", Num::int(1.0, 20.0));
+    let similarity_threshold = input.opt_number(
+        "similarityThreshold",
+        Num {
+            min: Some(0.0),
+            max: Some(1.0),
+            ..Num::default()
+        },
+    );
+    let expected_text = input.opt_string("expectedText", Str::trimmed(1, 200));
+    if !input.failed() && agent_id.is_some() == file_ids.is_some() {
+        input.issue(
+            &key("agentId"),
+            "custom",
+            "Provide exactly one of agentId or fileIds.",
+        );
+    }
+    SearchAiFilesInput {
+        workspace_id,
+        query: query.unwrap_or_default(),
+        agent_id,
+        file_ids: file_ids.map(|ids| ids.iter().map(i64::to_string).collect()),
+        limit: limit.map(|n| n as i64),
+        similarity_threshold,
+        expected_text,
+    }
+}
+
 /// `listAIFileChunksRequest` (without the id).
 pub fn parse_list_chunks(input: &mut Input) -> (i64, Option<String>, Option<i64>) {
     let limit = input.opt_coerce_int("limit", Num::int(1.0, 100.0));
@@ -434,6 +475,18 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .await
                 .map(|row| json(201, ai_file_json(&row, true)))
                 .map_err(|e| business_error(e, CREATING))
+        }
+        "aiFiles.search" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let search = parse_search(&mut input, ws);
+            input.finish()?;
+            if let Err((error, retry_after)) = check_rate_limit(state, "search", ws) {
+                return rate_limited(error, retry_after);
+            }
+            knowledge::search_ai_files(db, state.embedder.as_ref(), search)
+                .await
+                .map(|body| json(200, body))
+                .map_err(|e| business_error(e, READING_WITH_BODY))
         }
         "aiFiles.listChunks" => {
             let mut input = Input::from_query(call.params, call.query);

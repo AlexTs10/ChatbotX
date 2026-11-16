@@ -12,9 +12,9 @@ is unit Q.W2: this unit only enqueues jobs with the original payload.
 | 1 | AI functions + MCP servers | `ai_function.rs`, `ai_mcp_server.rs`, `ai/mcp_client.rs` | `aiFunctions.*`, `aiMcpServers.*` | list procedures, CRUD actions, `validateAIMcpServer` | done |
 | 2 | AI agents | `ai_agent.rs`, `ai/models.rs` (model catalog) | `aiAgents.*` | `aiAgentsAPI.listAIAgentsAPI`, create/update/delete actions | done |
 | 3 | AI provider integrations | `integration_ai_provider.rs` (key probe, find, autoReply update), `integration_openai_compatible.rs` | `integrations.getAiProvider`, `updateAiProvider` | `update<Provider>Action` (6) | done (connect / disconnect: P3.6-D2) |
-| 4 | AI files / RAG | `ai_file.rs` (DB vector scan: `ai_file_embedding::vector_search`) | `aiFiles.*` except `search` | `aiFilesAPI.*`, create / delete / reindex actions | done (`aiFiles.search`, `searchAIFilesAction`: slice 6) |
+| 4 | AI files / RAG | `ai_file.rs` (DB vector scan: `ai_file_embedding::vector_search`) | `aiFiles.*` except `search` | `aiFilesAPI.*`, create / delete / reindex actions | done |
 | 5 | AI handover settings + bulk run | `ai_handover.rs` | `aiHandover.*` | `aiHandoverAPIs.*`, save / set / retry actions | done (engine / sweeper: Q.W2) |
-| 6 | `packages/ai` provider layer | — | — | — | todo |
+| 6 | `packages/ai` provider layer (server part) | `ai/knowledge.rs` (embedding model, query embedding, `searchKnowledgeChunks`, `performFileSearch`, `searchAIFiles`, `isInvalidApiKeyError`), `ai/models.rs` catalog tests | `aiFiles.search` | `searchAIFilesAction` | done (LLM runtime: Q.W2 / Q.D12) |
 
 ## 2. Test map
 
@@ -94,6 +94,24 @@ Per test case: `specs/Q.D6-test-map.tsv` (file, line, name, Rust test, status, n
   store there is no limit. Action copy is the `en` message.
   `createFromCopiedObject` (template install) is not ported (no templates).
 
+- `packages/ai` (slice 6): this unit ports the parts with a server caller in
+  the AI domains: the embedding model (`resolveEmbeddingModel`: OpenAI
+  `text-embedding-ada-002`, then Gemini `gemini-embedding-001` at 1536
+  dimensions), the query embedding (one reqwest POST per provider behind the
+  `Embedder` trait, `ApiState.embedder`; the `ai` SDK retries, 2 after 2 s /
+  4 s, without its `Retry-After` reading), `searchKnowledgeChunks`,
+  `performFileSearch`, `searchAIFiles`, `isInvalidApiKeyError`, the model
+  catalog (slice 2) and the MCP client (slice 1). The LLM runtime
+  (`factory`, `stream`, tools / toolset, prompts, `ai-context-service`,
+  `muse-transcribe`, `sam`) is ported with its caller, the worker AI agent
+  (Q.W2); the summarizer with the WhatsApp call summaries (Q.D12). The
+  picker catalogs (`openaiCompatiblePresetConfigs`, knowledge extensions)
+  stay TypeScript: the web frontend imports `packages/ai`.
+  `aiIntegrationService.invalidateCache` is a cache (P3.6-D1: none).
+- A resolve or provider failure inside a search is a plain error (500), as
+  the original's unhandled `EmbeddingProviderNotConfiguredError` /
+  `APICallError`; `noEmbeddingProvider` (400) is checked first.
+
 ## 4. State
 
-- Slices 1–5 committed (see TRACKER). 6 todo (with `aiFiles.search`).
+- Slices 1–6 committed (see TRACKER). Parity p1-02 / p1-03: see TRACKER.

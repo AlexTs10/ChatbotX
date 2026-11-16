@@ -1,26 +1,30 @@
 //! Ports of `apps/builder/__tests__/ai-files-public-api.test.ts`,
-//! `ai-files-reindex-api.test.ts`, `ai-files-resource-schema.test.ts` and
-//! `create-ai-file-action.test.ts` (Q.D6).
+//! `ai-files-reindex-api.test.ts`, `ai-files-resource-schema.test.ts`,
+//! `ai-files-search-api.test.ts` and `create-ai-file-action.test.ts` (Q.D6).
 //! Adapted: the captured oRPC procedures and the mocked `aiFileService`
 //! become `handlers::dispatch` / `rpc_ai::call` over a real migrated database
 //! and an in-memory object store; "the service was called with" becomes the
 //! response and the stored rows; `schema.parse` becomes the mapped resource.
 //! The translated messages are the `en` copies.
 //! Not applicable here:
-//! - "a read_only token cannot reindex": the token permission is checked by
-//!   the route auth before the handler (`routes`, P3.5);
-//! - "a retry with the same Idempotency-Key replays the same file": the
-//!   idempotency middleware wraps the handler in `routes` (its own tests);
-//! - `aiFiles.search` and `searchAIFilesAction`: the `packages/ai` retrieval
-//!   (slice 6).
+//! - "a read_only token cannot reindex", "a read_only token cannot search"
+//!   and "a read_only token can still list chunks": the token permission is
+//!   checked by the route auth before the handler (`routes`, P3.5);
+//! - "a retry with the same Idempotency-Key replays the same file" and "is
+//!   exempt from idempotency replay": the idempotency middleware wraps the
+//!   handler in `routes` (its own tests; the exempt path is checked here).
 
 mod handlers_common;
 
 use std::sync::{Arc, Mutex};
 
 use chatbotx_api::handlers::{ApiState, Call, dispatch};
-use chatbotx_api::routes::scopes_of_module;
+use chatbotx_api::idempotency::is_exempt_read_path;
+use chatbotx_api::routes::{route_by_id, scopes_of_module};
 use chatbotx_api::rpc_ai::{RpcAiContext, call as rpc};
+use chatbotx_business::ai::knowledge::{
+    EMBEDDING_DIMENSIONS, EmbedFuture, Embedder, ResolvedEmbeddingModel,
+};
 use chatbotx_business::ai_file::parse_processing_run;
 use chatbotx_db::rusqlite::params;
 use chatbotx_files::{LocalUrlSigner, Uploader};
@@ -876,4 +880,257 @@ fn rejects_a_run_with_an_unknown_error_code_or_a_non_utc_timestamp() {
     offset["queuedAt"] = json!("2026-10-24T07:00:00.000+07:00");
     assert!(parse_processing_run(Some(&boom)).is_none());
     assert!(parse_processing_run(Some(&offset)).is_none());
+}
+
+// describe("aiFiles.search")
+
+/// Answers every query with `[1, 0, ...]`; counts the calls.
+#[derive(Default)]
+struct FakeEmbedder {
+    calls: Mutex<Vec<String>>,
+}
+
+impl Embedder for FakeEmbedder {
+    fn embed<'a>(&'a self, _model: &'a ResolvedEmbeddingModel, value: &'a str) -> EmbedFuture<'a> {
+        self.calls.lock().expect("lock").push(value.to_owned());
+        Box::pin(async move {
+            let mut vector = vec![0.0_f32; EMBEDDING_DIMENSIONS];
+            vector[0] = 1.0;
+            Ok(vector)
+        })
+    }
+}
+
+/// The stored vector with cosine similarity `s` to the query.
+fn vector(s: f32) -> Vec<u8> {
+    let mut v = vec![0.0_f32; EMBEDDING_DIMENSIONS];
+    v[0] = s;
+    v[1] = (1.0 - s * s).max(0.0).sqrt();
+    v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// [`seeded`] with a usable OpenAI key, chunk vectors (11: 0.9, 12: 0.8 with
+/// "Pro: 499.000", 13: 0.2) and a fake embedder.
+async fn searchable() -> (Fixture, Arc<FakeEmbedder>) {
+    let mut f = seeded(None).await;
+    f.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                r#"UPDATE "IntegrationOpenai" SET "auth" = '{"authType":"secretText","secretText":"sk-test"}'"#,
+                [],
+            )?;
+            for (id, s, content) in [(11_i64, 0.9_f32, "chunk 0"), (12, 0.8, "Pro: 499.000"), (13, 0.2, "chunk 2")] {
+                tx.execute(
+                    r#"UPDATE "AIEmbedding" SET "embedding" = ?1, "content" = ?2 WHERE "id" = ?3"#,
+                    params![vector(s), content, id],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("seed");
+    let embedder = Arc::new(FakeEmbedder::default());
+    f.state = f.state.clone().with_embedder(embedder.clone());
+    (f, embedder)
+}
+
+async fn search(f: &Fixture, body: Value) -> (u16, Value) {
+    call(f, "aiFiles.search", WS, &[], None, Some(body)).await
+}
+
+/// Port of: apps/builder/__tests__/ai-files-public-api.test.ts:268 "phase-two AI file procedures > search delegates to the shared retrieval implementation"
+#[tokio::test]
+async fn search_delegates_to_the_shared_retrieval_implementation() {
+    let (f, embedder) = searchable().await;
+    let (status, body) = search(&f, json!({ "query": "hello", "fileIds": ["9101"] })).await;
+
+    assert_eq!(status, 200);
+    assert_eq!(*embedder.calls.lock().unwrap(), vec!["hello"]);
+    assert_eq!(body["mode"], json!("files"));
+    assert_eq!(body["files"][0]["id"], json!("9101"));
+}
+
+/// Port of: apps/builder/__tests__/ai-files-search-api.test.ts:121 "aiFiles.search > searches in the token's workspace"
+#[tokio::test]
+async fn searches_in_the_tokens_workspace() {
+    let (f, _) = searchable().await;
+    let (status, body) = search(&f, json!({ "query": "price", "fileIds": ["9101"] })).await;
+    assert_eq!((status, &body["diagnosis"]), (200, &json!("ok")));
+
+    // Adapted: the other workspace does not see the file.
+    let (status, body) = call(
+        &f,
+        "aiFiles.search",
+        OTHER_WS,
+        &[],
+        None,
+        Some(json!({ "query": "price", "fileIds": ["9101"] })),
+    )
+    .await;
+    assert_eq!((status, &body["code"]), (404, &json!("notFound")));
+}
+
+/// Port of: apps/builder/__tests__/ai-files-search-api.test.ts:132 "aiFiles.search > forwards the expected text and returns the verdict"
+#[tokio::test]
+async fn forwards_the_expected_text_and_returns_the_verdict() {
+    let (f, _) = searchable().await;
+    let (status, body) = search(
+        &f,
+        json!({ "query": "price", "fileIds": ["9101"], "expectedText": " 499.000 " }),
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    assert_eq!(
+        body["expected"],
+        json!({
+            "verdict": "inTopResults",
+            "matches": [{ "fileId": "9101", "fileName": "prices.csv", "chunkId": "12", "chunkIndex": 1, "rank": 2 }],
+        })
+    );
+}
+
+/// Port of: apps/builder/__tests__/ai-files-search-api.test.ts:164 "aiFiles.search > rejects an expected text over 200 characters or blank"
+#[tokio::test]
+async fn rejects_an_expected_text_over_200_characters_or_blank() {
+    let (f, embedder) = searchable().await;
+    for expected in ["x".repeat(201), "   ".to_owned()] {
+        let (status, body) = search(
+            &f,
+            json!({ "query": "price", "fileIds": ["9101"], "expectedText": expected }),
+        )
+        .await;
+        assert_eq!((status, &body["code"]), (422, &json!("invalidRequestData")));
+    }
+    assert!(embedder.calls.lock().unwrap().is_empty());
+}
+
+/// Port of: apps/builder/__tests__/ai-files-search-api.test.ts:177 "aiFiles.search > returns chunk positions and agent visibility per result"
+#[tokio::test]
+async fn returns_chunk_positions_and_agent_visibility_per_result() {
+    let (f, _) = searchable().await;
+    let (_, body) = search(&f, json!({ "query": "price", "fileIds": ["9101"] })).await;
+
+    let first = &body["results"][1];
+    assert_eq!(
+        (
+            &first["chunkIndex"],
+            &first["agentVisible"],
+            &first["usedByAgent"],
+            &first["content"]
+        ),
+        (
+            &json!(1),
+            &json!(true),
+            &Value::Null,
+            &json!("Pro: 499.000")
+        )
+    );
+    assert_eq!(body["results"][2]["agentVisible"], json!(false));
+}
+
+/// Port of: apps/builder/__tests__/ai-files-search-api.test.ts:203 "aiFiles.search > rejects a request with both or neither of agentId and fileIds"
+#[tokio::test]
+async fn rejects_a_request_with_both_or_neither_of_agent_id_and_file_ids() {
+    let (f, embedder) = searchable().await;
+    for body in [
+        json!({ "query": "price" }),
+        json!({ "query": "price", "agentId": "1", "fileIds": ["9101"] }),
+    ] {
+        let (status, body) = search(&f, body).await;
+        assert_eq!((status, &body["code"]), (422, &json!("invalidRequestData")));
+        assert_eq!(
+            first_issue(&body),
+            (
+                json!(["agentId"]),
+                json!("Provide exactly one of agentId or fileIds.")
+            )
+        );
+    }
+    assert!(embedder.calls.lock().unwrap().is_empty());
+}
+
+/// Port of: apps/builder/__tests__/ai-files-search-api.test.ts:241 "aiFiles.search > listChunks forwards fromChunkIndex and returns positions"
+#[tokio::test]
+async fn list_chunks_forwards_from_chunk_index_and_returns_positions() {
+    let f = seeded(None).await;
+    let (status, body) = call(
+        &f,
+        "aiFiles.listChunks",
+        WS,
+        ID,
+        Some("fromChunkIndex=1"),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    let indexes: Vec<&Value> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| &c["chunkIndex"])
+        .collect();
+    assert_eq!(indexes, vec![&json!(1), &json!(2)]);
+}
+
+/// Port of: apps/builder/__tests__/ai-files-search-api.test.ts:267 "aiFiles.search > the sixth search in a window is rate limited before embedding"
+#[tokio::test]
+async fn the_sixth_search_in_a_window_is_rate_limited_before_embedding() {
+    let (f, embedder) = searchable().await;
+    let body = json!({ "query": "q", "fileIds": ["9101"] }).to_string();
+    let mut last = (0, None, Value::Null);
+    let mut sent = 0;
+    for _ in 0..12 {
+        sent += 1;
+        last = raw(&f, "aiFiles.search", body.as_bytes()).await;
+        if last.0 == 429 {
+            break;
+        }
+    }
+    // Adapted: a window boundary may split the calls; the refused call never embeds.
+    let (status, retry, body) = last;
+    assert_eq!((status, &body["code"]), (429, &json!("tooManyRequests")));
+    let retry: u64 = retry.expect("Retry-After").parse().expect("seconds");
+    assert!((1..=10).contains(&retry), "{retry}");
+    assert_eq!(embedder.calls.lock().unwrap().len(), sent - 1);
+}
+
+/// Port of: apps/builder/__tests__/ai-files-search-api.test.ts:318 "aiFiles.search > is registered at the path the idempotency exemption names"
+#[test]
+fn is_registered_at_the_path_the_idempotency_exemption_names() {
+    let route = route_by_id("aiFiles.search").expect("route");
+    assert_eq!((route.method, route.path), ("POST", "/v1/ai-files/search"));
+    assert!(is_exempt_read_path(route.path));
+}
+
+// describe("searchAIFilesAction")
+
+#[tokio::test]
+async fn the_search_action_shares_the_api_bucket_with_a_translated_message() {
+    let (f, _) = searchable().await;
+    let input = json!({ "query": "q", "fileIds": ["9101"] });
+    let out = action(&f, "actions.searchAIFilesAction", None, Some(input.clone()))
+        .await
+        .expect("searched");
+    assert_eq!(out["diagnosis"], json!("ok"));
+    let mut refused = None;
+    for _ in 0..12 {
+        if let Err(error) =
+            action(&f, "actions.searchAIFilesAction", None, Some(input.clone())).await
+        {
+            refused = Some(error);
+            break;
+        }
+    }
+    let error = refused.expect("rate limited");
+    assert_eq!(
+        (error.code.as_str(), error.status, error.message.as_str()),
+        (
+            "tooManyRequests",
+            429,
+            "Too many test requests. Try again shortly."
+        )
+    );
 }
