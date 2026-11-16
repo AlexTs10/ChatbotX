@@ -3,8 +3,14 @@
 //! `authMiddleware`) and, when the input carries a `workspaceId`,
 //! `workspaceAuthorizedMidddleware`.
 //!
-//! The procedures themselves are the domain ports (P3.6+): after auth a call
-//! answers the RPC-encoded `NOT_FOUND "Operation not ported yet"`.
+//! Every procedure of the builder router is in [`RPC_PROCEDURES`] (generated
+//! by `conversion/tools/rpc-table-gen/gen.mjs`) with its auth base, method and
+//! workspace mapper. A ported procedure runs its handler ([`procedures`]); any
+//! other answers the RPC-encoded `NOT_FOUND "Operation not ported yet"` after
+//! auth.
+
+pub mod procedures;
+mod table;
 
 use std::sync::Arc;
 
@@ -17,7 +23,10 @@ use axum::routing::any;
 use chatbotx_db::rusqlite::{OptionalExtension as _, params};
 use serde_json::{Value, json};
 
+pub use table::RPC_PROCEDURES;
+
 use crate::auth::decode_query_component;
+use crate::handlers::ApiState;
 use crate::session::{
     AuthState, SESSION_COOKIE, apply_bearer, request_cookie, verify_signed_cookie,
 };
@@ -105,11 +114,89 @@ pub const RPC_ROUTER_KEYS: &[&str] = &[
     "mediaLibraryAPI",
 ];
 
-/// The router of `/rpc/*`.
+/// The auth base of a procedure (`authorizedAPI`, `workspaceTokenAuthAPIForScope(scope)`, ...).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RpcAuth {
+    /// `authorizedAPI`: a better-auth session.
+    Session,
+    /// `workspaceTokenAuthAPIForScope(scope)`: a workspace API token.
+    Token(&'static str),
+    /// `channelApiTokenAPI`.
+    ChannelToken,
+    /// `mobileUserAPI`.
+    MobileUser,
+    /// `mobileUserPasswordChangeAPI`.
+    MobileUserPasswordChange,
+    /// `os` / `base` without an auth middleware.
+    Public,
+}
+
+/// One procedure of the builder router.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RpcProcedure {
+    /// The router path, `.`-joined (`pollsAPI.listPollsAPI`).
+    pub path: &'static str,
+    pub auth: RpcAuth,
+    /// `.route({ method })`; `None` = not set (the owner gate treats it as POST).
+    pub method: Option<&'static str>,
+    /// The input path the `workspaceAuthorizedMidddleware` mapper reads
+    /// (`["workspaceId"]`); `None` = no workspace check.
+    pub workspace: Option<&'static [&'static str]>,
+    /// `true` when the input schema is validated before the workspace check
+    /// (`.input(...)` before `.use(workspaceAuthorizedMidddleware, ...)`).
+    pub validate_first: bool,
+}
+
+/// The procedure of a `.`-joined router path.
+pub fn find_procedure(path: &str) -> Option<&'static RpcProcedure> {
+    RPC_PROCEDURES
+        .iter()
+        .find(|procedure| procedure.path == path)
+}
+
+/// What the `/rpc` handler needs: the session store and, for the ported
+/// procedures, the handler state and the realtime broadcast secret.
+#[derive(Clone)]
+pub struct RpcState {
+    pub auth: Arc<AuthState>,
+    /// `None` = no procedure is ported (every call answers "not ported").
+    pub api: Option<Arc<ApiState>>,
+    /// `resolveBroadcastSecret()` (`REALTIME_BROADCAST_SECRET`); `None` = the
+    /// realtime gateway is off.
+    pub realtime_secret: Option<String>,
+}
+
+/// The router of `/rpc/*` without procedure handlers (auth only).
 pub fn rpc_router(state: Arc<AuthState>) -> Router {
+    rpc_router_with(RpcState {
+        auth: state,
+        api: None,
+        realtime_secret: None,
+    })
+}
+
+/// The router of `/rpc/*` with the ported procedures.
+pub fn rpc_router_with(state: RpcState) -> Router {
     Router::new()
         .route("/rpc/{*rest}", any(handle))
-        .with_state(state)
+        .with_state(Arc::new(state))
+}
+
+/// The workspace context of a call that passed `workspaceAuthorizedMidddleware`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RpcWorkspace {
+    pub workspace_id: i64,
+    /// `context.workspaceMember.permissions` (the stored JSON object).
+    pub permissions: Value,
+}
+
+/// The context of a procedure call (`context.session`, `context.user`,
+/// `context.workspace`, `context.requestIssuedAtMs`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RpcContext {
+    pub session: RpcSession,
+    pub workspace: Option<RpcWorkspace>,
+    pub request_issued_at_ms: i64,
 }
 
 /// The authenticated caller of a `/rpc` call (`context.session` + `context.user`).
@@ -122,7 +209,7 @@ pub struct RpcSession {
 
 /// An RPC-encoded oRPC error (`{ json: error.toJSON(), meta }`; `data` is
 /// `undefined`, so the meta marks it).
-fn rpc_error(status: StatusCode, code: &str, message: &str) -> Response {
+pub(crate) fn rpc_error(status: StatusCode, code: &str, message: &str) -> Response {
     let body = json!({
         "json": {
             "defined": false,
@@ -210,44 +297,80 @@ pub async fn find_rpc_session(
 }
 
 /// `workspaceAuthorizedMidddleware`: the caller's membership in the
-/// workspace; `Some(scheduledDeletionAt)` when a member.
+/// workspace; `Some((scheduledDeletionAt, permissions))` when a member.
 async fn find_membership(
     state: &AuthState,
     workspace_id: i64,
     user_id: i64,
-) -> Result<Option<Option<i64>>, chatbotx_db::DbError> {
+) -> Result<Option<(Option<i64>, String)>, chatbotx_db::DbError> {
     state
         .db
         .read(move |conn| {
             Ok(conn
                 .query_row(
-                    r#"SELECT w."scheduledDeletionAt"
+                    r#"SELECT w."scheduledDeletionAt", m."permissions"
                        FROM "WorkspaceMember" m JOIN "Workspace" w ON w."id" = m."workspaceId"
                        WHERE m."workspaceId" = ?1 AND m."userId" = ?2"#,
                     params![workspace_id, user_id],
-                    |row| row.get::<_, Option<i64>>(0),
+                    |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, String>(1)?)),
                 )
                 .optional()?)
         })
         .await
 }
 
+/// The input value at `path` (`input.workspaceId`).
+fn input_at<'a>(input: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    path.iter().try_fold(input, |value, key| value.get(key))
+}
+
+/// `zodBigintAsString` / `z.string()` of a workspace id: digits only.
+fn workspace_id_of(value: Option<&Value>) -> Option<i64> {
+    let text = value?.as_str()?;
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
+}
+
+/// oRPC's input validation error (the zod issues are not reported).
+fn input_validation_failed() -> Response {
+    rpc_error(
+        StatusCode::BAD_REQUEST,
+        "BAD_REQUEST",
+        "Input validation failed",
+    )
+}
+
+/// A procedure output, RPC-encoded (`{ json }`; no meta: the ported outputs
+/// hold no Date, bigint or undefined value).
+fn rpc_output(output: Value) -> Response {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        json!({ "json": output }).to_string(),
+    )
+        .into_response()
+}
+
 async fn handle(
-    State(state): State<Arc<AuthState>>,
+    State(state): State<Arc<RpcState>>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let key = uri
-        .path()
-        .strip_prefix("/rpc/")
-        .and_then(|rest| rest.split('/').next())
-        .unwrap_or_default();
+    let request_issued_at_ms = (state.auth.now_ms)();
+    let rest = uri.path().strip_prefix("/rpc/").unwrap_or_default();
+    let key = rest.split('/').next().unwrap_or_default();
     if !RPC_ROUTER_KEYS.contains(&key) {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
-    let session = match find_rpc_session(&state, &headers).await {
+    let path = rest.trim_end_matches('/').replace('/', ".");
+    // A name that is not in the table keeps the generic session auth (and the
+    // workspace check when the input has a `workspaceId`).
+    let procedure = find_procedure(&path);
+    let session = match find_rpc_session(&state.auth, &headers).await {
         Ok(Some(session)) => session,
         Ok(None) => return unauthorized(),
         Err(error) => return internal(error),
@@ -260,22 +383,50 @@ async fn handle(
         );
     }
     let input = rpc_input(&method, &uri, &body);
-    if let Some(workspace_id) = input.get("workspaceId").and_then(Value::as_str) {
-        let Ok(workspace_id) = workspace_id.parse::<i64>() else {
-            return unauthorized();
+    let workspace_path: &[&str] = match procedure {
+        Some(procedure) => procedure.workspace.unwrap_or_default(),
+        None if input.get("workspaceId").is_some_and(Value::is_string) => &["workspaceId"],
+        None => &[],
+    };
+    let mut workspace = None;
+    if !workspace_path.is_empty() {
+        let Some(workspace_id) = workspace_id_of(input_at(&input, workspace_path)) else {
+            return if procedure.is_some_and(|procedure| procedure.validate_first) {
+                input_validation_failed()
+            } else {
+                unauthorized()
+            };
         };
-        match find_membership(&state, workspace_id, session.user_id).await {
+        match find_membership(&state.auth, workspace_id, session.user_id).await {
             Ok(None) => return unauthorized(),
-            Ok(Some(Some(_scheduled))) => {
+            Ok(Some((Some(_scheduled), _))) => {
                 return rpc_error(
                     StatusCode::FORBIDDEN,
                     "FORBIDDEN",
                     "Workspace deletion scheduled",
                 );
             }
-            Ok(Some(None)) => {}
+            Ok(Some((None, permissions))) => {
+                workspace = Some(RpcWorkspace {
+                    workspace_id,
+                    permissions: serde_json::from_str(&permissions).unwrap_or(Value::Null),
+                });
+            }
             Err(error) => return internal(error),
         }
+    }
+    let context = RpcContext {
+        session,
+        workspace,
+        request_issued_at_ms,
+    };
+    if let Some(procedure) = procedure
+        && let Some(outcome) = procedures::call(&state, procedure.path, &context, &input).await
+    {
+        return match outcome {
+            Ok(output) => rpc_output(output),
+            Err(error) => procedures::error_response(&error),
+        };
     }
     rpc_error(
         StatusCode::NOT_FOUND,
