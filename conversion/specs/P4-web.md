@@ -154,24 +154,54 @@ serialized them: ids as strings, dates as ISO strings, flags as booleans
 | `pages.contactsAccess` | `requireContactsAccess` | `{ workspaceId }` | `{ canViewEmailAndPhone }` (`superAdmin \|\| emailAndPhone`) |
 | `pages.folder` | `getCurrentFolder` (`folderService.getWithParents`) | `{ id, workspaceId }` | `{ folder \| null, parents[] }` |
 | `pages.deletedWorkspaces` | `features/workspaces/deleted-workspaces.tsx` | `{ page, perPage }` | `{ data: [] }` (deletion records not ported) |
+| `pages.flow` | `app/(no-sidebar)/space/[workspaceId]/flows/[id]/page.tsx` | `{ workspaceId, id }` | the `FlowDetail` props: `{ flow (with flowVersions), flowVersion (draft), hasPublishedVersion, canRevertToPublished, isTemplateLocked, openaiCompatibleIntegrations: [], workspaceTargetCountry }`. Needs the `flows` permission; no flow / no draft = 404. |
+| `pages.channelsCreate` | `app/(no-sidebar)/channels/create/page.tsx` | `{ workspaceId? }` | `{ offeredChannels: ["webchat", "api"], configuredChannels: [] }`; with `workspaceId` the caller must be its super admin (else 401). |
 
 Workspace loaders answer `401` when the caller is not a member.
-`/rpc/actions/<name>` answers `404 "Action not ported yet"` after auth.
 
-## 6. Procedures the SPA needs that Rust does not have yet
+### 5.3 Where the private procedures and actions live
 
-Keep current: the SPA status per screen. "missing" = Rust answers
-`404 "Operation not ported yet"` (or route 404).
+`/rpc/actions/<name>` is part of the `/rpc` router (`crates/api/src/rpc/mod.rs`):
+session check, then the workspace check when `input.workspaceId` is set,
+then `crates/api/src/rpc_procedures::action`. Private procedures that are not
+in the generated `PORTED` table go to `rpc_procedures::procedure`. One file
+per domain: `rpc_procedures/{contacts,flows,lists,workspaces}.rs`. Each
+handler is thin: it parses the builder input, calls the `crates/business`
+function, and returns the builder JSON. Two shared helpers:
 
-| Screen | Procedure / action | Rust |
+- `Ctx::contact_scope()`: the member contact scope (`buildContactPermissionScope`:
+  super admin, PII flag, assigned-only user).
+- `public(ctx, route_id, ...)`: when the action or procedure has the same
+  JSON as a ported public `/v1` route, it runs that route handler with a
+  task-local `Member` (`handlers::dispatch_as_member`), so audit, events and
+  side effects stay the same.
+
+Model JSON: `table_row!` models have `to_json()` (ids as strings, date
+columns as ISO strings, flags as booleans, JSON columns parsed); `/rpc`
+answers put `Date` meta (`[1, ...path]`) on ISO date values, so `z.date()`
+outputs become `Date` again. Unknown names: `404 "Operation not ported yet"`
+/ `404 "Action not ported yet"`. Tests: `crates/api/tests/rpc_spa_procedures.rs`,
+`crates/api/tests/spa_pages.rs`.
+
+## 6. Screen state and missing procedures
+
+Keep current. "works" = the screen loads and saves real data through Rust.
+"missing" = Rust answers `404 "Operation not ported yet"` / `"Action not
+ported yet"`; the UI shows its error or an empty option list. Full lists:
+`P4-procedures.tsv`, `P4-actions.tsv` (column `rust`).
+
+| Screen (SPA path) | State | Missing (needs a backend domain unit) |
 |---|---|---|
-| sign-in / sign-up / session | `/api/auth/*` (better-auth) | yes (P3.5d) |
-| all | `pages.session`, `pages.authOptions` | yes (P4 `spa.rs`) |
-| workspace list | `pages.home` (creates the first workspace), `pages.deletedWorkspaces`; action `createWorkspaceAction` | yes / yes (empty) / missing |
-| workspace shell | `pages.workspace` | yes (P4 `spa.rs`) |
-| contacts list | `contactsAPIs.listContactsByPOSTAuthenticatedAPI`, `contactsAPIs.countContactsAuthenticatedAPI`, `contactFilterAPI.*` (3), `tagsAPI.*` (2), `customFieldsAPI.*` (2) | procedures missing (P3.5f); `pages.contactsAccess` yes |
-| contact detail | `contactsAPIs.getContactAuthenticatedAPI`, `contactNotesAPI.listContactNotesAuthenticatedAPI`, `contactSequencesAPI.listContactSequencesAuthenticatedAPI`, `contactsAPIs.countContactInboxesAuthenticatedAPI`, `contactsAPIs.listContactAdReferralsAuthenticatedAPI`, `couponsAPI.listContactCouponsAPI`, `appointmentsAPI.listContactAppointmentsAPI`; contact actions (19, `features/contacts`) | missing (P3.5f) |
-| flows list | `flowsAPI.privateListFlowsAPI`, `foldersAPI.*`; flow actions (10, `features/flows`), folder actions (4) | missing (P3.5f); `pages.folder` yes |
+| sign-in, sign-up, password pages (`/auth/*`) | works | OAuth providers (`pages.authOptions` lists none) |
+| workspace list (`/`) | works; the first workspace is created on first load | `pages.deletedWorkspaces` is empty (deletion records); `updateWorkspaceStatusAction`, `reconcileTenantEntitlementAction` |
+| new workspace (`/channels/create`) | works for webchat and API (`createWebchatAction`, `createApiAction` create the workspace) | the other channels: tenant channel visibility and platform credentials (`platformCredentialService`, `tenantService.resolveVisibleChannels`), Telegram / WhatsApp / Messenger / Instagram / Threads / Zalo / TikTok connect; `clearTemplateInstallIntentAction`, `rememberTemplateInstallIntentAction` |
+| workspace shell (`/space/$id`) | works | quota, support session, token refresh errors and call-capable channel are fixed defaults (`pages.workspace`); `refreshAllChannelTokensAction` |
+| contacts list (`/space/$id/contacts`) | works: list, count, filters, tag / custom field / bot field / member options, bulk tag, sequence, custom field, delete, create, export | filter options: `inboxesAPI.listAllInboxesAuthenticatedAPI`, `inboxTeamsAPI.listInboxTeamsAuthenticatedAPI`, `sequencesAPI.listSequencesWorkspaceAuthAPI`, `emailTopicsAPI.privateListWorkspaceEmailTopicsAPI`, `workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI`; `createCustomFieldAction`, `peekImportHeadersAction` (import); the table avatar is not hydrated from the inbox |
+| contact detail (sheet) | partial: contact, tags, custom fields, notes list, sequences list, ad referrals | `countContactInboxesAuthenticatedAPI`, `couponsAPI.listContactCouponsAPI`, `appointmentsAPI.listContactAppointmentsAPI`; note create / edit / delete actions; `enableBotAction`, `disableBotAction` |
+| flows list + folders (`/space/$id/flows`) | works: list, folders (create, rename, delete, move), create, rename, duplicate, import, delete | `templatesAPI.listLockedIdsAPI` (lock badges) |
+| flow editor (`/space/$id/flows/$flowId`) | works: open (`pages.flow`), save draft, publish, revert, restore, versions | step option lists: `sequencesAPI.*`, `inboxesAPI.listAllInboxesAuthenticatedAPI`, `whatsappMessageTemplateAPIs.*`, `whatsappFlowAPIs.*`, `messengerMessageTemplateAPIs.*`, `aiAgentsAPI.*`, `aiFilesAPI.*`, `aiFunctionsAPI.*`, `aiMcpServerAPIs.*`, `pipelinesAPI.*`, `productsAPI.*`, `couponsAPI.listCouponTopicOptionsAPI`, `leaderboardsAPI.*`, `miniAppsAPI.*`, `refLinksAPI.*`, `broadcastAPIs.*`, `decisionProfilesAPI.*`, `appointmentCalendarsAPI.*`, `spreadsheetsAPI.*`, `personasAPIs.*`, `userPersistentMenusAPI.*`, `dynamicImagesAPI.*`, `googleAdsAPI.getIntegration`, `platformCredentialsAPI.getGiphyApiKeyAPI`, the email / CRM integrations (`integration{ActiveCampaign,Drip,FacebookAds,GetResponse,Klaviyo,Mailchimp,MailerLite,Moosend,SendGrid}API.*`), media library (`mediaLibraryAPI.*` and 8 actions), `flowsAPI.privateGetFlowStatsAPI`, `flowsAPI.privateGetMessengerAdsJsonAPI`, `testExternalRequestAction`; OpenAI-compatible integrations (`pages.flow` sends `[]`) |
+| inbox / conversations | blocked | no SPA route yet. D3 ported `/v1/conversations` and messages for workspace tokens only; the private procedures (`conversationsAPI.*`, `messagesAPI.*`), the member scope and `archiveConversationAction` / `assignConversationAction` need a D3 follow-up; calls (`*Voip*`, `getCall*`) need the calling unit |
+| settings pages | blocked | no SPA routes yet; each settings page needs its domain procedures (workspace general, members, channels, API tokens) |
 
 ## 7. Build and run
 
