@@ -80,6 +80,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | Q.I2 | 3 | Channel integrations: Telegram, TikTok, Zalo, webchat, API channel + webhooks (P1.22) | todo | Q.W1 | C + A | | |
 | Q.I3 | 3 | Marketing/email integrations: ActiveCampaign, Drip, GetResponse, Klaviyo, Mailchimp, MailerLite, Moosend, SendGrid, SMTP | todo | Q.W1 | C | | |
 | Q.I4 | 3 | Google (Sheets, Calendar, Ads), OpenAI, payments + Shopify/WooCommerce webhooks (P1.23) | todo | Q.W1 | C + A | | |
+| Q.A1 | 3 | Auth rest from P3.5f: MCP OAuth server (authorize, token, consent, client registration, `.well-known`), mobile-token member filters on the `/v1` routes, then mobile tokens on (security: do not turn them on before the filters), rate limits | todo | P3.5f | C + A | | |
 | Q.F2+ | 4 | Frontend feature batches (cut by the web agent in `specs/P4-web.md` after the scaffold) | todo | feat/conversion-web scaffold | B | | |
 | Q.P5 | 5 | Cutover: one-command build + run, RSS measurement ≤ 200 MB, full parity run, docs | todo | all | A | | |
 
