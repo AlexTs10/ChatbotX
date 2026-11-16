@@ -19,6 +19,8 @@ import {
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useCallback, useMemo } from "react"
+import type { BotFieldResource } from "@/features/bot-fields/schema/resource"
+import type { CustomFieldResource } from "@/features/custom-fields/schema/resource"
 import { useWorkspaceId } from "@/hooks/routing"
 import { orpc } from "@/lib/orpc/query"
 import { maxPerPage } from "@/lib/shared-request"
@@ -313,7 +315,8 @@ export const useCustomFields = (
   workspaceId: string | undefined,
   options?: { enabled?: boolean },
 ) =>
-  useQuery(
+  // The SPA oRPC client is untyped (lib/orpc/orpc.ts): name the data type.
+  useQuery<unknown, Error, CustomFieldResource[]>(
     orpc.customFieldsAPI.privateListCustomFieldsAPI.queryOptions({
       input: { workspaceId: workspaceId ?? "", perPage: maxPerPage },
       enabled: Boolean(workspaceId) && (options?.enabled ?? true),
@@ -325,7 +328,8 @@ export const useBotFields = (
   workspaceId: string | undefined,
   options?: { enabled?: boolean },
 ) =>
-  useQuery(
+  // The SPA oRPC client is untyped (lib/orpc/orpc.ts): name the data type.
+  useQuery<unknown, Error, BotFieldResource[]>(
     orpc.botFieldAPIs.privateListBotFieldsAPI.queryOptions({
       input: { workspaceId: workspaceId ?? "", perPage: maxPerPage },
       enabled: Boolean(workspaceId) && (options?.enabled ?? true),

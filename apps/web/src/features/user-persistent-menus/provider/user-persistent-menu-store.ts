@@ -1,0 +1,66 @@
+import { createStore } from "zustand/vanilla"
+import { getClientErrorMessage } from "@/lib/orpc/client-error"
+import { client } from "@/lib/orpc/orpc"
+import type { ListUserPersistentMenusResponse } from "../schema/action"
+
+export type UserPersistentMenuState = {
+  loading: boolean
+  error: string | null
+  initialized: boolean
+
+  workspaceId: string
+  menus: ListUserPersistentMenusResponse["data"]
+}
+
+export type UserPersistentMenuActions = {
+  initialize: () => void
+  getAll: (workspaceId: string) => void
+}
+
+export type UserPersistentMenuStore = UserPersistentMenuState &
+  UserPersistentMenuActions
+
+export const createUserPersistentMenuStore = (
+  props: Partial<UserPersistentMenuState> = {},
+) =>
+  createStore<UserPersistentMenuStore>((set, get) => ({
+    loading: false,
+    error: null,
+    initialized: false,
+
+    workspaceId: "",
+    menus: [],
+    ...props,
+
+    initialize: async () => {
+      const { initialized, workspaceId } = get()
+
+      if (initialized) {
+        return
+      }
+
+      set({ loading: true, error: null })
+
+      try {
+        await get().getAll(workspaceId)
+        set({ loading: false, initialized: true })
+      } catch (error: unknown) {
+        set({
+          error: getClientErrorMessage(
+            error,
+            "Failed to fetch user persistent menus",
+          ),
+          loading: false,
+        })
+      }
+    },
+
+    getAll: async (workspaceId: string) => {
+      const { data } =
+        await client.userPersistentMenusAPI.listUserPersistentMenusAuthenticatedAPI(
+          { workspaceId },
+        )
+
+      set({ menus: data })
+    },
+  }))

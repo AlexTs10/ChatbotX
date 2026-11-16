@@ -1,0 +1,36 @@
+import { useParams } from "next/navigation"
+import { useFormContext } from "react-hook-form"
+import { MediaLibraryOrInsertLink } from "@/components/media-library-or-insert-link"
+import { ButtonGroupEditor } from "../button/editor"
+import { MediaStepNotice } from "../button/media-step-notice"
+
+type SendVideoStepEditorProps = {
+  parentName: string
+}
+
+const SendVideoStepEditor = (props: SendVideoStepEditorProps) => {
+  const { parentName } = props
+  const params = useParams<{ workspaceId: string; id: string }>()
+  const { getValues } = useFormContext()
+  const stepId = getValues(`${parentName}.id`)
+
+  return (
+    <div className="items-center justify-center overflow-hidden rounded-lg">
+      <div className="bg-secondary px-4 py-2 pt-3">
+        <MediaLibraryOrInsertLink
+          fileType="video"
+          includeBotFieldVariables
+          parentName={parentName}
+          showVariablePicker
+          uploadPath={`public/space/${params.workspaceId}/flows/${params.id}/steps/${stepId}`}
+        />
+      </div>
+      <div className="bg-slate-200 px-3 py-2">
+        <ButtonGroupEditor parentName={`${parentName}.buttons`} />
+        <MediaStepNotice parentName={parentName} />
+      </div>
+    </div>
+  )
+}
+
+export default SendVideoStepEditor

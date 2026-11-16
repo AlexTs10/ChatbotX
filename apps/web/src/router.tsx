@@ -6,23 +6,16 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   redirect,
 } from "@tanstack/react-router"
 import { sessionQuery } from "@/lib/session"
-import {
-  AuthLayout,
-  ChangePasswordPage,
-  ForgotPasswordPage,
-  MagicLinkSentPage,
-  ResetPasswordPage,
-  SignInPage,
-  SignUpPage,
-} from "@/routes/auth"
-import { ContactsPage } from "@/routes/contacts"
-import { FlowsLayout, FlowsPage } from "@/routes/flows"
-import { MainPage } from "@/routes/home"
 import { DefaultErrorPage, NotFoundPage, RootLayout } from "@/routes/root"
-import { WorkspaceIndexPage, WorkspaceLayout } from "@/routes/workspace"
+
+// Each page is its own chunk (the main bundle keeps the root layout only).
+const auth = () => import("@/routes/auth")
+const workspace = () => import("@/routes/workspace")
+const flows = () => import("@/routes/flows")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -38,33 +31,33 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const authRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "auth",
-  component: AuthLayout,
+  component: lazyRouteComponent(auth, "AuthLayout"),
 })
 const authPages = [
   createRoute({
     getParentRoute: () => authRoute,
     path: "sign-in",
-    component: SignInPage,
+    component: lazyRouteComponent(auth, "SignInPage"),
   }),
   createRoute({
     getParentRoute: () => authRoute,
     path: "sign-up",
-    component: SignUpPage,
+    component: lazyRouteComponent(auth, "SignUpPage"),
   }),
   createRoute({
     getParentRoute: () => authRoute,
     path: "forgot-password",
-    component: ForgotPasswordPage,
+    component: lazyRouteComponent(auth, "ForgotPasswordPage"),
   }),
   createRoute({
     getParentRoute: () => authRoute,
     path: "reset-password",
-    component: ResetPasswordPage,
+    component: lazyRouteComponent(auth, "ResetPasswordPage"),
   }),
   createRoute({
     getParentRoute: () => authRoute,
     path: "magic-link-sent",
-    component: MagicLinkSentPage,
+    component: lazyRouteComponent(auth, "MagicLinkSentPage"),
   }),
   createRoute({
     getParentRoute: () => authRoute,
@@ -79,7 +72,7 @@ const authPages = [
         throw redirect({ href: "/" })
       }
     },
-    component: ChangePasswordPage,
+    component: lazyRouteComponent(auth, "ChangePasswordPage"),
   }),
 ]
 
@@ -104,43 +97,67 @@ const protectedRoute = createRoute({
 const homeRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "/",
-  component: MainPage,
+  component: lazyRouteComponent(() => import("@/routes/home"), "MainPage"),
 })
 
 const workspaceRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "space/$workspaceId",
-  component: WorkspaceLayout,
+  component: lazyRouteComponent(workspace, "WorkspaceLayout"),
 })
 const workspacePages = [
   createRoute({
     getParentRoute: () => workspaceRoute,
     path: "/",
-    component: WorkspaceIndexPage,
+    component: lazyRouteComponent(workspace, "WorkspaceIndexPage"),
   }),
   createRoute({
     getParentRoute: () => workspaceRoute,
     path: "contacts",
-    component: ContactsPage,
+    component: lazyRouteComponent(
+      () => import("@/routes/contacts"),
+      "ContactsPage",
+    ),
   }),
 ]
 const flowsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: "flows",
-  component: FlowsLayout,
+  component: lazyRouteComponent(flows, "FlowsLayout"),
 })
 const flowsPages = [
   createRoute({
     getParentRoute: () => flowsRoute,
     path: "/",
-    component: FlowsPage,
+    component: lazyRouteComponent(flows, "FlowsPage"),
   }),
 ]
+
+// `(no-sidebar)`: the flow editor is outside the workspace sidebar layout.
+const flowDetailRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "space/$workspaceId/flows/$id",
+  component: lazyRouteComponent(
+    () => import("@/routes/flow-detail"),
+    "FlowDetailPage",
+  ),
+})
+
+const createChannelRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "channels/create",
+  component: lazyRouteComponent(
+    () => import("@/routes/channels"),
+    "CreateChannelPage",
+  ),
+})
 
 const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
   protectedRoute.addChildren([
     homeRoute,
+    flowDetailRoute,
+    createChannelRoute,
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),

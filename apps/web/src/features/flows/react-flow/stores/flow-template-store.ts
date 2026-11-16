@@ -1,0 +1,215 @@
+import {
+  messengerTemplateStatusSchema,
+  whatsappTemplateStatusSchema,
+} from "@chatbotx.io/database/partials"
+import { createStore } from "zustand/vanilla"
+import type { ListMessengerMessageTemplatesResponse } from "@/features/integration-messenger/message-templates/schema/query"
+import type { IntegrationOpenaiCompatibleResource } from "@/features/integration-openai-compatible/schema/resource"
+import type { ListWhatsappMessageTemplatesResponse } from "@/features/integration-whatsapp/message-templates/schema/query"
+import type { ListMessengerPersonasResponse } from "@/features/personas/schema/query"
+import { getClientErrorMessage } from "@/lib/orpc/client-error"
+import { client } from "@/lib/orpc/orpc"
+
+export type FlowTemplateState = {
+  error: string | null
+  initialized: boolean
+
+  workspaceId: string
+  integrationWhatsappId?: string
+  /**
+   * The flow editor only offers approved templates; the broadcast form needs
+   * every status so it can show pages whose clone is still under review.
+   */
+  includeAllTemplateStatuses: boolean
+
+  loadingWhatsappTemplates: boolean
+  whatsappTemplates: ListWhatsappMessageTemplatesResponse
+
+  loadingMessengerTemplates: boolean
+  messengerTemplates: ListMessengerMessageTemplatesResponse
+
+  loadingMessengerPersonas: boolean
+  messengerPersonas: ListMessengerPersonasResponse["data"]
+
+  openaiCompatibleIntegrations: IntegrationOpenaiCompatibleResource[]
+}
+
+export type FlowTemplateActions = {
+  initialize: () => Promise<void>
+  fetchWhatsappTemplates: () => Promise<void>
+  fetchMessengerTemplates: () => Promise<void>
+  fetchMessengerPersonas: () => Promise<void>
+  setIntegrationWhatsappId: (id?: string) => void
+}
+
+export type FlowTemplateStore = FlowTemplateState & FlowTemplateActions
+
+export const createFlowTemplateStore = (props: Partial<FlowTemplateState>) => {
+  // Per-instance AbortController so rapid setIntegrationWhatsappId calls
+  // cancel the previous in-flight WA fetch instead of queuing retries.
+  let waFetchController: AbortController | null = null
+  // Closure-level flags to deduplicate concurrent Messenger fetches.
+  let messengerFetching = false
+  let messengerPersonasFetching = false
+
+  return createStore<FlowTemplateStore>((set, get) => ({
+    error: null,
+    initialized: false,
+
+    workspaceId: "",
+    integrationWhatsappId: undefined,
+    includeAllTemplateStatuses: false,
+
+    loadingWhatsappTemplates: false,
+    whatsappTemplates: [],
+
+    loadingMessengerTemplates: false,
+    messengerTemplates: [],
+
+    loadingMessengerPersonas: false,
+    messengerPersonas: [],
+
+    openaiCompatibleIntegrations: [],
+
+    ...props,
+
+    initialize: async () => {
+      const {
+        initialized,
+        workspaceId,
+        fetchWhatsappTemplates,
+        fetchMessengerTemplates,
+        fetchMessengerPersonas,
+      } = get()
+
+      if (initialized || !workspaceId) {
+        return
+      }
+
+      // Individual fetch methods manage their own error state via set({ error }).
+      // No outer catch needed — always mark initialized so the provider does not retry.
+      await Promise.all([
+        fetchWhatsappTemplates(),
+        fetchMessengerTemplates(),
+        fetchMessengerPersonas(),
+      ])
+      set({ initialized: true })
+    },
+
+    fetchWhatsappTemplates: async () => {
+      const { workspaceId, integrationWhatsappId, includeAllTemplateStatuses } =
+        get()
+
+      if (!workspaceId) {
+        return
+      }
+
+      // Cancel any prior in-flight WA fetch; the new request supersedes it.
+      waFetchController?.abort()
+      const controller = new AbortController()
+      waFetchController = controller
+      const { signal } = controller
+
+      set({ loadingWhatsappTemplates: true, error: null })
+      try {
+        const templates =
+          await client.whatsappMessageTemplateAPIs.listWhatsappMessageTemplatesInternalAPI(
+            {
+              workspaceId,
+              status: includeAllTemplateStatuses
+                ? undefined
+                : whatsappTemplateStatusSchema.enum.APPROVED,
+              integrationWhatsappId,
+            },
+            { signal },
+          )
+
+        set({ whatsappTemplates: templates, loadingWhatsappTemplates: false })
+      } catch (error: unknown) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          // A newer fetch superseded this one. Only clear loading if no newer
+          // fetch has since taken over (e.g. store abandoned on unmount).
+          if (waFetchController === controller) {
+            set({ loadingWhatsappTemplates: false })
+          }
+          return
+        }
+        set({
+          error: getClientErrorMessage(error, "Failed to fetch WA templates"),
+          whatsappTemplates: [],
+          loadingWhatsappTemplates: false,
+        })
+      }
+    },
+
+    fetchMessengerTemplates: async () => {
+      const { workspaceId, includeAllTemplateStatuses } = get()
+
+      if (!workspaceId || messengerFetching) {
+        return
+      }
+
+      messengerFetching = true
+      set({ loadingMessengerTemplates: true, error: null })
+      try {
+        const templates =
+          await client.messengerMessageTemplateAPIs.listMessengerMessageTemplatesInternalAPI(
+            {
+              workspaceId,
+              status: includeAllTemplateStatuses
+                ? undefined
+                : messengerTemplateStatusSchema.enum.APPROVED,
+            },
+          )
+
+        set({
+          messengerTemplates: templates,
+        })
+      } catch (error: unknown) {
+        set({
+          error: getClientErrorMessage(
+            error,
+            "Failed to fetch Messenger templates",
+          ),
+        })
+      } finally {
+        messengerFetching = false
+        set({ loadingMessengerTemplates: false })
+      }
+    },
+
+    fetchMessengerPersonas: async () => {
+      const { workspaceId } = get()
+
+      if (!workspaceId || messengerPersonasFetching) {
+        return
+      }
+
+      messengerPersonasFetching = true
+      set({ loadingMessengerPersonas: true, error: null })
+      try {
+        const { data } =
+          await client.personasAPIs.listMessengerPersonasAuthenticatedAPI({
+            workspaceId,
+          })
+
+        set({ messengerPersonas: data })
+      } catch (error: unknown) {
+        set({
+          error: getClientErrorMessage(
+            error,
+            "Failed to fetch Messenger personas",
+          ),
+        })
+      } finally {
+        messengerPersonasFetching = false
+        set({ loadingMessengerPersonas: false })
+      }
+    },
+
+    setIntegrationWhatsappId: (id?: string) => {
+      set({ integrationWhatsappId: id, whatsappTemplates: [] })
+      get().fetchWhatsappTemplates()
+    },
+  }))
+}

@@ -1,0 +1,63 @@
+import { zodBigintAsString } from "@chatbotx.io/utils"
+import z from "zod"
+import { integrationWhatsappResource } from "@/features/integration-whatsapp/schema/resource"
+import { whatsappFlowResource } from "./resource"
+
+export const listWhatsappFlowsRequest = z.object({
+  workspaceId: zodBigintAsString(),
+  inboxId: zodBigintAsString()
+    .optional()
+    .describe("Only Flows of the WhatsApp number on this inbox."),
+  integrationWhatsappId: zodBigintAsString()
+    .optional()
+    .describe("Only Flows of this WhatsApp channel."),
+})
+export type ListWhatsappFlowsRequest = z.infer<typeof listWhatsappFlowsRequest>
+
+export const listWhatsappFlowsResponse = z.array(
+  whatsappFlowResource.extend({
+    integrationWhatsapp: integrationWhatsappResource,
+  }),
+)
+export type ListWhatsappFlowsResponse = z.infer<
+  typeof listWhatsappFlowsResponse
+>
+
+export const whatsappFlowScreenOutputSchema = z.object({
+  value: z.string(),
+  label: z.string(),
+  kind: z
+    .enum(["file", "value"])
+    .optional()
+    .describe(
+      '"file" when the answer is a list of files the customer uploaded (PhotoPicker / DocumentPicker); "value" for any other answer.',
+    ),
+})
+export type WhatsappFlowScreenOutputResource = z.infer<
+  typeof whatsappFlowScreenOutputSchema
+>
+
+export const whatsappFlowScreenSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  terminal: z.boolean(),
+  output: z.array(whatsappFlowScreenOutputSchema),
+})
+export type WhatsappFlowScreenResource = z.infer<
+  typeof whatsappFlowScreenSchema
+>
+
+export const getWhatsappFlowScreensRequest = z.object({
+  workspaceId: zodBigintAsString(),
+  flowId: zodBigintAsString(),
+})
+export type GetWhatsappFlowScreensRequest = z.infer<
+  typeof getWhatsappFlowScreensRequest
+>
+
+export const getWhatsappFlowScreensResponse = z.object({
+  screens: z.array(whatsappFlowScreenSchema),
+})
+export type GetWhatsappFlowScreensResponse = z.infer<
+  typeof getWhatsappFlowScreensResponse
+>

@@ -1,7 +1,17 @@
 // Types of `@chatbotx.io/business` that the UI reads. Copied here: a type
 // import of the package root pulls the whole server graph into the SPA type
 // check. Keep them the same as the business package.
-import type { TenantHelpItemModel } from "@chatbotx.io/database/types"
+import type {
+  AIEmbeddingStatus,
+  AIFileChunking,
+  AIFileProcessingRun,
+  ResolvedAIFileChunkingConfig,
+} from "@chatbotx.io/database/partials"
+import type {
+  AIFileModel,
+  IntegrationMetaCatalogModel,
+  TenantHelpItemModel,
+} from "@chatbotx.io/database/types"
 
 export type EmailTemplate = { subject?: string; body?: string }
 
@@ -69,3 +79,31 @@ export type AIProvider =
   | "deepseek"
   | "openrouter"
   | "muse"
+
+/** `referral/utils.ts` */
+export type RefConfig =
+  | { type: "flow"; flowId: string; nodeId?: string }
+  | { type: "draft"; flowId: string }
+  | { type: "minigame-share"; minigameId: string; referrerContactId: string }
+  | { type: "leaderboard"; leaderboardId: string; contactId: string }
+  | { type: "poll"; pollId: string }
+  | { type: "qr-code"; name: string }
+  | { type: "reflink"; name: string }
+
+/** `ai-file/service.ts` (`AIFileWithProcessing`) */
+export type AIFileWithEmbeddingStatus = Omit<
+  AIFileModel,
+  "chunking" | "chunkingConfig"
+> & {
+  url: string
+  chunksCount: number
+  processingStatus: AIEmbeddingStatus
+  chunking: AIFileChunking | null
+  chunkingOutdated: boolean
+  chunkingConfig: ResolvedAIFileChunkingConfig & { isDefault: boolean }
+  indexOutdated: boolean
+  processingRun: (AIFileProcessingRun & { stale: boolean }) | null
+}
+
+/** `meta-catalog/integration.service.ts` (`findByWorkspaceId`) */
+export type MetaCatalogConnectionModel = IntegrationMetaCatalogModel
