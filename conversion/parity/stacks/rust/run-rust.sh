@@ -18,6 +18,13 @@
 # only one of the two stacks can run at a time.
 set -euo pipefail
 
+# One Rust parity stack per host (fixed project `parity-rust`, fixed ports): agents in
+# different worktrees queue here (orchestrator 2026-11-16).
+if [[ -z "${PARITY_RUST_LOCKED:-}" ]] && command -v flock >/dev/null; then
+  export PARITY_RUST_LOCKED=1
+  exec flock "$HOME/.parity-rust.lock" "$0" "$@"
+fi
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 parity_dir="$(cd "$here/../.." && pwd)"
 repo_dir="$(cd "$parity_dir/../.." && pwd)"
