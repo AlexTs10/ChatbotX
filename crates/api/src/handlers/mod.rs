@@ -199,6 +199,41 @@ pub struct Call<'a> {
 tokio::task_local! {
     /// `context.apiToken.id` of the running dispatch ([`dispatch_as`]).
     static TOKEN_ID: Option<i64>;
+    /// The signed-in member of a `/rpc` call that runs a public route
+    /// ([`dispatch_as_member`]).
+    static MEMBER: Option<Member>;
+}
+
+/// A workspace member calling a public route through `/rpc` (P4): the
+/// `ContactPermissionScope` and the export owner filter of the builder's
+/// private procedures. Public token calls have none (unscoped, full PII).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Member {
+    pub user_id: i64,
+    /// `isWorkspaceAdminMember` (sees every member's exports).
+    pub is_admin: bool,
+    pub can_view_email_and_phone: bool,
+    pub restrict_to_assigned_user_id: Option<i64>,
+}
+
+/// The member of the running [`dispatch_as_member`]; `None` for a token call.
+pub fn member() -> Option<Member> {
+    MEMBER.try_with(|member| *member).ok().flatten()
+}
+
+/// Runs the public route `route_id` for a signed-in member; `None` = not ported.
+pub async fn dispatch_as_member(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    member: Member,
+) -> Option<Response> {
+    MEMBER
+        .scope(
+            Some(member),
+            dispatch_as(state, route_id, call, &Principal::default()),
+        )
+        .await
 }
 
 impl Call<'_> {

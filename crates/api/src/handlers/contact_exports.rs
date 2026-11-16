@@ -38,7 +38,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 state.files.as_deref(),
                 call.workspace_id,
                 file_id.unwrap_or_default(),
-                None,
+                owner_filter(),
             )
             .await
             .map_err(|e| business_error(e, FINDING))?;
@@ -126,13 +126,14 @@ async fn start_export(state: &ApiState, call: Call<'_>) -> Reply {
         );
     }
     input.finish()?;
+    let member = super::member();
     let job = start(
         &state.db,
         StartExport {
             workspace_id: call.workspace_id,
-            requested_user_id: None,
-            can_export_email_and_phone: true,
-            restrict_to_assigned_user_id: None,
+            requested_user_id: member.map(|m| m.user_id),
+            can_export_email_and_phone: member.is_none_or(|m| m.can_view_email_and_phone),
+            restrict_to_assigned_user_id: member.and_then(|m| m.restrict_to_assigned_user_id),
             fields: fields.unwrap_or_default(),
             export_all: export_all == Some(true),
             filter,
@@ -153,6 +154,12 @@ async fn start_export(state: &ApiState, call: Call<'_>) -> Reply {
         ),
     }
     Ok(json(202, json!({ "fileId": job.file_id.to_string() })))
+}
+
+/// `exportFileOwnerFilter`: a member who is not a workspace admin sees only
+/// the exports they started (a token sees every export).
+fn owner_filter() -> Option<i64> {
+    super::member().filter(|m| !m.is_admin).map(|m| m.user_id)
 }
 
 /// `filter.contactFilter` issue paths start at `filter`.
@@ -245,7 +252,7 @@ async fn list_export_files(state: &ApiState, call: Call<'_>) -> Reply {
         None => None,
     };
     let limit = usize::try_from(per_page.unwrap_or(20)).unwrap_or(20);
-    let (rows, next) = list_files(&state.db, call.workspace_id, None, limit, cursor)
+    let (rows, next) = list_files(&state.db, call.workspace_id, owner_filter(), limit, cursor)
         .await
         .map_err(|e| business_error(e, LISTING_WITH_CURSOR))?;
     let data: Vec<Value> = rows

@@ -2,8 +2,8 @@
 //! read this data on the server in its layouts and pages; the SPA asks the
 //! Rust server for it (conversion/specs/P4-web.md §5.2).
 //!
-//! `/rpc/actions/{name}`: the "use server" actions (§5.1). None is ported
-//! yet: after auth a call answers `NOT_FOUND "Action not ported yet"`.
+//! `/rpc/actions/{name}` (the "use server" actions, §5.1) run in the `/rpc`
+//! router (`crate::rpc_procedures::action`).
 //!
 //! Request and response use the oRPC RPC encoding (`{ json, meta }`).
 
@@ -24,11 +24,10 @@ use crate::iso8601;
 use crate::rpc::{RpcSession, find_rpc_session};
 use crate::session::AuthState;
 
-/// The router of `/rpc/pages/*` and `/rpc/actions/*`.
+/// The router of `/rpc/pages/*`.
 pub fn spa_router(state: Arc<AuthState>) -> Router {
     Router::new()
         .route("/rpc/pages/{name}", post(page))
-        .route("/rpc/actions/{name}", post(action))
         .with_state(state)
 }
 
@@ -297,28 +296,12 @@ async fn home_page(state: &AuthState, user_id: i64) -> Response {
             if count > 0 {
                 return Ok(None);
             }
-            let (label, tenant_id): (String, i64) = tx.query_row(
-                r#"SELECT COALESCE(NULLIF("name", ''), "email"), "tenantId" FROM "User" WHERE "id" = ?1"#,
+            let label: String = tx.query_row(
+                r#"SELECT COALESCE(NULLIF("name", ''), "email") FROM "User" WHERE "id" = ?1"#,
                 params![user_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )?;
-            let workspace_id = repo::new_id();
-            tx.execute(
-                r#"INSERT INTO "Workspace" ("id", "name", "ownerId", "tenantId") VALUES (?1, ?2, ?3, ?4)"#,
-                params![workspace_id, format!("{label}'s workspace"), user_id, tenant_id],
-            )?;
-            tx.execute(
-                r#"INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role", "permissions", "notificationTypes", "notificationChannels")
-                   VALUES (?1, ?2, ?3, 'owner', ?4, ?5, ?6)"#,
-                params![
-                    repo::new_id(),
-                    workspace_id,
-                    user_id,
-                    FULL_PERMISSIONS,
-                    NOTIFICATION_TYPES,
-                    NOTIFICATION_CHANNELS
-                ],
-            )?;
+            let workspace_id = insert_workspace(tx, user_id, &format!("{label}'s workspace"))?;
             Ok(Some(workspace_id))
         })
         .await;
@@ -363,6 +346,34 @@ async fn home_page(state: &AuthState, user_id: i64) -> Response {
         "planStatus": null,
         "trialEndsAt": null,
     }))
+}
+
+/// `workspaceService.create`: a workspace owned by `user_id` (tenant of the
+/// user) and its owner membership with full permissions.
+pub(crate) fn insert_workspace(tx: &Connection, user_id: i64, name: &str) -> Result<i64, DbError> {
+    let tenant_id: i64 = tx.query_row(
+        r#"SELECT "tenantId" FROM "User" WHERE "id" = ?1"#,
+        params![user_id],
+        |row| row.get(0),
+    )?;
+    let workspace_id = repo::new_id();
+    tx.execute(
+        r#"INSERT INTO "Workspace" ("id", "name", "ownerId", "tenantId") VALUES (?1, ?2, ?3, ?4)"#,
+        params![workspace_id, name, user_id, tenant_id],
+    )?;
+    tx.execute(
+        r#"INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role", "permissions", "notificationTypes", "notificationChannels")
+           VALUES (?1, ?2, ?3, 'owner', ?4, ?5, ?6)"#,
+        params![
+            repo::new_id(),
+            workspace_id,
+            user_id,
+            FULL_PERMISSIONS,
+            NOTIFICATION_TYPES,
+            NOTIFICATION_CHANNELS
+        ],
+    )?;
+    Ok(workspace_id)
 }
 
 /// The loaders behind the workspace membership check
@@ -451,16 +462,4 @@ async fn folder_page(state: &AuthState, workspace_id: i64, input: &Value) -> Res
         Ok(value) => ok(value),
         Err(err) => internal(err),
     }
-}
-
-/// `/rpc/actions/{name}`: auth, then not ported.
-async fn action(
-    State(state): State<Arc<AuthState>>,
-    Path(_name): Path<String>,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = require_session(&state, &headers).await {
-        return *response;
-    }
-    error(StatusCode::NOT_FOUND, "NOT_FOUND", "Action not ported yet")
 }

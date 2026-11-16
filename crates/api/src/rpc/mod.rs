@@ -186,6 +186,8 @@ pub fn rpc_router_with(state: RpcState) -> Router {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RpcWorkspace {
     pub workspace_id: i64,
+    /// `context.workspaceMember.role` (`owner` / `admin` / `member`).
+    pub role: String,
     /// `context.workspaceMember.permissions` (the stored JSON object).
     pub permissions: Value,
 }
@@ -297,22 +299,28 @@ pub async fn find_rpc_session(
 }
 
 /// `workspaceAuthorizedMidddleware`: the caller's membership in the
-/// workspace; `Some((scheduledDeletionAt, permissions))` when a member.
+/// workspace; `Some((scheduledDeletionAt, permissions, role))` when a member.
 async fn find_membership(
     state: &AuthState,
     workspace_id: i64,
     user_id: i64,
-) -> Result<Option<(Option<i64>, String)>, chatbotx_db::DbError> {
+) -> Result<Option<(Option<i64>, String, String)>, chatbotx_db::DbError> {
     state
         .db
         .read(move |conn| {
             Ok(conn
                 .query_row(
-                    r#"SELECT w."scheduledDeletionAt", m."permissions"
+                    r#"SELECT w."scheduledDeletionAt", m."permissions", m."role"
                        FROM "WorkspaceMember" m JOIN "Workspace" w ON w."id" = m."workspaceId"
                        WHERE m."workspaceId" = ?1 AND m."userId" = ?2"#,
                     params![workspace_id, user_id],
-                    |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, String>(1)?)),
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<i64>>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
                 )
                 .optional()?)
         })
@@ -342,15 +350,65 @@ fn input_validation_failed() -> Response {
     )
 }
 
-/// A procedure output, RPC-encoded (`{ json }`; no meta: the ported outputs
-/// hold no Date, bigint or undefined value).
+/// A procedure output, RPC-encoded (`{ json, meta }`): the timestamps
+/// ([`date_meta`]) become `Date`s on the client.
 fn rpc_output(output: Value) -> Response {
+    let mut meta = Vec::new();
+    date_meta(&output, &mut Vec::new(), &mut meta);
+    let body = if meta.is_empty() {
+        json!({ "json": output })
+    } else {
+        json!({ "json": output, "meta": meta })
+    };
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json")],
-        json!({ "json": output }).to_string(),
+        body.to_string(),
     )
         .into_response()
+}
+
+/// `[1, ...path]` (oRPC `DATE`) for every ISO string under a timestamp key
+/// (`chatbotx_db::repo::is_date_column`).
+// ponytail: dates are found by key name + ISO shape (the builder's zod
+// `z.date()` outputs); a per-procedure date list if a text column ever matches.
+fn date_meta(value: &Value, path: &mut Vec<Value>, meta: &mut Vec<Value>) {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                path.push(Value::String(key.clone()));
+                if let Value::String(text) = child
+                    && chatbotx_db::repo::is_date_column(key)
+                    && is_iso_millis(text)
+                {
+                    let mut entry = vec![json!(1)];
+                    entry.extend(path.iter().cloned());
+                    meta.push(Value::Array(entry));
+                } else {
+                    date_meta(child, path, meta);
+                }
+                path.pop();
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                path.push(json!(index));
+                date_meta(child, path, meta);
+                path.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `2026-11-16T10:00:00.000Z`.
+fn is_iso_millis(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() == 24
+        && bytes[4] == b'-'
+        && bytes[10] == b'T'
+        && bytes[19] == b'.'
+        && bytes[23] == b'Z'
 }
 
 /// `forceChangePasswordAction` (a Next.js server action in the original,
@@ -396,7 +454,8 @@ async fn handle(
         return force_change_password_action(&state, &method, &uri, &headers, &body).await;
     }
     let key = rest.split('/').next().unwrap_or_default();
-    if !RPC_ROUTER_KEYS.contains(&key) {
+    let is_action = key == "actions";
+    if !is_action && !RPC_ROUTER_KEYS.contains(&key) {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
     let path = rest.trim_end_matches('/').replace('/', ".");
@@ -432,16 +491,17 @@ async fn handle(
         };
         match find_membership(&state.auth, workspace_id, session.user_id).await {
             Ok(None) => return unauthorized(),
-            Ok(Some((Some(_scheduled), _))) => {
+            Ok(Some((Some(_scheduled), _, _))) => {
                 return rpc_error(
                     StatusCode::FORBIDDEN,
                     "FORBIDDEN",
                     "Workspace deletion scheduled",
                 );
             }
-            Ok(Some((None, permissions))) => {
+            Ok(Some((None, permissions, role))) => {
                 workspace = Some(RpcWorkspace {
                     workspace_id,
+                    role,
                     permissions: serde_json::from_str(&permissions).unwrap_or(Value::Null),
                 });
             }
@@ -453,6 +513,14 @@ async fn handle(
         workspace,
         request_issued_at_ms,
     };
+    if is_action {
+        let name = path.strip_prefix("actions.").unwrap_or_default();
+        return match crate::rpc_procedures::action(&state, name, &context, &input).await {
+            Some(Ok(output)) => rpc_output(output),
+            Some(Err(error)) => procedures::error_response(&error),
+            None => rpc_error(StatusCode::NOT_FOUND, "NOT_FOUND", "Action not ported yet"),
+        };
+    }
     if let Some(procedure) = procedure
         && let Some(outcome) = procedures::call(&state, procedure.path, &context, &input).await
     {
