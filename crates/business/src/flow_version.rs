@@ -230,6 +230,12 @@ pub async fn publish(
     let nodes = Value::Array(normalize_flow_graph_decision_mappings(&nodes));
     let edges = Value::Array(edges);
     assert_flow_graph_publishable(&nodes, &edges)?;
+    crate::pipeline::flow_publish_check::assert_flow_pipeline_steps_publishable(
+        db,
+        workspace_id,
+        &nodes,
+    )
+    .await?;
     tx::write(db, move |tx| {
         flow_of(tx, workspace_id, flow_id)?
             .ok_or_else(|| BusinessError::not_found("Flow not found"))?;

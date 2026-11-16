@@ -596,8 +596,47 @@ pub async fn bulk_attach_to_contacts(
     contact_ids: &[i64],
     tag_ids: &[i64],
 ) -> Result<BulkAttachOutcome> {
-    let _ = (db, workspace_id, contact_ids, tag_ids);
-    todo!("P3.6-D2")
+    let mut contact_ids_unique = Vec::new();
+    let mut seen = HashSet::new();
+    for id in contact_ids {
+        if seen.insert(*id) {
+            contact_ids_unique.push(*id);
+        }
+    }
+    let mut tag_ids_unique = Vec::new();
+    let mut seen = HashSet::new();
+    for id in tag_ids {
+        if seen.insert(*id) {
+            tag_ids_unique.push(*id);
+        }
+    }
+    tx::write(db, move |conn| {
+        if contact_ids_unique.is_empty() || tag_ids_unique.is_empty() {
+            return Ok(BulkAttachOutcome::default());
+        }
+        let mut tags = Vec::new();
+        for tag_id in &tag_ids_unique {
+            if let Some(tag) = live_tag(conn, workspace_id, *tag_id)? {
+                tags.push(tag.id);
+            }
+        }
+        if tags.is_empty() {
+            return Ok(BulkAttachOutcome::default());
+        }
+        let mut out = BulkAttachOutcome::default();
+        for chunk in contact_ids_unique.chunks(CONTACT_CHUNK_SIZE) {
+            for contact_id in contacts_of(conn, workspace_id, chunk)? {
+                for tag_id in &tags {
+                    if link(conn, contact_id, *tag_id)? {
+                        out.newly_linked.push((contact_id, *tag_id));
+                    }
+                }
+            }
+        }
+        out.attached_pair_count = out.newly_linked.len();
+        Ok(out)
+    })
+    .await
 }
 
 /// [`attach_by_names_to_contacts`] that also returns the resolved tag ids
@@ -608,8 +647,13 @@ pub async fn attach_by_names_to_contacts_with_tags(
     contact_ids: &[i64],
     names: &[String],
 ) -> Result<(ContactsOutcome, Vec<i64>)> {
-    let _ = (db, workspace_id, contact_ids, names);
-    todo!("P3.6-D2")
+    let tag_ids = upsert_by_names(db, workspace_id, names)
+        .await?
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    let outcome = attach_by_names_to_contacts(db, workspace_id, contact_ids, names).await?;
+    Ok((outcome, tag_ids))
 }
 
 /// [`detach_by_names_from_contacts`] that also returns the removed
@@ -620,6 +664,33 @@ pub async fn detach_by_names_from_contacts_with_pairs(
     contact_ids: &[i64],
     names: &[String],
 ) -> Result<(ContactsOutcome, Vec<(i64, i64)>)> {
-    let _ = (db, workspace_id, contact_ids, names);
-    todo!("P3.6-D2")
+    let contact_ids = contact_ids.to_vec();
+    let names = names.to_vec();
+    tx::write(db, move |conn| {
+        if contact_ids.is_empty() || names.is_empty() {
+            return Ok((
+                ContactsOutcome {
+                    processed_contact_ids: Vec::new(),
+                    skipped_contact_ids: contact_ids,
+                },
+                Vec::new(),
+            ));
+        }
+        let tags = tags_named(conn, workspace_id, &clean_names(&names))?;
+        let mut processed = Vec::new();
+        let mut removed = Vec::new();
+        for chunk in contact_ids.chunks(CONTACT_CHUNK_SIZE) {
+            let contacts = contacts_of(conn, workspace_id, chunk)?;
+            for contact_id in &contacts {
+                for tag in &tags {
+                    if unlink(conn, *contact_id, tag.id)? {
+                        removed.push((*contact_id, tag.id));
+                    }
+                }
+            }
+            processed.extend(contacts);
+        }
+        Ok((outcome(contact_ids, processed), removed))
+    })
+    .await
 }

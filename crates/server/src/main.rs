@@ -88,6 +88,8 @@ struct Shared {
     db: Arc<Db>,
     kv: Arc<Kv>,
     clock: Arc<dyn Clock>,
+    /// The file store (`ApiState::files` and the `/files/{key}` route).
+    files: Arc<chatbotx_files::Uploader>,
 }
 
 /// Opens (and migrates) the database under `DATA_DIR` and starts the kv stores.
@@ -98,7 +100,34 @@ async fn open_shared(config: &Config) -> std::io::Result<Shared> {
     let db = Arc::new(db);
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let kv = Kv::start(Arc::clone(&db), Arc::clone(&clock), KvConfig::default());
-    Ok(Shared { db, kv, clock })
+    let files = files_uploader()?;
+    Ok(Shared {
+        db,
+        kv,
+        clock,
+        files,
+    })
+}
+
+/// The file store from `FILES_*` / `S3_*` (`chatbotx_files::FilesConfig`).
+/// On the local backend the URL signing secret falls back to
+/// `BETTER_AUTH_SECRET`, and a relative `FILES_URL_BASE` (default `/files`)
+/// is prefixed with `NEXT_PUBLIC_BUILDER_URL`: presigned URLs are absolute
+/// app URLs that the `/files/{key}` route serves.
+fn files_uploader() -> std::io::Result<Arc<chatbotx_files::Uploader>> {
+    let mut config = chatbotx_files::FilesConfig::from_env().map_err(std::io::Error::other)?;
+    if config.signing_secret.is_none() {
+        let secret = env_or("BETTER_AUTH_SECRET", "");
+        if !secret.is_empty() {
+            config.signing_secret = Some(secret);
+        }
+    }
+    if config.url_base.starts_with('/') {
+        let app_url = env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000");
+        config.url_base = format!("{}{}", app_url.trim_end_matches('/'), config.url_base);
+    }
+    let uploader = chatbotx_files::Uploader::new(&config).map_err(std::io::Error::other)?;
+    Ok(Arc::new(uploader))
 }
 
 /// Starts the realtime hub on the shared kv stores.
@@ -192,6 +221,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
+    app = app.merge(chatbotx_api::files::router(Arc::clone(&shared.files)));
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
     tracing::info!(
         addr = %listener.local_addr()?,
@@ -239,7 +269,8 @@ async fn api_state(
         .with_kv(Arc::clone(&shared.kv))
         .with_jobs(jobs)
         .with_events(events)
-        .with_audit(audit);
+        .with_audit(audit)
+        .with_files(Arc::clone(&shared.files));
     if let Some(realtime) = realtime {
         state = state.with_realtime(realtime.clone());
     }

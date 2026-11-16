@@ -12,6 +12,7 @@ import type {
   P106CreatedContact,
   P106Fixtures,
   P106InboxInput,
+  P106SequenceDispatchInput,
 } from "../../../src/fixtures/ext/p1-06.ts"
 
 const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
@@ -105,7 +106,39 @@ class SqliteP106Fixtures implements P106Fixtures {
     return { id: referralId.toString() }
   }
 
-  insertSequenceDispatch = notPorted("insertSequenceDispatch")
+  async insertSequenceDispatch(input: P106SequenceDispatchInput): Promise<void> {
+    this.transaction((db) => {
+      const enrollmentId = createId()
+      const now = Date.now()
+      db.prepare(
+        `INSERT INTO "ContactOnSequence"
+           ("id", "workspaceId", "sequenceId", "contactId", "status", "completedAt", "currentStep")
+         VALUES (?, ?, ?, ?, 'completed', ?, 1)`,
+      ).run(enrollmentId, BigInt(input.workspaceId), BigInt(input.sequenceId), BigInt(input.contactId), now)
+      const dispatchId = createId()
+      db.prepare(
+        `INSERT INTO "SequenceDispatch"
+           ("id", "runAtMs", "status", "idempotencyKey", "completedAt", "deliveredAt", "seenAt", "clickedAt",
+            "failedAt", "workspaceId", "sequenceId", "contactId", "contactInboxId", "stepId", "enrollmentId")
+         VALUES (?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        dispatchId,
+        now,
+        `parity:${dispatchId}`,
+        now,
+        ms(input.deliveredAt),
+        ms(input.seenAt),
+        ms(input.clickedAt),
+        ms(input.failedAt),
+        BigInt(input.workspaceId),
+        BigInt(input.sequenceId),
+        BigInt(input.contactId),
+        BigInt(input.contactInboxId),
+        BigInt(input.stepId),
+        enrollmentId,
+      )
+    })
+  }
 
   async createInbox(input: P106InboxInput): Promise<{ inboxId: string }> {
     const inboxId = createId()

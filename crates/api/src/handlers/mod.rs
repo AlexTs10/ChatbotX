@@ -8,6 +8,7 @@ pub mod channels;
 pub mod connections;
 pub mod contact_custom_fields;
 pub mod contact_filter;
+pub mod contact_imports;
 pub mod contact_inboxes;
 pub mod contact_messages;
 pub mod contact_notes;
@@ -70,6 +71,9 @@ pub struct ApiState {
     pub events: EventBus,
     /// The audit log writer (`auditService`).
     pub audit: AuditService,
+    /// The file store (`uploader`; presigned uploads, imports, exports).
+    /// `None` = off (tests that need no files).
+    pub files: Option<Arc<chatbotx_files::Uploader>>,
 }
 
 impl ApiState {
@@ -83,6 +87,7 @@ impl ApiState {
             jobs: None,
             events: EventBus::new(),
             audit: AuditService::disabled(),
+            files: None,
         }
     }
 
@@ -102,6 +107,12 @@ impl ApiState {
     pub fn with_jobs(mut self, jobs: Arc<dyn Enqueuer>) -> ApiState {
         self.audit = AuditService::new(Arc::clone(&jobs));
         self.jobs = Some(jobs);
+        self
+    }
+
+    /// Uses `files` as the file store.
+    pub fn with_files(mut self, files: Arc<chatbotx_files::Uploader>) -> ApiState {
+        self.files = Some(files);
         self
     }
 
@@ -396,6 +407,8 @@ async fn route(
         contact_notes::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
+    } else if contacts_bulk::ROUTES.contains(&route_id) {
+        contacts_bulk::handle(state, route_id, call).await
     } else if contacts::ROUTES.contains(&route_id) {
         contacts::handle(state, route_id, call).await
     } else if custom_fields::ROUTES.contains(&route_id) {
