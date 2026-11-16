@@ -25,6 +25,7 @@ pub mod product_categories;
 pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
+pub mod questionnaires;
 pub mod reflinks;
 pub mod sequences;
 pub mod tags;
@@ -420,6 +421,8 @@ async fn route(
         products::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
+    } else if questionnaires::ROUTES.contains(&route_id) {
+        questionnaires::handle(state, route_id, call).await
     } else if reflinks::ROUTES.contains(&route_id) {
         reflinks::handle(state, route_id, call).await
     } else if workspace_members::ROUTES.contains(&route_id) {

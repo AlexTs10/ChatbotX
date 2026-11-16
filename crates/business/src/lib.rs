@@ -34,6 +34,7 @@ pub mod product;
 pub mod product_category;
 pub mod product_message;
 pub mod qr_code;
+pub mod questionnaire;
 pub mod referral;
 pub mod reflink;
 pub mod sequence;

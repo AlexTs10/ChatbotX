@@ -2,12 +2,17 @@
 // (`src/fixtures/ext/p1-12.ts`): rows written with `node:sqlite` into the
 // shared `/rust-data` database, same columns as `stacks/original/ext/p1-12.ts`.
 // Methods are added as the P3.6 domain ports need them; the others throw.
+// Times are stored as unix ms (the Rust schema), JSON as text.
 
 import { DatabaseSync } from "node:sqlite"
 import type {
   P112Fixtures,
   P112MetaCatalogConnectionInput,
+  P112MiniAppSubmissionInput,
+  P112MinigamePlayerInput,
+  P112MinigamePlayInput,
   P112PollVoteInput,
+  P112QuestionnaireSubmissionInput,
 } from "../../../src/fixtures/ext/p1-12.ts"
 
 const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
@@ -51,10 +56,148 @@ class SqliteP112Fixtures implements P112Fixtures {
   }
 
   createWhatsappChannel = notPorted("createWhatsappChannel")
-  createMiniAppSubmission = notPorted("createMiniAppSubmission")
-  createMinigamePlayer = notPorted("createMinigamePlayer")
-  createMinigamePlay = notPorted("createMinigamePlay")
-  createQuestionnaireSubmission = notPorted("createQuestionnaireSubmission")
+
+  private transaction<T>(run: (db: DatabaseSync) => T): T {
+    const db = this.open()
+    db.exec("BEGIN IMMEDIATE")
+    try {
+      const out = run(db)
+      db.exec("COMMIT")
+      return out
+    } catch (error) {
+      db.exec("ROLLBACK")
+      throw error
+    }
+  }
+
+  async createMiniAppSubmission(
+    input: P112MiniAppSubmissionInput,
+  ): Promise<{ submissionId: string; createdAt: string }> {
+    const submissionId = createId()
+    const createdAt = input.createdAt ?? new Date().toISOString()
+    const ms = Date.parse(createdAt)
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO "MiniAppSubmission"
+           ("id", "createdAt", "updatedAt", "workspaceId", "miniAppId", "contactId", "source", "answers")
+         VALUES (?, ?, ?, ?, ?, ?, 'web', ?)`,
+      ).run(
+        submissionId,
+        ms,
+        ms,
+        BigInt(input.workspaceId),
+        BigInt(input.miniAppId),
+        input.contactId == null ? null : BigInt(input.contactId),
+        JSON.stringify(input.answers),
+      )
+      db.prepare(`UPDATE "MiniApp" SET "submissionsCount" = "submissionsCount" + 1 WHERE "id" = ?`).run(
+        BigInt(input.miniAppId),
+      )
+    })
+    return { submissionId: submissionId.toString(), createdAt }
+  }
+
+  async createMinigamePlayer(input: P112MinigamePlayerInput): Promise<{ playerId: string }> {
+    const playerId = createId()
+    const now = Date.now()
+    const openedAt = input.openedAt === undefined ? now : Date.parse(input.openedAt)
+    const lastPlayedAt = input.lastPlayedAt === undefined ? now : Date.parse(input.lastPlayedAt)
+    this.open()
+      .prepare(
+        `INSERT INTO "MinigameContact"
+           ("id", "createdAt", "updatedAt", "minigameId", "contactId", "contactInboxId", "openedAt", "played",
+            "remaining", "sharesCount")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        playerId,
+        openedAt,
+        lastPlayedAt,
+        BigInt(input.minigameId),
+        BigInt(input.contactId),
+        input.contactInboxId == null ? null : BigInt(input.contactInboxId),
+        openedAt,
+        input.played,
+        input.remaining,
+        input.sharesCount ?? 0,
+      )
+    return { playerId: playerId.toString() }
+  }
+
+  async createMinigamePlay(input: P112MinigamePlayInput): Promise<{ playId: string; createdAt: string }> {
+    const playId = createId()
+    const createdAt = input.createdAt ?? new Date().toISOString()
+    const ms = Date.parse(createdAt)
+    this.open()
+      .prepare(
+        `INSERT INTO "MinigamePlay"
+           ("id", "createdAt", "updatedAt", "minigameId", "contactId", "isWinning", "prizeId", "prizeName")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        playId,
+        ms,
+        ms,
+        BigInt(input.minigameId),
+        BigInt(input.contactId),
+        input.isWinning ? 1 : 0,
+        input.prizeId ?? null,
+        input.prizeName ?? null,
+      )
+    return { playId: playId.toString(), createdAt }
+  }
+
+  async createQuestionnaireSubmission(input: P112QuestionnaireSubmissionInput): Promise<{ submissionId: string }> {
+    const submissionId = createId()
+    const createdAt = input.createdAt ?? new Date().toISOString()
+    const completedAt =
+      input.completedAt !== undefined ? input.completedAt : input.status === "completed" ? createdAt : null
+    const base = Date.parse(createdAt)
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO "QuestionnaireSubmission"
+           ("id", "createdAt", "updatedAt", "workspaceId", "questionnaireId", "contactId", "conversationId", "status",
+            "totalPoints", "startedAt", "completedAt")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        submissionId,
+        base,
+        base,
+        BigInt(input.workspaceId),
+        BigInt(input.questionnaireId),
+        BigInt(input.contactId),
+        input.conversationId == null ? null : BigInt(input.conversationId),
+        input.status,
+        input.totalPoints ?? null,
+        base,
+        completedAt == null ? null : Date.parse(completedAt),
+      )
+      const answer = db.prepare(
+        `INSERT INTO "QuestionnaireAnswer"
+           ("id", "createdAt", "updatedAt", "submissionId", "questionId", "questionIdSnapshot", "questionTitleSnapshot",
+            "questionTypeSnapshot", "labelSnapshot", "value", "pointsEarned", "answeredAt")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      for (const [index, item] of (input.answers ?? []).entries()) {
+        const answeredAt = base + index + 1
+        answer.run(
+          createId(),
+          answeredAt,
+          answeredAt,
+          submissionId,
+          BigInt(item.questionId),
+          item.questionId,
+          item.questionTitle,
+          item.questionType,
+          item.label,
+          JSON.stringify(item.value),
+          item.pointsEarned ?? null,
+          answeredAt,
+        )
+      }
+    })
+    return { submissionId: submissionId.toString() }
+  }
 
   async createPollVote(input: P112PollVoteInput): Promise<{ voteId: string }> {
     const voteId = createId()
