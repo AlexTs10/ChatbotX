@@ -13,6 +13,7 @@ pub mod contact_messages;
 pub mod contact_notes;
 pub mod contact_sequences;
 pub mod contacts;
+pub mod contacts_bulk;
 pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod flows;

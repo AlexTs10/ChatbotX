@@ -577,3 +577,49 @@ fn outcome(contact_ids: Vec<i64>, processed: Vec<i64>) -> ContactsOutcome {
         processed_contact_ids: processed,
     }
 }
+
+/// `bulkAttachToContacts` result: the count of new links and the new
+/// `(contactId, tagId)` pairs (the caller emits `tagApplied` for them).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BulkAttachOutcome {
+    pub attached_pair_count: usize,
+    pub newly_linked: Vec<(i64, i64)>,
+}
+
+/// `bulkAttachToContacts`: links the live workspace tags of `tag_ids` to the
+/// workspace contacts of `contact_ids` (both deduplicated, contacts in
+/// chunks of 200). No tag-sync / ads-conversion enqueue, no
+/// `recoverUnsyncedPairs` (no channel tag sync is ported).
+pub async fn bulk_attach_to_contacts(
+    db: &Db,
+    workspace_id: i64,
+    contact_ids: &[i64],
+    tag_ids: &[i64],
+) -> Result<BulkAttachOutcome> {
+    let _ = (db, workspace_id, contact_ids, tag_ids);
+    todo!("P3.6-D2")
+}
+
+/// [`attach_by_names_to_contacts`] that also returns the resolved tag ids
+/// (the route emits `tagApplied` for every processed contact × tag).
+pub async fn attach_by_names_to_contacts_with_tags(
+    db: &Db,
+    workspace_id: i64,
+    contact_ids: &[i64],
+    names: &[String],
+) -> Result<(ContactsOutcome, Vec<i64>)> {
+    let _ = (db, workspace_id, contact_ids, names);
+    todo!("P3.6-D2")
+}
+
+/// [`detach_by_names_from_contacts`] that also returns the removed
+/// `(contactId, tagId)` pairs (the route emits `tagRemoved` for them).
+pub async fn detach_by_names_from_contacts_with_pairs(
+    db: &Db,
+    workspace_id: i64,
+    contact_ids: &[i64],
+    names: &[String],
+) -> Result<(ContactsOutcome, Vec<(i64, i64)>)> {
+    let _ = (db, workspace_id, contact_ids, names);
+    todo!("P3.6-D2")
+}

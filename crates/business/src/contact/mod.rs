@@ -3,6 +3,7 @@
 //! standard and custom fields, delete, block / unblock and upsert.
 
 pub mod avatar;
+pub mod bulk_tag_stats;
 pub mod create;
 pub mod filter_fields;
 pub mod identifier;

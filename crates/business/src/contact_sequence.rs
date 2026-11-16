@@ -322,3 +322,17 @@ pub async fn update_contact_sequences(
     })
     .await
 }
+
+/// `unsubscribeContacts`: every sequence must be the workspace's (404
+/// "Sequence not found", nothing removed); contacts in chunks of 1000;
+/// contacts that do not resolve are skipped; the enrollments of the rest are
+/// removed (`subscription_removed`).
+pub async fn unsubscribe_contacts(
+    db: &Db,
+    workspace_id: i64,
+    contact_ids: &[i64],
+    sequence_ids: &[i64],
+) -> Result<SubscribeOutcome> {
+    let _ = (db, workspace_id, contact_ids, sequence_ids);
+    todo!("P3.6-D2")
+}
