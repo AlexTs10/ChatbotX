@@ -196,6 +196,16 @@ pub fn auth_router(state: Arc<AuthState>) -> Router {
             "/api/auth/reset-password",
             post(super::magic_link::reset_password),
         )
+        .route("/api/auth/jwks", get(super::mobile::get_jwks))
+        .route("/api/auth/mobile/token", post(super::mobile::mobile_token))
+        .route(
+            "/api/auth/mobile/callback",
+            get(super::mobile::mobile_callback),
+        )
+        .route(
+            "/api/auth/mobile/revoke",
+            post(super::mobile::mobile_revoke),
+        )
         .with_state(state)
 }
 

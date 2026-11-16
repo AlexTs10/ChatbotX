@@ -13,6 +13,8 @@ base64 = "0.22"
 chatbotx-business.workspace = true
 # File storage behind `ApiState` and the `/files/{key}` route (P3.6-D2).
 chatbotx-files.workspace = true
+# better-auth jwt plugin private-key encryption (`symmetricEncrypt`, XChaCha20-Poly1305).
+chacha20poly1305 = "0.10"
 # `isPlaceholderEmail` (sign-up gate).
 chatbotx-core.workspace = true
 # Token scope names (`WORKSPACE_API_TOKEN_SCOPES`) and the auth repositories.
