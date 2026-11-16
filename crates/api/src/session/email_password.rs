@@ -171,6 +171,11 @@ pub fn auth_router(state: Arc<AuthState>) -> Router {
         .route("/api/auth/get-session", get(get_session))
         .route("/api/auth/verify-email", get(verify_email))
         .route("/api/auth/sign-out", post(sign_out))
+        .route("/api/auth/update-user", post(super::account::update_user))
+        .route(
+            "/api/auth/change-password",
+            post(super::account::change_password_endpoint),
+        )
         .route(
             "/api/auth/sign-in/magic-link",
             post(super::magic_link::sign_in_magic_link),
@@ -374,9 +379,11 @@ pub(super) struct UserRow {
     pub(super) name: Option<String>,
     pub(super) email: String,
     pub(super) email_verified: bool,
-    image: Option<String>,
+    pub(super) image: Option<String>,
     created_at: i64,
     updated_at: i64,
+    is_anonymous: bool,
+    pub(super) must_change_password: bool,
 }
 
 fn iso(ms: i64) -> String {
@@ -393,12 +400,13 @@ impl UserRow {
             "image": self.image,
             "createdAt": iso(self.created_at),
             "updatedAt": iso(self.updated_at),
+            "isAnonymous": self.is_anonymous,
+            "mustChangePassword": self.must_change_password,
         })
     }
 }
 
-const USER_COLUMNS: &str =
-    r#""id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt""#;
+const USER_COLUMNS: &str = r#""id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt", "isAnonymous", "mustChangePassword""#;
 
 fn user_from_row(row: &chatbotx_db::rusqlite::Row<'_>) -> chatbotx_db::rusqlite::Result<UserRow> {
     Ok(UserRow {
@@ -409,6 +417,8 @@ fn user_from_row(row: &chatbotx_db::rusqlite::Row<'_>) -> chatbotx_db::rusqlite:
         image: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+        is_anonymous: row.get(7)?,
+        must_change_password: row.get(8)?,
     })
 }
 
@@ -479,7 +489,7 @@ pub(super) fn session_cookie(token: &str, secret: &str) -> HeaderValue {
     .expect("cookie is ASCII")
 }
 
-fn cleared_session_cookie() -> HeaderValue {
+pub(super) fn cleared_session_cookie() -> HeaderValue {
     HeaderValue::from_static(
         "better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax",
     )

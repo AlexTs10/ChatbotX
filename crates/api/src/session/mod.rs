@@ -2,6 +2,7 @@
 //! the sign-up gate, the generic OAuth path rules and (stage 2) the
 //! email/password endpoints under `/api/auth`.
 
+mod account;
 mod auth_mail;
 mod bearer;
 mod claim;
@@ -14,6 +15,7 @@ mod origin;
 mod resource;
 mod social;
 
+pub use account::*;
 pub use auth_mail::*;
 pub use bearer::*;
 pub use claim::*;

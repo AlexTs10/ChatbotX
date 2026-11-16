@@ -353,6 +353,36 @@ fn rpc_output(output: Value) -> Response {
         .into_response()
 }
 
+/// `forceChangePasswordAction` (a Next.js server action in the original,
+/// served here as an RPC procedure for the SPA). It runs before the
+/// `mustChangePassword` gate, like the action on the base `actionClient`.
+pub const FORCE_CHANGE_PASSWORD_PATH: &str = "authActions/forceChangePassword";
+
+async fn force_change_password_action(
+    state: &RpcState,
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    body: &Bytes,
+) -> Response {
+    let input = rpc_input(method, uri, body);
+    match crate::session::force_change_password(&state.auth, headers, &input).await {
+        Ok(cookie) => {
+            let mut response = rpc_output(json!({ "ok": true }));
+            if let Some(cookie) = cookie {
+                response.headers_mut().append(header::SET_COOKIE, cookie);
+                crate::session::expose_auth_token(response.headers_mut());
+            }
+            response
+        }
+        Err(error) => rpc_error(
+            StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            &error.code,
+            &error.message,
+        ),
+    }
+}
+
 async fn handle(
     State(state): State<Arc<RpcState>>,
     method: Method,
@@ -362,6 +392,9 @@ async fn handle(
 ) -> Response {
     let request_issued_at_ms = (state.auth.now_ms)();
     let rest = uri.path().strip_prefix("/rpc/").unwrap_or_default();
+    if rest.trim_end_matches('/') == FORCE_CHANGE_PASSWORD_PATH {
+        return force_change_password_action(&state, &method, &uri, &headers, &body).await;
+    }
     let key = rest.split('/').next().unwrap_or_default();
     if !RPC_ROUTER_KEYS.contains(&key) {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
