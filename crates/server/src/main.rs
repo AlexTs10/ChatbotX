@@ -12,6 +12,8 @@ use chatbotx_business::audit::AuditService;
 use chatbotx_business::events::cache::ActiveCache;
 use chatbotx_business::events::emitter::QueueEmitter;
 use chatbotx_db::Db;
+use chatbotx_jobs::runtime::Runtime;
+use chatbotx_jobs::shutdown::{Shutdown, ShutdownReason};
 use chatbotx_kv::{Clock, Kv, KvConfig, SystemClock};
 use chatbotx_rt::{KvPresence, NoRevokeRetry, Realtime, RtConfig};
 use config::Config;
@@ -220,7 +222,15 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         now_ms,
     });
     chatbotx_api::session::bootstrap_platform_admin_at_startup(&shared.db).await;
-    let api = Arc::new(api_state(&shared, realtime.as_ref()).await?);
+    // One job store for the API (enqueue) and the workers: the wake-up
+    // notifications are in-process.
+    let jobs = Arc::new(
+        chatbotx_jobs::JobStore::open(Arc::clone(&shared.db), Arc::new(chatbotx_jobs::SystemClock))
+            .await
+            .map_err(std::io::Error::other)?,
+    );
+    let (shutdown, exited) = start_workers(&shared, &jobs, realtime.as_ref())?;
+    let api = Arc::new(api_state(&shared, Arc::clone(&jobs), realtime.as_ref()));
     let mut app = chatbotx_api::router()
         .merge(chatbotx_api::rpc::rpc_router_with(
             chatbotx_api::rpc::RpcState {
@@ -247,7 +257,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         "listening"
     );
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(realtime))
+        .with_graceful_shutdown(shutdown_signal(realtime, shutdown, exited))
         .await?;
     tracing::info!("shutdown complete");
     Ok(())
@@ -256,18 +266,12 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
 /// The handler state: the database, the app URL and the cross-cutting
 /// services (realtime producer, kv, job store for jobs and audit records,
 /// the in-process event bus).
-async fn api_state(
+fn api_state(
     shared: &Shared,
+    jobs: Arc<chatbotx_jobs::JobStore>,
     realtime: Option<&Realtime>,
-) -> std::io::Result<chatbotx_api::handlers::ApiState> {
-    let jobs =
-        chatbotx_jobs::JobStore::open(Arc::clone(&shared.db), Arc::new(chatbotx_jobs::SystemClock))
-            .await
-            .map_err(std::io::Error::other)?;
-    let app_url = env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
-        .trim_end_matches('/')
-        .to_string();
-    let jobs: Arc<dyn chatbotx_jobs::Enqueuer> = Arc::new(jobs);
+) -> chatbotx_api::handlers::ApiState {
+    let jobs: Arc<dyn chatbotx_jobs::Enqueuer> = jobs;
     // The flow-trigger and webhook emitters queue `evaluate-triggers` /
     // `evaluate-webhooks` jobs for the (later) trigger and webhook workers.
     let events = chatbotx_business::events::EventBus::new();
@@ -282,7 +286,7 @@ async fn api_state(
     // Audit rows are written in the request (the `sendAuditLog` handler);
     // the community edition writes none, as the original handler.
     let audit = AuditService::direct(Arc::clone(&shared.db), edition() != "community");
-    let mut state = chatbotx_api::handlers::ApiState::new(Arc::clone(&shared.db), app_url)
+    let mut state = chatbotx_api::handlers::ApiState::new(Arc::clone(&shared.db), app_url())
         .with_kv(Arc::clone(&shared.kv))
         .with_jobs(jobs)
         .with_events(events)
@@ -291,13 +295,70 @@ async fn api_state(
     if let Some(realtime) = realtime {
         state = state.with_realtime(realtime.clone());
     }
-    Ok(state)
+    state
 }
 
-/// Resolve on SIGINT (Ctrl-C) or SIGTERM, after the realtime drain
-/// (producers flushed, sockets closed 4003 with `retryAfter`).
-async fn shutdown_signal(realtime: Option<Realtime>) {
-    wait_for_signal().await;
+/// `NEXT_PUBLIC_BUILDER_URL` without a trailing `/`.
+fn app_url() -> String {
+    env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+type Exited = tokio::sync::watch::Receiver<Option<i32>>;
+
+/// Starts the `chat`, `integration` and `default` workers (Q.W1). The
+/// shutdown coordinator drains them on SIGINT / SIGTERM
+/// (`WORKER_SHUTDOWN_TIMEOUT_MS`); its exit call resolves `Exited`.
+fn start_workers(
+    shared: &Shared,
+    jobs: &Arc<chatbotx_jobs::JobStore>,
+    realtime: Option<&Realtime>,
+) -> std::io::Result<(Arc<Shutdown>, Exited)> {
+    let (exit_tx, exited) = tokio::sync::watch::channel(None);
+    let timeout_ms = std::env::var("WORKER_SHUTDOWN_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0);
+    let shutdown = Shutdown::new(
+        timeout_ms,
+        Arc::new(move |code| {
+            let _ = exit_tx.send(Some(code));
+        }),
+        Arc::new(|| Box::pin(async { Ok(()) })),
+    );
+    let runtime = Runtime::new(
+        Arc::clone(jobs),
+        Arc::clone(&shutdown),
+        Arc::new(chatbotx_jobs::SystemClock),
+    );
+    let deps = chatbotx_worker::Deps {
+        db: Arc::clone(&shared.db),
+        jobs: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::Enqueuer>,
+        waiter: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::JobWaiter>,
+        realtime: realtime.cloned(),
+        channels: chatbotx_worker::Channels::builtin(),
+        app_url: app_url(),
+    };
+    chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
+    Ok((shutdown, exited))
+}
+
+/// Resolve on SIGINT (Ctrl-C) or SIGTERM, after the worker drain and the
+/// realtime drain (producers flushed, sockets closed 4003 with
+/// `retryAfter`).
+async fn shutdown_signal(realtime: Option<Realtime>, shutdown: Arc<Shutdown>, mut exited: Exited) {
+    tokio::select! {
+        () = wait_for_signal() => {}
+        _ = exited.wait_for(Option::is_some) => {}
+    }
+    // Idempotent: the coordinator's own signal handler may have started it.
+    shutdown.request(ShutdownReason::Sigterm, None).await;
+    if let Ok(code) = exited.wait_for(Option::is_some).await
+        && *code != Some(0)
+    {
+        tracing::error!(exit_code = ?*code, "workers did not drain cleanly");
+    }
     if let Some(realtime) = realtime {
         realtime.shutdown().await;
     }

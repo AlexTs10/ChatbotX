@@ -18,6 +18,7 @@ chatbotx-files = { path = "crates/files" }
 chatbotx-jobs = { path = "crates/jobs" }
 chatbotx-kv = { path = "crates/kv" }
 chatbotx-rt = { path = "crates/rt" }
+chatbotx-worker = { path = "crates/worker" }
 
 # External crates. Default features are off; enable only what a crate uses.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }

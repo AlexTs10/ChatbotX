@@ -443,9 +443,26 @@ dependencies = [
  "chatbotx-jobs",
  "chatbotx-kv",
  "chatbotx-rt",
+ "chatbotx-worker",
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "chatbotx-worker"
+version = "0.1.0"
+dependencies = [
+ "chatbotx-business",
+ "chatbotx-core",
+ "chatbotx-db",
+ "chatbotx-jobs",
+ "chatbotx-rt",
+ "reqwest",
+ "ring",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

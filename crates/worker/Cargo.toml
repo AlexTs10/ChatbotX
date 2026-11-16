@@ -1,0 +1,28 @@
+[package]
+name = "chatbotx-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Job handlers of `apps/worker` (Q.W1: chat, integration `sendFlow`, default),
+# run by the `chatbotx-jobs` runtime inside `chatbotx-server`.
+[dependencies]
+chatbotx-business = { workspace = true }
+chatbotx-core = { workspace = true }
+chatbotx-db = { workspace = true }
+chatbotx-jobs = { workspace = true }
+chatbotx-rt = { workspace = true }
+# API channel callback POST (same client as chatbotx-business).
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# API channel HMAC-SHA256 signature and the delivery id.
+ring = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
