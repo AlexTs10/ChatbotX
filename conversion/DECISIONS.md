@@ -322,3 +322,11 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
   - One agent per domain does analysis, test port and implementation in one pass (no separate analyst / porter / verifier agents). Gate per commit: `cargo fmt --check`, clippy `-D warnings` and `cargo test` for the changed crates. Parity folders run once per domain at merge, not per slice.
   - Mini apps (P3.6-D1 rest) wait; core messaging domains go first.
   - Frontend (Phase 4) starts now in parallel: the existing builder React UI is moved to a Vite + React SPA (TanStack Router + the existing TanStack Query / oRPC client) that the Rust binary serves as static files. Server actions become calls to Rust `/rpc` procedures. No Next.js server at run time.
+
+## 2026-11-16 — P4 frontend (implementer; orchestrator-delegated, recommended options)
+
+- Orchestrator-delegated, recommended option: `apps/web` uses TanStack Router with code-based routes (no file-route codegen plugin); builder files are copied on demand with their import closure by `apps/web/scripts/copy-from-builder.mjs`, so only reachable files land in `apps/web`.
+- Orchestrator-delegated, recommended option: `"use server"` files become generated client stubs that call `POST /rpc/actions/<exportName>` (`{ args, workspaceId? }`); the stub maps oRPC errors back to the next-safe-action result (`serverError` / `validationErrors`), so `useAction` and the components stay unchanged. Spec: `conversion/specs/P4-web.md` §5.1.
+- Orchestrator-delegated, recommended option: server-component data with no oRPC procedure comes from page loaders `GET /rpc/pages/<name>` (`crates/api/src/spa.rs`), one per layout/page, returning the props the server component passed down.
+- Orchestrator-delegated, recommended option: the SPA oRPC client sends one request per call (no `BatchLinkPlugin`), so Rust needs no `/rpc/__batch__`; the client is typed loosely (no import of the builder's server router type), type safety per procedure comes back when a contract package exists.
+- P4 infra (implementer): this worktree has no Mac `node_modules` and tsc/lint are heavy (Dell only), so commits run with `LEFTHOOK=0`; the gate (biome check, `tsc --noEmit`, `vite build` for `apps/web`; cargo fmt/clippy/test for changed crates) runs on the Dell before each commit.
