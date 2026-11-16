@@ -71,7 +71,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | Q.D8 | 3 | Ecommerce rest: Shopify, WooCommerce, webshop, carts, coupons, discount codes, ecommerce analytics | todo | P3.6-D1o | C + A | | |
 | Q.D9 | 3 | Appointments: calendars, external calendars, reminders, working hours | todo | P3.6-D2 | C + A | | |
 | Q.D10 | 3 | Comments + posts: comment automations, IG comments/stories, FB comments, Threads/TikTok comments, channel posts | todo | P3.6-D3 | C + A | | |
-| Q.D11 | 3 | Workspace + platform: lifecycle, quota, platform, enterprise, admin, error logs, analytics, capabilities, settings, jobs page (Bull Board replacement) | todo | P3.5f | C + A | | |
+| Q.D11 | 3 | Workspace + platform: lifecycle, quota, platform, enterprise, admin, error logs, analytics, capabilities, settings, jobs page (Bull Board replacement) | in_progress | P3.5f | C + A | slices 1-8a done (spec conversion/specs/Q.D11.md) | |
 | Q.D12 | 3 | WhatsApp domain: calls, WhatsApp flows, WhatsApp templates, thread control | todo | P3.6-D3 | C + A | | |
 | Q.D13 | 3 | Rest: leaderboards, dynamic images, decisions, inbound/external webhooks, spreadsheets, saved replies, response SLA, schemas, persistent menus | todo | P3.6-D2 | C + A | | |
 | Q.W1 | 3 | Worker core: flow execution (chat queue), integration queue routing, job context (`apps/worker` chat, integration, default) | todo | P3.6-D3 | C | | |

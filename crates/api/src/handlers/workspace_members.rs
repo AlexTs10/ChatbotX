@@ -29,7 +29,7 @@ fn json_column(text: &str) -> Value {
 }
 
 /// `workspaceMemberResource` + `user: { id, name, image }`.
-fn member_json(row: &MemberWithUser) -> Value {
+pub(crate) fn member_json(row: &MemberWithUser) -> Value {
     let stored = json_column(&row.permissions);
     let permissions: Map<String, Value> = PERMISSION_KEYS
         .iter()

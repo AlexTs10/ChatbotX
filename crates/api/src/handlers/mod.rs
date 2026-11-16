@@ -4,6 +4,7 @@
 
 pub mod analytics;
 pub mod bot_fields;
+pub mod capabilities;
 pub mod channels;
 pub mod connections;
 pub mod contact_custom_fields;
@@ -17,6 +18,7 @@ pub mod contacts;
 pub mod contacts_bulk;
 pub mod custom_fields;
 pub mod ecommerce_settings;
+pub mod error_logs;
 pub mod flows;
 pub mod folders;
 pub mod input;
@@ -35,6 +37,7 @@ pub mod sequences;
 pub mod tags;
 pub mod webchats;
 pub mod workspace_members;
+pub mod workspace_settings;
 
 use std::sync::Arc;
 
@@ -74,6 +77,11 @@ pub struct ApiState {
     /// The file store (`uploader`; presigned uploads, imports, exports).
     /// `None` = off (tests that need no files).
     pub files: Option<Arc<chatbotx_files::Uploader>>,
+    /// `NEXT_PUBLIC_EDITION` (read once at start; tests set it).
+    pub edition: chatbotx_business::keys::Edition,
+    /// `encryptUtils` (`ENCRYPTION_KEY*`, read once at start); `None` = the
+    /// keys are unset (credential writes fail).
+    pub encryption: Option<Arc<chatbotx_core::encryption::Encryption>>,
 }
 
 impl ApiState {
@@ -88,7 +96,26 @@ impl ApiState {
             events: EventBus::new(),
             audit: AuditService::disabled(),
             files: None,
+            edition: chatbotx_business::keys::Edition::from_env(),
+            encryption: chatbotx_core::encryption::Keys::from_env(&chatbotx_core::env::ProcessEnv)
+                .ok()
+                .map(|keys| Arc::new(chatbotx_core::encryption::Encryption::new(keys))),
         }
+    }
+
+    /// Encrypts and decrypts with `encryption`.
+    pub fn with_encryption(
+        mut self,
+        encryption: Arc<chatbotx_core::encryption::Encryption>,
+    ) -> ApiState {
+        self.encryption = Some(encryption);
+        self
+    }
+
+    /// Runs the services as this edition.
+    pub fn with_edition(mut self, edition: chatbotx_business::keys::Edition) -> ApiState {
+        self.edition = edition;
+        self
     }
 
     /// Publishes realtime events through `realtime`.
@@ -447,6 +474,12 @@ async fn route(
         workspace_members::handle(state, route_id, call).await
     } else if contact_filter::ROUTES.contains(&route_id) {
         contact_filter::handle(state, route_id, call).await
+    } else if workspace_settings::ROUTES.contains(&route_id) {
+        workspace_settings::handle(state, route_id, call).await
+    } else if error_logs::ROUTES.contains(&route_id) {
+        error_logs::handle(state, route_id, call).await
+    } else if capabilities::ROUTES.contains(&route_id) {
+        capabilities::handle(state, route_id, call).await
     } else {
         return None;
     };

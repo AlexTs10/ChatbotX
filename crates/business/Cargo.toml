@@ -19,6 +19,8 @@ chatbotx-files = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
+# Concurrent error-log emits (`Promise.allSettled`, Q.D11).
+futures = { workspace = true }
 # P3.6-D2 contacts: E.164 normalization (libphonenumber-js).
 phonenumber = { workspace = true }
 # SSRF guard DoH lookup (`fetch("https://1.1.1.1/dns-query")`); same client as crates/files.
@@ -28,7 +30,7 @@ ring = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 # Task-local audit actor (`withAuditContext`, P3.6-X1).
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "time"] }
 tracing = { workspace = true }
 # Chat links of inboxes (`new URL` + `searchParams.set`).
 url = { workspace = true }

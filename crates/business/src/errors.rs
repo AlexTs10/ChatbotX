@@ -103,6 +103,12 @@ impl From<repo::Error> for BusinessError {
     }
 }
 
+impl From<chatbotx_db::rusqlite::Error> for BusinessError {
+    fn from(error: chatbotx_db::rusqlite::Error) -> BusinessError {
+        BusinessError::Repo(error.into())
+    }
+}
+
 impl From<chatbotx_db::DbError> for BusinessError {
     fn from(error: chatbotx_db::DbError) -> BusinessError {
         BusinessError::Repo(repo::Error::Db(error))

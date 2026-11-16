@@ -305,6 +305,7 @@ dependencies = [
  "chatbotx-rt",
  "chrono",
  "chrono-tz",
+ "futures",
  "phonenumber",
  "reqwest",
  "ring",

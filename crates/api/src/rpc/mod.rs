@@ -9,8 +9,12 @@
 //! other answers the RPC-encoded `NOT_FOUND "Operation not ported yet"` after
 //! auth.
 
+pub mod actions;
+pub mod platform_credentials;
 pub mod procedures;
 mod table;
+pub mod workspace;
+pub mod workspace_members;
 
 use std::sync::Arc;
 
@@ -353,6 +357,21 @@ fn rpc_output(output: Value) -> Response {
         .into_response()
 }
 
+/// A procedure output with its meta (`[1, ...path]` per Date).
+fn rpc_output_with_meta(output: Value, meta: Vec<Value>) -> Response {
+    let body = if meta.is_empty() {
+        json!({ "json": output })
+    } else {
+        json!({ "json": output, "meta": meta })
+    };
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
 /// `forceChangePasswordAction` (a Next.js server action in the original,
 /// served here as an RPC procedure for the SPA). It runs before the
 /// `mustChangePassword` gate, like the action on the base `actionClient`.
@@ -394,6 +413,9 @@ async fn handle(
     let rest = uri.path().strip_prefix("/rpc/").unwrap_or_default();
     if rest.trim_end_matches('/') == FORCE_CHANGE_PASSWORD_PATH {
         return force_change_password_action(&state, &method, &uri, &headers, &body).await;
+    }
+    if let Some(response) = actions::handle(&state, rest, &method, &uri, &headers, &body).await {
+        return response;
     }
     let key = rest.split('/').next().unwrap_or_default();
     if !RPC_ROUTER_KEYS.contains(&key) {
@@ -460,6 +482,21 @@ async fn handle(
             Ok(output) => rpc_output(output),
             Err(error) => procedures::error_response(&error),
         };
+    }
+    if let Some(api) = state.api.as_ref() {
+        let outcome = match workspace::call(api, &path, &context, &input).await {
+            Some(outcome) => Some(outcome),
+            None => match workspace_members::call(api, &path, &context, &input).await {
+                Some(outcome) => Some(outcome),
+                None => platform_credentials::call(api, &path, &context).await,
+            },
+        };
+        if let Some(outcome) = outcome {
+            return match outcome {
+                Ok((output, meta)) => rpc_output_with_meta(output, meta),
+                Err(error) => procedures::error_response(&error),
+            };
+        }
     }
     rpc_error(
         StatusCode::NOT_FOUND,
