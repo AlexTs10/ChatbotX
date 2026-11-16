@@ -11,6 +11,7 @@ pub mod orpc;
 pub mod reflink_widget;
 pub mod routes;
 pub mod rpc;
+pub mod rpc_ai;
 pub mod session;
 
 use axum::Router;

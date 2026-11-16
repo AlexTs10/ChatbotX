@@ -2,6 +2,9 @@
 //! one module per builder router. [`dispatch`] runs the handler of a route after
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
+pub mod ai_agents;
+pub mod ai_functions;
+pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
 pub mod channels;
@@ -20,6 +23,7 @@ pub mod ecommerce_settings;
 pub mod flows;
 pub mod folders;
 pub mod input;
+pub mod integrations_ai;
 pub mod minigames;
 pub mod open_hours;
 pub mod pipelines;
@@ -391,6 +395,14 @@ async fn route(
 ) -> Option<Response> {
     let reply = if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
+    } else if integrations_ai::ROUTES.contains(&route_id) {
+        integrations_ai::handle(state, route_id, call).await
+    } else if ai_agents::ROUTES.contains(&route_id) {
+        ai_agents::handle(state, route_id, call).await
+    } else if ai_functions::ROUTES.contains(&route_id) {
+        ai_functions::handle(state, route_id, call).await
+    } else if ai_mcp_servers::ROUTES.contains(&route_id) {
+        ai_mcp_servers::handle(state, route_id, call).await
     } else if analytics::ROUTES.contains(&route_id) {
         analytics::handle(state, route_id, call).await
     } else if contact_sequences::ROUTES.contains(&route_id) {
