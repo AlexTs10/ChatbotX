@@ -7,6 +7,7 @@ pub mod bot_fields;
 pub mod channels;
 pub mod connections;
 pub mod contact_custom_fields;
+pub mod contact_exports;
 pub mod contact_filter;
 pub mod contact_imports;
 pub mod contact_inboxes;
@@ -445,6 +446,10 @@ async fn route(
         reflinks::handle(state, route_id, call).await
     } else if workspace_members::ROUTES.contains(&route_id) {
         workspace_members::handle(state, route_id, call).await
+    } else if contact_exports::ROUTES.contains(&route_id) {
+        contact_exports::handle(state, route_id, call).await
+    } else if contact_imports::ROUTES.contains(&route_id) {
+        contact_imports::handle(state, route_id, call).await
     } else if contact_filter::ROUTES.contains(&route_id) {
         contact_filter::handle(state, route_id, call).await
     } else {

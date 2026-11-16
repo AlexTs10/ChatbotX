@@ -65,9 +65,11 @@ async fn post_v1_contacts_imports_upload_url_mints_an_upload_for_the_token_s_wor
         .keys()
         .map(String::as_str)
         .collect();
+    // Orchestrator fix (P3.6-D2): serde_json sorts object keys (no `preserve_order`;
+    // DECISIONS P3.1); the key set is the contract, not the order.
     assert_eq!(
         keys,
-        vec!["fileId", "presignedPostUrl", "publicUrl", "path"]
+        vec!["fileId", "path", "presignedPostUrl", "publicUrl"]
     );
     let stored = f
         .state
