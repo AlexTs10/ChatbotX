@@ -13,7 +13,7 @@ is unit Q.W2: this unit only enqueues jobs with the original payload.
 | 2 | AI agents | `ai_agent.rs`, `ai/models.rs` (model catalog) | `aiAgents.*` | `aiAgentsAPI.listAIAgentsAPI`, create/update/delete actions | done |
 | 3 | AI provider integrations | `integration_ai_provider.rs` (key probe, find, autoReply update), `integration_openai_compatible.rs` | `integrations.getAiProvider`, `updateAiProvider` | `update<Provider>Action` (6) | done (connect / disconnect: P3.6-D2) |
 | 4 | AI files / RAG | — | `aiFiles.*` | — | todo |
-| 5 | AI handover settings + bulk run | `ai_handover.rs` | `aiHandover.*` | `aiHandoverAPIs.*`, save / set / retry actions | in progress |
+| 5 | AI handover settings + bulk run | `ai_handover.rs` | `aiHandover.*` | `aiHandoverAPIs.*`, save / set / retry actions | done (engine / sweeper: Q.W2) |
 | 6 | `packages/ai` provider layer | — | — | — | todo |
 
 ## 2. Test map
@@ -61,6 +61,26 @@ Per test case: `specs/Q.D6-test-map.tsv` (file, line, name, Rust test, status, n
   original's drizzle `.set({})` throws); the OpenAI action ignores its bound
   integration id (one row per workspace).
 
+- AI handover (slice 5): no settings cache (P3.6-D1). The distributed lock and
+  the `FOR UPDATE` row locks become one SQLite write transaction: the TS tests
+  for races "between the two locks" / "under the lock" are n-a. The bulk-run
+  engine, sweeper, claim / page helpers and `refundIfPreviousChunkQueued` are
+  worker code (Q.W2). The API enqueues `aiHandoverBulkToggle` on the
+  integration queue with job id `ai-handover-bulk-{runId}-chunk-{seq}` and
+  payload `{ type, data: { runId, workspaceId } }` (ids as strings, as the
+  original's bigint-as-string), attempts 1, `removeOnComplete`,
+  `removeOnFail: 100`.
+- An ON for a Page with no settings row is refused when the automation does
+  not run (`aiHandoverBulkAutomationNotActive`); the TS test passes only because
+  `isActiveNow` is mocked. A confirmed change that cannot start its run rolls
+  back and then stops the live run in its own transaction, as the original.
+- An unknown workspace time zone is read as UTC (the original's
+  `formatInTimeZone` throws a `RangeError`, so the request fails with a 500).
+- Builder actions: `RpcAiContext.is_super_admin` / `is_support_session` default
+  to `false`; the p35f wiring sets them (`with_member`). Refusal and domain-error
+  copy is the `en` message (no i18n on the server). `inboxService.disconnect`
+  is not in Rust yet; `ai_handover::cancel_live_in` is its hook.
+
 ## 4. State
 
-- Slices 1–3 committed (see TRACKER). Slice 5 in progress; 4 and 6 todo.
+- Slices 1–3 and 5 committed (see TRACKER). 4 and 6 todo.

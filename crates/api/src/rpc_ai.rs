@@ -13,14 +13,19 @@ use chatbotx_business::BusinessError;
 use chatbotx_business::ai::mcp_client::EndpointGuard;
 use chatbotx_business::ai_agent::{self as agents, ListAiAgents};
 use chatbotx_business::ai_function as functions;
+use chatbotx_business::ai_handover::{self as handover, SaveSettingsInput, SetApplyToAllInput};
 use chatbotx_business::ai_mcp_server::{self as mcp, McpEndpointPolicy};
 use chatbotx_business::integration_ai_provider as ai_providers;
+use chatbotx_business::tx;
 use chatbotx_core::variables::bot_field::BotFieldVariableTextResolution;
 use chatbotx_db::repo::utils::{PaginationInput, SortItem};
 use serde_json::{Map, Value, json};
 
 use crate::handlers::ai_agents::{ai_agent_json, parse_ai_agent_input};
 use crate::handlers::ai_functions::{ai_function_json, parse_ai_function_input};
+use crate::handlers::ai_handover::{
+    apply_to_all_status_json, parse_private_set_apply_to_all, parse_private_settings, run_json,
+};
 use crate::handlers::ai_mcp_servers::{
     ai_mcp_server_json, auth_field, parse_ai_mcp_server_input, url_field,
 };
@@ -51,6 +56,11 @@ pub const PORTED: &[&str] = &[
     "actions.deleteAIMcpServerAction",
     "actions.deleteAIMcpServer",
     "actions.validateAIMcpServer",
+    "aiHandoverAPIs.getApplyToAllStatus",
+    "aiHandoverAPIs.listBulkHistory",
+    "actions.saveAiHandoverSettingsAction",
+    "actions.setApplyToAllAction",
+    "actions.retryApplyToAllAction",
 ];
 
 /// The caller after the `/rpc` auth.
@@ -58,16 +68,29 @@ pub const PORTED: &[&str] = &[
 pub struct RpcAiContext {
     pub workspace_id: i64,
     pub user_id: i64,
+    /// `hasWorkspacePermission(workspaceMemberPermissions, "superAdmin")`.
+    pub is_super_admin: bool,
+    /// `ctx.isSupportSession` (a platform support session).
+    pub is_support_session: bool,
     /// The MCP endpoint guard (`assertSafeMcpEndpoint`).
     pub mcp_guard: Arc<dyn EndpointGuard>,
 }
 
 impl RpcAiContext {
+    /// The member's super admin flag and the support-session flag.
+    pub fn with_member(mut self, is_super_admin: bool, is_support_session: bool) -> RpcAiContext {
+        self.is_super_admin = is_super_admin;
+        self.is_support_session = is_support_session;
+        self
+    }
+
     /// The context with this process's MCP endpoint policy.
     pub fn new(workspace_id: i64, user_id: i64) -> RpcAiContext {
         RpcAiContext {
             workspace_id,
             user_id,
+            is_super_admin: false,
+            is_support_session: false,
             mcp_guard: Arc::new(McpEndpointPolicy::from_env()),
         }
     }
@@ -235,6 +258,79 @@ fn bulk_ids(input: &mut Input) -> Vec<i64> {
         .collect()
 }
 
+/// `errors.superAdminRequired` / `aiHandover.errors.supportSession` (en).
+const SUPER_ADMIN_REQUIRED: &str = "You need to be a workspace super admin to do this.";
+const SUPPORT_SESSION: &str = "Settings cannot be changed from a support session.";
+
+/// `BULK_ERROR_COPY_KEYS` (en messages).
+const BULK_ERROR_COPY: &[(&str, &str)] = &[
+    (
+        handover::codes::AUTOMATION_NOT_ACTIVE,
+        "Save the automation and switch it on (inside its run time) before enabling it for all customers.",
+    ),
+    (
+        handover::codes::MESSAGE_REQUIRED,
+        "Enter the message to send to customers.",
+    ),
+    (
+        handover::codes::MESSAGE_TOO_LONG,
+        "The message is too long.",
+    ),
+    (
+        handover::codes::PAGE_NOT_CONNECTED,
+        "This Page is not connected.",
+    ),
+    (
+        handover::codes::NOTHING_TO_RETRY,
+        "There is nothing to retry.",
+    ),
+];
+/// `SAVE_ERROR_COPY_KEYS` (en).
+const SAVE_ERROR_COPY: &[(&str, &str)] = &[(
+    "notFound",
+    "The selected flow was not found or is not active.",
+)];
+
+/// `assertCanManageAiHandover`: a super admin, never a support session.
+fn assert_can_manage_ai_handover(context: &RpcAiContext) -> Result<(), OrpcError> {
+    let refuse = |message: &str| {
+        business_error(
+            BusinessError::exception(message, "systemError", 400),
+            MUTATING,
+        )
+    };
+    if !context.is_super_admin {
+        return Err(refuse(SUPER_ADMIN_REQUIRED));
+    }
+    if context.is_support_session {
+        return Err(refuse(SUPPORT_SESSION));
+    }
+    Ok(())
+}
+
+/// `rethrowTranslated`: a known code gets its copy (422), anything else as is.
+fn translated(error: BusinessError, copy: &[(&str, &str)]) -> OrpcError {
+    let known = error
+        .code()
+        .and_then(|code| copy.iter().find(|(c, _)| *c == code))
+        .copied();
+    match known {
+        Some((code, message)) => {
+            business_error(BusinessError::exception(message, code, 422), MUTATING)
+        }
+        None => business_error(error, MUTATING),
+    }
+}
+
+/// Date meta of a bulk run resource at `prefix` (its non-null dates).
+fn run_date_meta(prefix: &[Value], run: &Value) -> Vec<Value> {
+    ["requestedAt", "startedAt", "finishedAt", "pausedUntil"]
+        .into_iter()
+        .filter(|field| run.get(*field).is_some_and(Value::is_string))
+        .flat_map(|field| object_date_meta(prefix, &[field]))
+        .collect()
+}
+
 /// `listAIAgentsRequest` (`page` 1, `perPage` 10, `sort` newest first).
 fn parse_list_ai_agents(input: &mut Input) -> ListAiAgents {
     let page = input.opt_coerce_int(
@@ -392,6 +488,119 @@ async fn run(
             ai_providers::update_auto_reply(db, &api.audit, provider, ws, auto_reply)
                 .await
                 .map_err(|e| business_error(e, MUTATING))?;
+            Ok(RpcOutput::plain(Value::Null))
+        }
+        "aiHandoverAPIs.getApplyToAllStatus" => {
+            let mut parsed = Input::from_object(input.as_object().cloned().unwrap_or_default());
+            let inbox = parsed.id("inboxId");
+            parsed.finish().map_err(|_| validation_failed())?;
+            let inbox = inbox.unwrap_or_default();
+            let now = chatbotx_db::repo::now_ms();
+            let (status, active) = tx::read(db, move |conn| {
+                Ok((
+                    handover::find_status_in(conn, ws, inbox)?,
+                    handover::find_active_in(conn, ws, inbox, now)?.is_some(),
+                ))
+            })
+            .await
+            .map_err(|e| business_error(e, FINDING))?;
+            let json = apply_to_all_status_json(&status, active, now);
+            Ok(RpcOutput {
+                meta: run_date_meta(&[json!("run")], &json["run"]),
+                json,
+            })
+        }
+        "aiHandoverAPIs.listBulkHistory" => {
+            let mut parsed = Input::from_object(input.as_object().cloned().unwrap_or_default());
+            let inbox = parsed.id("inboxId");
+            let min_one = Num {
+                min: Some(1.0),
+                ..Num::default()
+            };
+            let page = parsed.opt_coerce_int("page", min_one);
+            let per_page = parsed.opt_coerce_int("perPage", min_one);
+            parsed.finish().map_err(|_| validation_failed())?;
+            let inbox = inbox.unwrap_or_default();
+            let (rows, page_count) = tx::read(db, move |conn| {
+                handover::list_history_in(conn, ws, inbox, PaginationInput { page, per_page })
+            })
+            .await
+            .map_err(|e| business_error(e, FINDING))?;
+            let now = chatbotx_db::repo::now_ms();
+            let data: Vec<Value> = rows
+                .iter()
+                .map(|row| run_json(&row.run, row.requested_by.as_ref(), now))
+                .collect();
+            let meta = data
+                .iter()
+                .enumerate()
+                .flat_map(|(i, run)| run_date_meta(&[json!("data"), json!(i)], run))
+                .collect();
+            Ok(RpcOutput {
+                json: json!({ "data": data, "pageCount": page_count }),
+                meta,
+            })
+        }
+        "actions.saveAiHandoverSettingsAction" => {
+            let inbox = bind_id(&args, 1)?;
+            let mut parsed = action_input(&args, 2);
+            let form = parse_private_settings(&mut parsed);
+            finish_action(parsed)?;
+            assert_can_manage_ai_handover(context)?;
+            let saved = handover::save_settings(
+                db,
+                SaveSettingsInput {
+                    workspace_id: ws,
+                    inbox_id: inbox,
+                    enabled: form.enabled.unwrap_or_default(),
+                    schedule_enabled: form.schedule_enabled.unwrap_or_default(),
+                    time_ranges: form.time_ranges.unwrap_or_else(|| json!([])),
+                    goto_flow_id: form.goto_flow_id.flatten(),
+                    return_message: form.return_message.flatten(),
+                    pause_bot_waiting_for_staff: form
+                        .pause_bot_waiting_for_staff
+                        .unwrap_or_default(),
+                },
+            )
+            .await
+            .map_err(|e| translated(e, SAVE_ERROR_COPY))?;
+            Ok(RpcOutput::plain(json!({
+                "enabled": saved.enabled,
+                "scheduleEnabled": saved.schedule_enabled,
+                "timeRanges": saved.time_ranges.0,
+                "gotoFlowId": saved.goto_flow_id.map(|id| id.to_string()),
+                "returnMessage": saved.return_message.unwrap_or_default(),
+                "pauseBotWaitingForStaff": saved.pause_bot_waiting_for_staff,
+            })))
+        }
+        "actions.setApplyToAllAction" => {
+            let inbox = bind_id(&args, 1)?;
+            let mut parsed = action_input(&args, 2);
+            let (apply, message) = parse_private_set_apply_to_all(&mut parsed);
+            finish_action(parsed)?;
+            assert_can_manage_ai_handover(context)?;
+            let change = handover::set_apply_to_all(
+                db,
+                api.jobs.as_ref(),
+                SetApplyToAllInput {
+                    workspace_id: ws,
+                    inbox_id: inbox,
+                    user_id: Some(context.user_id),
+                    apply_to_all_customers: apply,
+                    message: Some(message),
+                    confirm_max_eligible: None,
+                },
+            )
+            .await
+            .map_err(|e| translated(e, BULK_ERROR_COPY))?;
+            Ok(RpcOutput::plain(json!({ "isChanged": change.is_changed })))
+        }
+        "actions.retryApplyToAllAction" => {
+            let inbox = bind_id(&args, 1)?;
+            assert_can_manage_ai_handover(context)?;
+            handover::retry(db, api.jobs.as_ref(), ws, inbox, Some(context.user_id))
+                .await
+                .map_err(|e| translated(e, BULK_ERROR_COPY))?;
             Ok(RpcOutput::plain(Value::Null))
         }
         "aiFunctionsAPI.listAIFunctionsAuthenticatedAPI" => {

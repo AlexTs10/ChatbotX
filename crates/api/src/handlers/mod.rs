@@ -4,6 +4,7 @@
 
 pub mod ai_agents;
 pub mod ai_functions;
+pub mod ai_handover;
 pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
@@ -397,6 +398,8 @@ async fn route(
         connections::handle(state, route_id, call, principal).await?
     } else if integrations_ai::ROUTES.contains(&route_id) {
         integrations_ai::handle(state, route_id, call).await
+    } else if ai_handover::ROUTES.contains(&route_id) {
+        ai_handover::handle(state, route_id, call).await
     } else if ai_agents::ROUTES.contains(&route_id) {
         ai_agents::handle(state, route_id, call).await
     } else if ai_functions::ROUTES.contains(&route_id) {

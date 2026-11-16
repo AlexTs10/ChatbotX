@@ -6,6 +6,7 @@
 pub mod ai;
 pub mod ai_agent;
 pub mod ai_function;
+pub mod ai_handover;
 pub mod ai_mcp_server;
 pub mod audit;
 pub mod bot_field;
