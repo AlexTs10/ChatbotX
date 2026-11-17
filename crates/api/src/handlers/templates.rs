@@ -308,10 +308,10 @@ async fn list_installations(state: &ApiState, call: Call<'_>, actor: &Actor) -> 
         false,
     );
     let active_only = input.opt_coerced_bool("activeOnly");
-    let cursor = input.get("cursor").cloned();
-    let before_id = match cursor {
-        None => None,
-        Some(_) => Some(input.digits_id("cursor")),
+    let before_id = if input.has("cursor") {
+        input.digits_id("cursor")
+    } else {
+        None
     };
     let limit = input.opt_coerce_int("limit", Num::int(1.0, 100.0));
     input.finish()?;
@@ -321,7 +321,7 @@ async fn list_installations(state: &ApiState, call: Call<'_>, actor: &Actor) -> 
         installations::ListInstallations {
             status,
             active_only: active_only.unwrap_or_default(),
-            before_id: before_id.flatten(),
+            before_id,
             limit,
         },
         actor,
