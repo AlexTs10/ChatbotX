@@ -498,6 +498,10 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let (data, count) = crud::list(db, COMMENTS, ws, channel.types, filter)
                 .await
                 .map_err(|e| business_error(e, LISTING))?;
+            let data = data
+                .into_iter()
+                .map(|row| crud::channel_resource(channel.kind, row))
+                .collect();
             page(data, count)
         }
         "get" => {
@@ -513,7 +517,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(|e| business_error(e, FINDING))?;
-            Ok(json(200, row))
+            Ok(json(200, crud::channel_resource(channel.kind, row)))
         }
         "delete" => {
             let id = input.digits_id("id");
@@ -545,7 +549,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let row = crud::create_comment(db, ws, channel.kind, data)
                 .await
                 .map_err(|e| business_error(e, CREATING))?;
-            Ok(json(201, row))
+            Ok(json(201, crud::channel_resource(channel.kind, row)))
         }
         _ => {
             let id = input.digits_id("id");
@@ -565,7 +569,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             )
             .await
             .map_err(|e| business_error(e, MUTATING))?;
-            Ok(json(200, row))
+            Ok(json(200, crud::channel_resource(channel.kind, row)))
         }
     }
 }

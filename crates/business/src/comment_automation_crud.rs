@@ -779,6 +779,40 @@ pub fn build_channel_write(kind: &str, data: &mut Map<String, Value>, create: bo
     }
 }
 
+/// `toThreadsResource` / `toTiktokResource`: the stored row narrowed to what
+/// the channel supports. `post` is `postIds` or `all` (no ids); `privateReply`
+/// is `none` (Threads) or `text` / `AIAgent` / `none` (TikTok); a text public
+/// reply keeps its `values`, a flow / AI one drops them.
+pub fn channel_resource(kind: &str, mut row: Value) -> Value {
+    let post_ids = row["post"]["type"] == "postIds";
+    row["post"] = json!({
+        "type": if post_ids { "postIds" } else { "all" },
+        "value": if post_ids { row["post"]["value"].clone() } else { json!([]) },
+    });
+    let private_type = row["privateReply"]["type"].as_str().unwrap_or("none");
+    row["privateReply"] = if kind == "tiktok" && matches!(private_type, "text" | "AIAgent") {
+        json!({
+            "type": private_type,
+            "value": row["privateReply"]["value"].as_str().unwrap_or_default(),
+        })
+    } else {
+        json!({ "type": "none", "value": null })
+    };
+    let public = row["publicReply"].clone();
+    row["publicReply"] = match public["type"].as_str().unwrap_or("none") {
+        "none" => json!({ "type": "none", "value": null }),
+        kind => {
+            let mut out =
+                json!({ "type": kind, "value": public["value"].as_str().unwrap_or_default() });
+            if kind == "text" && !public["values"].is_null() {
+                out["values"] = public["values"].clone();
+            }
+            out
+        }
+    };
+    row
+}
+
 /// `pinStoryMentionFilters`: only the filters present are pinned.
 pub fn pin_story_mention(trigger: &str, data: &mut Map<String, Value>) {
     if trigger != "storyMention" {
@@ -999,5 +1033,37 @@ mod tests {
         pin_story_mention("storyMention", &mut data);
         assert_eq!(data["story"], json!({ "type": "all", "value": [] }));
         assert!(!data.contains_key("includeKeywords"));
+    }
+
+    #[test]
+    fn channel_resources_narrow_the_stored_row() {
+        let row = json!({
+            "id": "1",
+            "post": { "type": "published", "value": ["x"] },
+            "privateReply": { "type": "flow", "value": "9" },
+            "publicReply": { "type": "flow", "value": "9", "values": [{ "value": "a" }] },
+        });
+        let threads = channel_resource("threads", row.clone());
+        assert_eq!(threads["post"], json!({ "type": "all", "value": [] }));
+        assert_eq!(
+            threads["privateReply"],
+            json!({ "type": "none", "value": null })
+        );
+        assert_eq!(
+            threads["publicReply"],
+            json!({ "type": "flow", "value": "9" })
+        );
+        let row = json!({
+            "post": { "type": "postIds", "value": ["p"] },
+            "privateReply": { "type": "text", "value": null },
+            "publicReply": { "type": "text", "value": "hi", "values": [{ "value": "hi" }] },
+        });
+        let tiktok = channel_resource("tiktok", row);
+        assert_eq!(tiktok["post"], json!({ "type": "postIds", "value": ["p"] }));
+        assert_eq!(
+            tiktok["privateReply"],
+            json!({ "type": "text", "value": "" })
+        );
+        assert_eq!(tiktok["publicReply"]["values"], json!([{ "value": "hi" }]));
     }
 }
