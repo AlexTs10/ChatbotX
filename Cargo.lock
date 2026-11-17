@@ -512,6 +512,7 @@ dependencies = [
 name = "chatbotx-worker"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "chatbotx-business",
  "chatbotx-core",
@@ -527,6 +528,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

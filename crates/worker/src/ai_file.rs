@@ -87,12 +87,16 @@ fn file_lock(ai_file_id: i64) -> Arc<tokio::sync::Mutex<()>> {
     Arc::clone(locks.entry(ai_file_id).or_default())
 }
 
-/// The heavy queue processor: only `processAIFile` is in Rust.
+/// The heavy queue processor: `processAIFile` and the flow-step jobs
+/// (`crate::heavy`).
 pub async fn handle_heavy(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     let kind = str_of(&job.data, "type").unwrap_or("");
+    if crate::heavy::action_of(kind).is_some() {
+        return crate::heavy::handle_step_job(&deps, &job).await;
+    }
     if kind != "processAIFile" {
-        // ponytail: the image / speech / extract heavy steps are later
-        // slices (Q.W2 spec).
+        // ponytail: speech to text, extract-text and analyze-image heavy
+        // jobs are not ported (Q.W2 spec).
         return Err(JobError::unrecoverable(format!(
             "Heavy job action is not available: {kind}"
         )));

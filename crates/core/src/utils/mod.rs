@@ -3,6 +3,7 @@
 pub mod broadcast;
 pub mod cache_keys;
 pub mod channel;
+pub mod channel_safe_image;
 pub mod concurrency;
 pub mod connection;
 pub mod contact_filter_value_format;

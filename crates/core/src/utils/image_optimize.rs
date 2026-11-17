@@ -72,7 +72,7 @@ fn is_animated_webp(bytes: &[u8]) -> bool {
 }
 
 /// A JPEG's pixels through `jpeg-decoder` (RGB, grayscale or CMYK).
-fn decode_jpeg(bytes: &[u8]) -> Result<DynamicImage, String> {
+pub(crate) fn decode_jpeg(bytes: &[u8]) -> Result<DynamicImage, String> {
     let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(bytes));
     let pixels = decoder.decode().map_err(|e| e.to_string())?;
     let info = decoder.info().ok_or("missing JPEG header")?;
@@ -112,7 +112,7 @@ fn resize_inside(image: DynamicImage, max: u32) -> DynamicImage {
     image.resize(max, max, image::imageops::FilterType::Lanczos3)
 }
 
-fn encode_jpeg(image: &DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_jpeg(image: &DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
     let rgb = image.to_rgb8();
     let mut out = Vec::new();
     let mut encoder = jpeg_encoder::Encoder::new(&mut out, quality);
