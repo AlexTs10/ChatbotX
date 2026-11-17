@@ -3,8 +3,9 @@
 
 use chatbotx_core::js::to_iso_string;
 use chatbotx_db::Db;
+use chatbotx_db::repo::Model as _;
 use chatbotx_db::repo::broadcast::load_relations;
-use chatbotx_db::repo::models::Broadcast;
+use chatbotx_db::repo::models::{Broadcast, ContactInbox};
 use chatbotx_db::repo::partials::broadcast::{
     BroadcastAudienceRange, CappedCount, clamp_audience_count_to_range,
     clamp_capped_audience_count, requires_recent_interaction_window, resolve_audience_page_window,
@@ -305,4 +306,81 @@ fn escape_like(text: &str) -> String {
     text.replace('\\', "\\\\")
         .replace('%', "\\%")
         .replace('_', "\\_")
+}
+
+/// `DEFAULT_CHUNK_SIZE` of `forEachAudienceChunk`.
+pub const AUDIENCE_CHUNK_SIZE: i64 = 1000;
+
+/// `forEachAudienceChunk` as a cursor: each [`AudienceWalk::next_chunk`]
+/// is the next page of the reachable contact inboxes in `ContactInbox.id`
+/// order, inside the position window; empty = done.
+// ponytail: one keyset query with the contact filter in SQL; the original's
+// separate filtered scan (5000-row pages matched by `findIdsMatchingFilter`)
+// is a Postgres speed path with the same rows.
+pub struct AudienceWalk {
+    input: AudienceInput,
+    inbox_ids: Vec<i64>,
+    chunk_size: i64,
+    last_id: Option<i64>,
+    offset: i64,
+    remaining: Option<i64>,
+}
+
+/// Starts an [`AudienceWalk`] (`chunk_size` `None` = [`AUDIENCE_CHUNK_SIZE`]).
+pub async fn audience_walk(
+    db: &Db,
+    input: AudienceInput,
+    chunk_size: Option<i64>,
+) -> Result<AudienceWalk> {
+    let inbox_ids = resolve_inbox_ids(db, &input).await?;
+    let range = input.audience_range;
+    Ok(AudienceWalk {
+        inbox_ids,
+        chunk_size: chunk_size.unwrap_or(AUDIENCE_CHUNK_SIZE).max(1),
+        last_id: None,
+        offset: range.map_or(0, |r| r.offset),
+        remaining: range.and_then(|r| r.size),
+        input,
+    })
+}
+
+impl AudienceWalk {
+    /// The next chunk; empty once the audience or the window is exhausted.
+    pub async fn next_chunk(&mut self, db: &Db) -> Result<Vec<ContactInbox>> {
+        let limit = match self.remaining {
+            Some(remaining) => self.chunk_size.min(remaining),
+            None => self.chunk_size,
+        };
+        if self.inbox_ids.is_empty() || limit <= 0 {
+            return Ok(Vec::new());
+        }
+        let mut sql = Sql::raw(format!("{} WHERE ", ContactInbox::select_sql()));
+        sql.append(Sql::and([
+            Some(audience_where(
+                &self.inbox_ids,
+                &self.input,
+                DmJoin::None,
+                now_ms(),
+            )),
+            self.last_id
+                .map(|id| Sql::new(r#""ContactInbox"."id" > ?"#, vec![SqlValue::Integer(id)])),
+        ]));
+        sql.append(Sql::new(
+            r#" ORDER BY "ContactInbox"."id" ASC LIMIT ? OFFSET ?"#,
+            vec![SqlValue::Integer(limit), SqlValue::Integer(self.offset)],
+        ));
+        let rows = tx::read(db, move |conn| {
+            Ok(sql.query_map(conn, ContactInbox::from_row)?)
+        })
+        .await?;
+        self.offset = 0;
+        self.last_id = rows.last().map(|row| row.id).or(self.last_id);
+        if let Some(remaining) = self.remaining.as_mut() {
+            *remaining -= rows.len() as i64;
+        }
+        if (rows.len() as i64) < limit {
+            self.remaining = Some(0);
+        }
+        Ok(rows)
+    }
 }

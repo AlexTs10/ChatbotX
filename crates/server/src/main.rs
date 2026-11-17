@@ -330,7 +330,8 @@ fn app_url() -> String {
 
 type Exited = tokio::sync::watch::Receiver<Option<i32>>;
 
-/// Starts the `chat`, `integration` and `default` workers (Q.W1). The
+/// Starts the `chat`, `integration`, `default` and `schedule` workers (Q.W1,
+/// Q.D5 broadcast jobs) and registers the broadcast schedulers. The
 /// shutdown coordinator drains them on SIGINT / SIGTERM
 /// (`WORKER_SHUTDOWN_TIMEOUT_MS`); its exit call resolves `Exited`.
 fn start_workers(
@@ -369,6 +370,8 @@ fn start_workers(
         .map(Arc::new),
     };
     chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
+    let store = Arc::clone(jobs);
+    tokio::spawn(async move { chatbotx_worker::schedule::register_schedules(&*store).await });
     Ok((shutdown, exited))
 }
 

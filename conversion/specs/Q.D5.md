@@ -15,7 +15,8 @@ Q.W1 runtime (`crates/worker`, `specs/Q.W1.md`).
 | 3 | Triggers | `trigger.rs` (CRUD, 50 quota, conditions, settings), `automation_action.rs` (action reference check) | `triggers.*` (zod port schemas in `handlers/triggers.rs`) | create / delete / update / updateSettings actions | done |
 | 4 | Broadcasts (business + routes) | `broadcast/` (`mod` reads + transitions, `write` create / draft / schedule / clone / resend, `audience` count / preview / calendar, `recurrence` arm / disarm / ledger / preview, `plan_policy`), `template_params.rs` | `broadcasts.*` except `listContacts` and the 4 recurrence-history routes | `privatePreviewBroadcastRecurrenceAPI`, `privateListBroadcastOptionsAPI`, `privateListBroadcastTemplateDetailsAPI`; 11 actions (all but `setBroadcastRunSkippedAction`) | done |
 | 4b | Broadcast recurrence history | `broadcast/history.rs` (skip / restore, run groups, occurrences, recipient stats) | `skipOccurrence`, `restoreOccurrence`, `listRunGroups`, `listOccurrences` | `privateListBroadcastRunGroupsAPI`, `privateListBroadcastOccurrencesAPI`, `setBroadcastRunSkippedAction` | done |
-| 5 | Broadcast worker jobs | | | | todo |
+| 5a | Broadcast worker jobs: enqueue, prepare, send, reconcile, finalize, purge, draft purge | `broadcast/send.rs`, `broadcast/audience.rs` (`AudienceWalk`); `crates/worker/src/schedule` (`schedule` queue worker, broadcast schedulers) | worker part of `broadcast/service.ts` | — | done |
+| 5b | Recurring broadcast jobs: `enqueueRecurringBroadcasts`, `materializeRecurringBroadcasts` (`materializeOccurrence`, `skipOccurrence`) | | | | todo |
 | 6 | Sequence scheduler in the worker (producer / consumer / reconcile, step executor) | | | | todo |
 | 7 | Smart delay | | | | todo |
 | 8 | Trigger worker | | | | todo |
@@ -61,8 +62,15 @@ Per test case: `specs/Q.D5-test-map.tsv` (file, line, name, Rust test, status, n
 - Audience preview avatar: resolved against the row's own contact inbox.
 - An invalid path id on `/api/v1` answers 422 `invalidRequestData` (the TS
   tests check only that the schema rejects it).
+- Broadcast worker jobs (slice 5a): the `schedule` queue worker starts with
+  the broadcast jobs and registers only their schedulers; other schedule
+  jobs fail unrecoverable until Q.W2. Cron locks are process-local mutexes
+  (per database); the dispatch-window lease is the durable kv CAS. Hand-off
+  and purge run one at a time. `isBlockedWorkspace` = the workspace row
+  is gone or scheduled for deletion (cloud `ownerBlocked` waits for the
+  user-quota port). The chat template send handlers are Q.I1.
 
 ## 4. State
 
-Slices 1–3 done (`641f599f2`). Slice 4 done. Gate per commit: fmt, clippy `-D warnings`, `cargo test`
-for `chatbotx-business`, `chatbotx-api`, `chatbotx-jobs` (Dell).
+Slices 1–3 done (`641f599f2`). Slice 4 done (`8b3cfe662`), 4b done (`e67dd7857`), 5a done. Gate per commit: fmt, clippy `-D warnings`, `cargo test`
+for `chatbotx-business`, `chatbotx-api`, `chatbotx-jobs`, `chatbotx-worker` (Dell).

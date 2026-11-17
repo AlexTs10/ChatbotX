@@ -13,6 +13,7 @@ pub mod default_queue;
 pub mod flow;
 pub mod integration;
 pub mod meta_catalog;
+pub mod schedule;
 pub mod send_flow_step;
 pub mod variables;
 
@@ -138,7 +139,7 @@ fn handler(deps: &Deps, run: QueueHandler) -> Handler {
     Arc::new(move |job| run(deps.clone(), job))
 }
 
-/// Starts the `chat`, `integration` and `default` workers (`runWorker` +
+/// Starts the `chat`, `integration`, `default` and `schedule` workers (`runWorker` +
 /// `createQueueWorker`) with the original concurrency envs.
 pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     let specs = chatbotx_jobs::runtime::worker_specs();
@@ -164,6 +165,10 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     runtime.spawn_worker(
         spec_of(QueueName::Default),
         handler(deps, |deps, job| Box::pin(default_queue::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::Schedule),
+        handler(deps, |deps, job| Box::pin(schedule::handle(deps, job))),
     )?;
     Ok(())
 }

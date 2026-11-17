@@ -1295,7 +1295,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/document-reader-ensure-stored.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/drip-handler.test.ts` | C | tbd | todo | Drip integration |
 | `apps/worker/__tests__/enqueue-attachment-downloads.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
-| `apps/worker/__tests__/enqueue-broadcast.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/enqueue-broadcast.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/enqueue-recurring-broadcasts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `apps/worker/__tests__/evaluate-conversion-trigger.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `apps/worker/__tests__/evaluate-template-sent.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
@@ -1315,7 +1315,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/facebook-custom-audience-handler.test.ts` | C | tbd | todo | Facebook Ads integration |
 | `apps/worker/__tests__/facebook-custom-audience-step-registration.test.ts` | C | tbd | todo | Facebook Ads integration |
 | `apps/worker/__tests__/fan-out-template-update.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `apps/worker/__tests__/finalize-broadcasts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/finalize-broadcasts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/find-places-near-me-step.test.ts` | C | tbd | todo | Places near me |
 | `apps/worker/__tests__/flow-action-sanitize.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/flow-continuation-priority.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
@@ -1411,9 +1411,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/poll-ref.test.ts` | C | tbd | todo | Polls |
 | `apps/worker/__tests__/poll-sentinel-flow-analytics.test.ts` | C | tbd | todo | Polls |
 | `apps/worker/__tests__/poll-tap.test.ts` | C | tbd | todo | Polls |
-| `apps/worker/__tests__/prepare-broadcast.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/prepare-broadcast.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/process-ai-file.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
-| `apps/worker/__tests__/process-broadcast-contacts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/process-broadcast-contacts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/process-conversation-source-ensure-stored.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/process-inbound-webhook-request.test.ts` | C | tbd | todo | Inbound webhooks |
 | `apps/worker/__tests__/process-pending-embeddings.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
@@ -1424,8 +1424,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/provider-rate-limiter.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/prune-sourcemaps.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/purge-automation-throttle.test.ts` | C | tbd | todo | Automated responses and keywords |
-| `apps/worker/__tests__/purge-broadcasts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `apps/worker/__tests__/purge-draft-broadcast-recipients.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/purge-broadcasts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
+| `apps/worker/__tests__/purge-draft-broadcast-recipients.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/purge-error-logs.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/purge-expired-connect-sessions.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `apps/worker/__tests__/purge-expired-contact-exports.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -1438,7 +1438,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/quick-reply-settings.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/read-receipts.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `apps/worker/__tests__/received-message.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `apps/worker/__tests__/reconcile-broadcasts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/reconcile-broadcasts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/reconcile-tenants.test.ts` | C | tbd | todo | Workspaces |
 | `apps/worker/__tests__/reconcile.test.ts` | C | `crates/jobs/tests/reconcile.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/record-provider-error-log.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |

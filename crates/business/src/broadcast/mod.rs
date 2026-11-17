@@ -5,6 +5,7 @@ pub mod audience;
 pub mod history;
 pub mod plan_policy;
 pub mod recurrence;
+pub mod send;
 pub mod write;
 
 use chatbotx_core::js::to_iso_string;
