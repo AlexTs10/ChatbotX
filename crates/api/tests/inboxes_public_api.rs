@@ -48,7 +48,12 @@ async fn updates_mark_read_on_outbound_in_the_tokens_workspace() {
         out,
         json!({ "id": "5", "name": "Shop", "channel": "messenger", "status": "connected", "sourceId": "page-1", "markReadOnOutbound": true })
     );
-    let stored = scalar(&fx, r#"SELECT "markReadOnOutbound" FROM "Inbox" WHERE "id" = ?1"#, 5).await;
+    let stored = scalar(
+        &fx,
+        r#"SELECT "markReadOnOutbound" FROM "Inbox" WHERE "id" = ?1"#,
+        5,
+    )
+    .await;
     assert_eq!(stored, Some(json!(1)));
     // Another workspace cannot change it.
     let (status, _) = call(
@@ -67,8 +72,19 @@ async fn updates_mark_read_on_outbound_in_the_tokens_workspace() {
 async fn with_no_field_it_returns_the_inbox_unchanged_and_writes_nothing() {
     let fx = seeded().await;
     let before = scalar(&fx, r#"SELECT "updatedAt" FROM "Inbox" WHERE "id" = ?1"#, 5).await;
-    let (status, out) = call(&fx, "inboxes.update", WS, &[("id", "5")], None, Some(json!({}))).await;
-    assert_eq!((status, out["markReadOnOutbound"].clone()), (200, json!(false)));
+    let (status, out) = call(
+        &fx,
+        "inboxes.update",
+        WS,
+        &[("id", "5")],
+        None,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(
+        (status, out["markReadOnOutbound"].clone()),
+        (200, json!(false))
+    );
     let after = scalar(&fx, r#"SELECT "updatedAt" FROM "Inbox" WHERE "id" = ?1"#, 5).await;
     assert_eq!(before, after);
 }
@@ -76,7 +92,15 @@ async fn with_no_field_it_returns_the_inbox_unchanged_and_writes_nothing() {
 #[tokio::test]
 async fn a_missing_inbox_is_a_404() {
     let fx = seeded().await;
-    let (status, out) = call(&fx, "inboxes.update", WS, &[("id", "404")], None, Some(json!({}))).await;
+    let (status, out) = call(
+        &fx,
+        "inboxes.update",
+        WS,
+        &[("id", "404")],
+        None,
+        Some(json!({})),
+    )
+    .await;
     assert_eq!(status, 404);
     assert_eq!(out["message"], json!("Inbox not found"));
     let (status, _) = call(&fx, "inboxes.update", WS, &[("id", "x")], None, None).await;
@@ -94,14 +118,30 @@ async fn the_public_inbox_resource_exposes_the_setting() {
 #[tokio::test]
 async fn list_includes_connected_inboxes_and_excludes_disconnected_inboxes() {
     let fx = seeded().await;
-    let (status, out) = call(&fx, "inboxes.list", WS, &[], Some("includes[]=integration"), None).await;
+    let (status, out) = call(
+        &fx,
+        "inboxes.list",
+        WS,
+        &[],
+        Some("includes[]=integration"),
+        None,
+    )
+    .await;
     assert_eq!(status, 200, "{out}");
-    let ids: Vec<_> = out["data"].as_array().unwrap().iter().map(|i| i["id"].clone()).collect();
+    let ids: Vec<_> = out["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].clone())
+        .collect();
     assert_eq!(ids, vec![json!("5"), json!("7")]);
     // `ceil(2 / (perPage ?? 10))`.
     assert_eq!(out["pageCount"], json!(1));
     let (_, page2) = call(&fx, "inboxes.list", WS, &[], Some("page=2&perPage=1"), None).await;
-    assert_eq!((page2["data"][0]["id"].clone(), page2["pageCount"].clone()), (json!("7"), json!(2)));
+    assert_eq!(
+        (page2["data"][0]["id"].clone(), page2["pageCount"].clone()),
+        (json!("7"), json!(2))
+    );
     let (status, _) = call(&fx, "inboxes.list", WS, &[], Some("perPage=0"), None).await;
     assert_eq!(status, 422);
     let (status, _) = call(&fx, "inboxes.list", WS, &[], Some("includes[]=tags"), None).await;

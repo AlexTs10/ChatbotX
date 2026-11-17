@@ -57,8 +57,10 @@ pub async fn find_by_id_or_fail(db: &Db, workspace_id: i64, id: i64) -> Result<I
             r#"SELECT {} FROM "Inbox" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
             Inbox::columns_sql(None)
         );
-        Ok(c.query_row(&sql, params![id, workspace_id], Inbox::from_row)
-            .optional()?)
+        Ok(
+            c.query_row(&sql, params![id, workspace_id], Inbox::from_row)
+                .optional()?,
+        )
     })
     .await?
     .ok_or_else(not_found)

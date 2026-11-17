@@ -2,8 +2,8 @@
 //! (`WorkspaceApiToken`, `Workspace`), the in-memory rate counters of `crates/kv`.
 //!
 //! The quota services are the business port (P3.6+); until then the owner is
-//! never blocked. Mobile access tokens (P3.5e) and MCP OAuth tokens (P3.5e)
-//! are refused as invalid tokens.
+//! never blocked. MCP OAuth tokens are verified (Q.A1); mobile access tokens
+//! are refused as invalid tokens until their member filters are in place.
 
 use std::sync::Arc;
 
@@ -28,6 +28,10 @@ pub struct LiveAuthDeps {
     pub db: Arc<Db>,
     pub kv: Arc<Kv>,
     pub clock: Arc<dyn Clock>,
+    /// better-auth `baseURL` (`<BETTER_AUTH_URL>/api/auth`): the MCP token issuer.
+    pub auth_base_url: String,
+    /// The MCP resource URL (the MCP token audience).
+    pub mcp_resource_url: String,
     /// `isCloud()` (`CHATBOTX_DEPLOYMENT=cloud`).
     pub is_cloud: bool,
 }
@@ -120,8 +124,31 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
         &self,
         bearer_token: &str,
     ) -> Result<Option<McpAccessToken>, McpTokenVerificationUnavailable> {
-        let _ = bearer_token;
-        Ok(None)
+        let verifier = crate::session::DbJwtVerifier {
+            db: &self.db,
+            now_ms: self.clock.now_ms(),
+        };
+        match crate::session::verify_mcp_access_token(
+            &verifier,
+            &self.auth_base_url,
+            &self.mcp_resource_url,
+            bearer_token,
+        )
+        .await
+        {
+            Ok(subject) => Ok(subject.map(|s| McpAccessToken {
+                client_id: s.client_id,
+                user_id: s.user_id,
+            })),
+            Err(crate::session::TokenVerifyError::Unavailable) => {
+                Err(McpTokenVerificationUnavailable)
+            }
+            // A rethrown verifier error: the token is not accepted.
+            Err(crate::session::TokenVerifyError::Rethrown(error)) => {
+                tracing::error!(error = ?error, "MCP access token verification failed");
+                Err(McpTokenVerificationUnavailable)
+            }
+        }
     }
 
     async fn resolve_oauth_principal(
@@ -130,8 +157,49 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
         user_id: &str,
         workspace_id: Option<&str>,
     ) -> OAuthPrincipalResolution {
-        let _ = (client_id, user_id, workspace_id);
-        OAuthPrincipalResolution::InvalidToken
+        use chatbotx_business::mcp_oauth::{Resolution, resolve_principal};
+        let Ok(user_id) = user_id.parse::<i64>() else {
+            return OAuthPrincipalResolution::InvalidToken;
+        };
+        let workspace_id = match workspace_id.map(str::parse::<i64>) {
+            None => None,
+            Some(Ok(id)) => Some(id),
+            // A non-numeric workspace id is no workspace of the grant.
+            Some(Err(_)) => return OAuthPrincipalResolution::Forbidden,
+        };
+        match resolve_principal(&self.db, client_id, user_id, workspace_id).await {
+            Ok(Resolution::Principal {
+                workspace,
+                user_id,
+                client_id,
+            }) => OAuthPrincipalResolution::Principal {
+                workspace: AuthWorkspace {
+                    id: workspace.id.to_string(),
+                    name: workspace.name,
+                    owner_id: workspace.owner_id.to_string(),
+                    scheduled_deletion_at: workspace.scheduled_deletion_at,
+                },
+                user_id: user_id.to_string(),
+                client_id,
+            },
+            Ok(Resolution::InvalidToken) => OAuthPrincipalResolution::InvalidToken,
+            Ok(Resolution::Forbidden) => OAuthPrincipalResolution::Forbidden,
+            Ok(Resolution::WorkspaceSelectionRequired(choices)) => {
+                OAuthPrincipalResolution::WorkspaceSelectionRequired(
+                    choices
+                        .into_iter()
+                        .map(|(id, name)| super::WorkspaceChoice {
+                            id: id.to_string(),
+                            name,
+                        })
+                        .collect(),
+                )
+            }
+            Err(error) => {
+                tracing::error!(error = %error.message(), "MCP OAuth principal lookup failed");
+                OAuthPrincipalResolution::InvalidToken
+            }
+        }
     }
 
     fn now_ms(&self) -> i64 {

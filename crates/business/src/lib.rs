@@ -54,6 +54,7 @@ pub mod invitation;
 pub mod keys;
 pub mod keyword_match;
 pub mod license;
+pub mod mcp_oauth;
 pub mod media_library;
 pub mod message;
 pub mod message_actions;

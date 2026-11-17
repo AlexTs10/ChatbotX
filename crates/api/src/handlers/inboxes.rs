@@ -31,18 +31,24 @@ pub fn inbox_json(inbox: &Inbox) -> Value {
 fn list_input(call: &Call<'_>) -> Result<(Option<i64>, Option<i64>), crate::orpc::OrpcError> {
     let mut input = bracket_query(call.params, call.query);
     if input.has("includes") {
-        array(&mut input, "includes", 0, usize::MAX, |input, path, value| {
-            if value.as_str() == Some("integration") {
-                Some(())
-            } else {
-                input.issue(
-                    path,
-                    "invalid_value",
-                    "Invalid input: expected \"integration\"",
-                );
-                None
-            }
-        });
+        array(
+            &mut input,
+            "includes",
+            0,
+            usize::MAX,
+            |input, path, value| {
+                if value.as_str() == Some("integration") {
+                    Some(())
+                } else {
+                    input.issue(
+                        path,
+                        "invalid_value",
+                        "Invalid input: expected \"integration\"",
+                    );
+                    None
+                }
+            },
+        );
     }
     let min1 = Num {
         min: Some(1.0),
