@@ -272,3 +272,81 @@ pub async fn list_active_domains(db: &Db) -> Result<Vec<String>> {
     })
     .await
 }
+
+/// `resolveTenantByDomain` (`@chatbotx.io/auth/tenant`): the tenant of an
+/// active custom domain whose tenant is active; otherwise the root tenant.
+pub async fn resolve_tenant_by_domain(db: &Db, domain: &str) -> Result<i64> {
+    if domain.is_empty() {
+        return Ok(ROOT_TENANT_ID);
+    }
+    let Some(custom) = find_active_domain(db, domain).await? else {
+        return Ok(ROOT_TENANT_ID);
+    };
+    Ok(match find_by_id(db, custom.tenant_id).await? {
+        Some(tenant) if tenant.status == "active" => custom.tenant_id,
+        _ => ROOT_TENANT_ID,
+    })
+}
+
+/// `resolveTenantOwnerId`: `None` for the root tenant or an unknown tenant.
+pub async fn resolve_tenant_owner_id(db: &Db, tenant_id: i64) -> Result<Option<i64>> {
+    if tenant_id == ROOT_TENANT_ID {
+        return Ok(None);
+    }
+    Ok(find_by_id(db, tenant_id).await?.and_then(|t| t.owner_id))
+}
+
+/// `resolveCredentialOwnerIdForWorkspace` (`google-ads/owner.ts`): the
+/// tenant owner of a reseller workspace, else the workspace owner.
+/// `loaded` is `(ownerId, tenantId)` of an already-read workspace.
+pub async fn resolve_credential_owner_id_for_workspace(
+    db: &Db,
+    workspace_id: i64,
+    loaded: Option<(i64, i64)>,
+) -> Result<i64> {
+    let (owner_id, tenant_id) = match loaded {
+        Some(workspace) => workspace,
+        None => {
+            let workspace = crate::workspace::find_by_id(db, workspace_id).await?;
+            (workspace.owner_id, workspace.tenant_id)
+        }
+    };
+    if tenant_id != ROOT_TENANT_ID
+        && let Some(owner) = find_by_id(db, tenant_id).await?.and_then(|t| t.owner_id)
+    {
+        return Ok(owner);
+    }
+    Ok(owner_id)
+}
+
+/// `resolvePlatformOwnerId` (`apps/builder/src/lib/platform-credential-owner.ts`):
+/// whose platform credentials a channel connect uses. The host (`x-domain`)
+/// wins over the workspace; non-cloud editions always use the current user.
+pub async fn resolve_platform_owner_id(
+    db: &Db,
+    edition: crate::keys::Edition,
+    domain: &str,
+    user_id: i64,
+    workspace_id: Option<i64>,
+) -> Result<i64> {
+    if !edition.is_cloud() {
+        return Ok(user_id);
+    }
+    let domain_tenant = resolve_tenant_by_domain(db, domain).await?;
+    if domain_tenant != ROOT_TENANT_ID {
+        return Ok(resolve_tenant_owner_id(db, domain_tenant)
+            .await?
+            .unwrap_or(user_id));
+    }
+    if let Some(id) = workspace_id
+        && let Some(workspace) = tx::read(db, move |c| Ok(crate::workspace::find(c, id)?)).await?
+    {
+        return resolve_credential_owner_id_for_workspace(
+            db,
+            id,
+            Some((workspace.owner_id, workspace.tenant_id)),
+        )
+        .await;
+    }
+    Ok(user_id)
+}

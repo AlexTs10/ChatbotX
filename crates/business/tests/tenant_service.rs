@@ -4,6 +4,7 @@
 
 mod common;
 
+use chatbotx_business::keys::Edition;
 use chatbotx_business::tenant::{self, ROOT_TENANT_ID, Reconciled};
 use chatbotx_db::DbError;
 use chatbotx_db::rusqlite::Connection;
@@ -280,4 +281,138 @@ async fn custom_domain_reads_only_active_rows() {
         tenant::find_domains_by_tenant(&db, 8).await.unwrap().len(),
         1
     );
+}
+
+const RESELLER: i64 = 21;
+const SUB_ACCOUNT: i64 = 31;
+const USER: i64 = 41;
+
+/// Tenant 42 (owner RESELLER) on `reseller.example.com`; workspace 5 of
+/// SUB_ACCOUNT in tenant 42; workspace 6 of SUB_ACCOUNT in the root tenant.
+async fn reseller_db(tenant_status: &'static str) -> common::TestDb {
+    let db = fresh_db().await;
+    setup(&db, move |tx| {
+        for id in [RESELLER, USER] {
+            user(tx, id)?;
+        }
+        tenant_row(tx, 42, RESELLER, tenant_status, "[]")?;
+        tx.execute(
+            r#"INSERT INTO "CustomDomain" ("id", "tenantId", "domain", "status") VALUES (1, 42, 'reseller.example.com', 'active')"#,
+            [],
+        )?;
+        common::workspace(tx, SUB_ACCOUNT, 5)?;
+        tx.execute(r#"UPDATE "Workspace" SET "tenantId" = 42 WHERE "id" = 5"#, [])?;
+        tx.execute(
+            r#"INSERT INTO "Workspace" ("id", "name", "ownerId") VALUES (6, 'Root', ?1)"#,
+            [SUB_ACCOUNT],
+        )?;
+        Ok(())
+    })
+    .await;
+    db
+}
+
+/// `platform-credential-owner.test.ts` "non-cloud editions always use the
+/// current user, without consulting the host".
+#[tokio::test]
+async fn platform_owner_is_the_current_user_off_cloud() {
+    let db = reseller_db("active").await;
+    for edition in [Edition::Community, Edition::Enterprise] {
+        let owner =
+            tenant::resolve_platform_owner_id(&db, edition, "reseller.example.com", USER, Some(5))
+                .await
+                .unwrap();
+        assert_eq!(owner, USER);
+    }
+}
+
+/// "an active white-label domain resolves to that tenant's owner (case 1)" /
+/// "the white-label host wins even when workspaceId resolves to a different
+/// owner" / "falls back to the current user when the resolved tenant has no
+/// owner (suspended tenant)".
+#[tokio::test]
+async fn platform_owner_the_white_label_host_wins() {
+    let db = reseller_db("active").await;
+    let host = "reseller.example.com";
+    assert_eq!(
+        tenant::resolve_tenant_by_domain(&db, host).await.unwrap(),
+        42
+    );
+    for workspace in [None, Some(6)] {
+        let owner = tenant::resolve_platform_owner_id(&db, Edition::Cloud, host, USER, workspace)
+            .await
+            .unwrap();
+        assert_eq!(owner, RESELLER);
+    }
+    // A tenant with no owner: the current user.
+    setup(&db, |tx| {
+        tx.execute(
+            r#"UPDATE "Tenant" SET "ownerId" = NULL WHERE "id" = 42"#,
+            [],
+        )?;
+        Ok(())
+    })
+    .await;
+    let owner = tenant::resolve_platform_owner_id(&db, Edition::Cloud, host, USER, None)
+        .await
+        .unwrap();
+    assert_eq!(owner, USER);
+    // A suspended tenant: the host resolves to the root tenant.
+    let db = reseller_db("suspended").await;
+    assert_eq!(
+        tenant::resolve_tenant_by_domain(&db, host).await.unwrap(),
+        ROOT_TENANT_ID
+    );
+    let owner = tenant::resolve_platform_owner_id(&db, Edition::Cloud, host, USER, None)
+        .await
+        .unwrap();
+    assert_eq!(owner, USER);
+}
+
+/// "platform host with a known workspace resolves via the business
+/// tenant-owner helper" / "platform host, workspace not found, …" /
+/// "platform host, no workspaceId, …" / "an empty-string workspaceId is
+/// treated as absent" / "a missing x-domain header resolves to the root
+/// tenant".
+#[tokio::test]
+async fn platform_owner_on_the_platform_host_uses_the_workspace() {
+    let db = reseller_db("active").await;
+    assert_eq!(
+        tenant::resolve_tenant_by_domain(&db, "").await.unwrap(),
+        ROOT_TENANT_ID
+    );
+    let resolve = |workspace: Option<i64>| {
+        tenant::resolve_platform_owner_id(&db, Edition::Cloud, "", SUB_ACCOUNT, workspace)
+    };
+    // Reseller workspace: the tenant owner. Root workspace: its owner.
+    assert_eq!(resolve(Some(5)).await.unwrap(), RESELLER);
+    assert_eq!(resolve(Some(6)).await.unwrap(), SUB_ACCOUNT);
+    // Unknown workspace / no workspace ("" maps to None in the caller): the
+    // current user.
+    let owner = tenant::resolve_platform_owner_id(&db, Edition::Cloud, "", USER, Some(999))
+        .await
+        .unwrap();
+    assert_eq!(owner, USER);
+    let owner = tenant::resolve_platform_owner_id(&db, Edition::Cloud, "", USER, None)
+        .await
+        .unwrap();
+    assert_eq!(owner, USER);
+}
+
+/// `resolveOwnerForWorkspace` "delegates to the business workspace owner
+/// resolver" (`resolveCredentialOwnerIdForWorkspace` with a loaded workspace;
+/// a missing workspace is 404).
+#[tokio::test]
+async fn credential_owner_for_workspace() {
+    let db = reseller_db("active").await;
+    let owner = tenant::resolve_credential_owner_id_for_workspace(&db, 5, Some((SUB_ACCOUNT, 42)))
+        .await
+        .unwrap();
+    assert_eq!(owner, RESELLER);
+    let owner = tenant::resolve_credential_owner_id_for_workspace(&db, 6, None)
+        .await
+        .unwrap();
+    assert_eq!(owner, SUB_ACCOUNT);
+    let missing = tenant::resolve_credential_owner_id_for_workspace(&db, 999, None).await;
+    assert!(missing.is_err());
 }
