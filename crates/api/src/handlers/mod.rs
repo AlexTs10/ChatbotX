@@ -41,11 +41,14 @@ pub mod flows;
 pub mod folders;
 pub mod inbound_webhooks;
 pub mod inbox_teams;
+pub mod inboxes;
 pub mod input;
 pub mod integrations_ai;
 pub mod keywords;
 pub mod magic_links;
+pub mod me;
 pub mod media_library;
+pub mod member_scope;
 pub mod messages;
 pub mod messenger_menus;
 pub mod messenger_templates;
@@ -127,6 +130,8 @@ pub struct ApiState {
     /// The query embedding client (`aiFiles.search`); the provider APIs by
     /// default.
     pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
+    /// The auth state (`POST /v1/me/password`); `None` = off (tests).
+    pub sessions: Option<Arc<crate::session::AuthState>>,
 }
 
 impl ApiState {
@@ -148,6 +153,7 @@ impl ApiState {
             license_token: std::env::var("LICENSE_KEY").ok(),
             license_keys: chatbotx_business::license::LICENSE_PUBLIC_KEYS,
             embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
+            sessions: None,
         }
     }
 
@@ -329,6 +335,14 @@ tokio::task_local! {
     /// The signed-in member of a `/rpc` call that runs a public route
     /// ([`dispatch_as_member`]).
     static MEMBER: Option<Member>;
+    /// The mobile member of the running [`dispatch_as`] (Q.A1 §3).
+    static MOBILE: Option<Arc<crate::auth::MobileMember>>;
+}
+
+/// `context.member` of a mobile principal; `None` for a workspace token,
+/// MCP OAuth or a `/rpc` member call.
+pub fn mobile_member() -> Option<Arc<crate::auth::MobileMember>> {
+    MOBILE.try_with(Clone::clone).ok().flatten()
 }
 
 /// A workspace member calling a public route through `/rpc` (P4): the
@@ -381,6 +395,8 @@ pub struct Principal {
     pub scopes: Option<Vec<String>>,
     /// `context.apiToken.permission === "read_only"` (default: a `full` token).
     pub read_only: bool,
+    /// `context.member` of a mobile principal (Q.A1 §3); `None` for a token.
+    pub mobile: Option<Arc<crate::auth::MobileMember>>,
 }
 
 /// A handler outcome.
@@ -545,8 +561,23 @@ pub async fn dispatch_as(
     call: Call<'_>,
     principal: &Principal,
 ) -> Option<Response> {
-    TOKEN_ID
-        .scope(principal.token_id, route(state, route_id, call, principal))
+    // Fail closed: a mobile principal only reaches the allowlisted routes
+    // (also checked before the member lookup, `resolve_mobile_principal`).
+    if principal.mobile.is_some() && !crate::auth::is_mobile_member_route_id(route_id) {
+        return Some(
+            OrpcError::new(
+                "FORBIDDEN",
+                None,
+                Some("This operation is not available to mobile sessions"),
+            )
+            .into_response(),
+        );
+    }
+    MOBILE
+        .scope(
+            principal.mobile.clone(),
+            TOKEN_ID.scope(principal.token_id, route(state, route_id, call, principal)),
+        )
         .await
 }
 
@@ -670,6 +701,8 @@ async fn route(
         workspace_settings::handle(state, route_id, call).await
     } else if error_logs::ROUTES.contains(&route_id) {
         error_logs::handle(state, route_id, call).await
+    } else if inboxes::ROUTES.contains(&route_id) {
+        inboxes::handle(state, route_id, call).await
     } else if inbox_teams::ROUTES.contains(&route_id) {
         inbox_teams::handle(state, route_id, call).await
     } else if capabilities::ROUTES.contains(&route_id) {
