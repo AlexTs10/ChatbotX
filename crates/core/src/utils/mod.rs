@@ -24,6 +24,7 @@ pub mod graph_error;
 pub mod graph_pagination;
 pub mod has_link;
 pub mod id;
+pub mod channel_safe_image;
 pub mod image_optimize;
 pub mod image_optimize_settings;
 pub mod inbound_webhook_channel;

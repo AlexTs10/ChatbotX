@@ -16,6 +16,8 @@ chatbotx-files = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
+# Heavy steps: provider image / audio payloads (`b64_json`, `data:` URLs).
+base64 = "0.22"
 bytes = { workspace = true }
 # Smart-delay job ids and the on-shift check (working-hours zone).
 chrono = { workspace = true, features = ["std"] }
@@ -29,6 +31,8 @@ mail-parser = "0.11"
 pdf-extract = "0.12"
 # Meta catalog: the error sanitizer and the remote product URLs.
 regex = { workspace = true }
+# Heavy steps: the outcome record.
+serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tracing = { workspace = true }
