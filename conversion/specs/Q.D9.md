@@ -15,10 +15,10 @@ Branch `feat/conversion-d9` (from `conversion` at `e2d16a491`). Sources:
 | 3 | Public `/v1` routes | `crates/api/src/handlers/appointments.rs`: all 17 `appointmentCalendars.*`, `appointmentExternalCalendars.*`, `appointmentReminders.list`, `appointments.*` routes | done |
 | 4 | `/rpc` | `crates/api/src/rpc_procedures/appointments.rs`: `appointmentCalendarsAPI.{listAppointmentCalendarsForFlowAPI,getContactAvailabilityAPI}`, `appointmentsAPI.listContactAppointmentsAPI`; 11 actions (calendar create / delete / duplicate / rename / active / update, book, cancel, delete, inbox booking link, Google disconnect) | done |
 | 5 | Worker | `crates/worker/src/appointment.rs`: `sendAppointmentReminder`, `syncExternalCalendarEvent` (default queue), `scanAppointmentReminders` cron; `steps/appointment.rs`: the `appointmentScheduling` step (5 modes); the appointment cancel postback in `inbound.rs`; the appointment `{{variables}}` sources in `variables.rs` | done |
-| 6 | Google OAuth connect (`connectGoogleCalendarAction`, callback), `updateGoogleCalendarIdAction` | - | left |
-| 7 | Booking webview pages (`/booking/{slug,picker,range-picker,schedule,cancel}` + their 3 submit actions) | business functions done (`complete_webview_booking`, `cancel_by_token`, `schedule_detail`); pages / public actions not ported (no public page in the SPA yet) | left |
+| 6 | Google OAuth connect (`connectGoogleCalendarAction`, `connectGoogleSheets`, callback), `updateGoogleCalendarIdAction` | `crates/business/src/google_oauth.rs` (connect session bound to user + workspace, code exchange, encrypted auth), `connect_callback.rs` Google branch | done (Sheets settings page UI left) |
+| 7 | Booking webview pages (`/booking/{slug,picker,range-picker,schedule,cancel}` + their 3 submit actions) | `crates/api/src/booking_public.rs` (4 page loaders, 3 actions, guest per-IP rate limit); `apps/web/src/routes/booking.tsx` | done (`/booking/$slug` is "coming soon", as the original) |
 | 8 | Working hours | `crates/business/src/working_hours.rs` (schedules, intervals, members, date overrides, holidays; validation of the partial schemas), `handlers/working_hours.rs` (10 `workingHours.*` routes), `rpc_procedures/working_hours.rs` (options procedure, 7 actions); the read side (`steps/working_hours.rs`) existed | done (no cache layer) |
-| 9 | Web SPA appointment screens (calendar list / edit, appointments list) | the SPA has no route for them yet; the inbox / contact / flow-editor parts call the ported procedures and actions | left |
+| 9 | Web SPA appointment screens (calendar list / edit, appointments list, external calendars, working-hours editor + list) | `apps/web/src/routes/appointments.tsx`, inbox-teams page in `routes/settings.tsx`; list / get queries and page loaders in `rpc_procedures/{appointments,working_hours}.rs` | done (Response SLA card left) |
 
 ## 2. Tests
 
@@ -26,8 +26,8 @@ Branch `feat/conversion-d9` (from `conversion` at `e2d16a491`). Sources:
 public-route tests: real database instead of mocked services), unit tests in
 `crates/business/src/appointment/*.rs` (window bounds, slot slicing, interval
 merge, reminder send-at with DST) and `crates/worker/src/appointment.rs`
-(attendee parsing, event id). The other TEST_MAP rows (webview, OAuth,
-jsdom, working-hours UI) stay `todo` with their slices.
+(attendee parsing, event id), `crates/business/tests/google_oauth_connect.rs`
+(callback bound to the user and member). The jsdom / UI TEST_MAP rows stay `todo`.
 
 ## 3. Decisions (also in `DECISIONS.md`)
 
@@ -41,8 +41,11 @@ jsdom, working-hours UI) stay `todo` with their slices.
 - The Google auth is stored encrypted (AAD `integration-google-calendar:{id}`);
   plain rows are still read. The refresh uses the `google` platform credential
   of the credential owner.
-- The `resultUsedByAI` availability rewrite (AI candidates loop) is not
-  ported: the raw availability text is written.
+- The `resultUsedByAI` availability rewrite runs on the worker AI client
+  (candidates loop, raw text as fallback).
+- The booking page loaders and the 3 public actions have a guest per-IP rate
+  limit (the original has none). They answer JSON that React renders, so no
+  value is reflected as HTML.
 - The cancel postback ends the inbound routing (the original falls through
   with no action left).
 - The member conversation scope of the booking actions is the workspace check

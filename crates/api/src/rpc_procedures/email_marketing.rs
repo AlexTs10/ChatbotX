@@ -223,6 +223,7 @@ pub(super) const ACTIONS: &[&str] = &[
     "updateSmtpAction",
     "deleteSmtpAction",
     "disconnectGoogleSheetsAction",
+    "connectGoogleSheets",
 ];
 
 /// `zodBigintAsString` bind argument.
@@ -306,6 +307,14 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> super::
                         "name": row.name,
                         "fromAddress": row.from_address,
                     }))
+                }
+                "connectGoogleSheets" => {
+                    super::appointments::connect_google(
+                        ctx,
+                        chatbotx_business::google_oauth::Kind::Sheets,
+                        super::arg(args, 1),
+                    )
+                    .await
                 }
                 "disconnectGoogleSheetsAction" => {
                     chatbotx_business::google_sheets::disconnect(db, em::safe_http(), ws)

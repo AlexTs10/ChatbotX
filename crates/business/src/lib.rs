@@ -50,6 +50,7 @@ pub mod external_webhook;
 pub mod flow;
 pub mod flow_version;
 pub mod folder;
+pub mod google_oauth;
 pub mod google_sheets;
 pub mod import;
 pub mod inbound_webhook;
