@@ -11,6 +11,7 @@ pub mod jobs_admin;
 pub mod mail;
 pub mod orpc;
 pub mod presigned_upload;
+pub mod magic_link_redirect;
 pub mod reflink_widget;
 pub mod routes;
 pub mod rpc;

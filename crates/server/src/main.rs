@@ -259,6 +259,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             (None, None)
         }
     };
+    let redirect_buses = buses.clone();
     let (shutdown, exited, worker_deps) = start_workers(&shared, &jobs, realtime.as_ref(), buses)?;
     let jobs_admin =
         chatbotx_api::jobs_admin::router(Arc::new(chatbotx_api::jobs_admin::JobsAdminState {
@@ -288,7 +289,13 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         ))
         .merge(chatbotx_api::session::auth_router(sessions))
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
-        .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)));
+        .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)))
+        .merge(chatbotx_api::magic_link_redirect::router(
+            chatbotx_api::magic_link_redirect::RedirectState {
+                api: Arc::clone(&api),
+                buses: redirect_buses,
+            },
+        ));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
