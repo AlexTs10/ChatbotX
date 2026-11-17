@@ -26,12 +26,16 @@ import {
   PopoverTrigger,
 } from "@chatbotx.io/ui/components/ui/popover"
 import { cn } from "@chatbotx.io/ui/lib/utils"
-import EmojiPicker, { type EmojiClickData } from "emoji-picker-react"
+import type { EmojiClickData } from "emoji-picker-react"
 import { CodeXml, Smile } from "lucide-react"
+import dynamic from "next/dynamic"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { htmlToPlainTextWithBlocks } from "./html-to-plain-text"
 import { usePromptVariableOptions } from "./use-prompt-variable-options"
 import { useReadOnlyWhenLocked } from "./use-read-only-when-locked"
+
+// The picker opens in a popover: load its 480 KB on first open.
+const EmojiPicker = dynamic(() => import("emoji-picker-react"), { ssr: false })
 
 // Swallows Enter / Shift+Enter so a single-line value never gets a line
 // break. Priority sits below Mention (101) so Enter still picks a variable

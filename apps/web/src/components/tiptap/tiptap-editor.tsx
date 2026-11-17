@@ -22,11 +22,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@chatbotx.io/ui/components/ui/popover"
-import EmojiPicker, { type EmojiClickData } from "emoji-picker-react"
+import type { EmojiClickData } from "emoji-picker-react"
 import { CodeXml, Smile } from "lucide-react"
+import dynamic from "next/dynamic"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { usePromptVariableOptions } from "./use-prompt-variable-options"
 import { useReadOnlyWhenLocked } from "./use-read-only-when-locked"
+
+// The picker opens in a popover: load its 480 KB on first open.
+const EmojiPicker = dynamic(() => import("emoji-picker-react"), { ssr: false })
 
 type TiptapEditorProps = {
   initValue?: string

@@ -6,6 +6,11 @@ import { defineConfig } from "vite"
 const src = (path: string) =>
   fileURLToPath(new URL(`./src/${path}`, import.meta.url))
 
+// Large editor libraries in their own chunks (`manualChunks`).
+const TIPTAP = /node_modules\/.*(@tiptap|prosemirror-)/
+const XYFLOW = /node_modules\/.*(@xyflow|\/d3-)/
+const LIBPHONENUMBER = /node_modules\/.*libphonenumber-js/
+
 // The Rust server (`chatbotx-server`) in dev; override with CHATBOTX_SERVER_URL.
 const server = process.env.CHATBOTX_SERVER_URL ?? "http://localhost:3000"
 
@@ -53,5 +58,23 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 4096,
+    rollupOptions: {
+      output: {
+        // Large editor libraries in their own chunks, so the shared form
+        // chunk and the flow editor chunk stay small. Lazy loading is kept:
+        // a chunk loads with the first page that imports it.
+        manualChunks(id) {
+          if (TIPTAP.test(id)) {
+            return "tiptap"
+          }
+          if (XYFLOW.test(id)) {
+            return "xyflow"
+          }
+          if (LIBPHONENUMBER.test(id)) {
+            return "libphonenumber"
+          }
+        },
+      },
+    },
   },
 })

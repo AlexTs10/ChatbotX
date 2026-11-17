@@ -1,0 +1,188 @@
+"use client"
+
+import { DataTableColumnHeader } from "@chatbotx.io/ui/components/data-table/data-table-column-header"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import { Checkbox } from "@chatbotx.io/ui/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@chatbotx.io/ui/components/ui/dropdown-menu"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@chatbotx.io/ui/components/ui/tooltip"
+import type { DataTableRowAction } from "@chatbotx.io/ui/types/data-table"
+import type { ColumnDef } from "@tanstack/react-table"
+import {
+  CopyPlusIcon,
+  EllipsisVerticalIcon,
+  ListChecksIcon,
+  TextIcon,
+  Trash2Icon,
+} from "lucide-react"
+import Link from "next/link"
+import type { useTranslations } from "next-intl"
+import type { Dispatch, SetStateAction } from "react"
+import { LockBadge } from "@/features/templates/components/lock-badge"
+import {
+  LockedGuard,
+  UndeletableGuard,
+} from "@/features/templates/components/lock-context"
+import type { QuestionnaireListItem } from "../schema/resource"
+
+type Props = {
+  t: ReturnType<typeof useTranslations>
+  setRowAction: Dispatch<
+    SetStateAction<DataTableRowAction<QuestionnaireListItem> | null>
+  >
+}
+
+export function getQuestionnaireColumns({
+  t,
+  setRowAction,
+}: Props): ColumnDef<QuestionnaireListItem>[] {
+  return [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          aria-label={t("actions.selectAll")}
+          checked={table.getIsAllPageRowsSelected()}
+          className="translate-y-0.5"
+          indeterminate={table.getIsSomePageRowsSelected()}
+          onCheckedChange={(value) =>
+            table.toggleAllPageRowsSelected(Boolean(value))
+          }
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          aria-label={t("actions.selectRow")}
+          checked={row.getIsSelected()}
+          className="translate-y-0.5"
+          onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+        />
+      ),
+      size: 20,
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
+      id: "name",
+      accessorKey: "name",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t("fields.name.label")} />
+      ),
+      cell: ({ row }) => (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="flex max-w-[320px] items-center font-medium">
+                <Link
+                  className="truncate"
+                  href={`/space/${row.original.workspaceId}/questionnaires/${row.original.id}/edit`}
+                >
+                  {row.original.name}
+                </Link>
+                <LockBadge resourceId={row.original.id} />
+              </span>
+            }
+          />
+          <TooltipContent>{row.original.name}</TooltipContent>
+        </Tooltip>
+      ),
+      meta: {
+        label: t("fields.name.label"),
+        placeholder: t("fields.name.searchPlaceholder"),
+        variant: "text",
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+    },
+    {
+      id: "applicantsCount",
+      accessorKey: "applicantsCount",
+      header: ({ column }) => (
+        <DataTableColumnHeader
+          column={column}
+          title={t("questionnaires.applicants")}
+        />
+      ),
+      cell: ({ row }) => row.original.applicantsCount,
+      enableSorting: false,
+    },
+    {
+      id: "actions",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t("actions.actions")} />
+      ),
+      cell: ({ row }) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                aria-label={t("actions.openMenu")}
+                className="size-8 p-0"
+                variant="ghost"
+              >
+                <EllipsisVerticalIcon className="size-4" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              render={
+                <Link
+                  href={`/space/${row.original.workspaceId}/questionnaires/${row.original.id}/applicants`}
+                >
+                  <ListChecksIcon />
+                  {t("questionnaires.applicants")}
+                </Link>
+              }
+            />
+            <LockedGuard resourceId={row.original.id}>
+              {(locked) => (
+                <DropdownMenuItem
+                  disabled={locked}
+                  onClick={() => setRowAction({ row, variant: "rename" })}
+                >
+                  <TextIcon />
+                  {t("actions.rename")}
+                </DropdownMenuItem>
+              )}
+            </LockedGuard>
+            <LockedGuard resourceId={row.original.id}>
+              {(locked) => (
+                <DropdownMenuItem
+                  disabled={locked}
+                  onClick={() => setRowAction({ row, variant: "duplicate" })}
+                >
+                  <CopyPlusIcon />
+                  {t("actions.duplicate")}
+                </DropdownMenuItem>
+              )}
+            </LockedGuard>
+            <UndeletableGuard resourceId={row.original.id}>
+              {(disabled) => (
+                <DropdownMenuItem
+                  disabled={disabled}
+                  onClick={() => setRowAction({ row, variant: "delete" })}
+                  variant="destructive"
+                >
+                  <Trash2Icon />
+                  {t("actions.delete")}
+                </DropdownMenuItem>
+              )}
+            </UndeletableGuard>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+      size: 90,
+      enableSorting: false,
+      enableHiding: false,
+    },
+  ]
+}
