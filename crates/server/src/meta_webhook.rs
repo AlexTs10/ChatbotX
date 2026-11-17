@@ -1,7 +1,7 @@
 //! `GET|POST /integrations/{type}/webhook[/c/{credentialId}]` (P1.21,
 //! Q.I1b): the HTTP layer of `chatbotx_worker::channels::meta_webhook`.
-//! Each Meta type gets static paths so they never overlap the WhatsApp
-//! manual route.
+//! Each Meta type (and Threads, `?appId=`) gets static paths so they
+//! never overlap the WhatsApp manual route.
 
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use chatbotx_worker::channels::whatsapp_webhook::HUB_SIGNATURE_HEADER;
 pub fn router(webhook: MetaWebhook) -> Router {
     let webhook = Arc::new(webhook);
     let mut router = Router::new();
-    for kind in TYPES {
+    for kind in TYPES.into_iter().chain(["threads"]) {
         let plain = move |s, m, u, h, b| handle(s, kind, None, m, u, h, b);
         let scoped =
             move |s, Path(c): Path<String>, m, u, h, b| handle(s, kind, Some(c), m, u, h, b);
@@ -44,17 +44,20 @@ async fn handle(
     body: Bytes,
 ) -> Response {
     let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
-    let reply = webhook
-        .handle(MetaRequest {
-            kind,
-            credential_id: credential_id.as_deref(),
-            is_get: method == Method::GET,
-            query: uri.query(),
-            domain: header("x-domain").unwrap_or(""),
-            signature: header(HUB_SIGNATURE_HEADER),
-            body: &body,
-        })
-        .await;
+    let req = MetaRequest {
+        kind,
+        credential_id: credential_id.as_deref(),
+        is_get: method == Method::GET,
+        query: uri.query(),
+        domain: header("x-domain").unwrap_or(""),
+        signature: header(HUB_SIGNATURE_HEADER),
+        body: &body,
+    };
+    let reply = if kind == "threads" {
+        webhook.handle_threads(req).await
+    } else {
+        webhook.handle(req).await
+    };
     (
         StatusCode::from_u16(reply.status).unwrap_or(StatusCode::BAD_REQUEST),
         [(header::CONTENT_TYPE, reply.content_type)],

@@ -19,7 +19,7 @@ use super::messenger_webhook::{self, Outcome};
 use super::whatsapp_webhook::{WebhookJob, WebhookReply};
 
 /// The Meta channels this route serves.
-pub const TYPES: [&str; 2] = ["messenger", "instagram"];
+pub const TYPES: [&str; 3] = ["messenger", "instagram", "instagramFacebook"];
 
 pub struct MetaWebhook {
     pub db: Arc<Db>,
@@ -99,6 +99,7 @@ impl MetaWebhook {
         };
         let jobs_of = match kind {
             "instagram" => super::instagram::webhook_jobs,
+            "instagramFacebook" => super::instagram::facebook_webhook_jobs,
             _ => messenger_webhook::webhook_jobs,
         };
         let outcome = messenger_webhook::handle_request_with(
@@ -124,6 +125,69 @@ impl MetaWebhook {
             return json_error(400, &message);
         }
         text("ok".into())
+    }
+
+    /// `handleThreadsWebhook`: the credential whose `clientId` is the
+    /// `?appId=` query; a credential-scoped path is never configured.
+    pub async fn handle_threads(&self, req: MetaRequest<'_>) -> WebhookReply {
+        if req.credential_id.is_some() {
+            return not_configured();
+        }
+        let app_id = req.query.and_then(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .find(|(k, _)| k == "appId")
+                .map(|(_, v)| v.trim().to_owned())
+        });
+        let Some(app_id) = app_id.filter(|a| !a.is_empty()) else {
+            return not_configured();
+        };
+        let Some(encryption) = self.encryption.clone() else {
+            return not_configured();
+        };
+        let found = self
+            .db
+            .read(move |c| {
+                Ok(platform_credential::find_decrypted_threads_by_client_id(
+                    c,
+                    &encryption,
+                    &app_id,
+                ))
+            })
+            .await
+            .ok()
+            .flatten();
+        let Some(credential) = found else {
+            tracing::debug!(
+                integration_type = "threads",
+                "No configured Threads credential for webhook appId"
+            );
+            return not_configured();
+        };
+        let outcome = super::threads::handle_request(
+            req.is_get,
+            req.query,
+            req.signature,
+            req.body,
+            (
+                credential.text("verifyToken"),
+                credential.text("clientId"),
+                credential.text("clientSecret").unwrap_or(""),
+            ),
+        );
+        let failed = |message: &str| {
+            let (status, public) = super::threads::error_response(message);
+            tracing::error!(err = %super::threads::sanitize_sensitive_text(message),
+                integration_type = "threads", status, "Threads handleRequest failed");
+            json_error(status, public)
+        };
+        match outcome {
+            Ok(Outcome::Challenge(challenge)) => text(challenge),
+            Ok(Outcome::Jobs(jobs)) => match self.enqueue(jobs, None).await {
+                Ok(()) => text("ok".into()),
+                Err(e) => failed(&e),
+            },
+            Err(message) => failed(&message),
+        }
     }
 
     /// The credential and, for `/c/{id}`, the owner whose inboxes it serves.

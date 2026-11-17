@@ -9,6 +9,7 @@ pub mod messenger;
 pub mod messenger_webhook;
 pub mod meta;
 pub mod meta_webhook;
+pub mod threads;
 pub mod webchat;
 pub mod whatsapp;
 pub mod whatsapp_webhook;

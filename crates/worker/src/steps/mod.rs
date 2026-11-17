@@ -8,6 +8,7 @@ mod condition;
 mod contact;
 mod conversation;
 pub mod delay;
+mod messenger;
 mod pipeline;
 mod places;
 mod reply;
@@ -144,6 +145,9 @@ pub(crate) async fn run(
         return Ok(status);
     }
     if let Some(status) = ai_step::run(&ctx, step_type).await? {
+        return Ok(status);
+    }
+    if let Some(status) = messenger::run(&ctx, step_type).await? {
         return Ok(status);
     }
     match step_type {

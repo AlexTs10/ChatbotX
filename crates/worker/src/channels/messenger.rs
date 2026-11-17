@@ -1418,6 +1418,85 @@ impl Channel for Messenger {
             Ok(())
         })
     }
+
+    /// `getCustomUserSettings` (`GET me/custom_user_settings`): the
+    /// default-locale (`[0]`) entry of each level.
+    fn get_user_custom_settings(
+        &self,
+        ctx: &ChannelCtx,
+        psid: String,
+    ) -> BoxFuture<'static, ChannelResult<Value>> {
+        let sender = self.sender(ctx);
+        Box::pin(async move {
+            let sender = sender?;
+            let response = sender
+                .call(
+                    GraphRequest::get(format!("{}/me/custom_user_settings", sender.auth.version))
+                        .bearer(&sender.auth.access_token)
+                        .query("psid", psid)
+                        .query(
+                            "fields",
+                            "user_level_persistent_menu,page_level_persistent_menu",
+                        ),
+                )
+                .await?;
+            let settings = response.pointer("/data/0");
+            let level = |k: &str| {
+                settings
+                    .and_then(|s| s.pointer(&format!("/{k}/0")))
+                    .cloned()
+            };
+            Ok(super::meta::compact(json!({
+                "userLevel": level("user_level_persistent_menu"),
+                "pageLevel": level("page_level_persistent_menu"),
+            })))
+        })
+    }
+
+    /// `setUserPersistentMenu` (`POST me/custom_user_settings`).
+    fn set_user_persistent_menu(
+        &self,
+        ctx: &ChannelCtx,
+        psid: String,
+        persistent_menu: Value,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let sender = self.sender(ctx);
+        Box::pin(async move {
+            let sender = sender?;
+            sender
+                .call(
+                    GraphRequest::post(format!("{}/me/custom_user_settings", sender.auth.version))
+                        .bearer(&sender.auth.access_token)
+                        .json(json!({ "psid": psid, "persistent_menu": persistent_menu })),
+                )
+                .await?;
+            Ok(())
+        })
+    }
+
+    /// `deleteUserPersistentMenu` (`DELETE me/custom_user_settings`).
+    fn delete_user_persistent_menu(
+        &self,
+        ctx: &ChannelCtx,
+        psid: String,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let sender = self.sender(ctx);
+        Box::pin(async move {
+            let sender = sender?;
+            sender
+                .call(
+                    GraphRequest::delete(format!(
+                        "{}/me/custom_user_settings",
+                        sender.auth.version
+                    ))
+                    .bearer(&sender.auth.access_token)
+                    .query("psid", psid)
+                    .query("params", r#"["persistent_menu"]"#),
+                )
+                .await?;
+            Ok(())
+        })
+    }
 }
 
 // ---- inbound (`incoming-message.ts`, `lib/echo.ts`) -----------------------

@@ -10,10 +10,10 @@ pipeline of Q.I1a (`crates/worker/src/inbound.rs`, see specs/Q.I1a.md).
 | # | Slice | State |
 |---|-------|-------|
 | 1 | Messenger: shared Graph client (`channels/graph.rs`), shared Meta helpers (`channels/meta.rs`), `Channel` impl (`channels/messenger.rs`: send, flow steps, comments, private replies, typing, mark-as-read, inbound parser), webhook parser (`channels/messenger_webhook.rs`), webhook route with credential resolution (`channels/meta_webhook.rs` + `server/src/meta_webhook.rs`), worker jobs `incomingMessageEcho`, `contactMarkAsRead`, `messageReaction`, `deleteIncomingMessage`, `updateIncomingComment`, `deleteIncomingComment` (`worker/src/inbound_events.rs`), parity fixture `createMessengerPage` | done (60ec6aaea, dd4749b47) |
-| 2 | Instagram (`integrations/instagram`, graph.instagram.com): `Channel` impl (`channels/instagram.rs`: send with the 24 h / 7 d policy, flow steps, comment reply / hide / delete, private replies, typing, mark-as-read, inbound parser with location / story reply / story mention), webhook jobs (comments, live comments, messaging) on the shared Meta route | done |
-| 3 | Instagram-Facebook (`integrations/instagram-facebook`) | todo |
-| 4 | Threads (`integrations/threads`, `?appId=` webhook) | todo |
-| 5 | Messenger routes / steps: `messengerPersonas.*`, `userPersistentMenus.*`, `messengerTemplates.*`, menu / composer / persona steps, thread control (Messenger side, shared with Q.D12) | todo |
+| 2 | Instagram (`integrations/instagram`, graph.instagram.com): `Channel` impl (`channels/instagram.rs`: send with the 24 h / 7 d policy, flow steps, comment reply / hide / delete, private replies, typing, mark-as-read, inbound parser with location / story reply / story mention), webhook jobs (comments, live comments, messaging) on the shared Meta route | done (49cc18b9f) |
+| 3 | Instagram-Facebook (`integrations/instagram-facebook`): `Instagram` variant `Facebook` (graph.facebook.com, page-scoped sends, thread-control take-over on 2534037, `{igId}/likes`), `type = 'facebook'` rows resolved centrally in `Channels::resolve`, `instagramFacebook` webhook jobs | done |
+| 4 | Threads (`integrations/threads`): `Channel` impl (`channels/threads.rs`: comment reply = create, poll status, publish; hide / unhide), own HTTP client (form bodies, GET retries), error mapper + sanitizer, `?appId=` webhook with `sha256=` signature | done |
+| 5 | Messenger routes / steps: `messengerPersonas.*`, `userPersistentMenus.*`, `messengerTemplates.*`, menu / composer / persona steps, thread control (Messenger side, shared with Q.D12) | in progress: 5a steps `setMessengerUserPersistentMenu`, `enable/disableMessengerComposer`, `setMessengerPersona` + channel `custom_user_settings` calls; 5b `messengerPersonas.list`, `userPersistentMenus.*` + both `/rpc` lists |
 
 ## Messenger
 
@@ -67,8 +67,35 @@ payload.
   original parses the body with one schema); comments come from a top-level
   `field` / `value` or from every `changes[]` item (`live_comments` adds
   `isLive`).
-- Outbound to an `IntegrationInstagram` row with `type = 'facebook'` must use
-  the Instagram-Facebook channel (`isInstagramViaFacebook`): slice 3.
+- Outbound to an `IntegrationInstagram` row with `type = 'facebook'` uses
+  the Instagram-Facebook channel (`isInstagramViaFacebook`).
+
+## Instagram-Facebook
+
+- Same row and auth as Instagram; sends use the top-level `auth.version`
+  (default `v23.0`) on graph.facebook.com and `{pageId}/messages`.
+- No messaging policy; error 2534037 (not thread owner) = take thread
+  control, then one retry.
+- Flow step quick replies go on the last message; uploads retry 2 times.
+- Webhook: comments only from `changes[]`, tagged `instagramFacebook`;
+  `read.watermark` is required.
+
+## Threads
+
+- `?appId=` = client id of the Threads credential; `/c/{id}` is not used.
+- Signature `sha256=<hex>`, compared as decoded bytes (upper-case hex
+  matches). Errors: 400 for known bad requests, 405, else 500, with a
+  public message only.
+- Own HTTP client: form-urlencoded, 30 s; GET retried 2 times on
+  408/413/429/5xx and transport errors, POST never.
+
+## Messenger steps and menus
+
+- Steps resolve the Messenger user from the run contact inbox, else the
+  contact's latest Messenger inbox of the workspace; no user = success.
+- `updateMessengerContactData` is not ported (needs the profile lookup).
+- `userPersistentMenus.*`: `paginateInMemory`, item union `flow` / `url`,
+  max 20 items, single-id delete 404s.
 
 ## Parity
 
@@ -76,6 +103,8 @@ payload.
 
 ## Left
 
+- `messengerTemplates.*` and `messengerChannels.*` routes (parity p1-11
+  50 / 51 / 60).
 - Conversation routing (`threadControlEvent`: handover, requests, app roles,
   standby): dropped with a log until thread control (Q.D12 / slice 5).
 - Worker jobs not ported yet (fail "IntegrationJobAction action is not

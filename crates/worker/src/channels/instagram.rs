@@ -4,6 +4,12 @@
 //! handlers, `sendTyping` / `agentMarkAsRead`, `receiveMessage`
 //! (`handlers/message/incoming-message.ts`) and the webhook
 //! (`handlers/webhook.ts`).
+//!
+//! `integrations/instagram-facebook` is the same package with a Page token
+//! on `graph.facebook.com`; [`Variant::Facebook`] carries its differences
+//! (no messaging policy, quick replies on the last message, the Handover
+//! retry, private replies on the Page node, comment likes, no location /
+//! button title inbound, comments only from `changes[]`).
 
 use std::collections::HashSet;
 
@@ -28,6 +34,12 @@ use crate::channel::{
 pub const API_URL: &str = "https://graph.instagram.com";
 /// `DEFAULT_API_VERSION`.
 pub const DEFAULT_API_VERSION: &str = "v22.0";
+/// Instagram-Facebook `API_URL`.
+pub const FACEBOOK_API_URL: &str = "https://graph.facebook.com";
+/// Instagram-Facebook `DEFAULT_API_VERSION`.
+pub const FACEBOOK_DEFAULT_API_VERSION: &str = "v23.0";
+/// `NOT_THREAD_OWNER_CODE` / `NOT_THREAD_OWNER_SUBCODE`.
+const NOT_THREAD_OWNER: (i64, i64) = (200, 2_534_037);
 /// `INSTAGRAM_MESSAGE_METADATA`.
 pub const MESSAGE_METADATA: &str = "SENT_FROM_CHATBOTX";
 /// `MAX_BUTTONS`.
@@ -35,8 +47,19 @@ const MAX_BUTTONS: usize = 3;
 /// `MAX_CAROUSEL_ELEMENTS`.
 const MAX_CAROUSEL_ELEMENTS: usize = 10;
 
+/// Which package: Instagram Login (`instagram`) or Instagram via Facebook
+/// Login (`instagramFacebook`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Variant {
+    Login,
+    Facebook,
+}
+
 pub struct Instagram {
     graph: GraphHttp,
+    /// `instagramAttachmentClient` (Facebook: 60 s, 2 retries).
+    upload_graph: GraphHttp,
+    variant: Variant,
 }
 
 impl Instagram {
@@ -48,6 +71,27 @@ impl Instagram {
     pub fn with_base_url(base_url: &str) -> Instagram {
         Instagram {
             graph: GraphHttp::facebook(base_url),
+            upload_graph: GraphHttp::facebook(base_url),
+            variant: Variant::Login,
+        }
+    }
+
+    /// The Instagram-Facebook channel on `graph.facebook.com`.
+    pub fn facebook() -> Instagram {
+        Instagram::facebook_with_base_url(FACEBOOK_API_URL)
+    }
+
+    /// `instagramGraphClient` (30 s, 3 retries, 1 s) and
+    /// `instagramAttachmentClient` (60 s, 2 retries, 2 s).
+    pub fn facebook_with_base_url(base_url: &str) -> Instagram {
+        Instagram {
+            graph: GraphHttp::facebook(base_url),
+            upload_graph: GraphHttp::new(
+                base_url,
+                std::time::Duration::from_secs(60),
+                std::time::Duration::from_secs(2),
+            ),
+            variant: Variant::Facebook,
         }
     }
 }
@@ -64,11 +108,20 @@ pub struct Auth {
     pub access_token: String,
     /// `auth.metadata.version ?? DEFAULT_API_VERSION`.
     pub version: String,
+    /// The `sendMessage` version: Instagram-Facebook reads the top-level
+    /// `auth.version` (`const { version = DEFAULT_API_VERSION } = auth`).
+    pub send_version: String,
     pub ig_id: String,
+    /// `auth.metadata.pageId` (Login falls back to the IG id).
     pub page_id: String,
+    pub has_page_id: bool,
 }
 
 pub fn auth_of(auth: &Value) -> ChannelResult<Auth> {
+    auth_for(Variant::Login, auth)
+}
+
+pub fn auth_for(variant: Variant, auth: &Value) -> ChannelResult<Auth> {
     let text = |p: &str| auth.pointer(p).and_then(Value::as_str);
     let (Some(token), Some(ig_id)) = (text("/tokens/accessToken"), text("/metadata/igId")) else {
         return Err(ChannelError::new(
@@ -78,14 +131,25 @@ pub fn auth_of(auth: &Value) -> ChannelResult<Auth> {
         .with_code("integration_auth_missing")
         .into());
     };
+    let default = match variant {
+        Variant::Login => DEFAULT_API_VERSION,
+        Variant::Facebook => FACEBOOK_DEFAULT_API_VERSION,
+    };
+    let version = text("/metadata/version")
+        .filter(|v| !v.is_empty())
+        .unwrap_or(default)
+        .to_owned();
+    let page_id = text("/metadata/pageId").filter(|p| !p.is_empty());
     Ok(Auth {
         access_token: token.to_owned(),
-        version: text("/metadata/version")
-            .filter(|v| !v.is_empty())
-            .unwrap_or(DEFAULT_API_VERSION)
-            .to_owned(),
+        send_version: match variant {
+            Variant::Login => version.clone(),
+            Variant::Facebook => text("/version").unwrap_or(default).to_owned(),
+        },
+        version,
         ig_id: ig_id.to_owned(),
-        page_id: text("/metadata/pageId").unwrap_or(ig_id).to_owned(),
+        page_id: page_id.unwrap_or(ig_id).to_owned(),
+        has_page_id: page_id.is_some(),
     })
 }
 
@@ -331,8 +395,32 @@ pub enum StepMessage {
     },
 }
 
-/// `convertFlowStep`.
+/// `convertFlowStep` of Instagram Login.
 pub fn convert_flow_step(data: &SendFlowStep) -> ChannelResult<Vec<StepMessage>> {
+    convert_flow_step_for(Variant::Login, data)
+}
+
+/// `convertFlowStep`; Instagram-Facebook then stamps the step's quick
+/// replies on the last message (`sendFlowStep`), whatever its kind.
+pub fn convert_flow_step_for(
+    variant: Variant,
+    data: &SendFlowStep,
+) -> ChannelResult<Vec<StepMessage>> {
+    let mut messages = convert_flow_step_messages(data)?;
+    let quick_replies = quick_replies_of(data.quick_replies.as_ref());
+    if variant == Variant::Facebook && !quick_replies.is_empty() {
+        match messages.last_mut() {
+            Some(StepMessage::Ready(message)) => message["quick_replies"] = json!(quick_replies),
+            Some(StepMessage::Upload {
+                quick_replies: q, ..
+            }) => *q = quick_replies,
+            None => {}
+        }
+    }
+    Ok(messages)
+}
+
+fn convert_flow_step_messages(data: &SendFlowStep) -> ChannelResult<Vec<StepMessage>> {
     let step = &data.step;
     let step_type = str_field(step, "stepType");
     let quick_replies = quick_replies_of(data.quick_replies.as_ref());
@@ -436,30 +524,113 @@ fn message_id_of(response: &Value) -> Option<String> {
 
 struct Sender {
     graph: GraphHttp,
+    upload_graph: GraphHttp,
     auth: Auth,
+    variant: Variant,
+}
+
+fn log_graph_error(endpoint: &str, e: &GraphError) {
+    tracing::error!(endpoint, status = e.http_status, code = ?e.code, sub_code = ?e.sub_code,
+        "Instagram API error: {}", e.message.as_deref().unwrap_or("unknown"));
+}
+
+/// `isNotThreadOwnerError`: code 200 + sub code 2534037.
+pub fn is_not_thread_owner_error(error: &GraphError) -> bool {
+    (
+        error.numeric_code(),
+        error.sub_code.as_ref().and_then(Value::as_i64),
+    ) == (Some(NOT_THREAD_OWNER.0), Some(NOT_THREAD_OWNER.1))
 }
 
 impl Sender {
-    async fn call(&self, request: GraphRequest) -> Result<Value, SendFailure> {
+    async fn raw(&self, graph: &GraphHttp, request: GraphRequest) -> Result<Value, GraphError> {
         let endpoint = request.path.clone();
-        self.graph.send(request.bearer(&self.auth.access_token)).await.map_err(|e| {
-            tracing::error!(endpoint, status = e.http_status, code = ?e.code, sub_code = ?e.sub_code,
-                "Instagram API error: {}", e.message.as_deref().unwrap_or("unknown"));
-            map_error(&e).into()
-        })
+        graph
+            .send(request.bearer(&self.auth.access_token))
+            .await
+            .inspect_err(|e| log_graph_error(&endpoint, e))
+    }
+
+    async fn call(&self, request: GraphRequest) -> Result<Value, SendFailure> {
+        self.raw(&self.graph, request)
+            .await
+            .map_err(|e| map_error(&e).into())
+    }
+
+    fn send_request(&self, payload: Value) -> GraphRequest {
+        GraphRequest::post(format!("{}/me/messages", self.auth.send_version))
+            .json(payload)
+            .retries(0)
     }
 
     /// `sendMessage` (`POST {version}/me/messages`, no retry).
     async fn send(&self, payload: Value) -> Result<Value, SendFailure> {
-        self.call(
-            GraphRequest::post(format!("{}/me/messages", self.auth.version))
-                .json(payload)
-                .retries(0),
-        )
-        .await
+        self.call(self.send_request(payload)).await
     }
 
-    /// `sendPrivateReplyMessage`: the comment id as the recipient.
+    /// One DM. Instagram-Facebook `sendWithHandover`: when another app owns
+    /// the thread (2534037), take it back for this IGSID and retry once.
+    async fn send_dm(&self, recipient: &str, payload: Value) -> Result<Value, SendFailure> {
+        if self.variant == Variant::Login {
+            return self.send(payload).await;
+        }
+        match self
+            .raw(&self.graph, self.send_request(payload.clone()))
+            .await
+        {
+            Ok(value) => Ok(value),
+            Err(e) if is_not_thread_owner_error(&e) => {
+                tracing::info!(
+                    "Send refused (2534037): taking thread control for IGSID {recipient} and retrying once"
+                );
+                self.take_thread_control(recipient).await?;
+                self.send(payload).await
+            }
+            Err(e) => Err(map_error(&e).into()),
+        }
+    }
+
+    /// `takeThreadControl` (`{version}/{pageId}/take_thread_control`).
+    async fn take_thread_control(&self, recipient: &str) -> Result<(), SendFailure> {
+        if recipient.is_empty() {
+            return Err(ChannelError::new(
+                "Cannot take Instagram thread control: no recipient id.",
+                Category::Unknown,
+            )
+            .into());
+        }
+        if !self.auth.has_page_id {
+            return Err(ChannelError::new(
+                "Cannot take Instagram thread control: the integration has no pageId. Reconnect the Instagram account.",
+                Category::Unknown,
+            )
+            .into());
+        }
+        let page_id = &self.auth.page_id;
+        let response = self
+            .call(
+                GraphRequest::post(format!(
+                    "{}/{page_id}/take_thread_control",
+                    self.auth.version
+                ))
+                .json(json!({ "recipient": { "id": recipient },
+                    "metadata": "ChatbotX handover: send refused with 2534037" }))
+                .retries(0),
+            )
+            .await?;
+        if response.get("success") != Some(&json!(true)) {
+            return Err(ChannelError::new(
+                format!("Instagram take_thread_control was not accepted for page {page_id}"),
+                Category::Unknown,
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// `sendPrivateReplyMessage`: the comment id as the recipient, on
+    /// `me/messages` (Login) or the Page node (Facebook, which needs a
+    /// `pageId`).
     async fn send_private_reply(
         &self,
         comment_id: &str,
@@ -467,24 +638,49 @@ impl Sender {
     ) -> Result<Value, SendFailure> {
         let mut message = message.clone();
         message["metadata"] = json!(MESSAGE_METADATA);
-        self.send(json!({ "recipient": { "comment_id": comment_id }, "message": message }))
-            .await
+        let payload = json!({ "recipient": { "comment_id": comment_id }, "message": message });
+        if self.variant == Variant::Login {
+            return self.send(payload).await;
+        }
+        if !self.auth.has_page_id {
+            return Err(ChannelError::new(
+                "Cannot send an Instagram private reply: the integration has no pageId. Reconnect the Instagram account.",
+                Category::Unknown,
+            )
+            .into());
+        }
+        self.call(
+            GraphRequest::post(format!(
+                "{}/{}/messages",
+                self.auth.version, self.auth.page_id
+            ))
+            .json(payload)
+            .retries(0),
+        )
+        .await
     }
 
     /// `uploadAttachment` (`{version}/{pageId}/message_attachments`).
     async fn upload(&self, url: &str, kind: &str) -> Result<Option<String>, SendFailure> {
+        let retries = match self.variant {
+            Variant::Login => 3,
+            Variant::Facebook => 2,
+        };
         let response = self
-            .call(
+            .raw(
+                &self.upload_graph,
                 GraphRequest::post(format!(
                     "{}/{}/message_attachments",
                     self.auth.version, self.auth.page_id
                 ))
+                .retries(retries)
                 .json(
                     json!({ "platform": "instagram", "message": { "attachment": {
                         "type": kind, "payload": { "url": url, "is_reusable": true } } } }),
                 ),
             )
-            .await?;
+            .await
+            .map_err(|e| SendFailure::from(map_error(&e)))?;
         Ok(response.get("attachment_id").and_then(|v| match v {
             Value::String(s) => Some(s.clone()),
             Value::Number(n) => Some(n.to_string()),
@@ -497,7 +693,9 @@ impl Instagram {
     fn sender(&self, ctx: &ChannelCtx) -> ChannelResult<Sender> {
         Ok(Sender {
             graph: self.graph.clone(),
-            auth: auth_of(&ctx.auth)?,
+            upload_graph: self.upload_graph.clone(),
+            auth: auth_for(self.variant, &ctx.auth)?,
+            variant: self.variant,
         })
     }
 }
@@ -530,8 +728,9 @@ impl Channel for Instagram {
         ctx: &ChannelCtx,
         payload: Value,
     ) -> BoxFuture<'static, ChannelResult<Option<Received>>> {
-        let ig_id = auth_of(&ctx.auth).map(|a| a.ig_id);
-        Box::pin(async move { parse_incoming(&ig_id?, &payload).map(Some) })
+        let ig_id = auth_for(self.variant, &ctx.auth).map(|a| a.ig_id);
+        let variant = self.variant;
+        Box::pin(async move { parse_incoming_for(variant, &ig_id?, &payload).map(Some) })
     }
 
     fn send_message(
@@ -540,13 +739,18 @@ impl Channel for Instagram {
         data: SendMessage,
     ) -> BoxFuture<'static, ChannelResult<SendResult>> {
         let sender = self.sender(ctx);
+        let variant = self.variant;
         Box::pin(async move {
             let ci = &data.contact.contact_inbox;
-            let policy = resolve_messaging_policy(
-                ci.last_incoming_message_at,
-                data.send_from.as_deref(),
-                now_ms(),
-            )?;
+            // Instagram-Facebook sends with no messaging policy.
+            let policy = match variant {
+                Variant::Login => Some(resolve_messaging_policy(
+                    ci.last_incoming_message_at,
+                    data.send_from.as_deref(),
+                    now_ms(),
+                )?),
+                Variant::Facebook => None,
+            };
             let sender = sender?;
             let mut messages = convert_message(&data.message);
             let quick_replies = quick_replies_of(data.quick_replies.as_ref());
@@ -558,11 +762,10 @@ impl Channel for Instagram {
             let mut result = SendResult::default();
             for message in messages {
                 let response = sender
-                    .send(build_message_payload(
+                    .send_dm(
                         &ci.source_id,
-                        &message,
-                        Some(policy),
-                    )?)
+                        build_message_payload(&ci.source_id, &message, policy)?,
+                    )
                     .await?;
                 result.sent_count += 1;
                 result.message_ids.extend(message_id_of(&response));
@@ -591,7 +794,7 @@ impl Channel for Instagram {
             // the 24-hour window.
             let mut policy: Option<Policy> = None;
             let mut result = SendResult::default();
-            for step_message in convert_flow_step(&data)? {
+            for step_message in convert_flow_step_for(sender.variant, &data)? {
                 let message = match step_message {
                     StepMessage::Ready(message) => message,
                     StepMessage::Upload {
@@ -612,20 +815,22 @@ impl Channel for Instagram {
                 let response = match anchor_comment.take() {
                     Some(comment) => sender.send_private_reply(&comment, &message).await?,
                     None => {
-                        let policy = match policy {
-                            Some(p) => p,
-                            None => *policy.insert(resolve_messaging_policy(
-                                ci.last_incoming_message_at,
-                                data.send_from.as_deref(),
-                                now_ms(),
-                            )?),
+                        let policy = match (sender.variant, policy) {
+                            (Variant::Facebook, _) => None,
+                            (Variant::Login, Some(p)) => Some(p),
+                            (Variant::Login, None) => {
+                                Some(*policy.insert(resolve_messaging_policy(
+                                    ci.last_incoming_message_at,
+                                    data.send_from.as_deref(),
+                                    now_ms(),
+                                )?))
+                            }
                         };
                         sender
-                            .send(build_message_payload(
+                            .send_dm(
                                 &ci.source_id,
-                                &message,
-                                Some(policy),
-                            )?)
+                                build_message_payload(&ci.source_id, &message, policy)?,
+                            )
                             .await?
                     }
                 };
@@ -740,24 +945,58 @@ impl Channel for Instagram {
         _new_text: String,
         _new_attachment_url: Option<String>,
     ) -> BoxFuture<'static, ChannelResult<()>> {
-        tracing::info!(
-            comment_id,
-            "editComment: Instagram does not support editing comments via API, skipping"
-        );
+        match self.variant {
+            Variant::Login => tracing::info!(
+                comment_id,
+                "editComment: Instagram does not support editing comments via API, skipping"
+            ),
+            Variant::Facebook => tracing::info!(
+                comment_id,
+                "editComment: Facebook does not support editing comments via API, skipping"
+            ),
+        }
         Box::pin(async { Ok(()) })
     }
 
+    /// Login: a logged no-op. Facebook: `likeComment`
+    /// (`POST|DELETE {version}/{igId}/likes?access_token&comment_id`).
     fn like_comment(
         &self,
-        _ctx: &ChannelCtx,
+        ctx: &ChannelCtx,
         comment_id: String,
-        _liked: bool,
+        liked: bool,
     ) -> BoxFuture<'static, ChannelResult<()>> {
-        tracing::info!(
-            comment_id,
-            "likeComment: Instagram does not support liking comments via API, skipping"
-        );
-        Box::pin(async { Ok(()) })
+        if self.variant == Variant::Login {
+            tracing::info!(
+                comment_id,
+                "likeComment: Instagram does not support liking comments via API, skipping"
+            );
+            return Box::pin(async { Ok(()) });
+        }
+        let sender = self.sender(ctx);
+        Box::pin(async move {
+            let sender = sender?;
+            let path = format!("{}/{}/likes", sender.auth.version, sender.auth.ig_id);
+            let request = if liked {
+                GraphRequest::post(path)
+            } else {
+                GraphRequest::delete(path)
+            };
+            let request = request
+                .query("access_token", sender.auth.access_token.clone())
+                .query("comment_id", comment_id.clone());
+            let endpoint = request.path.clone();
+            sender.graph.send(request).await.map_err(|e| {
+                log_graph_error(&endpoint, &e);
+                tracing::error!("An error occurred while liking the comment");
+                SendFailure::from(map_error(&e))
+            })?;
+            tracing::info!(
+                "Comment {}: {comment_id}",
+                if liked { "liked" } else { "unliked" }
+            );
+            Ok(())
+        })
     }
 
     fn hide_comment(
@@ -849,9 +1088,12 @@ pub fn has_story_mention(message: &Value) -> bool {
         .is_some_and(|a| a.iter().any(|x| str_field(x, "type") == "story_mention"))
 }
 
-/// `getMessageContentAttributes`: location, story reply, story mention.
-fn content_attributes(message: &Value) -> Option<Value> {
-    if let Some(location) = location_of(message) {
+/// `getMessageContentAttributes`: location (Login only), story reply,
+/// story mention.
+fn content_attributes(variant: Variant, message: &Value) -> Option<Value> {
+    if variant == Variant::Login
+        && let Some(location) = location_of(message)
+    {
         return Some(location);
     }
     if let Some(story) = message.pointer("/reply_to/story").filter(|s| s.is_object()) {
@@ -862,6 +1104,17 @@ fn content_attributes(message: &Value) -> Option<Value> {
 
 /// `receiveMessage` + `getMessageEntity` of one single-event payload.
 pub fn parse_incoming(ig_id: &str, payload: &Value) -> ChannelResult<Received> {
+    parse_incoming_for(Variant::Login, ig_id, payload)
+}
+
+/// Instagram-Facebook has no location content type, no `buttonTitle` and
+/// no attachment de-duplication.
+pub fn parse_incoming_for(
+    variant: Variant,
+    ig_id: &str,
+    payload: &Value,
+) -> ChannelResult<Received> {
+    let login = variant == Variant::Login;
     let Some(messaging) = payload.pointer("/entry/0/messaging/0") else {
         return Err(SendFailure::other("No messaging found"));
     };
@@ -893,10 +1146,10 @@ pub fn parse_incoming(ig_id: &str, payload: &Value) -> ChannelResult<Received> {
             incoming.message_type = "outgoing".into();
         }
         incoming.text = s(m, "text");
-        if location_of(m).is_some() {
+        if login && location_of(m).is_some() {
             incoming.content_type = "location".into();
         }
-        incoming.content_attributes = content_attributes(m);
+        incoming.content_attributes = content_attributes(variant, m);
         let mut seen = HashSet::new();
         for attachment in m
             .get("attachments")
@@ -907,7 +1160,7 @@ pub fn parse_incoming(ig_id: &str, payload: &Value) -> ChannelResult<Received> {
             let Some(url) = attachment.pointer("/payload/url").and_then(Value::as_str) else {
                 continue;
             };
-            if !seen.insert(url.to_owned()) {
+            if login && !seen.insert(url.to_owned()) {
                 continue;
             }
             let kind = str_field(attachment, "type");
@@ -924,10 +1177,12 @@ pub fn parse_incoming(ig_id: &str, payload: &Value) -> ChannelResult<Received> {
             .pointer("/quick_reply/payload")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        received.button_title = m
-            .pointer("/quick_reply/title")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        if login {
+            received.button_title = m
+                .pointer("/quick_reply/title")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
         received.message = Some(incoming);
     }
     if let Some(p) = postback {
@@ -935,7 +1190,9 @@ pub fn parse_incoming(ig_id: &str, payload: &Value) -> ChannelResult<Received> {
         incoming.text = s(p, "title");
         received.message = Some(incoming);
         received.postback_action = s(p, "payload");
-        received.button_title = s(p, "title");
+        if login {
+            received.button_title = s(p, "title");
+        }
     }
     // A `message.referral` without `source` / `type` is dropped (`.catch(undefined)`).
     let valid_referral = |r: &&Value| {
@@ -972,8 +1229,9 @@ fn job(name: &'static str, data: Value) -> WebhookJob {
     }
 }
 
-/// `instagramMessagingEventSchema` (the parts a job reads).
-fn is_valid_event(e: &Value) -> bool {
+/// `instagramMessagingEventSchema` (the parts a job reads); Facebook also
+/// requires `read.watermark`.
+fn is_valid_event(variant: Variant, e: &Value) -> bool {
     let id = |p: &str| e.pointer(p).is_some_and(Value::is_string);
     id("/sender/id")
         && id("/recipient/id")
@@ -985,6 +1243,9 @@ fn is_valid_event(e: &Value) -> bool {
                 .iter()
                 .all(|k| p.get(*k).is_some_and(Value::is_string))
         })
+        && (variant == Variant::Login
+            || e.get("read")
+                .is_none_or(|r| r.get("watermark").is_some_and(Value::is_number)))
         && e.get("reaction").is_none_or(|r| {
             r.get("mid").is_some_and(Value::is_string)
                 && matches!(
@@ -998,6 +1259,17 @@ fn is_valid_event(e: &Value) -> bool {
 /// skipped when one entry or event is malformed (the schema parses the
 /// payload at once).
 pub fn webhook_jobs(body: &str) -> Result<Vec<WebhookJob>, String> {
+    webhook_jobs_for(Variant::Login, body)
+}
+
+/// The Instagram-Facebook webhook (`instagramFacebook` route).
+pub fn facebook_webhook_jobs(body: &str) -> Result<Vec<WebhookJob>, String> {
+    webhook_jobs_for(Variant::Facebook, body)
+}
+
+/// Facebook reads comments only from `changes[]` and tags them
+/// `instagramFacebook`; messaging jobs stay `instagram` on both.
+pub fn webhook_jobs_for(variant: Variant, body: &str) -> Result<Vec<WebhookJob>, String> {
     let parsed: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
     let entries = parsed.get("entry").and_then(Value::as_array);
     let well_formed = parsed.get("object").and_then(Value::as_str) == Some("instagram")
@@ -1005,20 +1277,30 @@ pub fn webhook_jobs(body: &str) -> Result<Vec<WebhookJob>, String> {
             entries.iter().all(|entry| {
                 entry.get("id").is_some_and(Value::is_string)
                     && entry.get("time").is_some_and(Value::is_number)
-                    && entry
-                        .get("messaging")
-                        .is_none_or(|m| m.as_array().is_some_and(|m| m.iter().all(is_valid_event)))
+                    && entry.get("messaging").is_none_or(|m| {
+                        m.as_array()
+                            .is_some_and(|m| m.iter().all(|e| is_valid_event(variant, e)))
+                    })
             })
         });
     let mut jobs = Vec::new();
     if !well_formed {
-        tracing::warn!("instagram webhook payload unrecognized — skipping");
+        match variant {
+            Variant::Login => tracing::warn!("instagram webhook payload unrecognized — skipping"),
+            Variant::Facebook => {
+                tracing::warn!("instagram facebook webhook payload unrecognized — skipping")
+            }
+        }
         return Ok(jobs);
     }
     for entry in entries.into_iter().flatten() {
         let id = str_field(entry, "id");
         let time = &entry["time"];
-        let comments: Vec<(&Value, bool)> = match entry.get("field").and_then(Value::as_str) {
+        let top_field = entry
+            .get("field")
+            .and_then(Value::as_str)
+            .filter(|_| variant == Variant::Login);
+        let comments: Vec<(&Value, bool)> = match top_field {
             Some(field @ ("comments" | "live_comments")) => {
                 vec![(&entry["value"], field == "live_comments")]
             }
@@ -1063,8 +1345,12 @@ pub fn webhook_jobs(body: &str) -> Result<Vec<WebhookJob>, String> {
                 if is_live {
                     comment["isLive"] = json!(true);
                 }
+                let integration_type = match variant {
+                    Variant::Login => "instagram",
+                    Variant::Facebook => "instagramFacebook",
+                };
                 jobs.push(job("incomingComment", json!({
-                    "integrationType": "instagram", "integrationIdentifier": id, "commentData": comment,
+                    "integrationType": integration_type, "integrationIdentifier": id, "commentData": comment,
                 })));
             }
             continue;
