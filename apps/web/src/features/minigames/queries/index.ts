@@ -10,3 +10,23 @@ export const listMinigames = (input: ListMinigamesRequest) =>
   serverQuery<ListMinigamesResponse>("listMinigames", input.workspaceId, [
     input,
   ])
+
+/** `findMinigame`: `null` for "not found". */
+export const findMinigame = (where: { workspaceId: string; id: string }) =>
+  serverQuery<import("../schema/resource").MinigameResource | null>(
+    "findMinigame",
+    where.workspaceId,
+    [where],
+  )
+
+/** `listMinigameHistory` (`minigameContactService.list`). */
+export const listMinigameHistory = (
+  input: import("../schema/query").ListMinigameHistoryRequest,
+) =>
+  serverQuery<
+    Awaited<
+      ReturnType<
+        typeof import("@chatbotx.io/business/minigame").minigameContactService.list
+      >
+    >
+  >("listMinigameHistory", input.workspaceId, [input])

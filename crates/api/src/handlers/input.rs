@@ -190,6 +190,12 @@ impl Input {
         self.issues.extend(issues);
     }
 
+    /// How many issues were recorded (a nested refinement runs only when
+    /// its object added none).
+    pub fn issue_count(&self) -> usize {
+        self.issues.len()
+    }
+
     /// Whether any issue was recorded.
     pub fn failed(&self) -> bool {
         !self.issues.is_empty()

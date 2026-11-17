@@ -16,6 +16,9 @@
 // page: app/space/[workspaceId]/(settings)/settings/integrations/muse/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/integrations/openrouter/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/integrations/openai-compatible/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/create/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/[menuId]/page.tsx
 // `resolveGuardedWorkspaceId(params, "superAdmin")`: 404 without superAdmin.
 // The channel policy (creatable / connected channels) is the page loader
 // `pages.settingsChannels`; the other data comes from the builder queries.
@@ -36,11 +39,13 @@ import { Outlet, useParams } from "@tanstack/react-router"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { Suspense } from "react"
+import { type ReactNode, Suspense } from "react"
 import { ChannelsAccordionShell } from "@/app/space/[workspaceId]/(settings)/settings/channels/channels-accordion-shell"
 import { IntegrationsAccordionShell } from "@/app/space/[workspaceId]/(settings)/settings/integrations/integrations-accordion-shell"
 import { SettingsTab } from "@/app/space/[workspaceId]/(settings)/settings/tab"
 import { isCommunity } from "@/env"
+import { ListInboxTeams } from "@/enterprise/features/inbox-teams/list-inbox-teams"
+import { listInboxTeams } from "@/enterprise/features/inbox-teams/queries"
 import { ApiManage } from "@/features/integration-api/api-manage"
 import { listIntegrationApis } from "@/features/integration-api/queries"
 import { ClaudeConnect } from "@/features/integration-claude/claude-connect"
@@ -65,12 +70,20 @@ import { WebchatTable } from "@/features/integration-webchat/webchat-table"
 import { listWorkspaceMembers } from "@/features/workspace-members/queries"
 import { getWorkspaceMembersSearchParamsCache } from "@/features/workspace-members/schema/query"
 import { WorkspaceMembersTable } from "@/features/workspace-members/workspace-members-table"
+import { ManageWorkspaceTokens } from "@/features/workspaces/manage-workspace-tokens"
+import { listWorkspaceTokens } from "@/features/workspaces/queries/workspace-tokens.query"
 import { UpdateWorkspaceForm } from "@/features/workspaces/update-workspace-form"
 import { hasWorkspacePermission } from "@/lib/auth/permission-routes"
 import { useQueryPromise } from "@/lib/query/use-query-promise"
+import { UserPersistentMenuForm } from "@/features/user-persistent-menus/components/user-persistent-menu-form"
+import { UserPersistentMenuList } from "@/features/user-persistent-menus/components/user-persistent-menu-list"
+import {
+  findUserPersistentMenu,
+  listUserPersistentMenus,
+} from "@/features/user-persistent-menus/queries"
 import { loadPage } from "@/lib/server-action"
 import { workspaceSettingsGeneralPath } from "@/lib/workspace/settings-paths"
-import { NotFoundPage } from "@/routes/root"
+import { NotAvailablePage, NotFoundPage } from "@/routes/root"
 import { useWorkspacePage } from "@/routes/workspace"
 import { Redirect } from "@/shims/redirect"
 
@@ -116,6 +129,83 @@ export function SettingsGeneralPage() {
       consentRequired={consentRequired}
       workspace={workspace}
     />
+  )
+}
+
+// `settings/inbox-teams/page.tsx`: the teams list; working hours, holidays
+// and the response SLA have no Rust domain yet.
+export function SettingsInboxTeamsPage() {
+  const workspaceId = useWorkspaceId()
+  const promises = useQueryPromise(["inboxTeams", workspaceId], () =>
+    Promise.all([
+      listInboxTeams({ workspaceId }),
+      listWorkspaceMembers({
+        workspaceId,
+        ...getWorkspaceMembersSearchParamsCache.parse({}),
+      }),
+    ] as const),
+  )
+  return (
+    <div className="flex flex-col gap-6">
+      <Suspense>
+        <ListInboxTeams promises={promises} workspaceId={workspaceId} />
+      </Suspense>
+      <NotAvailablePage
+        detail="Working hours, holidays and the response SLA are not available yet in this version."
+        title="Working hours"
+      />
+    </div>
+  )
+}
+
+export function SettingsUserPersistentMenusPage() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "listUserPersistentMenus", workspaceId],
+    queryFn: () => listUserPersistentMenus({ workspaceId }),
+  })
+  return <UserPersistentMenuList menus={data.data} workspaceId={workspaceId} />
+}
+
+function UserPersistentMenuCard(props: {
+  title: "actions.createFeature" | "actions.editFeature"
+  children: ReactNode
+}) {
+  const t = useTranslations()
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="font-bold text-xl">
+          {t(props.title, { feature: t("fields.userPersistentMenu.label") })}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>{props.children}</CardContent>
+    </Card>
+  )
+}
+
+export function SettingsUserPersistentMenuCreatePage() {
+  return (
+    <UserPersistentMenuCard title="actions.createFeature">
+      <UserPersistentMenuForm workspaceId={useWorkspaceId()} />
+    </UserPersistentMenuCard>
+  )
+}
+
+export function SettingsUserPersistentMenuEditPage() {
+  const workspaceId = useWorkspaceId()
+  const { menuId } = useParams({ strict: false }) as { menuId: string }
+  const { data: menu } = useSuspenseQuery({
+    queryKey: ["spa", "findUserPersistentMenu", workspaceId, menuId],
+    queryFn: () => findUserPersistentMenu({ id: menuId, workspaceId }),
+  })
+  if (!menu) {
+    return <NotFoundPage />
+  }
+  return (
+    <UserPersistentMenuCard title="actions.editFeature">
+      <UserPersistentMenuForm menu={menu} workspaceId={workspaceId} />
+    </UserPersistentMenuCard>
   )
 }
 
@@ -308,10 +398,21 @@ export function SettingsIntegrationPage() {
       return <OpenRouterIntegration />
     case "openai-compatible":
       return <OpenaiCompatibleIntegration />
+    case "workspace-token":
+      return <WorkspaceTokens />
     default:
       // ponytail: the other integrations wait for their domain units.
       return null
   }
+}
+
+function WorkspaceTokens() {
+  const workspaceId = useWorkspaceId()
+  const { data: tokens } = useSuspenseQuery({
+    queryKey: ["spa", "listWorkspaceTokens", workspaceId],
+    queryFn: () => listWorkspaceTokens(workspaceId),
+  })
+  return <ManageWorkspaceTokens tokens={tokens} workspaceId={workspaceId} />
 }
 
 function OpenAIIntegration() {

@@ -26,6 +26,7 @@ const dashboard = () => import("@/routes/dashboard")
 const ecommerce = () => import("@/routes/ecommerce")
 const tools = () => import("@/routes/tools")
 const toolEditors = () => import("@/routes/tool-editors")
+const comments = () => import("@/routes/comments")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -85,6 +86,16 @@ const authPages = [
     component: lazyRouteComponent(auth, "ChangePasswordPage"),
   }),
 ]
+
+// `/invitations/$code` is public too (lib/public-routes.ts).
+const invitationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "invitations/$code",
+  component: lazyRouteComponent(
+    () => import("@/routes/invitations"),
+    "InvitationsPage",
+  ),
+})
 
 // Everything else needs a session (proxy.ts) and a current password
 // (`enforcePasswordCurrent` in every protected layout).
@@ -247,7 +258,70 @@ const productFormPages = (
   }),
 )
 
+// Comment / story automations: `(has-folder)/<x>/layout.tsx` is a pathless
+// folder layout around the list; the create / edit / analytics pages sit
+// outside it.
+const commentListRoutes = (
+  [
+    ["fb-comments", "FbCommentsLayout", "FbCommentsPage"],
+    ["ig-comments", "IgCommentsLayout", "IgCommentsPage"],
+    ["ig-stories", "IgStoriesLayout", "IgStoriesPage"],
+  ] as const
+).map(([path, layout, page]) => {
+  const folder = createRoute({
+    getParentRoute: () => workspaceRoute,
+    id: `${path}-folder`,
+    component: lazyRouteComponent(comments, layout),
+  })
+  return folder.addChildren([
+    createRoute({
+      getParentRoute: () => folder,
+      path,
+      component: lazyRouteComponent(comments, page),
+    }),
+  ])
+})
+const commentPages = (
+  [
+    ["fb-comments/create", "CreateFbCommentPage"],
+    ["fb-comments/$id", "EditFbCommentPage"],
+    ["fb-comments/$id/analytics", "FbCommentAnalyticsPage"],
+    ["ig-comments/create", "CreateIgCommentPage"],
+    ["ig-comments/$id", "EditIgCommentPage"],
+    ["ig-comments/$id/analytics", "IgCommentAnalyticsPage"],
+    ["ig-stories/create", "CreateIgStoryPage"],
+    ["ig-stories/$id", "EditIgStoryPage"],
+    ["threads-comments", "ThreadsCommentsPage"],
+    ["threads-comments/create", "CreateThreadsCommentPage"],
+    ["threads-comments/$id", "EditThreadsCommentPage"],
+    ["tiktok-comments", "TiktokCommentsPage"],
+    ["tiktok-comments/create", "CreateTiktokCommentPage"],
+    ["tiktok-comments/$id", "EditTiktokCommentPage"],
+    ["tiktok-comments/$id/analytics", "TiktokCommentAnalyticsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(comments, page),
+  }),
+)
+
 // The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
+const logs = () => import("@/routes/logs")
+const logPages = (
+  [
+    ["error-logs", "ErrorLogsPage"],
+    ["audit-logs", "AuditLogsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(logs, page),
+  }),
+)
+
 const toolPages = (
   [
     ["polls", "PollsPage"],
@@ -355,6 +429,22 @@ const settingsRoutes = settingsRoute.addChildren([
   settingsPage(() => settingsRoute, "/", "SettingsIndexPage"),
   settingsPage(() => settingsRoute, "general", "SettingsGeneralPage"),
   settingsPage(() => settingsRoute, "admins", "SettingsAdminsPage"),
+  settingsPage(() => settingsRoute, "inbox-teams", "SettingsInboxTeamsPage"),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus",
+    "SettingsUserPersistentMenusPage",
+  ),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus/create",
+    "SettingsUserPersistentMenuCreatePage",
+  ),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus/$menuId",
+    "SettingsUserPersistentMenuEditPage",
+  ),
   settingsChannelsRoute.addChildren([
     createRoute({
       getParentRoute: () => settingsChannelsRoute,
@@ -400,12 +490,45 @@ const createChannelRoute = createRoute({
   ),
 })
 
+// `app/admin/*`: the platform-operator console (platform admin only).
+const admin = () => import("@/routes/admin")
+const adminRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "admin",
+  component: lazyRouteComponent(admin, "AdminLayout"),
+})
+const adminPages = (
+  [
+    ["/", "AdminIndexPage"],
+    ["workspaces", "AdminWorkspacesPage"],
+    ["admins", "AdminAdminsPage"],
+    ["help-items", "AdminHelpItemsPage"],
+    ["platform-credentials", "AdminNotAvailablePage"],
+    ["workspaces/deleted", "AdminNotAvailablePage"],
+    ["platform-channels", "AdminNotAvailablePage"],
+    ["default-template", "AdminNotAvailablePage"],
+    ["audit-logs", "AdminNotAvailablePage"],
+    ["smtp", "AdminNotAvailablePage"],
+    ["branding", "AdminNotAvailablePage"],
+    ["email-templates", "AdminNotAvailablePage"],
+    ["email-templates/$type", "AdminNotAvailablePage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => adminRoute,
+    path,
+    component: lazyRouteComponent(admin, page),
+  }),
+)
+
 const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
+  invitationRoute,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
     createChannelRoute,
+    adminRoute.addChildren(adminPages),
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
@@ -414,7 +537,10 @@ const routeTree = rootRoute.addChildren([
       ecommerceRoute.addChildren(ecommercePages),
       productFormsRoute.addChildren(productFormPages),
       ...toolPages,
+      ...logPages,
       ...toolEditorPages,
+      ...commentListRoutes,
+      ...commentPages,
       pipelinesRoutes,
       aiRoute.addChildren(aiPages),
       settingsRoutes,

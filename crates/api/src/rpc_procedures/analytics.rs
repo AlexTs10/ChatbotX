@@ -14,6 +14,13 @@ fn route(path: &str) -> Option<String> {
     if name == "macActiveContactCountByWorkspaceAPI" {
         return Some("analytics.macActiveContactCount".into());
     }
+    // `analyticsReflinkRoutes` / the magic link routes: same names.
+    if matches!(
+        name,
+        "refLinkStats" | "refLinkContacts" | "magicLinkStats" | "magicLinkContacts"
+    ) {
+        return Some(format!("analytics.{name}"));
+    }
     let name = name.strip_suffix("AnalyticsAPI")?;
     if name.starts_with("get") {
         return None; // broadcast / sequence stats: other inputs, not ported here.
@@ -41,7 +48,7 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
 
 /// The input as a GET query (arrays as repeated keys, as the oRPC OpenAPI
 /// query of the original); `workspaceId` is the `/rpc` workspace.
-fn query(input: &Value) -> String {
+pub(super) fn query(input: &Value) -> String {
     let mut pairs = url::form_urlencoded::Serializer::new(String::new());
     let Some(object) = input.as_object() else {
         return String::new();
@@ -87,7 +94,10 @@ mod tests {
                 Some("analytics.macActiveContactCount"),
             ),
             ("analyticsRoutes.getBroadcastStatsAnalyticsAPI", None),
-            ("analyticsRoutes.refLinkStats", None),
+            (
+                "analyticsRoutes.refLinkStats",
+                Some("analytics.refLinkStats"),
+            ),
         ];
         for (path, want) in cases {
             assert_eq!(route(path).as_deref(), want, "{path}");

@@ -680,6 +680,9 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
         return Ok(());
     }
     let from_contact = str_of(message, "senderType") == Some("contact");
+    if from_contact && crate::story_automation::dispatch(deps, stored, message, message_id).await? {
+        return Ok(());
+    }
     let text = str_of(message, "text")
         .filter(|t| !t.is_empty())
         .map(str::to_owned);
