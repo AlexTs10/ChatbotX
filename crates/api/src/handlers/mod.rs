@@ -14,6 +14,7 @@ pub mod channel_integrations;
 pub mod channel_settings;
 pub mod channels;
 pub mod comment_automations;
+pub mod conditions;
 pub mod connect_sessions;
 pub mod connections;
 pub mod contact_custom_fields;
@@ -54,10 +55,13 @@ pub mod products;
 pub mod qr_codes;
 pub mod questionnaires;
 pub mod reflinks;
+pub mod response_sla;
+pub mod saved_replies;
 pub mod sequences;
 pub mod tags;
 pub mod templates;
 pub mod webchats;
+pub mod webhooks;
 pub mod workspace_members;
 pub mod workspace_settings;
 
@@ -651,6 +655,12 @@ async fn route(
         messenger_menus::handle(state, route_id, call).await
     } else if messenger_templates::ROUTES.contains(&route_id) {
         messenger_templates::handle(state, route_id, call).await
+    } else if saved_replies::ROUTES.contains(&route_id) {
+        saved_replies::handle(state, route_id, call).await
+    } else if response_sla::ROUTES.contains(&route_id) {
+        response_sla::handle(state, route_id, call).await
+    } else if webhooks::ROUTES.contains(&route_id) {
+        webhooks::handle(state, route_id, call).await
     } else {
         return None;
     };

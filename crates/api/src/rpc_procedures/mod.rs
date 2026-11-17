@@ -18,6 +18,7 @@ mod lists;
 mod media_library;
 mod pipelines;
 mod products;
+mod rest;
 mod templates;
 mod tools;
 mod workspaces;
@@ -139,7 +140,7 @@ pub async fn procedure(
     if let Some(outcome) = tools::procedure(ctx, path, input).await {
         return Some(outcome);
     }
-    if let Some(outcome) = templates::procedure(ctx, path, input).await {
+    if let Some(outcome) = rest::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     lists::procedure(ctx, path, input).await
@@ -180,6 +181,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || products::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
+                || rest::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
@@ -212,6 +214,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = tools::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = rest::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

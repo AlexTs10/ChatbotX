@@ -1104,3 +1104,85 @@ async fn questionnaire_editor_loads_through_the_public_route() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
     assert!(out["data"]["validationErrors"].is_object(), "{out}");
 }
+
+#[tokio::test]
+async fn saved_reply_sla_and_menu_actions_are_wired() {
+    let (router, _) = router().await;
+    let act = |name: &'static str, args: Value| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": args }),
+            )
+            .await
+        }
+    };
+    let (status, reply, _) = act(
+        "createSavedReplyAction",
+        json!([ws(), { "shortcut": "hi", "text": "Hello" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    let id = reply["id"].as_str().unwrap().to_string();
+    // The form refine is a `validationErrors.text` entry.
+    let (status, error, _) = act("createSavedReplyAction", json!([ws(), { "shortcut": "x" }])).await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(error["data"]["validationErrors"]["text"]["_errors"][0].is_string(), "{error}");
+    let (status, out, _) = act(
+        "editSavedReplyAction",
+        json!([ws(), id.clone(), { "shortcut": "hey" }]),
+    )
+    .await;
+    assert_eq!((status, out["text"].clone()), (StatusCode::OK, json!("Hello")), "{out}");
+    let (_, list, _) = post(
+        &router,
+        "savedRepliesAPI/listSavedRepliesAuthorizedAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(list["data"][0]["shortcut"], "hey", "{list}");
+    let (status, _, _) = act("deleteSavedReplyAction", json!([ws(), id])).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, sla, _) = act(
+        "updateResponseSlaAction",
+        json!([ws(), { "firstResponseTargetSeconds": 300, "nextResponseTargetSeconds": 600, "enabled": false }]),
+    )
+    .await;
+    assert_eq!((status, sla["enabled"].clone()), (StatusCode::OK, json!(false)), "{sla}");
+    let (_, status_out, _) = post(
+        &router,
+        "responseSlaAPI/getResponseSlaStatusWorkspaceAuthAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status_out, json!({ "enabled": false }));
+
+    let menu = json!({ "name": "Main", "persistentMenus": [] });
+    let (status, out, _) = act("createUserPersistentMenuAction", json!([ws(), menu])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, menus, _) = post(
+        &router,
+        "userPersistentMenusAPI/listUserPersistentMenusAuthenticatedAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    let menu_id = menus["data"][0]["id"].as_str().unwrap().to_string();
+    let (status, out, _) = act(
+        "updateUserPersistentMenuAction",
+        json!([ws(), menu_id.clone(), { "name": "Renamed", "persistentMenus": [] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, _, _) = act("deleteUserPersistentMenuAction", json!([ws(), { "ids": [menu_id.clone()] }])).await;
+    assert_eq!(status, StatusCode::OK);
+    // A single unknown id is a 404, as the original service.
+    let (status, _, _) = act("deleteUserPersistentMenuAction", json!([ws(), { "ids": [menu_id] }])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
