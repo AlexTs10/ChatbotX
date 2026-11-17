@@ -154,6 +154,7 @@ impl Fixture {
             channels: Channels::default(),
             app_url: "http://app.test".into(),
             variables: None,
+            ai: Arc::new(crate::ai::Ai::live()),
         };
         Fixture { deps, jobs, dir }
     }

@@ -367,6 +367,7 @@ fn start_workers(
             app_url(),
         )
         .map(Arc::new),
+        ai: Arc::new(chatbotx_worker::ai::Ai::live()),
     };
     chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
     Ok((shutdown, exited))

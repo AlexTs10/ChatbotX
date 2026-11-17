@@ -6,6 +6,7 @@
 //! Handlers run on the `chatbotx-jobs` runtime inside `chatbotx-server`
 //! ([`start`]).
 
+pub mod ai;
 pub mod channel;
 pub mod channels;
 pub mod chat;
@@ -43,6 +44,8 @@ pub struct Deps {
     pub app_url: String,
     /// `{{variable}}` resolution; `None` = spintax only.
     pub variables: Option<Arc<variables::VariableDeps>>,
+    /// The AI provider transport and embedder.
+    pub ai: Arc<ai::Ai>,
 }
 
 /// A handler failure that BullMQ would retry (`throw new Error(..)`).
