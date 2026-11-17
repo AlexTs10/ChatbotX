@@ -7,7 +7,9 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
+  parseSearchWith,
   redirect,
+  stringifySearchWith,
 } from "@tanstack/react-router"
 import { sessionQuery } from "@/lib/session"
 import { DefaultErrorPage, NotFoundPage, RootLayout } from "@/routes/root"
@@ -16,6 +18,8 @@ import { DefaultErrorPage, NotFoundPage, RootLayout } from "@/routes/root"
 const auth = () => import("@/routes/auth")
 const workspace = () => import("@/routes/workspace")
 const flows = () => import("@/routes/flows")
+const fields = () => import("@/routes/fields")
+const sequences = () => import("@/routes/sequences")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -119,6 +123,11 @@ const workspacePages = [
       "ContactsPage",
     ),
   }),
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path: "inbox",
+    component: lazyRouteComponent(() => import("@/routes/inbox"), "InboxPage"),
+  }),
 ]
 const flowsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -131,6 +140,36 @@ const flowsPages = [
     path: "/",
     component: lazyRouteComponent(flows, "FlowsPage"),
   }),
+]
+// A layout route with one index page (`<name>/layout.tsx` + `page.tsx`).
+function sectionRoute<T extends Record<string, unknown>>(
+  path: string,
+  load: () => Promise<T>,
+  layout: keyof T & string,
+  page: keyof T & string,
+) {
+  const section = createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(load, layout),
+  })
+  return section.addChildren([
+    createRoute({
+      getParentRoute: () => section,
+      path: "/",
+      component: lazyRouteComponent(load, page),
+    }),
+  ])
+}
+const sectionRoutes = [
+  sectionRoute("tags", fields, "TagsLayout", "TagsPage"),
+  sectionRoute(
+    "custom-fields",
+    fields,
+    "CustomFieldsLayout",
+    "CustomFieldsPage",
+  ),
+  sectionRoute("sequences", sequences, "SequencesLayout", "SequencesPage"),
 ]
 
 // `(no-sidebar)`: the flow editor is outside the workspace sidebar layout.
@@ -161,6 +200,7 @@ const routeTree = rootRoute.addChildren([
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
+      ...sectionRoutes,
     ]),
   ]),
 ])
@@ -171,6 +211,11 @@ export function createAppRouter(queryClient: QueryClient) {
     context: { queryClient },
     defaultPreload: false,
     scrollRestoration: true,
+    // Next.js search params are plain strings. The default JSON parse turns
+    // an id above 2^53 into a rounded number (`useSearchParams` then reads
+    // `…683` as `…684`); values that round-trip exactly still become numbers.
+    parseSearch: parseSearchWith((value) => value),
+    stringifySearch: stringifySearchWith(JSON.stringify),
   })
 }
 

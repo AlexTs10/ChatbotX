@@ -399,6 +399,14 @@ async fn workspace_page(state: &AuthState, name: &str, user_id: i64, input: Valu
     let permissions = &current.permissions;
     match name {
         // `requireContactsAccess` → `buildContactPermissionScope`.
+        // `requireContactsAccess`: no contact scope = the not-found page.
+        "contactsAccess"
+            if !(flag(permissions, "superAdmin")
+                || flag(permissions, "contacts")
+                || flag(permissions, "onlyAssignedContacts")) =>
+        {
+            error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found")
+        }
         "contactsAccess" => ok(json!({
             "canViewEmailAndPhone": flag(permissions, "superAdmin") || flag(permissions, "emailAndPhone"),
         })),

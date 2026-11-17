@@ -1,0 +1,335 @@
+"use client"
+
+import type { CustomFieldType } from "@chatbotx.io/database/partials"
+import { DataTable } from "@chatbotx.io/ui/components/data-table/data-table"
+import { DataTableColumnHeader } from "@chatbotx.io/ui/components/data-table/data-table-column-header"
+import { DataTableSkeleton } from "@chatbotx.io/ui/components/data-table/data-table-skeleton"
+import { DataTableToolbar } from "@chatbotx.io/ui/components/data-table/data-table-toolbar"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@chatbotx.io/ui/components/ui/card"
+import { Checkbox } from "@chatbotx.io/ui/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@chatbotx.io/ui/components/ui/dropdown-menu"
+import { Switch } from "@chatbotx.io/ui/components/ui/switch"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@chatbotx.io/ui/components/ui/tooltip"
+import { useDataTable } from "@chatbotx.io/ui/hooks/use-data-table"
+import type { DataTableRowAction } from "@chatbotx.io/ui/types/data-table"
+import type { ColumnDef } from "@tanstack/react-table"
+import {
+  FolderUpIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  Trash2Icon,
+} from "lucide-react"
+import { useTranslations } from "next-intl"
+import { Suspense, use, useMemo, useState } from "react"
+import { FolderBarSlot } from "@/features/folders/folder-bar-slot"
+import { LockBadge } from "@/features/templates/components/lock-badge"
+import {
+  TemplateLockedList,
+  UndeletableGuard,
+} from "@/features/templates/components/lock-context"
+import { ChangeFolderDialog } from "../folders/change-folder"
+import CustomFieldTypeLabel from "./components/custom-field-label"
+import { CreateCustomFieldDialog } from "./create-custom-field"
+import { CustomFieldsTableToolbarActions } from "./custom-field-table-toolbar-actions"
+import { DeleteFieldsDialog } from "./delete-fields-dialog"
+import { useInvalidateCustomFields } from "./provider/custom-field-hook"
+import type { listCustomFieldsRSC } from "./queries"
+import type { CustomFieldResource } from "./schema/resource"
+import { UpdateCustomFieldDialog } from "./update-custom-field-dialog"
+
+type FieldsTableProps = {
+  promises: Promise<[Awaited<ReturnType<typeof listCustomFieldsRSC>>]>
+  workspaceId: string
+  folderId: string | null
+}
+
+function CustomFieldsTableContent({
+  promises,
+  workspaceId,
+  folderId,
+}: FieldsTableProps) {
+  const t = useTranslations()
+  const invalidateCustomFields = useInvalidateCustomFields()
+  const [{ data, pageCount }] = use(promises)
+  const [rowAction, setRowAction] =
+    useState<DataTableRowAction<CustomFieldResource> | null>(null)
+  // const [_, copyFieldId] = useCopyToClipboard()
+
+  // const handleCopy = (id: string) => {
+  //   copyFieldId(id)
+  //     .then(() => {
+  //       toast.success("Copied to clipboard!")
+  //     })
+  //     .catch(() => {
+  //       toast.error("Failed to copy!")
+  //     })
+  // }
+
+  const columns = useMemo<ColumnDef<CustomFieldResource>[]>(
+    () => [
+      {
+        id: "select",
+        header: ({ table: innerTable }) => (
+          <Checkbox
+            aria-label={t("actions.selectAll")}
+            checked={innerTable.getIsAllPageRowsSelected()}
+            indeterminate={innerTable.getIsSomePageRowsSelected()}
+            onCheckedChange={(value) =>
+              innerTable.toggleAllPageRowsSelected(Boolean(value))
+            }
+          />
+        ),
+        cell: ({ row }) => (
+          <Checkbox
+            aria-label={t("actions.selectRow")}
+            checked={row.getIsSelected()}
+            onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+          />
+        ),
+        size: 32,
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        id: "name",
+        accessorKey: "name",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.name.label")}
+          />
+        ),
+        cell: ({ row }) => (
+          <div>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <div className="flex max-w-[200px] items-center">
+                    <span className="truncate">{row.original.name}</span>
+                    <LockBadge resourceId={row.original.id} />
+                  </div>
+                }
+              />
+              <TooltipContent>
+                <p>{row.original.name}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        ),
+        meta: {
+          label: t("fields.name.label"),
+          placeholder: t("fields.name.searchPlaceholder"),
+          variant: "text",
+        },
+        enableColumnFilter: true,
+        enableSorting: true,
+        enableHiding: false,
+      },
+      {
+        id: "description",
+        accessorKey: "description",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.description.label")}
+          />
+        ),
+        cell: ({ row }) => (
+          <div>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <div className="inline-block max-w-[200px] truncate">
+                    {row.original.description}
+                  </div>
+                }
+              />
+              <TooltipContent>
+                <p>{row.original.description}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        ),
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        id: "Type",
+        accessorKey: "type",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.type.label")}
+          />
+        ),
+        cell: ({ row }) => (
+          <CustomFieldTypeLabel type={row.original.type as CustomFieldType} />
+        ),
+        meta: {
+          label: t("fields.type.label"),
+        },
+        size: 100,
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        id: "Inbox",
+        accessorKey: "showInInbox",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.inbox.label")}
+          />
+        ),
+        cell: ({ row }) => <Switch checked={row.original.showInInbox} />,
+        enableSorting: false,
+        enableHiding: false,
+        meta: {
+          label: t("fields.inbox.label"),
+        },
+      },
+      {
+        id: "actions",
+        header: t("actions.actions"),
+        cell: ({ row }) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button size="icon" variant="ghost">
+                  <MoreHorizontalIcon className="h-4 w-4" />
+                  <span className="sr-only">Open menu</span>
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => setRowAction({ row, variant: "update" })}
+              >
+                <PencilIcon />
+                {t("actions.edit")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setRowAction({ row, variant: "move" })}
+              >
+                <FolderUpIcon />
+                {t("actions.move")}
+              </DropdownMenuItem>
+              <UndeletableGuard resourceId={row.original.id}>
+                {(disabled) => (
+                  <DropdownMenuItem
+                    disabled={disabled}
+                    onClick={() => setRowAction({ row, variant: "delete" })}
+                    variant="destructive"
+                  >
+                    <Trash2Icon />
+                    {t("actions.delete")}
+                  </DropdownMenuItem>
+                )}
+              </UndeletableGuard>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+        size: 50,
+        enableSorting: false,
+        enableHiding: false,
+      },
+    ],
+    [t],
+  )
+
+  const { table } = useDataTable({
+    data,
+    columns,
+    pageCount,
+    initialState: {
+      sorting: [{ id: "createdAt", desc: true }],
+      columnPinning: { right: ["actions"] },
+    },
+    getRowId: (originalRow) => originalRow.id,
+    shallow: false,
+    clearOnDefault: true,
+  })
+
+  return (
+    <TemplateLockedList
+      resourceKind="customField"
+      rows={data}
+      workspaceId={workspaceId}
+    >
+      <DataTable table={table}>
+        <DataTableToolbar table={table}>
+          <CustomFieldsTableToolbarActions
+            table={table}
+            workspaceId={workspaceId}
+            // setRowAction={setRowAction}
+          />
+          <CreateCustomFieldDialog
+            folderId={folderId}
+            workspaceId={workspaceId}
+          />
+        </DataTableToolbar>
+      </DataTable>
+
+      <DeleteFieldsDialog
+        onOpenChange={() => setRowAction(null)}
+        onSuccess={() => rowAction?.row.toggleSelected(false)}
+        open={rowAction?.variant === "delete"}
+        records={rowAction?.row.original ? [rowAction?.row.original] : []}
+        showTrigger={false}
+        workspaceId={workspaceId}
+      />
+
+      <UpdateCustomFieldDialog
+        customField={rowAction?.row.original || null}
+        onOpenChange={() => setRowAction(null)}
+        open={rowAction?.variant === "update"}
+        workspaceId={workspaceId}
+      />
+
+      <ChangeFolderDialog
+        currentFolderId={rowAction?.row.original?.folderId || null}
+        folderType="customField"
+        modelIds={rowAction?.row.original ? [rowAction?.row.original.id] : null}
+        onOpenChange={() => setRowAction(null)}
+        onSuccess={invalidateCustomFields}
+        open={rowAction?.variant === "move"}
+        workspaceId={workspaceId}
+      />
+    </TemplateLockedList>
+  )
+}
+
+export function CustomFieldsTable(props: FieldsTableProps) {
+  const t = useTranslations()
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="font-bold text-xl">
+          {t("customFields.title")}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <FolderBarSlot />
+        <Suspense fallback={<DataTableSkeleton columnCount={5} />}>
+          <CustomFieldsTableContent {...props} />
+        </Suspense>
+      </CardContent>
+    </Card>
+  )
+}
