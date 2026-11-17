@@ -25,6 +25,7 @@ pub mod inbox_labels;
 pub mod integration;
 pub mod low;
 pub mod meta_catalog;
+pub mod mini_app_buttons;
 pub mod notification;
 pub mod purge;
 pub mod schedule;
