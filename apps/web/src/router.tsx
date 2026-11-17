@@ -430,6 +430,37 @@ const createChannelRoute = createRoute({
   ),
 })
 
+// `app/admin/*`: the platform-operator console (platform admin only).
+const admin = () => import("@/routes/admin")
+const adminRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "admin",
+  component: lazyRouteComponent(admin, "AdminLayout"),
+})
+const adminPages = (
+  [
+    ["/", "AdminIndexPage"],
+    ["workspaces", "AdminWorkspacesPage"],
+    ["admins", "AdminAdminsPage"],
+    ["help-items", "AdminHelpItemsPage"],
+    ["platform-credentials", "AdminNotAvailablePage"],
+    ["workspaces/deleted", "AdminNotAvailablePage"],
+    ["platform-channels", "AdminNotAvailablePage"],
+    ["default-template", "AdminNotAvailablePage"],
+    ["audit-logs", "AdminNotAvailablePage"],
+    ["smtp", "AdminNotAvailablePage"],
+    ["branding", "AdminNotAvailablePage"],
+    ["email-templates", "AdminNotAvailablePage"],
+    ["email-templates/$type", "AdminNotAvailablePage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => adminRoute,
+    path,
+    component: lazyRouteComponent(admin, page),
+  }),
+)
+
 const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
   invitationRoute,
@@ -437,6 +468,7 @@ const routeTree = rootRoute.addChildren([
     homeRoute,
     flowDetailRoute,
     createChannelRoute,
+    adminRoute.addChildren(adminPages),
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),

@@ -8,6 +8,7 @@
 //! returns the same JSON as a ported public `/v1` route, the handler runs that
 //! route ([`public`]) after the member checks, so both stay one code path.
 
+mod admin;
 mod analytics;
 mod contacts;
 mod conversations;
@@ -162,6 +163,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         .cloned()
         .unwrap_or_default();
     if let Some(outcome) = workspaces::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = admin::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = integrations::auth_action(ctx, name, &args).await {
