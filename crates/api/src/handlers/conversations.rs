@@ -1,11 +1,9 @@
 //! `apps/builder/src/features/conversations/api/public.ts`
 //! (`conversationsPublicRouter`, `/v1/conversations`, scope `inbox`).
-//! Workspace tokens only (no member scope / masking). `threadControl`
-//! answers 501 `notPorted` (needs the channel thread-control registry).
+//! Workspace tokens only (no member scope / masking).
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use chatbotx_business::BusinessError;
 use chatbotx_business::contact::avatar::{AvatarInbox, resolve_contact_avatar_url_with};
 use chatbotx_business::contact_filter::{parse_strict_param, to_filter_criteria};
 use chatbotx_business::conversation_actions as actions;
@@ -61,8 +59,16 @@ const CHANNELS: &[&str] = &[
     "api",
 ];
 
-/// `possibleErrorsOnThreadControl` is not needed: the route is not ported.
-const NOT_PORTED: ErrorMap = &[("notPorted", 501)];
+/// `possibleErrorsOnThreadControl`.
+const THREAD_CONTROL: ErrorMap = &[
+    ("notFound", 404),
+    ("businessError", 400),
+    ("idempotencyKeyInvalid", 422),
+    ("idempotencyKeyReused", 422),
+    ("idempotencyKeyConflict", 409),
+    ("threadControlUnsupported", 400),
+    ("threadControlFailed", 400),
+];
 
 // ---- output ---------------------------------------------------------------
 
@@ -545,13 +551,81 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .map_err(mutated)?;
             success()
         }
-        _ => Err(business_error(
-            BusinessError::exception(
-                "Conversation thread control is not ported yet",
-                "notPorted",
-                501,
-            ),
-            NOT_PORTED,
+        _ => thread_control(state, call).await,
+    }
+}
+
+/// `conversations.threadControl` (take / release / pass / sync).
+async fn thread_control(state: &ApiState, call: Call<'_>) -> Reply {
+    use chatbotx_business::thread_control as tc;
+    let mut input = Input::from_body(call.params, call.body);
+    let contact_inbox = input.digits_id("contactInboxId");
+    let value = input.get("action").cloned();
+    let action = input.enum_at(
+        &key("action"),
+        value.as_ref(),
+        &["take", "release", "pass", "sync"],
+        true,
+    );
+    let value = input.get("targetRole").cloned();
+    let target_role = input.enum_at(&key("targetRole"), value.as_ref(), tc::roles::ALL, false);
+    let metadata = input.opt_string(
+        "metadata",
+        Str::trimmed(
+            1,
+            chatbotx_db::repo::partials::thread_control::THREAD_CONTROL_METADATA_MAX_LENGTH,
+        ),
+    );
+    // `refineThreadControlHandover`.
+    if let Some(action) = &action {
+        if target_role.is_some() && action != "pass" {
+            input.issue(
+                &key("targetRole"),
+                "custom",
+                "targetRole is only allowed with the `pass` action",
+            );
+        }
+        if metadata.is_some() && !matches!(action.as_str(), "take" | "pass") {
+            input.issue(
+                &key("metadata"),
+                "custom",
+                "metadata is only allowed with the `take` or `pass` action",
+            );
+        }
+    }
+    let conversation = input.digits_id("id");
+    input.finish()?;
+    let (action, ws) = (action.unwrap_or_default(), call.workspace_id);
+    let errors = |e| business_error(e, THREAD_CONTROL);
+    let conversation = list::find_or_fail(&state.db, ws, conversation.unwrap_or(-1))
+        .await
+        .map_err(errors)?;
+    let contact_inbox = contact_inbox.unwrap_or(-1);
+    let graph = state.graph_url.as_str();
+    let rt = state.realtime.as_ref();
+    let result = if action == "sync" {
+        tc::sync_conversation_owner(&state.db, rt, graph, &conversation, contact_inbox).await
+    } else {
+        tc::request_conversation_action(
+            &state.db,
+            rt,
+            graph,
+            &conversation,
+            contact_inbox,
+            &action,
+            target_role.as_deref(),
+            metadata.as_deref(),
+        )
+        .await
+    };
+    match result {
+        Ok(row) => Ok(json(
+            200,
+            json!({ "status": "applied", "snapshot": tc::snapshot_json(&row) }),
         )),
+        Err(error) => {
+            let status = tc::map_error(error, &action).map_err(errors)?;
+            Ok(json(200, json!({ "status": status })))
+        }
     }
 }

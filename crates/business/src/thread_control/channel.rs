@@ -139,12 +139,33 @@ fn http() -> &'static reqwest::Client {
 /// retry vs. log on it); the full `ChannelErrorCategory` mapping lives in the worker.
 fn is_permanent_code(code: Option<i64>, kind: Option<&str>) -> bool {
     const TRANSIENT: &[i64] = &[
-        1, 2, 4, 17, 32, 613, 80_001, 80_006, 130_429, 131_000, 131_016, 131_048, 131_056,
-        133_004,
+        1, 2, 4, 17, 32, 613, 80_001, 80_006, 130_429, 131_000, 131_016, 131_048, 131_056, 133_004,
     ];
     const PERMANENT: &[i64] = &[
-        0, 3, 10, 102, 190, 341, 368, 458, 459, 460, 463, 464, 467, 492, 131_005, 131_031,
-        131_042, 131_057, 131_064, 133_000, 133_005, 133_006, 133_010, 133_015,
+        0,
+        3,
+        10,
+        102,
+        190,
+        341,
+        368,
+        458,
+        459,
+        460,
+        463,
+        464,
+        467,
+        492,
+        131_005,
+        131_031,
+        131_042,
+        131_057,
+        131_064,
+        133_000,
+        133_005,
+        133_006,
+        133_010,
+        133_015,
         NOT_ESCALATION_CODE,
     ];
     match code {
@@ -156,10 +177,7 @@ fn is_permanent_code(code: Option<i64>, kind: Option<&str>) -> bool {
 
 /// One Graph call; a non-2xx answer becomes a [`ChannelFailure`] (`parseOriginError` +
 /// `mapApiFields`), a transport error a transient one.
-async fn graph(
-    request: reqwest::RequestBuilder,
-    fallback: &str,
-) -> Result<Value, ChannelFailure> {
+async fn graph(request: reqwest::RequestBuilder, fallback: &str) -> Result<Value, ChannelFailure> {
     let response = request.send().await.map_err(|e| ChannelFailure {
         message: e.to_string(),
         code: None,
@@ -221,10 +239,26 @@ pub async fn update_on_channel(
     let metadata = if action == "release" { None } else { metadata };
     match integration_auth(db, workspace_id, contact_inbox).await? {
         Integration::Whatsapp(auth) => {
-            whatsapp_update(base_url, &auth, contact_inbox, action, target_role, metadata).await
+            whatsapp_update(
+                base_url,
+                &auth,
+                contact_inbox,
+                action,
+                target_role,
+                metadata,
+            )
+            .await
         }
         Integration::Messenger(auth) => {
-            messenger_update(base_url, &auth, contact_inbox, action, target_role, metadata).await
+            messenger_update(
+                base_url,
+                &auth,
+                contact_inbox,
+                action,
+                target_role,
+                metadata,
+            )
+            .await
         }
     }
 }
@@ -356,7 +390,10 @@ async fn messenger_update(
             "pass_thread_control",
             json!({ "recipient": { "id": psid }, "target_app_id": target }),
         ),
-        None => ("take_thread_control", json!({ "recipient": { "id": psid } })),
+        None => (
+            "take_thread_control",
+            json!({ "recipient": { "id": psid } }),
+        ),
     };
     if let Some(note) = clip(metadata) {
         body["metadata"] = json!(note);
@@ -466,7 +503,7 @@ mod tests {
     /// Port of `integrations/whatsapp/__tests__/thread-control.test.ts` body cases.
     #[test]
     fn whatsapp_body_matches_build_thread_control_body() {
-                assert_eq!(
+        assert_eq!(
             whatsapp_body("15550001", None, "pass", Some("marketing"), Some("note")),
             json!({ "messaging_product": "whatsapp", "to": "15550001", "action": "pass",
                     "metadata": "note", "control_pass": { "target_role": "marketing" } })
@@ -476,7 +513,13 @@ mod tests {
             json!({ "messaging_product": "whatsapp", "to": "15550001", "action": "pass" })
         );
         assert_eq!(
-            whatsapp_body("15550001", None, "take", Some("marketing"), Some(&"n".repeat(2100))),
+            whatsapp_body(
+                "15550001",
+                None,
+                "take",
+                Some("marketing"),
+                Some(&"n".repeat(2100))
+            ),
             json!({ "messaging_product": "whatsapp", "to": "15550001", "action": "take",
                     "metadata": "n".repeat(2000) })
         );
@@ -488,8 +531,14 @@ mod tests {
 
     #[test]
     fn expiration_reads_seconds_and_dates() {
-        assert_eq!(parse_expiration(Some(&json!(1_700_000_000))), Some(1_700_000_000_000));
-        assert_eq!(parse_expiration(Some(&json!("1700000000"))), Some(1_700_000_000_000));
+        assert_eq!(
+            parse_expiration(Some(&json!(1_700_000_000))),
+            Some(1_700_000_000_000)
+        );
+        assert_eq!(
+            parse_expiration(Some(&json!("1700000000"))),
+            Some(1_700_000_000_000)
+        );
         assert_eq!(parse_expiration(Some(&json!(""))), None);
         assert_eq!(parse_expiration(None), None);
     }

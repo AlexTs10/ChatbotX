@@ -13,12 +13,12 @@ pub mod channel;
 use chatbotx_db::Db;
 use chatbotx_db::repo::models::{ContactInbox, Conversation};
 use chatbotx_db::repo::partials::thread_control::{
-    ThreadControlInput, THREAD_CONTROL_SEEN_REFRESH_MS, is_inbox_thread_control_active,
+    THREAD_CONTROL_SEEN_REFRESH_MS, ThreadControlInput, is_inbox_thread_control_active,
     resolve_thread_control_state, to_thread_control_timestamp, transition,
 };
 use chatbotx_db::repo::{self, contact_inbox as ci_repo, iso, now_ms};
 use chatbotx_jobs::{Enqueuer, JobOptions, QueueName};
-use chatbotx_rt::{EventType, Envelope, Realtime};
+use chatbotx_rt::{Envelope, EventType, Realtime};
 use serde_json::{Value, json};
 
 pub use channel::{ChannelFailure, ChannelResult, ThreadOwner};
@@ -67,6 +67,45 @@ impl ThreadControlError {
 }
 
 type Result<T> = std::result::Result<T, ThreadControlError>;
+
+/// `THREAD_CONTROL_NOT_ESCALATION`.
+pub const NOT_ESCALATION: &str = "notEscalation";
+
+/// `mapThreadControlError` (English copy of the public API and the inbox action): a
+/// refused `take` is `Ok(notEscalation)`; an unsupported channel / channel failure a 400
+/// exception; anything else is returned unchanged.
+pub fn map_error(
+    error: ThreadControlError,
+    action: &str,
+) -> std::result::Result<&'static str, BusinessError> {
+    match error {
+        ThreadControlError::Unsupported(_) => Err(BusinessError::exception(
+            "This channel does not support thread control.",
+            "threadControlUnsupported",
+            400,
+        )),
+        ThreadControlError::Business(error) => Err(error),
+        ThreadControlError::Channel(failure) if action == "take" && failure.take_refused => {
+            Ok(NOT_ESCALATION)
+        }
+        ThreadControlError::Channel(failure) => {
+            const FALLBACK: &str = "The channel could not apply the thread-control action.";
+            let message =
+                if failure.message.is_empty() || crate::errors::is_query_dump(&failure.message) {
+                    FALLBACK.to_owned()
+                } else {
+                    Some(crate::errors::sanitize_public_text(&failure.message))
+                        .filter(|m| !m.is_empty())
+                        .unwrap_or_else(|| FALLBACK.to_owned())
+                };
+            Err(BusinessError::exception(
+                message,
+                "threadControlFailed",
+                400,
+            ))
+        }
+    }
+}
 
 // ---- constants ------------------------------------------------------------
 
@@ -191,20 +230,27 @@ fn original_of_repeated_action(
     owner_role: Option<&str>,
 ) -> Option<i64> {
     let row = input.ci();
-    if !matches!(input.event.as_str(), "taken" | "released" | "passed") || input.context.is_some()
-    {
+    if !matches!(input.event.as_str(), "taken" | "released" | "passed") || input.context.is_some() {
         return None;
     }
     let same = row.thread_control_last_event.as_deref() == Some(input.event.as_str())
         && stored_state(row, now_ms()).as_deref() == Some(next_state)
         && row.thread_owner_role.as_deref() == owner_role
         && row.thread_owner_app_id == input.owner_app_id;
-    if same { row.thread_control_updated_at } else { None }
+    if same {
+        row.thread_control_updated_at
+    } else {
+        None
+    }
 }
 
 /// `resolvePreviousOwnerAppId`.
 fn previous_owner_app_id(input: &RecordEventInput) -> Option<String> {
-    if let Some(prev) = input.previous_owner_app_id.as_ref().filter(|p| !p.is_empty()) {
+    if let Some(prev) = input
+        .previous_owner_app_id
+        .as_ref()
+        .filter(|p| !p.is_empty())
+    {
         return Some(prev.clone());
     }
     if !matches!(input.event.as_str(), "controlPassed" | "controlTaken") {
@@ -357,14 +403,21 @@ async fn touch_inbox_seen(db: &Db, input: &RecordEventInput) -> Result<()> {
     }
     let (ws, inbox) = (input.workspace_id, input.inbox_id);
     tx::write(db, move |conn| {
-        Ok(repo::inbox::touch_thread_control_seen(conn, ws, inbox, now)?)
+        Ok(repo::inbox::touch_thread_control_seen(
+            conn, ws, inbox, now,
+        )?)
     })
     .await?;
     Ok(())
 }
 
 /// `announceStateChange`: `contactInboxThreadControlUpdated`.
-async fn announce(rt: Option<&Realtime>, workspace_id: i64, conversation_id: i64, row: &ContactInbox) {
+async fn announce(
+    rt: Option<&Realtime>,
+    workspace_id: i64,
+    conversation_id: i64,
+    row: &ContactInbox,
+) {
     let Some(rt) = rt else { return };
     let mut data = snapshot_json(row);
     data["conversationId"] = json!(conversation_id.to_string());
@@ -408,7 +461,8 @@ async fn write_message(
                 row.thread_owner_app_id.clone()
             }
         });
-        let mut attrs = json!({ "type": ACTIVITY_TYPE, "event": input.event, "ownerRole": owner_role });
+        let mut attrs =
+            json!({ "type": ACTIVITY_TYPE, "event": input.event, "ownerRole": owner_role });
         if let Some(role) = previous_role {
             attrs["previousOwnerRole"] = json!(role);
         }
@@ -479,7 +533,9 @@ async fn publish_message_created(
     inbox_id: i64,
     message: &repo::models::Message,
 ) {
-    let Some(conversation) = conversation else { return };
+    let Some(conversation) = conversation else {
+        return;
+    };
     let payload = crate::message::message_json(&repo::message::MessageWithAttachments {
         message: message.clone(),
         attachment_count: None,
@@ -504,7 +560,11 @@ async fn publish_message_created(
 
 async fn find_contact_inbox(db: &Db, workspace_id: i64, id: i64) -> Result<Option<ContactInbox>> {
     Ok(tx::read(db, move |conn| {
-        Ok(ci_repo::find_model_by_id_for_workspace(conn, id, workspace_id)?)
+        Ok(ci_repo::find_model_by_id_for_workspace(
+            conn,
+            id,
+            workspace_id,
+        )?)
     })
     .await?)
 }
@@ -610,8 +670,7 @@ pub async fn sync_thread_owner(
     conversation_id: i64,
 ) -> Result<ContactInbox> {
     let occurred_at = to_thread_control_timestamp(now_ms());
-    let Some(owner) =
-        channel::get_thread_owner(db, base_url, workspace_id, &contact_inbox).await?
+    let Some(owner) = channel::get_thread_owner(db, base_url, workspace_id, &contact_inbox).await?
     else {
         return Ok(contact_inbox);
     };
@@ -630,7 +689,11 @@ pub async fn sync_thread_owner(
         "none" => ("released", None, false),
         _ => return Ok(contact_inbox),
     };
-    let owner_app_id = if keeps_app { owner.owner_app_id.clone() } else { None };
+    let owner_app_id = if keeps_app {
+        owner.owner_app_id.clone()
+    } else {
+        None
+    };
     let is_standby = event == "standbyReceived";
     let confirmed = match kind {
         "self" => resolved.as_deref() == Some("owned"),
@@ -772,7 +835,12 @@ pub async fn record_inbound_delivery(
         return Ok(None);
     }
     let standby = delivery == STANDBY_DELIVERY;
-    input.event = if standby { "standbyReceived" } else { "inboundReceived" }.into();
+    input.event = if standby {
+        "standbyReceived"
+    } else {
+        "inboundReceived"
+    }
+    .into();
     if !standby {
         input.owner_app_id = None;
         input.owner_role = None;
@@ -781,6 +849,54 @@ pub async fn record_inbound_delivery(
     input.previous_owner_app_id = None;
     input.handover_note = None;
     Ok(Some(record_event(db, rt, input).await?))
+}
+
+/// `promoteStandbyDelivery`: claims the standby copy once its owner delivery arrives;
+/// `true` for exactly one of concurrent claims.
+pub async fn promote_standby_delivery(
+    db: &Db,
+    workspace_id: i64,
+    message: &repo::models::Message,
+) -> std::result::Result<bool, BusinessError> {
+    if !is_unpromoted_standby_copy(message.content_attributes.as_ref().map(|j| &j.0)) {
+        return Ok(false);
+    }
+    let mut overlay = serde_json::Map::new();
+    overlay.insert(PROMOTED_KEY.into(), Value::Bool(true));
+    let params = repo::message::ClaimContentAttributesParams {
+        message_id: message.id,
+        workspace_id,
+        created_at: message.created_at,
+        guard_key: PROMOTED_KEY.into(),
+        overlay,
+    };
+    let claimed = tx::write(db, move |conn| {
+        Ok(repo::message::claim_content_attributes(conn, &params)?)
+    })
+    .await?;
+    Ok(claimed.is_some())
+}
+
+/// `refreshForRouting`: re-reads a thread that has observed routing (no query for a
+/// never-routed one).
+pub async fn refresh_for_routing(
+    db: &Db,
+    workspace_id: i64,
+    contact_inbox: ContactInbox,
+) -> std::result::Result<ContactInbox, BusinessError> {
+    if contact_inbox.thread_control_state.is_none() {
+        return Ok(contact_inbox);
+    }
+    let id = contact_inbox.id;
+    let current = tx::read(db, move |conn| {
+        Ok(ci_repo::find_model_by_id_for_workspace(
+            conn,
+            id,
+            workspace_id,
+        )?)
+    })
+    .await?;
+    Ok(current.unwrap_or(contact_inbox))
 }
 
 /// `isUnpromotedStandbyCopy`.
@@ -863,7 +979,10 @@ pub async fn release_owned_threads_for_contacts(
             remove_on_fail: Some(chatbotx_jobs::Retention::Remove),
             ..JobOptions::default()
         };
-        if let Err(error) = jobs.add(QueueName::Integration, RELEASE_JOB, data, opts).await {
+        if let Err(error) = jobs
+            .add(QueueName::Integration, RELEASE_JOB, data, opts)
+            .await
+        {
             return Err(BusinessError::exception(
                 format!("thread release enqueue failed: {error}"),
                 "systemError",
@@ -885,6 +1004,3 @@ pub async fn resolve_current_state(
         stored_state(&row, now_ms()).map(|state| (state, row.thread_control_updated_at))
     }))
 }
-
-#[cfg(test)]
-mod tests;

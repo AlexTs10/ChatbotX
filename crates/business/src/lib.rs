@@ -77,6 +77,7 @@ pub mod sequence;
 pub mod store_source;
 pub mod tag;
 pub mod template;
+pub mod thread_control;
 pub mod tenant;
 pub mod tenant_help_item;
 pub mod tx;
