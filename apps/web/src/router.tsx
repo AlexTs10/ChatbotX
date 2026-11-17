@@ -97,6 +97,14 @@ const invitationRoute = createRoute({
   ),
 })
 
+// `/mini-apps` (the Mini App runner) is public too: contacts open it.
+const miniApps = () => import("@/routes/mini-apps")
+const publicMiniAppRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "mini-apps",
+  component: lazyRouteComponent(miniApps, "PublicMiniAppPage"),
+})
+
 // Everything else needs a session (proxy.ts) and a current password
 // (`enforcePasswordCurrent` in every protected layout).
 const protectedRoute = createRoute({
@@ -358,6 +366,19 @@ const toolEditorPages = (
     component: lazyRouteComponent(toolEditors, page),
   }),
 )
+const miniAppPages = (
+  [
+    ["mini-apps", "MiniAppsPage"],
+    ["mini-apps/$id/edit", "EditMiniAppPage"],
+    ["mini-apps/$id/submissions", "MiniAppSubmissionsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(miniApps, page),
+  }),
+)
 const pipelinesRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: "pipelines",
@@ -524,6 +545,7 @@ const adminPages = (
 const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
   invitationRoute,
+  publicMiniAppRoute,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
@@ -539,6 +561,7 @@ const routeTree = rootRoute.addChildren([
       ...toolPages,
       ...logPages,
       ...toolEditorPages,
+      ...miniAppPages,
       ...commentListRoutes,
       ...commentPages,
       pipelinesRoutes,
