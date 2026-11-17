@@ -25,6 +25,7 @@ const settings = () => import("@/routes/settings")
 const dashboard = () => import("@/routes/dashboard")
 const ecommerce = () => import("@/routes/ecommerce")
 const tools = () => import("@/routes/tools")
+const toolEditors = () => import("@/routes/tool-editors")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -189,6 +190,8 @@ const dashboardRoutes = dashboardRoute.addChildren(
       ["/", "DashboardIndexPage"],
       ["contacts", "DashboardContactsPage"],
       ["conversations", "DashboardConversationsPage"],
+      ["ads", "DashboardAdsPage"],
+      ["ads/$channel", "DashboardAdsPage"],
     ] as const
   ).map(([path, page]) =>
     createRoute({
@@ -211,6 +214,13 @@ const ecommercePages = (
     ["products", "ProductsPage"],
     ["product-categories", "ProductCategoriesPage"],
     ["product-vendors", "ProductVendorsPage"],
+    ["orders", "OrdersPage"],
+    ["orders/$orderId", "OrdersPage"],
+    ["discount-codes", "DiscountCodesPage"],
+    ["discount-codes/$discountCodeId", "DiscountCodesPage"],
+    ["ecommerce-settings", "EcommerceSettingsPage"],
+    ["ecommerce-settings/$section", "EcommerceSettingsPage"],
+    ["ecommerce-analytics", "EcommerceAnalyticsPage"],
   ] as const
 ).map(([path, page]) =>
   createRoute({
@@ -253,6 +263,27 @@ const toolPages = (
     component: lazyRouteComponent(tools, page),
   }),
 )
+const toolEditorPages = (
+  [
+    ["questionnaires/$id/edit", "EditQuestionnairePage"],
+    ["questionnaires/$id/applicants", "QuestionnaireApplicantsPage"],
+    ["polls/create", "CreatePollPage"],
+    ["polls/$id/edit", "EditPollPage"],
+    ["polls/$id/analytics", "PollAnalyticsPage"],
+    ["qr-codes/create", "CreateQrCodePage"],
+    ["qr-codes/$id/edit", "EditQrCodePage"],
+    ["minigames/create", "CreateMinigamePage"],
+    ["minigames/$id/edit", "EditMinigamePage"],
+    ["minigames/$id/history", "MinigameHistoryPage"],
+    ["reflinks/$reflinkId/analytics", "ReflinkAnalyticsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(toolEditors, page),
+  }),
+)
 const pipelinesRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: "pipelines",
@@ -263,6 +294,11 @@ const pipelinesRoutes = pipelinesRoute.addChildren([
     getParentRoute: () => pipelinesRoute,
     path: "/",
     component: lazyRouteComponent(tools, "PipelinesPage"),
+  }),
+  createRoute({
+    getParentRoute: () => pipelinesRoute,
+    path: "$id",
+    component: lazyRouteComponent(toolEditors, "PipelineBoardPage"),
   }),
 ])
 
@@ -378,6 +414,7 @@ const routeTree = rootRoute.addChildren([
       ecommerceRoute.addChildren(ecommercePages),
       productFormsRoute.addChildren(productFormPages),
       ...toolPages,
+      ...toolEditorPages,
       pipelinesRoutes,
       aiRoute.addChildren(aiPages),
       settingsRoutes,

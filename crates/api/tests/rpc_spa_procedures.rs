@@ -1017,3 +1017,58 @@ async fn spa_stub_path_runs_the_workspace_actions_with_their_gates() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
     assert!(out["data"]["validationErrors"]["name"].is_object(), "{out}");
 }
+
+#[tokio::test]
+async fn locked_template_ids_answer_for_a_member() {
+    let (router, _) = router().await;
+    let (status, json, _) = post(
+        &router,
+        "templatesAPI/listLockedIdsAPI",
+        "assignedtoken",
+        json!({ "workspaceId": ws(), "resourceKind": "flow", "resourceIds": ["1", "2"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json, json!({ "lockedIds": [], "undeletableIds": [] }));
+    let (status, _, _) = post(
+        &router,
+        "templatesAPI/listLockedIdsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "resourceKind": "nope", "resourceIds": [] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn questionnaire_editor_loads_through_the_public_route() {
+    let (router, _) = router().await;
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createQuestionnaireAction",
+        json!([ws(), { "name": "Survey" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let id = out["id"].as_str().unwrap().to_string();
+    let (status, found) = act(
+        &router,
+        "assignedtoken",
+        "getQuestionnaire",
+        json!([{ "workspaceId": ws(), "id": id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["name"], "Survey");
+    assert_eq!(found["questions"], json!([]));
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateQuestionnaireAction",
+        json!([ws(), id, { "enableScore": "yes" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    assert!(out["data"]["validationErrors"].is_object(), "{out}");
+}

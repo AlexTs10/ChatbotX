@@ -18,6 +18,7 @@ mod lists;
 mod media_library;
 mod pipelines;
 mod products;
+mod templates;
 mod tools;
 mod workspaces;
 
@@ -109,6 +110,9 @@ pub async fn procedure(
         return Some(outcome);
     }
     if let Some(outcome) = analytics::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = templates::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     if let Some(outcome) = flows::procedure(ctx, path, input).await {
@@ -242,6 +246,26 @@ pub(crate) fn action_fail(error: BusinessError) -> OrpcError {
         return out;
     }
     fail(error)
+}
+
+/// A public route's schema failure (422, zod issues) as the action's
+/// next-safe-action `validationErrors` (the same schema checked the input).
+pub(crate) fn schema_errors(error: OrpcError) -> OrpcError {
+    if error.status != 422 {
+        return error;
+    }
+    let issues = error
+        .data
+        .as_ref()
+        .and_then(|data| data.get("issues"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut out = OrpcError::new("BAD_REQUEST", Some(400), Some("Input validation failed"));
+    out.data = Some(json!({
+        "validationErrors": crate::rpc::actions::validation_errors(&issues),
+    }));
+    out
 }
 
 /// oRPC's input validation error.

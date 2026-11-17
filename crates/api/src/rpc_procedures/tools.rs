@@ -21,6 +21,8 @@ pub(super) const ACTIONS: &[&str] = &[
     "deleteQuestionnairesAction",
     "duplicateQuestionnaireAction",
     "renameQuestionnaireAction",
+    "getQuestionnaire",
+    "updateQuestionnaireAction",
     "createReflinkAction",
     "updateReflinkAction",
     "updateReflinkWidgetAction",
@@ -150,6 +152,23 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             let id = bound(args, 1)?;
             let name = In(arg(args, 2)).str("name", true, 1, 255)?;
             done(questionnaire::rename(db, ws, id, &name).await)
+        }
+        "getQuestionnaire" => {
+            let id = In(search).id("id")?.to_string();
+            public(ctx, "questionnaires.get", &[("id", id)], Some(""), None).await
+        }
+        "updateQuestionnaireAction" => {
+            let id = bound(args, 1)?.to_string();
+            public(
+                ctx,
+                "questionnaires.update",
+                &[("id", id)],
+                None,
+                Some(arg(args, 2)),
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(super::schema_errors)
         }
         "createReflinkAction" => public(ctx, "reflinks.create", &[], None, Some(arg(args, 1)))
             .await
