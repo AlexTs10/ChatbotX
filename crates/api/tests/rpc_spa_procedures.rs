@@ -668,6 +668,14 @@ async fn flow_step_option_lists_answer_for_a_member() {
     for (path, data) in [
         ("pipelinesAPI/privateListPipelineOptionsAPI", "/data"),
         ("refLinksAPI/listRefLinkOptionsAuthenticatedAPI", "/data"),
+        (
+            "personasAPIs/listMessengerPersonasAuthenticatedAPI",
+            "/data",
+        ),
+        (
+            "userPersistentMenusAPI/listUserPersistentMenusAuthenticatedAPI",
+            "/data",
+        ),
         ("placesNearMeAPI/listPlaceCategoryOptionsAPI", "/data"),
         ("questionnairesAPI/listQuestionnairesForFlowAPI", ""),
     ] {

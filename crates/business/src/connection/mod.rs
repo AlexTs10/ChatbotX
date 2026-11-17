@@ -131,6 +131,42 @@ pub(crate) fn insert_inbox(
     Ok(())
 }
 
+/// `connectionStateService.disconnectInbox`: `user.disconnect` of the
+/// inbox's connection, else the legacy inbox disconnect (reason `manual`).
+///
+/// ponytail: no channel deletion log for the legacy path.
+pub fn disconnect_inbox(
+    conn: &Connection,
+    inbox_id: i64,
+    workspace_id: i64,
+    now: i64,
+) -> Result<()> {
+    let current = conn
+        .query_row(
+            &format!(r#"SELECT {COLUMNS} FROM "Connection" WHERE "inboxId" = ?1"#),
+            params![inbox_id],
+            row,
+        )
+        .optional()
+        .map_err(repo_err)?;
+    match current {
+        Some(current) if current.workspace_id != workspace_id => Err(BusinessError::not_found(
+            format!("Connection {inbox_id} not found"),
+        )),
+        Some(current) => mark_disconnected(conn, &current, now).map(|_| ()),
+        None => {
+            conn.execute(
+                r#"UPDATE "Inbox" SET "status" = 'disconnected', "disconnectedAt" = ?3,
+                       "disconnectReason" = 'manual', "updatedAt" = ?3
+                   WHERE "id" = ?1 AND "workspaceId" = ?2 AND "status" <> 'disconnected'"#,
+                params![inbox_id, workspace_id, now],
+            )
+            .map_err(repo_err)?;
+            Ok(())
+        }
+    }
+}
+
 /// `user.disconnect` of a channel connection (reason `manual`) and the inbox
 /// mirror (`mirrorInboxStatus`). An already disconnected row is unchanged.
 pub(crate) fn mark_disconnected(

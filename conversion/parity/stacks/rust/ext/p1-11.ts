@@ -144,10 +144,73 @@ class SqliteP111Fixtures implements P111Fixtures {
     })
   }
 
-  createInstagramForPage = notPorted("createInstagramForPage")
+  async createInstagramForPage(input: { workspaceId: string; pageId: string; igId: string; name: string }) {
+    return this.transaction((db) => {
+      const inboxId = this.insertInbox(db, {
+        workspaceId: input.workspaceId,
+        name: input.name,
+        channel: "instagram",
+        sourceId: input.igId,
+      })
+      const integrationId = createId()
+      const auth = oauth2Auth(
+        `ig-token-${input.igId}`,
+        { igId: input.igId, pageId: input.pageId, version: "v23.0" },
+        "http://app/integrations/instagram/callback",
+      )
+      db.prepare(
+        `INSERT INTO "IntegrationInstagram"
+           ("id", "auth", "igId", "pageId", "name", "username", "workspaceId", "inboxId", "type",
+            "conversationStarters", "persistentMenus")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'facebook', '[]', '[]')`,
+      ).run(
+        integrationId,
+        JSON.stringify(auth),
+        input.igId,
+        input.pageId,
+        input.name,
+        `parity_${input.igId}`,
+        BigInt(input.workspaceId),
+        inboxId,
+      )
+      db.prepare(
+        `INSERT INTO "Connection"
+           ("id", "workspaceId", "provider", "kind", "channel", "inboxId", "sourceId", "displayName", "status", "connectedAt")
+         VALUES (?, ?, 'instagramFacebook', 'channel', 'instagram', ?, ?, ?, 'connected', ?)`,
+      ).run(createId(), BigInt(input.workspaceId), inboxId, input.igId, input.name, Date.now())
+      return { integrationId: integrationId.toString(), inboxId: inboxId.toString() }
+    })
+  }
   createWhatsappChannel = notPorted("createWhatsappChannel")
   createWhatsappTemplate = notPorted("createWhatsappTemplate")
-  createMessengerTemplate = notPorted("createMessengerTemplate")
+  async createMessengerTemplate(input: {
+    integrationMessengerId: string
+    name: string
+    language: string
+    status: "APPROVED" | "PENDING" | "REJECTED"
+    category: string
+    components: unknown[]
+    sourceId?: string
+  }): Promise<{ templateId: string }> {
+    const templateId = createId()
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO "MessengerMessageTemplate"
+           ("id", "name", "integrationMessengerId", "sourceId", "language", "category", "status", "parameterFormat", "components")
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'POSITIONAL', ?)`,
+      ).run(
+        templateId,
+        input.name,
+        BigInt(input.integrationMessengerId),
+        input.sourceId ?? randomBytes(6).readUIntBE(0, 6).toString(),
+        input.language,
+        input.category,
+        input.status,
+        JSON.stringify(input.components),
+      )
+    })
+    return { templateId: templateId.toString() }
+  }
   setMustChangePassword = notPorted("setMustChangePassword")
 
   async createContact(input: P111ContactInput): Promise<P111Contact> {

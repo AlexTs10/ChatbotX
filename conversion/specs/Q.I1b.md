@@ -97,14 +97,37 @@ payload.
 - `userPersistentMenus.*`: `paginateInMemory`, item union `flow` / `url`,
   max 20 items, single-id delete 404s.
 
+## Messenger templates
+
+- `messengerTemplates.*`: list filters (page, inbox, status), newest first;
+  get adds the parameters; delete is local; sync pages Meta (50 pages max)
+  and deletes rows Meta no longer lists; create / clone validate first,
+  then call Meta. Header images: SSRF guard, no redirects, 5 MB.
+
+## Channel routes
+
+- `messengerChannels.*` / `instagramChannels.*`: list, get, getSettings,
+  updateSettings (PUT), patchSettings (PATCH), updateTagSync,
+  updateHandoverResumeFlow (Messenger), disconnect.
+- Messenger settings: personas synced with Facebook (create, list, delete
+  unused), refused default persona = 400; empty lists delete the profile
+  fields; `get_started` always sent; read-back once per page per 5 min.
+  Profile failures are logged only. PUT on an unknown page = 400.
+- Instagram settings: payloads carry the latest flow version; a Meta error
+  fails the write (400) and keeps the saved settings.
+- Disconnect: Messenger Meta calls are best effort; Instagram fails on a
+  Meta error except a revoked token. Local teardown: coexist runs, CAPI
+  events, tags (Messenger), row, inbox / connection.
+
 ## Parity
 
 - p1-11 `41-messages-messenger`: 4/5 on the Rust stack (2026-11-17, after dd4749b47; was 0/5). The left case (two `mediaFileIds` on a comment reply -> 422 `imagesNotSupportedOnChannel`) needs the media-library outgoing path (`mediaFileIds`, now 501 `notPorted` in `contact_messages.rs`), owned by the messages unit.
 
 ## Left
 
-- `messengerTemplates.*` and `messengerChannels.*` routes (parity p1-11
-  50 / 51 / 60).
+- CAPI routes of both channels (Q.D7) and the coexist routes (need the
+  history-sync worker): the CAPI / coexist cases of p1-11 `51` and p1-10
+  `21` / `22`.
 - Conversation routing (`threadControlEvent`: handover, requests, app roles,
   standby): dropped with a log until thread control (Q.D12 / slice 5).
 - Worker jobs not ported yet (fail "IntegrationJobAction action is not

@@ -95,7 +95,7 @@ impl Num {
     }
 }
 
-fn type_name(value: Option<&Value>) -> &'static str {
+pub(crate) fn type_name(value: Option<&Value>) -> &'static str {
     match value {
         None => "undefined",
         Some(Value::Null) => "null",

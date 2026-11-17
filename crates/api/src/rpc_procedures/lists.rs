@@ -58,6 +58,23 @@ async fn flow_options(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
                 .map(|rows| json!({ "data": pairs(rows.into_iter().map(|c| (c.id, c.name)).collect()) }))
                 .map_err(fail)
         }
+        "personasAPIs.listMessengerPersonasAuthenticatedAPI" => {
+            crate::handlers::messenger_menus::persona_options(db, ws)
+                .await
+                .map_err(fail)
+        }
+        "userPersistentMenusAPI.listUserPersistentMenusAuthenticatedAPI" => {
+            crate::handlers::messenger_menus::list_menus(db, ws)
+                .await
+                .map(|menus| {
+                    let data: Vec<Value> = menus
+                        .iter()
+                        .map(|m| crate::handlers::messenger_menus::menu_json(m, false))
+                        .collect();
+                    json!({ "data": data })
+                })
+                .map_err(fail)
+        }
         "productsAPI.listSendableProductsAuthorizedAPI" => {
             let query = super::query_of(input, &["channel", "keyword", "page", "perPage"]);
             public(ctx, "products.listSendable", &[], Some(&query), None).await
