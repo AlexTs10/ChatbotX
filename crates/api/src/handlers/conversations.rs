@@ -510,9 +510,15 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             list::find_or_fail(db, ws, conversation)
                 .await
                 .map_err(mutated)?;
-            actions::set_archived(db, ws, conversation, route_id == "conversations.archive")
-                .await
-                .map_err(mutated)?;
+            actions::set_archived(
+                db,
+                state.jobs.as_deref(),
+                ws,
+                conversation,
+                route_id == "conversations.archive",
+            )
+            .await
+            .map_err(mutated)?;
             success()
         }
         "conversations.read" | "conversations.unread" => {

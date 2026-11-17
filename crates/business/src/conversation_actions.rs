@@ -169,9 +169,18 @@ pub async fn assign_one(
 
 /// `archiveByIds` / `unarchiveByIds` for one id. Archiving closes the DM
 /// waiting window (`humanReplyWindowSet({ close, actor: "archive" })`).
-pub async fn set_archived(db: &Db, workspace_id: i64, id: i64, archived: bool) -> Result<()> {
+///
+/// An archive enqueues the release of the threads the contact's channels still own
+/// (`releaseOwnedThreads`; a failed enqueue is logged). `jobs` `None` = no queue.
+pub async fn set_archived(
+    db: &Db,
+    jobs: Option<&dyn chatbotx_jobs::Enqueuer>,
+    workspace_id: i64,
+    id: i64,
+    archived: bool,
+) -> Result<()> {
     let now = now_ms();
-    tx::write(db, move |conn| {
+    let contact_id = tx::write(db, move |conn| {
         let q = if archived {
             let closes = "\"sourceId\" IS NULL AND \"awaitingHumanReplySince\" IS NOT NULL AND \"awaitingHumanReplySince\" <= ?1";
             Sql::new(
@@ -193,9 +202,22 @@ pub async fn set_archived(db: &Db, workspace_id: i64, id: i64, archived: bool) -
             )
         };
         q.execute(conn)?;
-        Ok(())
+        Ok(crate::conversation_list::find_in(conn, workspace_id, id)?.map(|c| c.contact_id))
     })
-    .await
+    .await?;
+    if let (true, Some(jobs), Some(contact_id)) = (archived, jobs, contact_id)
+        && let Err(error) = crate::thread_control::release_owned_threads_for_contacts(
+            db,
+            jobs,
+            workspace_id,
+            &[(id, contact_id)],
+            now,
+        )
+        .await
+    {
+        tracing::warn!(%error, workspace_id, "Unable to enqueue thread release after archiving conversations");
+    }
+    Ok(())
 }
 
 /// `setFollowed` (404 "Conversation not found").

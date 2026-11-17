@@ -30,6 +30,7 @@ pub mod purge;
 pub mod schedule;
 pub mod send_flow_step;
 pub mod steps;
+pub mod thread_control;
 pub mod trigger;
 pub mod variables;
 pub mod wa_template;

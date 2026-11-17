@@ -123,6 +123,7 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                             "archiveConversationAction" | "unarchiveConversationAction" => {
                                 actions::set_archived(
                                     db,
+                                    ctx.api.jobs.as_deref(),
                                     ws,
                                     id,
                                     name == "archiveConversationAction",

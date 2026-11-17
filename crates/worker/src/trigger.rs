@@ -548,6 +548,7 @@ async fn execute_action(ctx: &ActionCtx<'_>, scope: &mut Scope) -> Result<Outcom
             scope.conversation = None;
             conversation_actions::set_archived(
                 db,
+                Some(&*ctx.deps.jobs),
                 ws,
                 conversation.id,
                 action_type == "archiveConversation",

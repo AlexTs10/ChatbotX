@@ -54,6 +54,18 @@ impl From<BusinessError> for ThreadControlError {
     }
 }
 
+impl std::fmt::Display for ThreadControlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ThreadControlError::Unsupported(channel) => {
+                write!(f, "Channel {channel} has no thread-control handler")
+            }
+            ThreadControlError::Channel(failure) => f.write_str(&failure.message),
+            ThreadControlError::Business(error) => write!(f, "{error}"),
+        }
+    }
+}
+
 impl ThreadControlError {
     /// `isPermanentThreadControlFailure`.
     pub fn is_permanent(&self) -> bool {
