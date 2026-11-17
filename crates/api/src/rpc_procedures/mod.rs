@@ -8,6 +8,7 @@
 //! returns the same JSON as a ported public `/v1` route, the handler runs that
 //! route ([`public`]) after the member checks, so both stay one code path.
 
+mod broadcasts;
 mod contacts;
 mod email_topics;
 mod flows;
@@ -100,6 +101,9 @@ pub async fn procedure(
     context.workspace.as_ref()?;
     let ctx = ctx(api, context);
     let ctx = &ctx;
+    if let Some(outcome) = broadcasts::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = contacts::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -141,7 +145,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     // Every other action is a `workspaceActionClient` one.
     if context.workspace.is_none() {
         return match name {
-            n if contacts::ACTIONS.contains(&n)
+            n if broadcasts::ACTIONS.contains(&n)
+                || contacts::ACTIONS.contains(&n)
                 || flows::ACTIONS.contains(&n)
                 || email_topics::ACTIONS.contains(&n)
                 || sequences::ACTIONS.contains(&n)
@@ -152,6 +157,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
             }
             _ => None,
         };
+    }
+    if let Some(outcome) = broadcasts::action(ctx, name, &args).await {
+        return Some(outcome);
     }
     if let Some(outcome) = contacts::action(ctx, name, &args).await {
         return Some(outcome);

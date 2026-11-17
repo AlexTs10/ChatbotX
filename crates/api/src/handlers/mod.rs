@@ -9,6 +9,7 @@ pub mod ai_handover;
 pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
+pub mod broadcasts;
 pub mod channels;
 pub mod connections;
 pub mod contact_custom_fields;
@@ -476,6 +477,8 @@ async fn route(
         triggers::handle(state, route_id, call).await
     } else if sequences::ROUTES.contains(&route_id) {
         sequences::handle(state, route_id, call).await
+    } else if broadcasts::ROUTES.contains(&route_id) {
+        broadcasts::handle(state, route_id, call).await
     } else if bot_fields::ROUTES.contains(&route_id) {
         bot_fields::handle(state, route_id, call).await
     } else if contact_custom_fields::ROUTES.contains(&route_id) {

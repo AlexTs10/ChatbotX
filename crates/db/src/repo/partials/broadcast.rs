@@ -215,6 +215,104 @@ pub fn is_targets_flow_send_without_flow(broadcast: &Value) -> bool {
         && !targets(broadcast).iter().any(|t| truthy(t.get("flowId")))
 }
 
+/// `broadcastTargetModes`.
+pub const BROADCAST_TARGET_MODES: &[&str] = &["channel", "targets"];
+
+/// `resolveBroadcastTargetMode`: `targets` for a non-empty list, else `channel`.
+pub fn resolve_broadcast_target_mode(targets: &[Value]) -> &'static str {
+    if targets.is_empty() {
+        "channel"
+    } else {
+        "targets"
+    }
+}
+
+/// `resolveBroadcastTargetInboxIds`: the target inbox ids of a targets-mode broadcast.
+pub fn resolve_broadcast_target_inbox_ids(broadcast: &Value) -> Option<Vec<Value>> {
+    uses_broadcast_targets(broadcast).then(|| {
+        targets(broadcast)
+            .iter()
+            .map(|t| t.get("inboxId").cloned().unwrap_or(Value::Null))
+            .collect()
+    })
+}
+
+/// `hasFlowAndTemplate`.
+pub fn has_flow_and_template(broadcast: &Value) -> bool {
+    broadcast_sends_flow(broadcast) && broadcast_sends_template(broadcast)
+}
+
+/// `hasDuplicateBroadcastTarget`: one page picked twice.
+pub fn has_duplicate_broadcast_target(broadcast: &Value) -> bool {
+    let targets = targets(broadcast);
+    let mut seen = std::collections::HashSet::new();
+    targets
+        .iter()
+        .any(|t| !seen.insert(t.get("inboxId").map(Value::to_string)))
+}
+
+/// `hasBroadcastTargetWithoutTemplate`.
+pub fn has_broadcast_target_without_template(broadcast: &Value) -> bool {
+    !broadcast_sends_flow(broadcast)
+        && broadcast_sends_template(broadcast)
+        && targets(broadcast)
+            .iter()
+            .any(|t| !truthy(t.get("templateId")))
+}
+
+/// `isTemplateSendWithoutPage`: a legacy template send with no integration.
+pub fn is_template_send_without_page(broadcast: &Value) -> bool {
+    broadcast_sends_template(broadcast)
+        && !uses_broadcast_targets(broadcast)
+        && !(truthy(broadcast.get("integrationWhatsappId"))
+            || truthy(broadcast.get("integrationMessengerId")))
+}
+
+/// `resolveBroadcastSendSlot`: the target of `inbox_id`, or the broadcast itself.
+fn resolve_broadcast_send_slot<'a>(broadcast: &'a Value, inbox_id: &str) -> Option<&'a Value> {
+    if !uses_broadcast_targets(broadcast) {
+        return Some(broadcast);
+    }
+    targets(broadcast).iter().find(|t| match t.get("inboxId") {
+        Some(Value::String(id)) => id == inbox_id,
+        Some(Value::Number(id)) => id.to_string() == inbox_id,
+        _ => false,
+    })
+}
+
+/// `BroadcastTemplateSend`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BroadcastTemplateSend {
+    pub template_id: Value,
+    pub template_data: Value,
+}
+
+/// `resolveBroadcastTemplateSend`.
+pub fn resolve_broadcast_template_send(
+    broadcast: &Value,
+    inbox_id: &str,
+) -> Option<BroadcastTemplateSend> {
+    let slot = resolve_broadcast_send_slot(broadcast, inbox_id)?;
+    truthy(slot.get("templateId")).then(|| BroadcastTemplateSend {
+        template_id: slot["templateId"].clone(),
+        template_data: slot.get("templateData").cloned().unwrap_or(Value::Null),
+    })
+}
+
+/// `resolveBroadcastFlowSend`.
+pub fn resolve_broadcast_flow_send(broadcast: &Value, inbox_id: &str) -> Option<Value> {
+    resolve_broadcast_send_slot(broadcast, inbox_id)
+        .and_then(|slot| slot.get("flowId"))
+        .filter(|flow| !flow.is_null())
+        .cloned()
+}
+
+/// `hasBroadcastSendForInbox`.
+pub fn has_broadcast_send_for_inbox(broadcast: &Value, inbox_id: &str) -> bool {
+    resolve_broadcast_send_slot(broadcast, inbox_id)
+        .is_some_and(|slot| truthy(slot.get("flowId")) || truthy(slot.get("templateId")))
+}
+
 /// `BROADCAST_DEFAULT_SEND_RATE_PER_MINUTE`.
 pub const BROADCAST_DEFAULT_SEND_RATE_PER_MINUTE: i64 = 500;
 /// `BROADCAST_MAX_SEND_RATE_PER_MINUTE`.

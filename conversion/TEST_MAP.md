@@ -128,7 +128,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/broadcasts-calendar-grid.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/broadcasts-calendar.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/broadcasts-empty-state-predicate.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
-| `apps/builder/__tests__/broadcasts-public-api.test.ts` | C | tbd | todo | Broadcasts (incl. recurring); builder server code |
+| `apps/builder/__tests__/broadcasts-public-api.test.ts` | C | `crates/api/tests/broadcasts_public_api.rs` | ported | Broadcasts (incl. recurring); builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/broadcasts-public-scope.test.ts` | C | tbd | todo | Broadcasts (incl. recurring); builder server code |
 | `apps/builder/__tests__/broadcasts-search-params.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/broadcasts-search-parsers-server-safe.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
@@ -2047,17 +2047,17 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/broadcast-plan-policy-service.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/business/__tests__/broadcast-recurrence-ledger.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/business/__tests__/broadcast-recurrence-service.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-audience.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-clone.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-create.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-drafts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `packages/business/__tests__/broadcast-service-audience.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/broadcast-service-clone.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/broadcast-service-create.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/broadcast-service-drafts.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-lifecycle.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/business/__tests__/broadcast-service-list-contacts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-payment-request.test.ts` | C | tbd | todo | WhatsApp message templates |
+| `packages/business/__tests__/broadcast-service-payment-request.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | WhatsApp message templates; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-prepare.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-resend.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-transitions.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-update.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `packages/business/__tests__/broadcast-service-resend.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/broadcast-service-transitions.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/broadcast-service-update.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/build-context.test.ts` | C | tbd | todo | Business layer shared services |
 | `packages/business/__tests__/bulk-import-channel-contacts.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/business/__tests__/campaign-cleanup.test.ts` | C | tbd | todo | Business layer shared services |
