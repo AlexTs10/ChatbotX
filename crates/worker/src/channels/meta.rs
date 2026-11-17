@@ -149,6 +149,8 @@ pub fn pending_attachment(url: &str, kind: &str) -> Option<IncomingAttachment> {
         mime_type: mime.to_owned(),
         origin_path: url.to_owned(),
         size: Some(0),
+        width: None,
+        height: None,
         name: None,
         is_photo_message: kind == "image",
     })

@@ -195,7 +195,7 @@ pub async fn message_reaction(deps: &Deps, data: &Value) -> Result<(), JobError>
                 return Ok(None);
             };
             let conversation =
-                crate::inbound::find_or_create_conversation(tx, probe.workspace_id, contact_inbox.contact_id, None)?;
+                crate::inbound::find_or_create_conversation(tx, probe.workspace_id, contact_inbox.contact_id, None, None)?;
             let created = repo_message::create_or_update(
                 tx,
                 &CreateMessageInput {
