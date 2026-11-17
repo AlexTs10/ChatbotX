@@ -1,3 +1,11 @@
+// page: app/space/[workspaceId]/(e-commerce)/orders/page.tsx
+// page: app/space/[workspaceId]/(e-commerce)/orders/[orderId]/page.tsx
+// page: app/space/[workspaceId]/(e-commerce)/discount-codes/page.tsx
+// page: app/space/[workspaceId]/(e-commerce)/discount-codes/new/page.tsx
+// page: app/space/[workspaceId]/(e-commerce)/discount-codes/[discountCodeId]/page.tsx
+// page: app/space/[workspaceId]/(e-commerce)/ecommerce-settings/page.tsx
+// page: app/space/[workspaceId]/(e-commerce)/ecommerce-settings/[section]/page.tsx
+// page: app/space/[workspaceId]/(e-commerce)/ecommerce-analytics/page.tsx
 // page: app/space/[workspaceId]/(e-commerce)/layout.tsx
 // page: app/space/[workspaceId]/(e-commerce)/products/page.tsx
 // page: app/space/[workspaceId]/(e-commerce)/product-categories/page.tsx
@@ -29,7 +37,7 @@ import { LockedEditorGuard } from "@/features/templates/components/locked-editor
 import { ShopLinkSection } from "@/features/webshop/components/shop-link-section"
 import { hasWorkspacePermission } from "@/lib/auth/permission-routes"
 import { serverQuery } from "@/lib/server-action"
-import { NotFoundPage } from "@/routes/root"
+import { NotAvailablePage, NotFoundPage } from "@/routes/root"
 import { useWorkspacePage } from "@/routes/workspace"
 
 function useWorkspaceId() {
@@ -211,3 +219,23 @@ function EditProductForm({
     </LockedEditorGuard>
   )
 }
+
+/** The e-commerce tabs whose domain is not in the Rust server yet (Q.D8). */
+function ecommerceNotAvailable(title: string) {
+  return function EcommerceNotAvailablePage() {
+    return (
+      <NotAvailablePage
+        detail={`${title} is not available yet in this version.`}
+        title={title}
+      />
+    )
+  }
+}
+export const OrdersPage = ecommerceNotAvailable("Orders")
+export const DiscountCodesPage = ecommerceNotAvailable("Discount codes")
+export const EcommerceSettingsPage = ecommerceNotAvailable(
+  "E-commerce settings",
+)
+export const EcommerceAnalyticsPage = ecommerceNotAvailable(
+  "E-commerce analytics",
+)

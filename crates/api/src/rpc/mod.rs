@@ -480,6 +480,19 @@ async fn handle(
     if let Some(response) = actions::handle(&state, rest, &method, &uri, &headers, &body).await {
         return response;
     }
+    // A Q.D11 action called through the SPA stub path: same gates and errors.
+    if let Some(export) = rest.trim_end_matches('/').strip_prefix("actions/")
+        && let Some((key, name)) = actions::spa_target(export)
+    {
+        let input = actions::spa_input(&rpc_input(&method, &uri, &body));
+        let body = Bytes::from(json!({ "json": input }).to_string());
+        let rest = format!("{key}/{name}");
+        if let Some(response) =
+            actions::handle(&state, &rest, &Method::POST, &uri, &headers, &body).await
+        {
+            return response;
+        }
+    }
     let key = rest.split('/').next().unwrap_or_default();
     let is_action = key == "actions";
     if !is_action && !RPC_ROUTER_KEYS.contains(&key) {

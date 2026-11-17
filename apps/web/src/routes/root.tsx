@@ -81,6 +81,22 @@ export function NotFoundPage() {
   )
 }
 
+/**
+ * A routed builder page whose backend domain is not in the Rust server yet:
+ * a clear empty state instead of an error.
+ * ponytail: English only; the domain unit replaces it with the real page.
+ */
+export function NotAvailablePage(props: { title: string; detail?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-12 text-center">
+      <h1 className="font-semibold text-lg">{props.title}</h1>
+      <p className="max-w-md text-muted-foreground text-sm">
+        {props.detail ?? "This page is not available yet in this version."}
+      </p>
+    </div>
+  )
+}
+
 export function DefaultErrorPage({ error, reset }: ErrorComponentProps) {
   useEffect(() => {
     console.error(error)

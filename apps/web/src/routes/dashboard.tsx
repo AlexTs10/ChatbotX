@@ -2,11 +2,16 @@
 // page: app/space/[workspaceId]/dashboard/page.tsx
 // page: app/space/[workspaceId]/dashboard/contacts/page.tsx
 // page: app/space/[workspaceId]/dashboard/conversations/page.tsx
+// page: app/space/[workspaceId]/dashboard/ads/page.tsx
+// page: app/space/[workspaceId]/dashboard/ads/[channel]/page.tsx
+// page: app/space/[workspaceId]/dashboard/ads/google/page.tsx
+// page: app/space/[workspaceId]/dashboard/ads/conversion-events/page.tsx
 // The layout's `analytics` permission check (404) and its inbox cards. The
 // server data (`listInboxes`, `listAnalyticsFilterOptions`,
 // `resolveAdsDashboardChannels`) comes from the one connected-inbox list
 // (`inboxesAPI.listAllInboxesAuthenticatedAPI`), filtered as the builder
 // queries filter it. Google Ads has no Rust domain: its nav entry stays off.
+// `dashboard/ads/*` (ads domain, Q.D7) shows the not-available state.
 import { ContactsDashboard } from "@chatbotx.io/analytics-nextjs/components/contacts-dashboard"
 import { ConversationsDashboard } from "@chatbotx.io/analytics-nextjs/components/conversations-dashboard"
 import {
@@ -22,7 +27,7 @@ import { InboxCardList } from "@/features/inboxes/components/inbox-card-list"
 import { hasWorkspacePermission } from "@/lib/auth/permission-routes"
 import { client } from "@/lib/orpc/orpc"
 import { orpc } from "@/lib/orpc/query"
-import { NotFoundPage } from "@/routes/root"
+import { NotAvailablePage, NotFoundPage } from "@/routes/root"
 import { useWorkspacePage } from "@/routes/workspace"
 import { Redirect } from "@/shims/redirect"
 
@@ -134,5 +139,15 @@ export function DashboardConversationsPage() {
     <div className="flex flex-col gap-4">
       <ConversationsDashboard {...useDashboardProps()} />
     </div>
+  )
+}
+
+/** `dashboard/ads/*`: the ads domain is not in the Rust server yet (Q.D7). */
+export function DashboardAdsPage() {
+  return (
+    <NotAvailablePage
+      detail="Ads analytics is not available yet in this version."
+      title="Ads"
+    />
   )
 }
