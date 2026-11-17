@@ -434,7 +434,12 @@ mod ai_image_and_extract {
             json!([{ "type": "text", "text": "Describe it" },
                    { "type": "image_url", "image_url": { "url": "https://cdn.example.test/cat.PNG?size=2" } }])
         );
-        assert!(body["messages"][0]["content"].as_str().unwrap().starts_with("Your answer will be sent as one"));
+        assert!(
+            body["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .starts_with("Your answer will be sent as one")
+        );
     }
 
     #[tokio::test]
@@ -451,7 +456,10 @@ mod ai_image_and_extract {
     async fn extract_data_saves_each_non_null_value() {
         let mut fx = Fixture::new().await;
         setup(&fx).await;
-        let http = with_ai(&mut fx, vec![FakeHttp::openai_text(r#"{"name":"Ada","city":null}"#)]);
+        let http = with_ai(
+            &mut fx,
+            vec![FakeHttp::openai_text(r#"{"name":"Ada","city":null}"#)],
+        );
         assert!(!run_step(&fx, extract(json!({}))).await);
         assert_eq!(answer(&fx).await.as_deref(), Some("Ada"));
         let body = &http.requests()[0].1;
@@ -473,7 +481,13 @@ mod ai_image_and_extract {
         setup(&fx).await;
         let http = with_ai(&mut fx, vec![]);
         assert!(!run_step(&fx, extract(json!({ "extractFields": [] }))).await);
-        assert!(!run_step(&fx, extract(json!({ "inputType": "image", "inputFieldId": "31" }))).await);
+        assert!(
+            !run_step(
+                &fx,
+                extract(json!({ "inputType": "image", "inputFieldId": "31" }))
+            )
+            .await
+        );
         assert!(http.requests().is_empty());
     }
 
