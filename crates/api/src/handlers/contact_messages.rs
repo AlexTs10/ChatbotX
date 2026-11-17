@@ -222,7 +222,7 @@ pub(crate) fn outgoing_input(
 }
 
 /// `decodeCursor` (`null` for an invalid cursor: the first page).
-pub(crate) fn decode_cursor(text: &str) -> Option<PaginationCursor> {
+pub fn decode_cursor(text: &str) -> Option<PaginationCursor> {
     let bytes = super::contact_inboxes::lenient_base64(text)?;
     let value: Value = serde_json::from_slice(&bytes).ok()?;
     let object = value.as_object()?;
@@ -253,7 +253,7 @@ pub(crate) fn decode_cursor(text: &str) -> Option<PaginationCursor> {
 }
 
 /// `encodeCursor({ direction: "prev", createdAt, id, shardId })`.
-pub(crate) fn encode_cursor(cursor: &PaginationCursor) -> String {
+pub fn encode_cursor(cursor: &PaginationCursor) -> String {
     let mut text = format!(
         r#"{{"direction":"prev","createdAt":"{}","id":"{}""#,
         chatbotx_db::repo::iso(cursor.created_at),

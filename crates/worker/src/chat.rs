@@ -532,10 +532,7 @@ async fn dispatch_send(
     let is_private_reply =
         is_comment && message.pointer("/contentAttributes/isPrivateReply") == Some(&json!(true));
     let send = SendMessage {
-        contact: OutgoingContact {
-            contact_inbox: contact_inbox.clone(),
-            source_conversation_id: conversation.source_id.clone(),
-        },
+        contact: OutgoingContact::new(contact_inbox, conversation),
         message,
         quick_replies: if is_comment {
             None
@@ -742,10 +739,7 @@ pub async fn send_typing_to_channel(deps: &Deps, data: &Value) -> Result<(), Job
         .send_typing(
             &ctx,
             SendTyping {
-                contact: OutgoingContact {
-                    contact_inbox: contact_inbox.clone(),
-                    source_conversation_id: conversation.source_id.clone(),
-                },
+                contact: OutgoingContact::new(&contact_inbox, &conversation),
                 typing: data.get("typing").and_then(Value::as_bool).unwrap_or(true),
                 seconds: data.get("seconds").and_then(Value::as_f64),
                 message_source_id: None,

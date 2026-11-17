@@ -144,6 +144,23 @@ pub struct OutgoingContact {
     pub source_conversation_id: Option<String>,
 }
 
+impl OutgoingContact {
+    /// `sourceConversationId: resolveChannelConversationId(conversation)`.
+    pub fn new(
+        contact_inbox: &ContactInbox,
+        conversation: &chatbotx_db::repo::models::Conversation,
+    ) -> OutgoingContact {
+        OutgoingContact {
+            contact_inbox: contact_inbox.clone(),
+            source_conversation_id:
+                chatbotx_db::repo::partials::channel::resolve_channel_conversation_id(
+                    conversation.source_id.as_deref(),
+                    conversation.additional_attributes.as_ref().map(|a| &a.0),
+                ),
+        }
+    }
+}
+
 /// `sendMessage` / `sendComment` / `sendPrivateReply` data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SendMessage {
@@ -249,6 +266,9 @@ pub struct IncomingContact {
     pub source_username: Option<String>,
     /// Keys the conversation (a post id for comments); `None` for DMs.
     pub source_conversation_id: Option<String>,
+    /// The channel's own DM id (TikTok `conversation_id`), stored on
+    /// `Conversation.additionalAttributes.channelConversationId`.
+    pub channel_conversation_id: Option<String>,
 }
 
 /// `ReceivedMessageResult`: what a channel parser read from one webhook
@@ -459,6 +479,12 @@ impl Channels {
                 "whatsapp",
                 Arc::new(crate::channels::whatsapp::Whatsapp::new()),
             )
+            .with(
+                "telegram",
+                Arc::new(crate::channels::telegram::Telegram::new()),
+            )
+            .with("tiktok", Arc::new(crate::channels::tiktok::Tiktok::new()))
+            .with("zalo", Arc::new(crate::channels::zalo::Zalo::new()))
     }
 
     pub fn with(mut self, channel: &str, implementation: Arc<dyn Channel>) -> Channels {

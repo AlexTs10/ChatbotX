@@ -138,60 +138,8 @@ pub fn readable_foreground(hex_color: &str) -> &'static str {
     }
 }
 
-fn normalize_host(value: &str) -> String {
-    value
-        .trim()
-        .to_lowercase()
-        .trim_start_matches('.')
-        .trim_end_matches('.')
-        .to_string()
-}
-
-/// `getHostFromOrigin`.
-fn host_from_origin(origin: &str) -> Option<String> {
-    let value = origin.trim();
-    if value.is_empty() {
-        return None;
-    }
-    if let Ok(url) = url::Url::parse(value)
-        && let Some(host) = url.host_str()
-    {
-        return Some(normalize_host(host));
-    }
-    let rest = match value.find("://") {
-        Some(at) if value[..at].bytes().all(|b| b.is_ascii_alphabetic()) && at > 0 => {
-            &value[at + 3..]
-        }
-        _ => value,
-    };
-    let host = rest.split(['/', ':', '?', '#']).next().unwrap_or("");
-    (!host.is_empty()).then(|| normalize_host(host))
-}
-
-/// `isEmbedOriginAllowed`: no domains = any origin; a missing origin is a
-/// direct request (allowed); else the host or a subdomain of one.
-pub fn is_embed_origin_allowed(origin: Option<&str>, authorized_domains: &[String]) -> bool {
-    if authorized_domains.is_empty() {
-        return true;
-    }
-    let Some(origin) = origin else {
-        return true;
-    };
-    let domains: Vec<String> = authorized_domains
-        .iter()
-        .map(|d| normalize_host(d))
-        .filter(|d| !d.is_empty())
-        .collect();
-    if domains.is_empty() {
-        return false;
-    }
-    let Some(host) = host_from_origin(origin) else {
-        return false;
-    };
-    domains
-        .iter()
-        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
-}
+/// `isEmbedOriginAllowed` (shared with the webchat guest routes).
+pub use chatbotx_business::integration_webchat::is_embed_origin_allowed;
 
 /// `resolveWidgetBrand` (without the labels).
 pub fn widget_brand(row: &reflink::ReflinkWithLogo, storage_url: &str) -> Value {

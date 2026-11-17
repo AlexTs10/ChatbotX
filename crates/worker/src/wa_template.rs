@@ -468,10 +468,7 @@ pub async fn process_template(
         conversation,
         contact_inbox,
         SendFlowStep {
-            contact: OutgoingContact {
-                contact_inbox: contact_inbox.clone(),
-                source_conversation_id: conversation.source_id.clone(),
-            },
+            contact: OutgoingContact::new(contact_inbox, conversation),
             flow_id: flow.id,
             flow_version_id: flow.version_id,
             step: json!({ "id": step_id, "nodeId": node_id, "stepType": "sendWaTemplateMessage",

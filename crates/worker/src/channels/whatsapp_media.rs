@@ -38,6 +38,7 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The file store and the tenant `storageUrl` (`ctx.uploader`,
 /// `ctx.platform.storageUrl`).
+#[derive(Clone)]
 pub struct WhatsappMedia {
     pub files: Arc<Uploader>,
     pub storage_url: String,
@@ -82,14 +83,14 @@ fn same_origin(a: &str, b: &str) -> bool {
 async fn download(
     client: &reqwest::Client,
     url: &str,
-    token: &str,
+    token: Option<&str>,
     max_bytes: u64,
-) -> Result<Bytes, String> {
+) -> Result<(Bytes, Option<String>), String> {
     let mut current = url.to_owned();
     for _ in 0..=MAX_REDIRECTS {
         assert_public_url(&current, "WhatsApp media URL").await?;
         let mut request = client.get(&current).header("User-Agent", "node");
-        if same_origin(url, &current) {
+        if let Some(token) = token.filter(|_| same_origin(url, &current)) {
             request = request.bearer_auth(token);
         }
         let mut response = request.send().await.map_err(|e| e.to_string())?;
@@ -108,6 +109,11 @@ async fn download(
         if !response.status().is_success() {
             return Err(format!("media download answered {}", response.status()));
         }
+        let declared = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let mut out = BytesMut::new();
         while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
             if (out.len() + chunk.len()) as u64 > max_bytes {
@@ -115,7 +121,7 @@ async fn download(
             }
             out.extend_from_slice(&chunk);
         }
-        return Ok(out.freeze());
+        return Ok((out.freeze(), declared));
     }
     Err("Too many redirects while fetching media".into())
 }
@@ -165,12 +171,45 @@ pub async fn store_inbound_media(
         tracing::error!(media_id, mediaResponse = %info, "Unable to fetch media:");
         return Err(media_error().into());
     };
-    let bytes = download(client, url, token, MAX_INBOUND_BYTES)
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, media_id, "Unable to fetch media info:");
-            media_error()
-        })?;
+    copy_to_storage(
+        media,
+        client,
+        url,
+        Some(token),
+        Some(mime_type),
+        loc,
+        attachment,
+    )
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, media_id, "Unable to fetch media info:");
+        media_error().into()
+    })
+}
+
+/// The download + `storeIncomingImage` half of `fetchMedia`, shared by the
+/// channels that copy a provider file URL (Telegram, TikTok, Zalo): the
+/// bytes under the channel media prefix, the attachment's stored fields.
+/// `bearer` goes only to the first URL's origin. `mime_type: None` takes
+/// the response `content-type` (`image/png` when absent), as Zalo does.
+pub async fn copy_to_storage(
+    media: &WhatsappMedia,
+    client: &reqwest::Client,
+    url: &str,
+    bearer: Option<&str>,
+    mime_type: Option<&str>,
+    loc: &ChannelMediaLocation,
+    attachment: &mut IncomingAttachment,
+) -> Result<(), String> {
+    let (bytes, declared) = download(client, url, bearer, MAX_INBOUND_BYTES).await?;
+    let mime_type = mime_type
+        .map(str::to_owned)
+        .or(declared)
+        .unwrap_or_else(|| "image/png".into());
+    let mime_type = mime_type.as_str();
+    if attachment.mime_type.is_empty() {
+        attachment.mime_type = mime_type.to_owned();
+    }
     let key = format!(
         "{}/{}",
         get_channel_media_prefix(loc),
@@ -195,15 +234,17 @@ pub async fn store_inbound_media(
         &EncodeSlots::global(),
     )
     .await
-    .map_err(|error| {
-        tracing::error!(%error, media_id, "Unable to fetch media info:");
-        media_error()
-    })?;
+    .map_err(|e| e.to_string())?;
     let fields = to_stored_media_fields(&stored);
     attachment.origin_path = fields.origin_path;
     attachment.size = Some(fields.size as i64);
-    attachment.width = fields.width.map(i64::from);
-    attachment.height = fields.height.map(i64::from);
+    // The provider's own dimensions stand in when the bytes could not be read.
+    if let Some(width) = fields.width {
+        attachment.width = Some(i64::from(width));
+    }
+    if let Some(height) = fields.height {
+        attachment.height = Some(i64::from(height));
+    }
     if stored.optimized {
         attachment.mime_type = fields.mime_type;
     }

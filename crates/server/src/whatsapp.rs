@@ -47,6 +47,20 @@ pub fn router(db: Arc<Db>, jobs: Arc<dyn Enqueuer>, is_cloud: bool, app_url: &st
             "/integrations/whatsapp/webhook",
             get(handle_platform).post(handle_platform),
         )
+        // ponytail: the other channel webhooks share this state and `reply`.
+        .route(
+            "/integrations/telegram/webhook",
+            get(handle_telegram).post(handle_telegram),
+        )
+        .route(
+            "/integrations/tiktok/webhook",
+            get(handle_tiktok).post(handle_tiktok),
+        )
+        .route(
+            "/integrations/zalo/webhook",
+            get(handle_zalo).post(handle_zalo),
+        )
+        .route("/api/zalo-verifier/{verifier}", get(handle_zalo_verifier))
         .with_state(WebhookState {
             db,
             jobs,
@@ -63,6 +77,104 @@ fn reply(reply: WebhookReply) -> Response {
         reply.body,
     )
         .into_response()
+}
+
+/// `/integrations/telegram/webhook?botId=` (P1.22).
+async fn handle_telegram(
+    State(state): State<WebhookState>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let bot_id = url::form_urlencoded::parse(uri.query().unwrap_or("").as_bytes())
+        .find(|(k, _)| k == "botId")
+        .map(|(_, v)| v.into_owned());
+    let secret = headers
+        .get(chatbotx_worker::channels::telegram::SECRET_HEADER)
+        .and_then(|v| v.to_str().ok());
+    reply(
+        chatbotx_worker::channels::telegram::webhook(
+            &state.db,
+            state.jobs.as_ref(),
+            bot_id.as_deref(),
+            secret,
+            &String::from_utf8_lossy(&body),
+        )
+        .await,
+    )
+}
+
+/// `/integrations/tiktok/webhook` (P1.22).
+async fn handle_tiktok(
+    State(state): State<WebhookState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let signature = headers
+        .get(chatbotx_worker::channels::tiktok::SIGNATURE_HEADER)
+        .and_then(|v| v.to_str().ok());
+    reply(
+        chatbotx_worker::channels::tiktok::webhook(
+            &state.db,
+            state.jobs.as_ref(),
+            signature,
+            &String::from_utf8_lossy(&body),
+        )
+        .await,
+    )
+}
+
+/// `/integrations/zalo/webhook` (P1.22): the platform `zalo` credential.
+async fn handle_zalo(
+    State(state): State<WebhookState>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let header_text = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    reply(
+        chatbotx_worker::channels::zalo::webhook(
+            &state.db,
+            state.jobs.as_ref(),
+            state.encryption.as_deref(),
+            state.is_cloud,
+            &state.broker_host,
+            chatbotx_worker::channels::zalo::WebhookRequest {
+                method: method.as_str(),
+                signature: header_text(chatbotx_worker::channels::zalo::SIGNATURE_HEADER),
+                domain: header_text("x-domain"),
+                body: &String::from_utf8_lossy(&body),
+            },
+        )
+        .await,
+    )
+}
+
+/// `GET /api/zalo-verifier/{verifier}`.
+async fn handle_zalo_verifier(Path(verifier): Path<String>) -> Response {
+    reply(chatbotx_worker::channels::zalo::verifier_page(&verifier))
+}
+
+/// The `/zalo_verifier:verifier.html` rewrite (`next.config`), as a layer on
+/// the whole app: Zalo fetches the file from the site root.
+pub async fn zalo_verifier_rewrite(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let verifier = request
+        .uri()
+        .path()
+        .strip_prefix("/zalo_verifier")
+        .and_then(|rest| rest.strip_suffix(".html"))
+        // ponytail: not percent-decoded; Zalo verifiers are plain tokens.
+        .filter(|v| !v.contains('/'))
+        .map(str::to_owned);
+    match verifier {
+        Some(verifier) if request.method() == Method::GET => {
+            reply(chatbotx_worker::channels::zalo::verifier_page(&verifier))
+        }
+        _ => next.run(request).await,
+    }
 }
 
 async fn handle_platform(
