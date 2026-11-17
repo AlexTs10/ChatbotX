@@ -9,8 +9,12 @@
 //! route ([`public`]) after the member checks, so both stay one code path.
 
 mod contacts;
+mod conversations;
 mod flows;
+mod inboxes;
 mod lists;
+mod media_library;
+mod pipelines;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -106,6 +110,18 @@ pub async fn procedure(
     if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
         return Some(outcome.map(|output| output.json));
     }
+    if let Some(outcome) = inboxes::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = pipelines::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = media_library::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = conversations::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 
@@ -134,7 +150,10 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return match name {
             n if contacts::ACTIONS.contains(&n)
                 || flows::ACTIONS.contains(&n)
-                || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str()) =>
+                || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str())
+                || conversations::ACTIONS.contains(&n)
+                || lists::ACTIONS.contains(&n)
+                || media_library::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -142,6 +161,15 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         };
     }
     if let Some(outcome) = contacts::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = conversations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = media_library::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = lists::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = flows::action(ctx, name, &args).await {
