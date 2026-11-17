@@ -24,7 +24,9 @@ chatbotx-kv.workspace = true
 chatbotx-rt.workspace = true
 # `window.__ENV` of the SPA index (P4).
 serde_json.workspace = true
-tokio = { workspace = true, features = ["fs", "macros", "net", "rt-multi-thread", "signal"] }
+# The chat / integration / default workers (Q.W1).
+chatbotx-worker.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync"] }
 # The SPA fallback forwards API paths to the public API router (P4).
 tower.workspace = true
 tracing.workspace = true
