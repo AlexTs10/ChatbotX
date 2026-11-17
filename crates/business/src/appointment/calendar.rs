@@ -281,7 +281,7 @@ pub async fn create(db: &Db, workspace_id: i64, name: &str) -> Result<i64> {
             },
         )
         .map_err(map_unique)?;
-        let mut flow = |label: &str, text: &str| {
+        let flow = |label: &str, text: &str| {
             let (start_node_id, node) = default_booking_flow_node(text, "{{booking_link}}");
             create_published_default(
                 conn,

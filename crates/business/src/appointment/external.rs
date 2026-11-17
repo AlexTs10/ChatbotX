@@ -566,6 +566,14 @@ fn urlencode(text: &str) -> String {
         .replace('+', "%20")
 }
 
+/// `createDeterministicGoogleEventId`: `abe` + sha256(appointment id) as hex.
+pub fn deterministic_event_id(appointment_id: i64) -> String {
+    use sha2::Digest as _;
+    let digest = sha2::Sha256::digest(appointment_id.to_string().as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("abe{hex}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -588,12 +596,4 @@ mod tests {
             "Request failed with status code 503"
         );
     }
-}
-
-/// `createDeterministicGoogleEventId`: `abe` + sha256(appointment id) as hex.
-pub fn deterministic_event_id(appointment_id: i64) -> String {
-    use sha2::Digest as _;
-    let digest = sha2::Sha256::digest(appointment_id.to_string().as_bytes());
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    format!("abe{hex}")
 }
