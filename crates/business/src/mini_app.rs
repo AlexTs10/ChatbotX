@@ -123,6 +123,7 @@ pub async fn list(
     keyword: Option<String>,
     page: i64,
     per_page: i64,
+    sort: Option<Vec<SortItem>>,
 ) -> Result<(Vec<MiniAppListRow>, i64)> {
     tx::read(db, move |conn| {
         let input = MiniAppListInput {
@@ -130,7 +131,7 @@ pub async fn list(
             keyword: keyword.clone(),
             page,
             per_page,
-            sort: Some(vec![SortItem { id: "createdAt".into(), desc: true }]),
+            sort: Some(sort.clone().unwrap_or_else(|| vec![SortItem { id: "createdAt".into(), desc: true }])),
         };
         let rows = repo::list_paginated(conn, &input)?;
         let total = repo::count(conn, workspace_id, keyword.as_deref())?;

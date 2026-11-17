@@ -189,7 +189,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let name = input.opt_string("name", Str::trimmed(1, usize::MAX));
             input.finish()?;
             let (rows, page_count) =
-                service::list(db, ws, name, page, per_page).await.map_err(|e| business_error(e, super::LISTING))?;
+                service::list(db, ws, name, page, per_page, None).await.map_err(|e| business_error(e, super::LISTING))?;
             let data: Vec<Value> = rows.iter().map(|r| list_row_json(app_url, r)).collect();
             Ok(json(200, json!({ "data": data, "pageCount": page_count })))
         }

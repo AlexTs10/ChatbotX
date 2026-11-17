@@ -22,6 +22,7 @@ mod inboxes;
 pub(crate) mod integrations;
 mod lists;
 mod media_library;
+mod mini_apps;
 mod pipeline_board;
 mod pipelines;
 mod products;
@@ -159,6 +160,9 @@ pub async fn procedure(
     if let Some(outcome) = tools::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = mini_apps::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = comments::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -214,6 +218,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || pipelines::ACTIONS.contains(&n)
                 || pipeline_board::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
+                || mini_apps::ACTIONS.contains(&n)
                 || comments::is_action(n)
                 || integrations::ACTIONS.contains(&n)
                 || email_topics::ACTIONS.contains(&n)
@@ -260,6 +265,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = tools::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = mini_apps::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = comments::action(ctx, name, &args).await {
