@@ -273,7 +273,11 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             auth: Arc::clone(&sessions),
             store: Arc::clone(&jobs),
         }));
-    let api = Arc::new(api_state(&shared, Arc::clone(&jobs), realtime.as_ref()));
+    let api = Arc::new({
+        let mut api = api_state(&shared, Arc::clone(&jobs), realtime.as_ref());
+        api.sessions = Some(Arc::clone(&sessions));
+        api
+    });
     // The `/api/auth/*` routes behind the auth rate limits (Q.A1).
     let auth_routes = chatbotx_api::session::oauth_router(Arc::new(
         chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,

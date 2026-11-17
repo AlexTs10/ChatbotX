@@ -17,7 +17,7 @@ use serde_json::Value;
 use super::{
     AuthWorkspace, ChannelApiLookup, McpAccessToken, McpTokenVerificationUnavailable,
     MobileWorkspacePrincipal, OAuthPrincipalResolution, OwnerAccessState, RequestApiToken,
-    WorkspaceQuota, WorkspaceTokenDeps, WorkspaceTokenLookup, invalid_token_error,
+    WorkspaceQuota, WorkspaceTokenDeps, WorkspaceTokenLookup,
 };
 use crate::errors::ChatbotXException;
 use crate::orpc::OrpcError;
@@ -129,18 +129,13 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
         self.mobile_audience.clone()
     }
 
-    /// `resolveMobileWorkspacePrincipal`: verify the JWT, load the user,
-    /// refuse a pending password change and every route outside the member
-    /// allowlist, then the membership of `x-workspace-id`.
-    async fn resolve_mobile_principal(
+    /// `authenticateMobileBearer`: verify the JWT, then load its user.
+    async fn authenticate_mobile_bearer(
         &self,
         bearer_token: &str,
-        requested_workspace_id: Option<&str>,
-        method: Option<&str>,
-        path: Option<&str>,
-    ) -> Result<MobileWorkspacePrincipal, OrpcError> {
+    ) -> Result<Option<super::MobileUser>, OrpcError> {
         let Some(audience) = self.mobile_audience.as_deref() else {
-            return Err(invalid_token_error());
+            return Ok(None);
         };
         let verifier = crate::session::DbJwtVerifier {
             db: &self.db,
@@ -167,33 +162,58 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
             }
         };
         let Some(subject) = subject else {
-            return Err(invalid_mobile_token_error());
+            return Ok(None);
         };
         let Ok(user_id) = subject.user_id.parse::<i64>() else {
-            return Err(invalid_mobile_token_error());
+            return Ok(None);
         };
-        let db_error = |error: DbError| {
-            tracing::error!(%error, "mobile principal lookup failed");
-            OrpcError::new("INTERNAL_SERVER_ERROR", Some(500), None)
-        };
-        let user: Option<bool> = self
-            .db
+        let device_id = subject.device_id;
+        self.db
             .read(move |conn| {
                 use chatbotx_db::rusqlite::OptionalExtension as _;
                 conn.query_row(
-                    r#"SELECT "mustChangePassword" FROM "User" WHERE "id" = ?1"#,
+                    r#"SELECT "name", "email", "image", "mustChangePassword" FROM "User" WHERE "id" = ?1"#,
                     [user_id],
-                    |row| row.get(0),
+                    |row| {
+                        Ok(super::MobileUser {
+                            id: user_id,
+                            name: row.get(0)?,
+                            email: row.get(1)?,
+                            image: row.get(2)?,
+                            must_change_password: row.get(3)?,
+                            device_id,
+                        })
+                    },
                 )
                 .optional()
                 .map_err(|e| DbError::other(e.to_string()))
             })
             .await
-            .map_err(db_error)?;
-        let Some(must_change_password) = user else {
+            .map_err(|error| {
+                tracing::error!(%error, "mobile user lookup failed");
+                OrpcError::new("INTERNAL_SERVER_ERROR", Some(500), None)
+            })
+    }
+
+    /// `resolveMobileWorkspacePrincipal`: the verified user, refused while a
+    /// password change is pending and on every route outside the member
+    /// allowlist, then the membership of `x-workspace-id`.
+    async fn resolve_mobile_principal(
+        &self,
+        bearer_token: &str,
+        requested_workspace_id: Option<&str>,
+        method: Option<&str>,
+        path: Option<&str>,
+    ) -> Result<MobileWorkspacePrincipal, OrpcError> {
+        let Some(user) = self.authenticate_mobile_bearer(bearer_token).await? else {
             return Err(invalid_mobile_token_error());
         };
-        if must_change_password {
+        let user_id = user.id;
+        let db_error = |error: DbError| {
+            tracing::error!(%error, "mobile principal lookup failed");
+            OrpcError::new("INTERNAL_SERVER_ERROR", Some(500), None)
+        };
+        if user.must_change_password {
             return Err(OrpcError::new(
                 "FORBIDDEN",
                 None,
@@ -258,7 +278,7 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
         } else {
             Vec::new()
         };
-        let device_id = subject.device_id;
+        let device_id = user.device_id;
         // `mobileCredentialId({ user, deviceId, workspace })`.
         let credential_id = format!(
             "mobile:{workspace_id}:{user_id}:{}",

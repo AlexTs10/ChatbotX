@@ -40,6 +40,7 @@ pub mod inboxes;
 pub mod input;
 pub mod integrations_ai;
 pub mod keywords;
+pub mod me;
 pub mod media_library;
 pub mod member_scope;
 pub mod messages;
@@ -117,6 +118,8 @@ pub struct ApiState {
     /// The query embedding client (`aiFiles.search`); the provider APIs by
     /// default.
     pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
+    /// The auth state (`POST /v1/me/password`); `None` = off (tests).
+    pub sessions: Option<Arc<crate::session::AuthState>>,
 }
 
 impl ApiState {
@@ -138,6 +141,7 @@ impl ApiState {
             license_token: std::env::var("LICENSE_KEY").ok(),
             license_keys: chatbotx_business::license::LICENSE_PUBLIC_KEYS,
             embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
+            sessions: None,
         }
     }
 

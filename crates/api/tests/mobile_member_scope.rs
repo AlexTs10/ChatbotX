@@ -475,4 +475,150 @@ mod e2e {
         assert_eq!(status, 403, "{body}");
         assert_eq!(body["message"], "Password change required");
     }
+
+    async fn send_body(
+        router: &axum::Router,
+        method: &str,
+        path: &str,
+        token: &str,
+        workspace: Option<&str>,
+        body: Value,
+    ) -> u16 {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(ws) = workspace {
+            request = request.header("x-workspace-id", ws);
+        }
+        router
+            .clone()
+            .oneshot(request.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+            .status()
+            .as_u16()
+    }
+
+    async fn device_tokens(fx: &Fixture) -> Vec<(i64, Option<i64>)> {
+        fx.state
+            .db
+            .read(|c| {
+                let mut stmt =
+                    c.prepare(r#"SELECT "userId", "workspaceId" FROM "UserDeviceToken""#)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn me_routes_serve_only_the_signed_in_user() {
+        let fx = seeded().await;
+        let router = router(&fx, true);
+        let jwt = token(&fx, AGENT, &format!("{ORIGIN}/api")).await;
+
+        let (status, body) = send(&router, "GET", "/api/v1/me", &jwt, None).await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["id"], AGENT.to_string());
+        assert_eq!(body["mustChangePassword"], false);
+
+        let (status, body) = send(&router, "GET", "/api/v1/me/workspaces", &jwt, None).await;
+        assert_eq!(status, 200, "{body}");
+        let ids: Vec<&str> = body["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, [WS.to_string()]);
+
+        let other = handlers_common::OTHER_WS.to_string();
+        let device = json!({ "platform": "ios", "token": "ExponentPushToken[x]" });
+        assert_eq!(
+            send_body(
+                &router,
+                "PUT",
+                "/api/v1/me/device-tokens",
+                &jwt,
+                Some(&other),
+                device.clone()
+            )
+            .await,
+            403
+        );
+        assert!(device_tokens(&fx).await.is_empty());
+        let ws = WS.to_string();
+        assert_eq!(
+            send_body(
+                &router,
+                "PUT",
+                "/api/v1/me/device-tokens",
+                &jwt,
+                Some(&ws),
+                device
+            )
+            .await,
+            200
+        );
+        assert_eq!(device_tokens(&fx).await, [(AGENT, Some(WS))]);
+
+        // Another user cannot remove it.
+        let other_jwt = token(&fx, 1011, &format!("{ORIGIN}/api")).await;
+        let remove = json!({ "token": "ExponentPushToken[x]" });
+        assert_eq!(
+            send_body(
+                &router,
+                "DELETE",
+                "/api/v1/me/device-tokens",
+                &other_jwt,
+                None,
+                remove.clone()
+            )
+            .await,
+            200
+        );
+        assert_eq!(device_tokens(&fx).await.len(), 1);
+        assert_eq!(
+            send_body(
+                &router,
+                "DELETE",
+                "/api/v1/me/device-tokens",
+                &jwt,
+                None,
+                remove
+            )
+            .await,
+            200
+        );
+        assert!(device_tokens(&fx).await.is_empty());
+
+        // A pending password change still reads `/v1/me`, nothing else.
+        fx.state
+            .db
+            .write(|tx| {
+                tx.execute(
+                    r#"UPDATE "User" SET "mustChangePassword" = 1 WHERE "id" = 1010"#,
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let (status, body) = send(&router, "GET", "/api/v1/me", &jwt, None).await;
+        assert_eq!(
+            (status, body["mustChangePassword"].clone()),
+            (200, json!(true))
+        );
+        let (status, _) = send(&router, "GET", "/api/v1/me/workspaces", &jwt, None).await;
+        assert_eq!(status, 403);
+
+        // Mobile tokens off: `/v1/me` refuses every token.
+        let (status, _) = send(&router(&fx, false), "GET", "/api/v1/me", &jwt, None).await;
+        assert_eq!(status, 401);
+    }
 }

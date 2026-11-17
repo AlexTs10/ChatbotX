@@ -205,6 +205,69 @@ pub trait WorkspaceTokenDeps: WorkspaceQuota + Sync {
         let _ = token_hash;
         async { Ok(None) }
     }
+
+    /// `authenticateMobileBearer(bearerToken)`: the verified mobile user
+    /// (`None` = invalid token). Default: no mobile user.
+    fn authenticate_mobile_bearer(
+        &self,
+        bearer_token: &str,
+    ) -> impl Future<Output = Result<Option<MobileUser>, OrpcError>> + Send {
+        let _ = bearer_token;
+        async { Ok(None) }
+    }
+}
+
+/// The user of a mobile access token (`authenticateMobileBearer`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MobileUser {
+    pub id: i64,
+    pub name: Option<String>,
+    pub email: String,
+    pub image: Option<String>,
+    pub must_change_password: bool,
+    pub device_id: Option<String>,
+}
+
+/// `createMobileUserAuthMiddleware({ allowPasswordChangeRequired })`: a
+/// mobile access token only (no workspace token, no MCP token).
+pub async fn authenticate_mobile_user<D: WorkspaceTokenDeps>(
+    deps: &D,
+    headers: &HeaderMap,
+    allow_password_change_required: bool,
+    res_headers: &mut HeaderMap,
+) -> Result<MobileUser, OrpcError> {
+    let audience = deps.mobile_api_audience();
+    let Some(bearer) = extract_bearer(headers).filter(|bearer| {
+        audience
+            .as_deref()
+            .is_some_and(|audience| is_mobile_access_token_candidate(bearer, audience))
+    }) else {
+        return Err(invalid_access_token_error());
+    };
+    rate_limit(
+        deps,
+        WORKSPACE_TOKEN_PREAUTH_RATE_LIMIT,
+        &guest_client_ip(headers),
+        Some(PREAUTH_REQUEST_LIMIT),
+        res_headers,
+    )
+    .await?;
+    let user = deps
+        .authenticate_mobile_bearer(bearer)
+        .await?
+        .ok_or_else(invalid_access_token_error)?;
+    rate_limit(
+        deps,
+        MOBILE_USER_RATE_LIMIT,
+        &user.id.to_string(),
+        None,
+        res_headers,
+    )
+    .await?;
+    if user.must_change_password && !allow_password_change_required {
+        return Err(forbidden("Password change required"));
+    }
+    Ok(user)
 }
 
 /// An API channel (`IntegrationApi`) found by its token hash.
