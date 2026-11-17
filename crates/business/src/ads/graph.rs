@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use chatbotx_core::encryption::EncryptedData;
 use chatbotx_db::Db;
 use chatbotx_db::repo::messaging_ads_connection::{self as connections, IntegrationRef};
-use chatbotx_db::rusqlite::{OptionalExtension, params};
+use chatbotx_db::rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 
 use crate::connection::credentials::{HttpUpstream, Upstream, UpstreamRequest};

@@ -87,6 +87,7 @@ pub async fn funnel(db: &Db, input: DateRangeInput) -> Result<Value> {
         let mut rows: Vec<(String, Map<String, Value>)> = Vec::new();
         let all = input.all_channels;
         let init = |ad_id: &Option<String>| {
+            let ad_id = ad_id.clone();
             move || {
                 let mut row = Map::new();
                 row.insert("adId".into(), json!(ad_id));
