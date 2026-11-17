@@ -1077,7 +1077,7 @@ mod tests {
             1
         );
         assert_eq!(
-            count(&deps, r#"SELECT count(*) FROM "ContactInbox" WHERE "sourceId" = 'c-1' AND "channel" = 'api'"#).await,
+            count(&deps, r#"SELECT count(*) FROM "ContactInbox" WHERE "sourceId" = 'c-1' AND "channel" = 'api' AND "lastIncomingMessageAt" IS NOT NULL"#).await,
             1
         );
         assert_eq!(
