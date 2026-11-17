@@ -1,7 +1,7 @@
 //! `features/ads/api/public.ts`: `ads.*` (scope `ads`).
 
 use chatbotx_business::ads::rules::{self, CHANNELS, EVENT_TYPES};
-use chatbotx_business::ads::{funnel, referral};
+use chatbotx_business::ads::{analytics, funnel, graph, referral};
 use chatbotx_db::repo::ads_conversion_event::{DateRangeInput, ExportSegmentInput};
 use serde_json::{Value, json};
 
@@ -27,7 +27,59 @@ pub const ROUTES: &[&str] = &[
     "ads.getCapiDelivery",
     "ads.listConversionExportRows",
     "ads.getConversion",
+    "ads.getAnalyticsOverview",
+    "ads.getAnalyticsTimeseries",
+    "ads.listChannelAdAccounts",
+    "ads.listCustomAudiences",
 ];
+
+fn ad_account_id(text: &str) -> bool {
+    text.strip_prefix("act_")
+        .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// `adsAnalyticsPublicRequest`.
+fn analytics_scope(input: &mut Input, ws: i64) -> analytics::Scope {
+    let from = input.string("from", DATE_KEY);
+    let to = input.string("to", DATE_KEY);
+    let tz = input.opt_string("tz", Str::default());
+    let ad_account = input.opt_string(
+        "adAccountId",
+        Str {
+            pattern: Some(ad_account_id),
+            ..Str::default()
+        },
+    );
+    let channel = enum_field(input, "channel", ELIGIBLE_CHANNELS, false);
+    let integration_whatsapp_id = opt_id(input, "integrationWhatsappId");
+    let integration_messenger_id = opt_id(input, "integrationMessengerId");
+    let integration_instagram_id = opt_id(input, "integrationInstagramId");
+    let all_channels = input.opt_coerced_bool("allChannels").unwrap_or(false);
+    let scope = analytics::Scope {
+        workspace_id: ws,
+        from: from.unwrap_or_default(),
+        to: to.unwrap_or_default(),
+        tz,
+        ad_account_id: ad_account,
+        channel,
+        integration_whatsapp_id,
+        integration_messenger_id,
+        integration_instagram_id,
+        all_channels,
+    };
+    let scoped = scope.channel.is_some()
+        || scope.integration_whatsapp_id.is_some()
+        || scope.integration_messenger_id.is_some()
+        || scope.integration_instagram_id.is_some();
+    if !input.failed() && scope.all_channels && scoped {
+        input.issue(
+            &key("allChannels"),
+            "custom",
+            "allChannels cannot be combined with channel or an integration id",
+        );
+    }
+    scope
+}
 
 const MAX_RANGE_DAYS: f64 = 366.0;
 const MS_PER_DAY: f64 = 86_400_000.0;
@@ -416,6 +468,46 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             funnel::find_event(db, ws, id.unwrap_or_default())
                 .await
                 .map(|b| json(200, b))
+                .map_err(|e| business_error(e, FINDING))
+        }
+        "ads.getAnalyticsOverview" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let scope = analytics_scope(&mut input, ws);
+            input.finish()?;
+            analytics::overview(db, scope)
+                .await
+                .map(|b| json(200, b))
+                .map_err(|e| business_error(e, LISTING))
+        }
+        "ads.getAnalyticsTimeseries" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let scope = analytics_scope(&mut input, ws);
+            input.finish()?;
+            analytics::timeseries(db, scope)
+                .await
+                .map(|data| json(200, json!({ "data": data })))
+                .map_err(|e| business_error(e, LISTING))
+        }
+        "ads.listChannelAdAccounts" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let channel = enum_field(&mut input, "channel", ELIGIBLE_CHANNELS, true);
+            let integration_id = opt_id(&mut input, "integrationId");
+            input.finish()?;
+            graph::channel_ad_accounts(db, ws, &channel.unwrap_or_default(), integration_id)
+                .await
+                .map(|accounts| {
+                    let data: Vec<Value> = accounts.into_iter().map(|a| a.account).collect();
+                    json(200, json!({ "data": data }))
+                })
+                .map_err(|e| business_error(e, FINDING))
+        }
+        "ads.listCustomAudiences" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let ad_account = input.string("adAccountId", NON_EMPTY);
+            input.finish()?;
+            graph::cached_custom_audiences(db, ws, ad_account.unwrap_or_default())
+                .await
+                .map(|data| json(200, json!({ "data": data })))
                 .map_err(|e| business_error(e, FINDING))
         }
         _ => Err(crate::routes::not_ported_error()),
