@@ -1311,3 +1311,86 @@ async fn settings_admin_and_invitation_actions_check_the_caller() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
 }
+
+#[tokio::test]
+async fn user_persistent_menus_crud() {
+    let (router, _db) = router().await;
+    let menu = json!({ "label": "Docs", "type": "url", "url": "https://example.com" });
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createUserPersistentMenuAction",
+        json!([ws(), { "name": " Main ", "persistentMenus": [menu] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    // `messengerPersistentMenuSchema`: a bad URL is a field validation error.
+    let bad = json!({ "label": "x", "type": "url", "url": "nope" });
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createUserPersistentMenuAction",
+        json!([ws(), { "name": "B", "persistentMenus": [bad] }]),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(
+        out["data"]["validationErrors"]["persistentMenus"].is_object(),
+        "{out}"
+    );
+
+    let (status, list) = act(
+        &router,
+        "admintoken",
+        "listUserPersistentMenus",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["data"][0]["name"], "Main");
+    let id = list["data"][0]["id"].as_str().expect("id").to_string();
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateUserPersistentMenuAction",
+        json!([ws(), id, { "name": "Renamed", "persistentMenus": [] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, found) = act(
+        &router,
+        "admintoken",
+        "findUserPersistentMenu",
+        json!([{ "id": id, "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(found["name"], "Renamed");
+
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "deleteUserPersistentMenuAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // A one-id delete of a missing menu is a 404.
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteUserPersistentMenuAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{out}");
+    let (_, found) = act(
+        &router,
+        "admintoken",
+        "findUserPersistentMenu",
+        json!([{ "id": id, "workspaceId": ws() }]),
+    )
+    .await;
+    assert!(found.is_null());
+}

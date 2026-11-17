@@ -78,6 +78,7 @@ pub mod tag;
 pub mod tenant;
 pub mod tenant_help_item;
 pub mod tx;
+pub mod user_persistent_menu;
 pub mod user_quota;
 pub mod vendor;
 pub mod whatsapp;

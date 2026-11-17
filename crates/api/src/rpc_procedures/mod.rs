@@ -23,6 +23,7 @@ mod products;
 mod settings;
 mod templates;
 mod tools;
+mod user_persistent_menus;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -142,6 +143,9 @@ pub async fn procedure(
     if let Some(outcome) = tools::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = user_persistent_menus::procedure(ctx, path).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 
@@ -185,6 +189,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || pipeline_board::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
                 || settings::ACTIONS.contains(&n)
+                || user_persistent_menus::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
@@ -220,6 +225,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = settings::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = user_persistent_menus::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

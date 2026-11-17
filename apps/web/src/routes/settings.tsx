@@ -16,6 +16,9 @@
 // page: app/space/[workspaceId]/(settings)/settings/integrations/muse/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/integrations/openrouter/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/integrations/openai-compatible/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/create/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/[menuId]/page.tsx
 // `resolveGuardedWorkspaceId(params, "superAdmin")`: 404 without superAdmin.
 // The channel policy (creatable / connected channels) is the page loader
 // `pages.settingsChannels`; the other data comes from the builder queries.
@@ -36,7 +39,7 @@ import { Outlet, useParams } from "@tanstack/react-router"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { Suspense } from "react"
+import { type ReactNode, Suspense } from "react"
 import { ChannelsAccordionShell } from "@/app/space/[workspaceId]/(settings)/settings/channels/channels-accordion-shell"
 import { IntegrationsAccordionShell } from "@/app/space/[workspaceId]/(settings)/settings/integrations/integrations-accordion-shell"
 import { SettingsTab } from "@/app/space/[workspaceId]/(settings)/settings/tab"
@@ -72,6 +75,12 @@ import { listWorkspaceTokens } from "@/features/workspaces/queries/workspace-tok
 import { UpdateWorkspaceForm } from "@/features/workspaces/update-workspace-form"
 import { hasWorkspacePermission } from "@/lib/auth/permission-routes"
 import { useQueryPromise } from "@/lib/query/use-query-promise"
+import { UserPersistentMenuForm } from "@/features/user-persistent-menus/components/user-persistent-menu-form"
+import { UserPersistentMenuList } from "@/features/user-persistent-menus/components/user-persistent-menu-list"
+import {
+  findUserPersistentMenu,
+  listUserPersistentMenus,
+} from "@/features/user-persistent-menus/queries"
 import { loadPage } from "@/lib/server-action"
 import { workspaceSettingsGeneralPath } from "@/lib/workspace/settings-paths"
 import { NotAvailablePage, NotFoundPage } from "@/routes/root"
@@ -149,10 +158,56 @@ export function SettingsInboxTeamsPage() {
   )
 }
 
-// `settings/user-persistent-menus`: no Rust domain yet.
-export const SettingsUserPersistentMenusPage = () => (
-  <NotAvailablePage title="Persistent menus" />
-)
+export function SettingsUserPersistentMenusPage() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "listUserPersistentMenus", workspaceId],
+    queryFn: () => listUserPersistentMenus({ workspaceId }),
+  })
+  return <UserPersistentMenuList menus={data.data} workspaceId={workspaceId} />
+}
+
+function UserPersistentMenuCard(props: {
+  title: "actions.createFeature" | "actions.editFeature"
+  children: ReactNode
+}) {
+  const t = useTranslations()
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="font-bold text-xl">
+          {t(props.title, { feature: t("fields.userPersistentMenu.label") })}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>{props.children}</CardContent>
+    </Card>
+  )
+}
+
+export function SettingsUserPersistentMenuCreatePage() {
+  return (
+    <UserPersistentMenuCard title="actions.createFeature">
+      <UserPersistentMenuForm workspaceId={useWorkspaceId()} />
+    </UserPersistentMenuCard>
+  )
+}
+
+export function SettingsUserPersistentMenuEditPage() {
+  const workspaceId = useWorkspaceId()
+  const { menuId } = useParams({ strict: false }) as { menuId: string }
+  const { data: menu } = useSuspenseQuery({
+    queryKey: ["spa", "findUserPersistentMenu", workspaceId, menuId],
+    queryFn: () => findUserPersistentMenu({ id: menuId, workspaceId }),
+  })
+  if (!menu) {
+    return <NotFoundPage />
+  }
+  return (
+    <UserPersistentMenuCard title="actions.editFeature">
+      <UserPersistentMenuForm menu={menu} workspaceId={workspaceId} />
+    </UserPersistentMenuCard>
+  )
+}
 
 export function SettingsAdminsPage() {
   const t = useTranslations()

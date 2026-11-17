@@ -385,6 +385,16 @@ const settingsRoutes = settingsRoute.addChildren([
     "user-persistent-menus",
     "SettingsUserPersistentMenusPage",
   ),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus/create",
+    "SettingsUserPersistentMenuCreatePage",
+  ),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus/$menuId",
+    "SettingsUserPersistentMenuEditPage",
+  ),
   settingsChannelsRoute.addChildren([
     createRoute({
       getParentRoute: () => settingsChannelsRoute,
