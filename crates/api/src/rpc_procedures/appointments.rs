@@ -7,6 +7,8 @@ use chatbotx_business::BusinessError;
 use chatbotx_business::appointment::{booking, calendar};
 use chatbotx_business::google_oauth;
 use chatbotx_business::tx;
+use chatbotx_db::repo::appointment::AppointmentListInput;
+use chatbotx_db::repo::appointment_calendar::CalendarListInput;
 use serde_json::{Value, json};
 
 use super::contacts::require_contact_access;
@@ -29,6 +31,13 @@ pub(super) const ACTIONS: &[&str] = &[
     "disconnectGoogleCalendarAction",
     "connectGoogleCalendarAction",
     "updateGoogleCalendarIdAction",
+    // Server-component queries (`features/*/queries`), `args: [input]`.
+    "listAppointmentCalendars",
+    "getAppointmentCalendar",
+    "listAppointmentCalendarsForFlow",
+    "listAppointments",
+    "listExternalCalendars",
+    "listExternalCalendarsForSelect",
 ];
 
 /// `DEFAULT_SLOT_WINDOW_DAYS` (the availability range cap).
@@ -256,6 +265,99 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             }))
         }
         "bookContactAppointmentAction" => book(ctx, arg(args, 1)).await,
+        "listAppointmentCalendars" => {
+            let input = In(arg(args, 0));
+            let list = CalendarListInput {
+                workspace_id: ws,
+                search: input.opt_str("name")?,
+                page: input.opt_positive("page")?,
+                per_page: input.opt_positive("perPage")?,
+                sort: input.sort(),
+            };
+            let found = tx::read(db, move |conn| {
+                Ok(chatbotx_db::repo::appointment_calendar::list(conn, &list)?)
+            })
+            .await
+            .map_err(fail)?;
+            Ok(json!({
+                "data": found.data.iter().map(|c| c.to_json()).collect::<Vec<_>>(),
+                "pageCount": found.page_count,
+                "total": found.total,
+            }))
+        }
+        "getAppointmentCalendar" => {
+            let calendar_id = In(arg(args, 0)).id("id")?;
+            let found = calendar::get_for_edit(db, ws, calendar_id)
+                .await
+                .map_err(fail)?;
+            let mut out = found.calendar.to_json();
+            out["availability"] = found.availability.iter().map(|a| a.to_json()).collect();
+            out["reminders"] = found.reminders.iter().map(|r| r.to_json()).collect();
+            Ok(out)
+        }
+        "listAppointmentCalendarsForFlow" => list_for_flow(ctx, arg(args, 0)).await,
+        "listAppointments" => {
+            let input = In(arg(args, 0));
+            let list = AppointmentListInput {
+                workspace_id: ws,
+                calendar_id: input.opt_id("calendarId")?,
+                search: input.opt_str("name")?,
+                past: input.opt_str("tab")?.as_deref() == Some("past"),
+                page: input.opt_positive("page")?,
+                per_page: input.opt_positive("perPage")?,
+                now_ms: ctx.now_ms,
+            };
+            let external = externals(ctx.api);
+            let (items, page_count) =
+                booking::list(deps(ctx.api, &external), list, &ctx.api.app_url)
+                    .await
+                    .map_err(fail)?;
+            let data: Vec<Value> = items
+                .iter()
+                .map(|item| {
+                    let mut out = item.row.appointment.to_json();
+                    out["calendarName"] = json!(item.row.calendar_name);
+                    out["contactAvatar"] = json!(item.row.contact_avatar);
+                    out["contactFirstName"] = json!(item.row.contact_first_name);
+                    out["contactLastName"] = json!(item.row.contact_last_name);
+                    out["contactFullName"] = json!(item.row.contact_full_name);
+                    out["contactName"] = json!(item.contact_name);
+                    out["scheduleUrl"] = json!(item.schedule_url);
+                    out["cancellable"] = json!(item.cancellable);
+                    out["deletable"] = json!(item.deletable);
+                    out
+                })
+                .collect();
+            Ok(json!({ "data": data, "pageCount": page_count }))
+        }
+        "listExternalCalendars" | "listExternalCalendarsForSelect" => {
+            let items = tx::read(db, move |conn| {
+                chatbotx_business::appointment::external::list_with_connected_count(conn, ws)
+            })
+            .await
+            .map_err(fail)?;
+            let data: Vec<Value> = items
+                .iter()
+                .map(|item| {
+                    json!({
+                        "id": id(item.id),
+                        "workspaceId": id(item.workspace_id),
+                        "providerType": "googleCalendar",
+                        "label": item.label,
+                        "providerCalendarId": item.provider_calendar_id,
+                        "email": item.email,
+                        "connectedCount": item.connected_count,
+                        "createdAt": date(item.created_at),
+                        "updatedAt": date(item.updated_at),
+                    })
+                })
+                .collect();
+            if name == "listExternalCalendarsForSelect" {
+                return Ok(Value::Array(data));
+            }
+            let total = data.len();
+            Ok(json!({ "data": data, "total": total, "pageCount": 1 }))
+        }
         _ => Err(fail(BusinessError::not_found("Action not found"))),
     }
 }

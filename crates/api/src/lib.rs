@@ -1,6 +1,7 @@
 //! HTTP API: the axum router and its handlers.
 
 pub mod auth;
+pub mod booking_public;
 pub mod connect_callback;
 pub mod errors;
 pub mod files;
