@@ -1,7 +1,9 @@
-//! Pipeline option lists of the flow editor and the inbox panel:
+//! Pipelines of the flow editor, the inbox panel and the pipelines list:
 //! `features/pipelines/api/private.ts` (`privateListPipelineOptionsAPI`,
-//! `privateGetPipelineAPI`). The member's pipeline grants apply
-//! (`pipelineScopeFromMember`), not the workspace-token scope of `/v1`.
+//! `privateGetPipelineAPI`, `privateListPipelinesAPI`) and
+//! `features/pipelines/actions/pipeline.action.ts`. The member's pipeline
+//! grants apply (`pipelineScopeFromMember`), not the workspace-token scope
+//! of `/v1`.
 
 use chatbotx_business::pipeline::access::{PipelineGrantPolicy, pipeline_grant_policy};
 use chatbotx_business::pipeline::service::{self, stored_settings};
@@ -11,15 +13,134 @@ use chatbotx_db::repo::models::WorkspaceMember;
 use chatbotx_db::repo::pipeline_stage as stage_repo;
 use serde_json::{Value, json};
 
-use super::{Ctx, In, Outcome, fail};
+use super::{Ctx, In, Outcome, action_fail, arg, fail};
+use crate::handlers::input::{Input, key};
+use crate::handlers::pipelines::{
+    CURRENCY, NAME, PIPELINE_TYPES, REFERENCE_NAME, pipeline_type, settings_patch,
+};
 use crate::orpc::OrpcError;
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
     Some(match path {
         "pipelinesAPI.privateListPipelineOptionsAPI" => options(ctx).await,
         "pipelinesAPI.privateGetPipelineAPI" => get(ctx, input).await,
+        "pipelinesAPI.privateListPipelinesAPI" => list(ctx).await,
         _ => return None,
     })
+}
+
+pub(super) const ACTIONS: &[&str] = &[
+    "createPipelineAction",
+    "updatePipelineAction",
+    "duplicatePipelineAction",
+    "deletePipelineAction",
+];
+
+/// `pipeline.action.ts`: the input is `args[1]`; the member scope and the
+/// user as the actor (`pipelineActionCaller`).
+pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
+    if !ACTIONS.contains(&name) {
+        return None;
+    }
+    Some(
+        async {
+            let body = arg(args, 1).to_string();
+            let mut input = Input::from_body(&[], body.as_bytes());
+            let scope = member_scope(ctx).await?;
+            let (db, ws) = (&ctx.api.db, ctx.workspace_id);
+            match name {
+                "createPipelineAction" => {
+                    let kind = input.enum_at(
+                        &key("type"),
+                        input.get("type").cloned().as_ref(),
+                        PIPELINE_TYPES,
+                        true,
+                    );
+                    let name = input.string("name", NAME);
+                    input.finish()?;
+                    let view = service::create(
+                        db,
+                        service::CreatePipeline {
+                            workspace_id: ws,
+                            pipeline_type: pipeline_type(kind.as_deref().unwrap_or_default()),
+                            name: name.unwrap_or_default(),
+                            scope,
+                            actor_user_id: Some(ctx.user_id),
+                        },
+                    )
+                    .await
+                    .map_err(action_fail)?;
+                    Ok(json!({ "id": view.pipeline.id.to_string() }))
+                }
+                "updatePipelineAction" => {
+                    let id = input.id("id");
+                    let name = input.opt_string("name", NAME);
+                    let reference_name = input.opt_string("referenceName", REFERENCE_NAME);
+                    let currency = input.nullish_string("currency", CURRENCY);
+                    let settings = settings_patch(&mut input);
+                    input.finish()?;
+                    service::update(
+                        db,
+                        service::UpdatePipeline {
+                            workspace_id: ws,
+                            id: id.unwrap_or_default(),
+                            scope,
+                            name,
+                            reference_name,
+                            currency,
+                            settings,
+                        },
+                    )
+                    .await
+                    .map_err(action_fail)?;
+                    Ok(Value::Null)
+                }
+                "duplicatePipelineAction" => {
+                    let id = input.id("id");
+                    input.finish()?;
+                    let copy = service::duplicate(
+                        db,
+                        ws,
+                        id.unwrap_or_default(),
+                        scope,
+                        Some(ctx.user_id),
+                    )
+                    .await
+                    .map_err(action_fail)?;
+                    Ok(json!({ "id": copy.pipeline.id.to_string() }))
+                }
+                _ => {
+                    let id = input.id("id");
+                    input.finish()?;
+                    service::delete(db, ws, id.unwrap_or_default(), scope)
+                        .await
+                        .map_err(action_fail)?;
+                    Ok(Value::Null)
+                }
+            }
+        }
+        .await,
+    )
+}
+
+/// `listWithPermissions`: `{ pipeline, itemsCount, permissions }` entries.
+async fn list(ctx: &Ctx<'_>) -> Result<Value, OrpcError> {
+    let scope = member_scope(ctx).await?;
+    let entries = service::list_with_permissions(&ctx.api.db, ctx.workspace_id, scope)
+        .await
+        .map_err(fail)?;
+    Ok(Value::Array(
+        entries
+            .iter()
+            .map(|entry| {
+                json!({
+                    "pipeline": pipeline_with_currency(&entry.pipeline),
+                    "itemsCount": entry.items_count,
+                    "permissions": permissions_json(&entry.permissions),
+                })
+            })
+            .collect(),
+    ))
 }
 
 /// `pipelineScopeFromMember` (support sessions do not reach the SPA `/rpc`).

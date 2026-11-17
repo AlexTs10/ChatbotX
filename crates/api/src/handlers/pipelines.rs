@@ -51,7 +51,7 @@ pub const MUTATING_PIPELINE: ErrorMap = &[
     ("idempotencyKeyConflict", 409),
 ];
 
-const PIPELINE_TYPES: &[&str] = &["opportunity", "ticket", "custom"];
+pub(crate) const PIPELINE_TYPES: &[&str] = &["opportunity", "ticket", "custom"];
 
 fn no_nul(text: &str) -> bool {
     !text.contains('\0')
@@ -72,13 +72,13 @@ pub const NAME: Str = Str {
     pattern: Some(no_nul),
     ..Str::trimmed(1, 120)
 };
-const REFERENCE_NAME: Str = Str {
+pub(crate) const REFERENCE_NAME: Str = Str {
     trim: false,
     min: None,
     max: Some(PIPELINE_REFERENCE_NAME_MAX),
     pattern: Some(is_reference_name),
 };
-const CURRENCY: Str = Str {
+pub(crate) const CURRENCY: Str = Str {
     trim: false,
     min: None,
     max: None,
@@ -153,7 +153,7 @@ fn delete_input(call: &Call<'_>) -> Input {
     }
 }
 
-fn pipeline_type(name: &str) -> PipelineType {
+pub(crate) fn pipeline_type(name: &str) -> PipelineType {
     match name {
         "ticket" => PipelineType::Ticket,
         "custom" => PipelineType::Custom,
@@ -162,7 +162,7 @@ fn pipeline_type(name: &str) -> PipelineType {
 }
 
 /// `pipelineSettingsPatchSchema`.
-fn settings_patch(input: &mut Input) -> Option<PipelineSettingsPatch> {
+pub(crate) fn settings_patch(input: &mut Input) -> Option<PipelineSettingsPatch> {
     let value = input.get("settings").cloned()?;
     let path = key("settings");
     let Value::Object(obj) = value else {
