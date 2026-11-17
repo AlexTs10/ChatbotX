@@ -118,6 +118,7 @@ pub async fn call_as(
     let principal = chatbotx_api::handlers::Principal {
         token_id: None,
         scopes: scopes.map(|s| s.iter().map(|v| (*v).to_string()).collect()),
+        ..Default::default()
     };
     let response = chatbotx_api::handlers::dispatch_as(
         &fixture.state,

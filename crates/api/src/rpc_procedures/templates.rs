@@ -1,52 +1,34 @@
-//! `templatesAPI.listLockedIdsAPI` (`features/templates/api/index.ts`,
-//! `listLockedTemplateResourceIds`): which ids of one list page are
-//! view-only (`allowEdit` off) or undeletable (`allowDelete` off) template
-//! copies. Access: the `/rpc` membership check (`workspaceAuthorizedMidddleware`).
+//! `features/templates/api/index.ts` (`templatesAPI`, Q.D4): the view-only /
+//! undeletable lookup the SPA's lock badges and editor guard read. The
+//! selectable-resources and dependency previews need the snapshot engine
+//! (not ported yet).
 
-use chatbotx_db::DbError;
-use chatbotx_db::repo::template_installed_resource::{
-    TEMPLATE_RESOURCE_KINDS, TemplateResourcePermission, find_blocking,
-};
+use chatbotx_business::template::{RESOURCE_KINDS, list_locked_resource_ids};
 use serde_json::{Value, json};
 
-use super::{Ctx, In, Outcome, invalid};
+use super::{Ctx, In, Outcome, fail, invalid};
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
-    if path != "templatesAPI.listLockedIdsAPI" {
-        return None;
+    match path {
+        "templatesAPI.listLockedIdsAPI" => Some(list_locked_ids(ctx, input).await),
+        _ => None,
     }
-    Some(
-        async {
-            let kind = In(input).str("resourceKind", false, 1, 64)?;
-            if !TEMPLATE_RESOURCE_KINDS.contains(&kind.as_str()) {
-                return Err(invalid());
-            }
-            let ids = In(input).ids("resourceIds")?;
-            if ids.len() > 200 {
-                return Err(invalid());
-            }
-            let ws = ctx.workspace_id;
-            let (locked, undeletable) = ctx
-                .api
-                .db
-                .read(move |conn| {
-                    let find = |permission| {
-                        find_blocking(conn, ws, &kind, &ids, permission, &[])
-                            .map_err(|e| DbError::other(e.to_string()))
-                    };
-                    Ok((
-                        find(TemplateResourcePermission::AllowEdit)?,
-                        find(TemplateResourcePermission::AllowDelete)?,
-                    ))
-                })
-                .await
-                .map_err(|e| crate::handlers::internal_error(&e.to_string()))?;
-            let strings = |ids: Vec<i64>| ids.iter().map(i64::to_string).collect::<Vec<_>>();
-            Ok(json!({
-                "lockedIds": strings(locked),
-                "undeletableIds": strings(undeletable),
-            }))
-        }
-        .await,
-    )
+}
+
+/// `{ resourceKind, resourceIds (<= 200) }` → `{ lockedIds, undeletableIds }`.
+async fn list_locked_ids(ctx: &Ctx<'_>, input: &Value) -> Result<Value, crate::orpc::OrpcError> {
+    let input = In(input);
+    let kind = input
+        .opt_str("resourceKind")?
+        .filter(|kind| RESOURCE_KINDS.contains(&kind.as_str()))
+        .ok_or_else(invalid)?;
+    let ids = input.ids("resourceIds")?;
+    if ids.len() > 200 {
+        return Err(invalid());
+    }
+    let (locked, undeletable) =
+        list_locked_resource_ids(&ctx.api.db, ctx.workspace_id, &kind, &ids)
+            .await
+            .map_err(fail)?;
+    Ok(json!({ "lockedIds": locked, "undeletableIds": undeletable }))
 }

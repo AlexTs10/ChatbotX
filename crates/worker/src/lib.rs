@@ -20,6 +20,8 @@ pub mod default_queue;
 pub mod events;
 pub mod flow;
 pub mod inbound;
+pub mod inbound_events;
+pub mod inbox_labels;
 pub mod integration;
 pub mod low;
 pub mod meta_catalog;
@@ -27,6 +29,8 @@ pub mod notification;
 pub mod purge;
 pub mod schedule;
 pub mod send_flow_step;
+pub mod sequence;
+pub mod smart_delay;
 pub mod steps;
 pub mod trigger;
 pub mod variables;
@@ -195,7 +199,7 @@ fn handler(deps: &Deps, run: QueueHandler) -> Handler {
     Arc::new(move |job| run(deps.clone(), job))
 }
 
-/// Starts the `chat`, `integration`, `ai-agent` and `default` workers (`runWorker` +
+/// Starts the `chat`, `integration`, `ai-agent`, `default` and `schedule` workers (`runWorker` +
 /// `createQueueWorker`) with the original concurrency envs.
 pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     let specs = chatbotx_jobs::runtime::worker_specs();

@@ -590,6 +590,9 @@ impl SequenceConsumerServices for FakeConsumerServices {
         ok(Some(StepRow {
             id: "step-1".to_owned(),
             sequence_id: "sequence-1".to_owned(),
+            order: 1,
+            is_active: true,
+            flow_id: Some(1),
         }))
     }
 

@@ -9,8 +9,10 @@ pub mod ai_handover;
 pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
+pub mod broadcasts;
 pub mod capabilities;
 pub mod channel_integrations;
+pub mod channel_settings;
 pub mod channels;
 pub mod comment_automations;
 pub mod connect_sessions;
@@ -29,6 +31,7 @@ pub mod contacts_bulk;
 pub mod conversations;
 pub mod custom_fields;
 pub mod ecommerce_settings;
+pub mod email_topics;
 pub mod error_logs;
 pub mod flows;
 pub mod folders;
@@ -39,6 +42,8 @@ pub mod integrations_ai;
 pub mod keywords;
 pub mod media_library;
 pub mod messages;
+pub mod messenger_menus;
+pub mod messenger_templates;
 pub mod meta_catalog;
 pub mod minigames;
 pub mod open_hours;
@@ -54,6 +59,8 @@ pub mod questionnaires;
 pub mod reflinks;
 pub mod sequences;
 pub mod tags;
+pub mod templates;
+pub mod triggers;
 pub mod webchats;
 pub mod workspace_members;
 pub mod workspace_settings;
@@ -361,6 +368,8 @@ pub struct Principal {
     pub token_id: Option<i64>,
     /// `context.apiToken.scopes` (`None` = unrestricted).
     pub scopes: Option<Vec<String>>,
+    /// `context.apiToken.permission === "read_only"` (default: a `full` token).
+    pub read_only: bool,
 }
 
 /// A handler outcome.
@@ -560,8 +569,14 @@ async fn route(
         analytics::handle(state, route_id, call).await
     } else if contact_sequences::ROUTES.contains(&route_id) {
         contact_sequences::handle(state, route_id, call).await
+    } else if email_topics::ROUTES.contains(&route_id) {
+        email_topics::handle(state, route_id, call).await
+    } else if triggers::ROUTES.contains(&route_id) {
+        triggers::handle(state, route_id, call).await
     } else if sequences::ROUTES.contains(&route_id) {
         sequences::handle(state, route_id, call).await
+    } else if broadcasts::ROUTES.contains(&route_id) {
+        broadcasts::handle(state, route_id, call).await
     } else if bot_fields::ROUTES.contains(&route_id) {
         bot_fields::handle(state, route_id, call).await
     } else if contact_custom_fields::ROUTES.contains(&route_id) {
@@ -578,6 +593,8 @@ async fn route(
         messages::handle(state, route_id, call).await
     } else if keywords::ROUTES.contains(&route_id) {
         keywords::handle(state, route_id, call).await
+    } else if templates::ROUTES.contains(&route_id) {
+        templates::handle(state, route_id, call, principal).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
     } else if contacts_bulk::ROUTES.contains(&route_id) {
@@ -642,6 +659,10 @@ async fn route(
         inbox_teams::handle(state, route_id, call).await
     } else if capabilities::ROUTES.contains(&route_id) {
         capabilities::handle(state, route_id, call).await
+    } else if messenger_menus::ROUTES.contains(&route_id) {
+        messenger_menus::handle(state, route_id, call).await
+    } else if messenger_templates::ROUTES.contains(&route_id) {
+        messenger_templates::handle(state, route_id, call).await
     } else {
         return None;
     };

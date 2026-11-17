@@ -130,8 +130,8 @@ pub async fn resolve_incoming_text_routing(
     }
 }
 
-/// The `integration` queue processor (`runWorker` switch). Only `sendFlow`
-/// is in this unit.
+/// The `integration` queue processor (`runWorker` switch): `sendFlow` and
+/// `sendSequenceFlow`.
 pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     let kind = str_of(&job.data, "type").unwrap_or("").to_owned();
     match kind.as_str() {
@@ -141,6 +141,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
                 .map(str::to_owned)
                 .unwrap_or_else(|| flow_execution_key(&job));
             crate::flow::run_flow_node(&deps, data, key).await?;
+        }
+        chatbotx_jobs::sequence::consumer::SEND_SEQUENCE_FLOW_ACTION => {
+            crate::sequence::handle_send_sequence_flow(&deps, &job).await?;
         }
         crate::steps::delay::RESUME_WAIT => {
             let key = flow_execution_key(&job);
@@ -156,6 +159,24 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         // same path; an echo never matches the contact-input rules.
         crate::inbound::INCOMING_MESSAGE | "incomingMessageEcho" => {
             crate::inbound::incoming_message(&deps, &job.data["data"]).await?
+        }
+        crate::inbound_events::CONTACT_MARK_AS_READ => {
+            crate::inbound_events::contact_mark_as_read(&deps, &job.data["data"]).await?
+        }
+        crate::inbound_events::MESSAGE_REACTION => {
+            crate::inbound_events::message_reaction(&deps, &job.data["data"]).await?
+        }
+        crate::inbound_events::DELETE_INCOMING_MESSAGE => {
+            crate::inbound_events::delete_incoming(&deps, &job.data["data"], "messageId").await?
+        }
+        crate::inbound_events::DELETE_INCOMING_COMMENT => {
+            crate::inbound_events::delete_incoming(&deps, &job.data["data"], "commentId").await?
+        }
+        crate::inbound_events::UPDATE_INCOMING_COMMENT => {
+            crate::inbound_events::update_incoming_comment(&deps, &job.data["data"]).await?
+        }
+        crate::inbox_labels::CHANNEL_LABEL_CHANGE => {
+            crate::inbox_labels::handle(&deps, &job.data["data"]).await?
         }
         crate::inbound::MESSAGE_STATUS => {
             crate::inbound::message_status(&deps, &job.data["data"]).await?

@@ -75,7 +75,7 @@ const WRITING_FIELDS: ErrorMap = &[
     ("invalidFieldOperation", 400),
 ];
 
-const CHANNEL_TYPES: &[&str] = &[
+pub(crate) const CHANNEL_TYPES: &[&str] = &[
     "omnichannel",
     "webchat",
     "messenger",

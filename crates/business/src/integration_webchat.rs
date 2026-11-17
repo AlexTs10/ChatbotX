@@ -393,22 +393,7 @@ pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
             params![id, workspace_id],
         )
         .map_err(repo_err)?;
-        // `connectionStateService.disconnectInbox`.
-        let current = tx
-            .query_row(
-                &format!(
-                    r#"SELECT {} FROM "Connection" WHERE "inboxId" = ?1 AND "workspaceId" = ?2"#,
-                    connection::COLUMNS
-                ),
-                params![webchat.inbox_id, workspace_id],
-                connection::row,
-            )
-            .optional()
-            .map_err(repo_err)?;
-        if let Some(current) = current {
-            connection::mark_disconnected(tx, &current, now)?;
-        }
-        Ok(())
+        connection::disconnect_inbox(tx, webchat.inbox_id, workspace_id, now)
     })
     .await
 }

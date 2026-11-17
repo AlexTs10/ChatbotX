@@ -1019,21 +1019,45 @@ async fn spa_stub_path_runs_the_workspace_actions_with_their_gates() {
 }
 
 #[tokio::test]
-async fn locked_template_ids_answer_for_a_member() {
-    let (router, _) = router().await;
+async fn template_locked_ids_answer_the_lock_badges() {
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "Template" ("id", "workspaceId", "tenantId", "name", "selection", "payload",
+                 "categoryCounts", "formatVersion", "shareToken", "defaultPermissions")
+               VALUES (601, ?1, (SELECT "tenantId" FROM "Workspace" WHERE "id" = ?1), 'T', '{}', '{}',
+                 '{}', 1, 'tok', '{}')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "TemplateInstallation" ("id", "workspaceId", "templateId", "templateName",
+                 "sourceWorkspaceId", "formatVersion", "status", "permissions", "sourceTemplateId")
+               VALUES (602, ?1, 601, 'T', ?1, 1, 'completed', '{}', 601)"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "TemplateInstalledResource" ("id", "installationId", "workspaceId", "category",
+                 "resourceKind", "resourceId", "sourceResourceId", "allowEdit", "allowDelete")
+               VALUES (603, 602, ?1, 'flows', 'flow', 77, 's', 0, 1)"#,
+            params![WS],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed template");
     let (status, json, _) = post(
         &router,
         "templatesAPI/listLockedIdsAPI",
         "assignedtoken",
-        json!({ "workspaceId": ws(), "resourceKind": "flow", "resourceIds": ["1", "2"] }),
+        json!({ "workspaceId": ws(), "resourceKind": "flow", "resourceIds": ["77", "78"] }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(json, json!({ "lockedIds": [], "undeletableIds": [] }));
+    assert_eq!(json, json!({ "lockedIds": ["77"], "undeletableIds": [] }));
     let (status, _, _) = post(
         &router,
         "templatesAPI/listLockedIdsAPI",
-        "admintoken",
+        "assignedtoken",
         json!({ "workspaceId": ws(), "resourceKind": "nope", "resourceIds": [] }),
     )
     .await;
@@ -1071,4 +1095,728 @@ async fn questionnaire_editor_loads_through_the_public_route() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
     assert!(out["data"]["validationErrors"].is_object(), "{out}");
+}
+
+#[tokio::test]
+async fn email_topic_procedures_and_actions_are_wired() {
+    let (router, _) = router().await;
+    let (status, topic, _) = post(
+        &router,
+        "actions/createEmailTopicAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "name": " News " }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{topic}");
+    assert_eq!(topic["name"], "News");
+    assert_eq!(topic["workspaceId"], ws());
+    let id = topic["id"].as_str().unwrap().to_string();
+
+    let (status, again, _) = post(
+        &router,
+        "actions/createEmailTopicAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "name": "News" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{again}");
+    assert_eq!(again["message"], "Name is already taken.");
+
+    let (status, updated, _) = post(
+        &router,
+        "actions/updateEmailTopicAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), id, { "name": "Updates" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["name"], "Updates");
+
+    let (status, list, meta) = post(
+        &router,
+        "emailTopicsAPI/privateListWorkspaceEmailTopicsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "name": "upd" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["pageCount"], 1);
+    assert_eq!(list["data"][0]["id"], id);
+    assert!(
+        meta.as_array()
+            .unwrap()
+            .contains(&json!([1, "data", 0, "createdAt"]))
+    );
+
+    let (status, _, _) = post(
+        &router,
+        "actions/deleteEmailTopicAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "ids": [id] }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list, _) = post(
+        &router,
+        "emailTopicsAPI/privateListWorkspaceEmailTopicsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(list["data"], json!([]));
+}
+
+#[tokio::test]
+async fn trigger_actions_are_wired() {
+    let (router, _) = router().await;
+    let (status, trigger, _) = post(
+        &router,
+        "actions/createTriggerAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "name": "My trigger", "folderId": null }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{trigger}");
+    assert_eq!(trigger["name"], "My trigger");
+    assert_eq!(trigger["actions"], json!([]));
+    let id = trigger["id"].as_str().unwrap().to_string();
+
+    let (status, updated, _) = post(
+        &router,
+        "actions/updateTriggerAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), id, {
+            "actions": [],
+            "conditions": [{ "type": "shoppingCartSent", "sourceId": "" }, { "type": "incomingCall" }],
+        }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["trigger"]["id"], id);
+    assert_eq!(updated["conditions"].as_array().map(Vec::len), Some(2));
+
+    let (status, _, _) = post(
+        &router,
+        "actions/updateTriggerSettingsAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), id, { "active": false }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, missing, _) = post(
+        &router,
+        "actions/updateTriggerSettingsAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), "999", { "active": false }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["message"], "Trigger not found");
+
+    let (status, _, _) = post(
+        &router,
+        "actions/deleteTriggersAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "ids": [id] }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn sequence_actions_are_wired() {
+    let (router, _) = router().await;
+    let call = |path: &'static str, args: Value| {
+        let router = router.clone();
+        async move {
+            let (status, body, _) = post(
+                &router,
+                path,
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": args }),
+            )
+            .await;
+            (status, body)
+        }
+    };
+    let (status, created) = call(
+        "actions/createSequenceAction",
+        json!([ws(), { "name": "Welcome" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let id = created["sequenceId"].as_str().unwrap().to_string();
+    // maps a validationException(name) to returnValidationErrors
+    let (status, taken) = call(
+        "actions/createSequenceAction",
+        json!([ws(), { "name": "Welcome" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{taken}");
+    assert_eq!(
+        taken["data"]["validationErrors"]["name"]["_errors"],
+        json!(["Sequence name already exists"])
+    );
+
+    // upsert: create path, then the update path with stepId.
+    let (status, step) = call(
+        "actions/upsertSequenceStepAction",
+        json!([ws(), { "sequenceId": id, "order": 0 }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{step}");
+    let step_id = step["stepId"].as_str().unwrap().to_string();
+    let (status, again) = call(
+        "actions/upsertSequenceStepAction",
+        json!([ws(), { "sequenceId": id, "stepId": step_id, "order": 0, "delayDays": 2 }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["stepId"], step_id);
+    let (status, missing) = call(
+        "actions/upsertSequenceStepAction",
+        json!([ws(), { "sequenceId": "999", "order": 0 }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["message"], "Sequence not found");
+
+    // updateContactSequenceAction: the set replace answers the sequences.
+    let (status, rows) = call(
+        "actions/updateContactSequenceAction",
+        json!([ws(), { "contactId": CONTACT_ID.to_string(), "sequences": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rows}");
+    assert_eq!(
+        rows,
+        json!([{ "sequence": { "id": id, "name": "Welcome" } }])
+    );
+
+    let (status, gone) = call(
+        "actions/deleteSequenceStepAction",
+        json!([ws(), { "stepId": "998", "sequenceId": id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{gone}");
+    assert_eq!(gone["message"], "Step not found");
+    let (status, deleted) = call(
+        "actions/deleteSequenceStepAction",
+        json!([ws(), { "stepId": step_id, "sequenceId": id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    assert_eq!(deleted, json!({ "success": true }));
+
+    let (status, _) = call("actions/deleteSequenceAction", json!([ws(), id])).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, missing) = call("actions/deleteSequenceAction", json!([ws(), id])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["message"], "Sequence not found");
+}
+
+async fn keyword_rule(db: &Db, id: i64, kind: &'static str) {
+    db.write(move |tx| {
+        tx.execute(
+            r#"INSERT INTO "AutomatedResponse" ("id", "workspaceId", "keywords", "status", "text", "type")
+               VALUES (?1, ?2, '["x"]', 0, 'old', ?3)"#,
+            params![id, WS, kind],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+async fn keyword_text(db: &Db, sql: &'static str, id: i64) -> Option<String> {
+    db.read(move |conn| {
+        Ok(conn
+            .query_row(sql, [id], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten())
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn create_automated_response_delegates_with_the_resolved_workspace_and_type() {
+    let (router, db) = router().await;
+    let (status, out, _) = post(
+        &router,
+        "actions/createAutomatedResponseAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), "outbound", {
+            "text": "hello", "flowId": null, "folderId": null, "keywords": [{ "value": "hi" }],
+        }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let row = keyword_text(
+        &db,
+        r#"SELECT json_array("workspaceId", "type", "text", "keywords") FROM "AutomatedResponse" WHERE "workspaceId" = ?1"#,
+        WS,
+    )
+    .await;
+    assert_eq!(
+        row.as_deref(),
+        Some(r#"[201,"outbound","hello","[\"hi\"]"]"#)
+    );
+}
+
+#[tokio::test]
+async fn create_automated_response_maps_a_field_scoped_validation_exception_to_a_form_field_error()
+{
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "Flow" ("id", "workspaceId", "name") VALUES (901, ?1, 'f')"#,
+            [WS],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let (status, out, _) = post(
+        &router,
+        "actions/createAutomatedResponseAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), "inbound", {
+            "text": "hello", "flowId": "901", "keywords": [{ "value": "hi" }],
+        }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    assert_eq!(
+        out["data"]["validationErrors"],
+        json!({
+            "_errors": ["Validation Exception"],
+            "flowId": { "_errors": ["A keyword replies with either text or a flow, not both"] },
+        })
+    );
+}
+
+#[tokio::test]
+async fn update_automated_response_passes_the_callers_type_through_to_the_service() {
+    let (router, db) = router().await;
+    keyword_rule(&db, 911, "outbound").await;
+    let update = |kind: &str| {
+        json!({ "workspaceId": ws(), "args": [ws(), "911", kind, {
+            "text": "hi", "flowId": null, "folderId": null, "keywords": [{ "value": "x" }],
+        }] })
+    };
+    let (status, _, _) = post(
+        &router,
+        "actions/updateAutomatedResponseAction",
+        "admintoken",
+        update("inbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, out, _) = post(
+        &router,
+        "actions/updateAutomatedResponseAction",
+        "admintoken",
+        update("outbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        keyword_text(
+            &db,
+            r#"SELECT "text" FROM "AutomatedResponse" WHERE "id" = ?1"#,
+            911
+        )
+        .await
+        .as_deref(),
+        Some("hi")
+    );
+}
+
+#[tokio::test]
+async fn enable_automated_response_scopes_both_find_or_fail_and_set_status_by_the_callers_type() {
+    let (router, db) = router().await;
+    keyword_rule(&db, 912, "outbound").await;
+    let enable = |kind: &str| json!({ "workspaceId": ws(), "args": [ws(), "912", kind, { "status": true }] });
+    let (status, _, _) = post(
+        &router,
+        "actions/enableAutomatedResponseAction",
+        "admintoken",
+        enable("inbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, out, _) = post(
+        &router,
+        "actions/enableAutomatedResponseAction",
+        "admintoken",
+        enable("outbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        keyword_text(
+            &db,
+            r#"SELECT CAST("status" AS TEXT) FROM "AutomatedResponse" WHERE "id" = ?1"#,
+            912
+        )
+        .await
+        .as_deref(),
+        Some("1")
+    );
+}
+
+#[tokio::test]
+async fn delete_automated_response_action_scopes_the_bulk_delete_by_the_callers_type() {
+    let (router, db) = router().await;
+    keyword_rule(&db, 913, "outbound").await;
+    keyword_rule(&db, 914, "outbound").await;
+    let delete = |kind: &str| json!({ "workspaceId": ws(), "args": [ws(), kind, { "ids": ["913", "914"] }] });
+    let count = || {
+        keyword_text(
+            &db,
+            r#"SELECT CAST(count(*) AS TEXT) FROM "AutomatedResponse" WHERE "workspaceId" = ?1"#,
+            WS,
+        )
+    };
+    let (status, _, _) = post(
+        &router,
+        "actions/deleteAutomatedResponseAction",
+        "admintoken",
+        delete("inbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(count().await.as_deref(), Some("2"));
+    let (status, _, _) = post(
+        &router,
+        "actions/deleteAutomatedResponseAction",
+        "admintoken",
+        delete("outbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(count().await.as_deref(), Some("0"));
+}
+
+#[tokio::test]
+async fn pipeline_board_stages_items_and_member_scope() {
+    let (router, _) = router().await;
+    let (_, out) = act(
+        &router,
+        "admintoken",
+        "createPipelineAction",
+        json!([ws(), { "type": "opportunity", "name": "Sales" }]),
+    )
+    .await;
+    let pipeline_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createStageAction",
+        json!([ws(), { "id": pipeline_id, "name": "Won soon" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let stage_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createItemAction",
+        json!([ws(), {
+            "id": pipeline_id,
+            "contactId": CONTACT_ID.to_string(),
+            "title": "Deal",
+            "value": 12.5,
+            "stageId": stage_id,
+        }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let item_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "addCommentAction",
+        json!([ws(), { "id": pipeline_id, "itemId": item_id, "text": "hi" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    let (status, board, _) = post(
+        &router,
+        "pipelinesAPI/privateGetBoardAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "filter": { "search": "deal" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{board}");
+    let column = board["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["stage"]["id"] == stage_id)
+        .unwrap();
+    assert_eq!(column["count"], 1);
+    assert_eq!(column["totalValue"], 12.5);
+    assert_eq!(column["items"][0]["item"]["title"], "Deal");
+    assert_eq!(column["items"][0]["commentCount"], 1);
+    assert_eq!(column["items"][0]["contact"]["fullName"], "Ada Lovelace");
+
+    let (status, page, _) = post(
+        &router,
+        "pipelinesAPI/privateListStagePageAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "stageId": stage_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    let (status, item, _) = post(
+        &router,
+        "pipelinesAPI/privateGetItemAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "itemId": item_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{item}");
+    assert_eq!(item["conversationId"], Value::Null);
+    let (status, activity, _) = post(
+        &router,
+        "pipelinesAPI/privateListItemActivityAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "itemId": item_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{activity}");
+    assert!(!activity["items"].as_array().unwrap().is_empty());
+
+    // A plain member without a grant does not see the pipeline.
+    let (status, _, _) = post(
+        &router,
+        "pipelinesAPI/privateGetBoardAPI",
+        "assignedtoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = act(
+        &router,
+        "assignedtoken",
+        "deleteItemAction",
+        json!([ws(), { "id": pipeline_id, "itemId": item_id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteStageMovingItemsAction",
+        json!([ws(), { "id": pipeline_id, "stageId": stage_id, "moveItemsToStageId": board["stages"][0]["stage"]["id"] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["queued"], false);
+}
+
+#[tokio::test]
+async fn settings_admin_and_invitation_actions_check_the_caller() {
+    const GUEST_ID: i64 = 103;
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "WorkspaceApiToken" ("id", "workspaceId", "name", "permission", "tokenHash", "tokenPrefix")
+               VALUES (901, ?1, 'ci', 'full', 'secret-hash', 'cbx_ab')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "ErrorLog" ("id", "workspaceId", "action", "detail", "contactId")
+               VALUES (902, ?1, 'telegram', 'boom', ?2)"#,
+            params![WS, CONTACT_ID],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "User" ("id", "email", "name", "emailVerified") VALUES (?1, 'guest@spa.test', 'Gus', 1)"#,
+            params![GUEST_ID],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Session" ("id", "token", "userId", "expiresAt") VALUES (?1, 'guesttoken', ?1, ?2)"#,
+            params![GUEST_ID, NOW_MS + 60_000],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Invitation" ("id", "code", "permissions", "expiresAt", "workspaceId", "invitedBy")
+               VALUES (903, 'invite-code', '{"contacts":true}', 4000000000000, ?1, ?2)"#,
+            params![WS, ADMIN_ID],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed");
+
+    // The token DTO never carries the hash.
+    let (status, tokens) = act(
+        &router,
+        "admintoken",
+        "listWorkspaceTokens",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tokens}");
+    assert_eq!(tokens[0]["tokenPrefix"], "cbx_ab");
+    assert!(tokens[0].get("tokenHash").is_none());
+
+    let (status, logs) = act(
+        &router,
+        "admintoken",
+        "listErrorLogs",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{logs}");
+    assert_eq!(logs["data"][0]["detail"], "boom");
+    assert_eq!(logs["data"][0]["contact"]["firstName"], "Ada");
+
+    // Audit logs: enterprise + workspace super admin.
+    let (status, _) = act(
+        &router,
+        "assignedtoken",
+        "listAuditLogs",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+
+    // Platform admin reads: no `PlatformAdmin` row = 404.
+    let (status, _, _) = post(
+        &router,
+        "actions/listPlatformAdmins",
+        "admintoken",
+        json!({ "args": [1] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Invitations: a member cannot accept again; a new user joins as an agent.
+    let accept = |token: &'static str| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                "actions/acceptInvitationAction",
+                token,
+                json!({ "args": [{ "code": "invite-code" }] }),
+            )
+            .await
+        }
+    };
+    let (status, error, _) = accept("assignedtoken").await;
+    assert_ne!(status, StatusCode::OK);
+    assert_eq!(
+        error["message"],
+        "You are already a member of this workspace"
+    );
+    let (status, out, _) = accept("guesttoken").await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let role: String = db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                r#"SELECT "role" FROM "WorkspaceMember" WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+                params![WS, GUEST_ID],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .expect("member");
+    assert_eq!(role, "agent");
+    let (status, error, _) = post(
+        &router,
+        "actions/acceptInvitationAction",
+        "guesttoken",
+        json!({ "args": [{ "code": "nope" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
+}
+
+#[tokio::test]
+async fn user_persistent_menus_crud() {
+    let (router, _db) = router().await;
+    let menu = json!({ "label": "Docs", "type": "url", "url": "https://example.com" });
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createUserPersistentMenuAction",
+        json!([ws(), { "name": " Main ", "persistentMenus": [menu] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    // `messengerPersistentMenuSchema`: a bad URL is a field validation error.
+    let bad = json!({ "label": "x", "type": "url", "url": "nope" });
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createUserPersistentMenuAction",
+        json!([ws(), { "name": "B", "persistentMenus": [bad] }]),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(
+        out["data"]["validationErrors"]["persistentMenus"].is_object(),
+        "{out}"
+    );
+
+    let (status, list) = act(
+        &router,
+        "admintoken",
+        "listUserPersistentMenus",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["data"][0]["name"], "Main");
+    let id = list["data"][0]["id"].as_str().expect("id").to_string();
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateUserPersistentMenuAction",
+        json!([ws(), id, { "name": "Renamed", "persistentMenus": [] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, found) = act(
+        &router,
+        "admintoken",
+        "findUserPersistentMenu",
+        json!([{ "id": id, "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(found["name"], "Renamed");
+
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "deleteUserPersistentMenuAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // A one-id delete of a missing menu is a 404.
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteUserPersistentMenuAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{out}");
+    let (_, found) = act(
+        &router,
+        "admintoken",
+        "findUserPersistentMenu",
+        json!([{ "id": id, "workspaceId": ws() }]),
+    )
+    .await;
+    assert!(found.is_null());
 }
