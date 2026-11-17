@@ -3,7 +3,7 @@
 //! each returns the routing status (`ExecuteStepResult.status`), `success`
 //! for the TypeScript `void` handlers.
 
-mod ai_step;
+pub(crate) mod ai_step;
 mod condition;
 mod contact;
 mod conversation;
@@ -153,6 +153,9 @@ pub(crate) async fn run(
     }
     if let Some(status) = email_marketing::run(&ctx, step_type).await? {
         return Ok(status);
+    }
+    if let Some(action) = crate::heavy::action_of(step_type) {
+        return crate::heavy::run_step(&ctx, action).await;
     }
     match step_type {
         "condition" => condition::handle(&ctx).await,

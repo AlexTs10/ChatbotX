@@ -19,6 +19,7 @@ pub mod datetime_sweep;
 pub mod default_queue;
 pub mod events;
 pub mod flow;
+pub mod heavy;
 pub mod inbound;
 pub mod inbound_events;
 pub mod inbox_labels;
@@ -236,7 +237,10 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
         handler(deps, |deps, job| Box::pin(default_queue::handle(deps, job))),
     )?;
     runtime.spawn_worker(
-        spec_of(QueueName::Heavy),
+        spec_of(QueueName::Heavy)
+            .concurrency(concurrency_env("HEAVY_WORKER_CONCURRENCY", 1, 3))
+            .lease_ms(heavy::worker_lease_ms())
+            .stalled_interval_ms(60_000),
         handler(deps, |deps, job| Box::pin(ai_file::handle_heavy(deps, job))),
     )?;
     runtime.spawn_worker(

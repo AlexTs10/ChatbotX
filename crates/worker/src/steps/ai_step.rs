@@ -71,20 +71,38 @@ async fn step_messages(
 
 /// `saveResultToCustomField`: a field that no longer exists is skipped.
 async fn save_result(ctx: &StepCtx<'_, '_>, field: &str, full_text: String) -> Result<(), String> {
+    save_result_to_custom_field(
+        &ctx.run.deps.db,
+        ctx.workspace_id(),
+        ctx.contact_id(),
+        field,
+        full_text,
+    )
+    .await
+}
+
+/// [`save_result`] outside a step (the heavy worker).
+pub(crate) async fn save_result_to_custom_field(
+    db: &chatbotx_db::Db,
+    workspace_id: i64,
+    contact_id: i64,
+    field: &str,
+    full_text: String,
+) -> Result<(), String> {
     let input = SetValueByKeyInput {
-        workspace_id: ctx.workspace_id(),
-        contact_id: ctx.contact_id(),
+        workspace_id,
+        contact_id,
         keyword: field.to_owned(),
         value: full_text,
         allow_bot_fields: true,
         ..SetValueByKeyInput::default()
     };
-    match contact_custom_field::set_value_by_key(&ctx.run.deps.db, input).await {
+    match contact_custom_field::set_value_by_key(db, input).await {
         Ok(_) => Ok(()),
         Err(err) if err.code() == Some("notFound") => {
             tracing::warn!(
-                workspace_id = ctx.workspace_id(),
-                contact_id = ctx.contact_id(),
+                workspace_id,
+                contact_id,
                 custom_field_id = field,
                 "saveResultToCustomField target no longer exists; skipping"
             );
