@@ -9,8 +9,11 @@
 //! route ([`public`]) after the member checks, so both stay one code path.
 
 mod contacts;
+mod email_topics;
 mod flows;
 mod lists;
+mod sequences;
+mod triggers;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -103,6 +106,12 @@ pub async fn procedure(
     if let Some(outcome) = flows::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = email_topics::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = sequences::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
         return Some(outcome.map(|output| output.json));
     }
@@ -134,6 +143,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return match name {
             n if contacts::ACTIONS.contains(&n)
                 || flows::ACTIONS.contains(&n)
+                || email_topics::ACTIONS.contains(&n)
+                || sequences::ACTIONS.contains(&n)
+                || triggers::ACTIONS.contains(&n)
                 || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str()) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
@@ -145,6 +157,15 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = flows::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_topics::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = sequences::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = triggers::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

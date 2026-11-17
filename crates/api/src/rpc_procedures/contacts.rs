@@ -32,6 +32,7 @@ pub const ACTIONS: &[&str] = &[
     "deleteContactAction",
     "createContactAction",
     "exportContactsAction",
+    "updateContactSequenceAction",
 ];
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
@@ -360,6 +361,33 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                     let workspace_id = ctx.workspace_id;
                     let contact = find_detail(ctx, workspace_id, contact_id).await?;
                     return Ok(contact.map_or(Value::Null, |c| c.contact.to_json()));
+                }
+                "updateContactSequenceAction" => {
+                    // `findByIdOrFail({ accessScope })`, then the set replace.
+                    let scope = ctx.require_contact_scope()?;
+                    let contact_id = input.id("contactId")?;
+                    let sequences = input.ids("sequences")?;
+                    if scoped_ids(ctx, scope, vec![contact_id]).await?.is_empty() {
+                        return Err(fail(BusinessError::not_found("Contact not found")));
+                    }
+                    // 404 for a contact outside the workspace.
+                    contact_sequence::list_by_contact_id(db, ctx.workspace_id, contact_id)
+                        .await
+                        .map_err(action_fail)?;
+                    let rows = contact_sequence::update_contact_sequences(
+                        db,
+                        ctx.workspace_id,
+                        contact_id,
+                        &sequences,
+                    )
+                    .await
+                    .map_err(action_fail)?;
+                    return Ok(rows
+                        .iter()
+                        .map(|row| {
+                            json!({ "sequence": { "id": row.sequence_id.to_string(), "name": row.sequence_name } })
+                        })
+                        .collect());
                 }
                 "exportContactsAction" => {
                     require_scope(ctx)?;

@@ -408,3 +408,226 @@ async fn ai_procedures_and_actions_are_wired() {
             .contains(&json!([1, "data", 0, "createdAt"]))
     );
 }
+
+#[tokio::test]
+async fn email_topic_procedures_and_actions_are_wired() {
+    let (router, _) = router().await;
+    let (status, topic, _) = post(
+        &router,
+        "actions/createEmailTopicAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "name": " News " }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{topic}");
+    assert_eq!(topic["name"], "News");
+    assert_eq!(topic["workspaceId"], ws());
+    let id = topic["id"].as_str().unwrap().to_string();
+
+    let (status, again, _) = post(
+        &router,
+        "actions/createEmailTopicAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "name": "News" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{again}");
+    assert_eq!(again["message"], "Name is already taken.");
+
+    let (status, updated, _) = post(
+        &router,
+        "actions/updateEmailTopicAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), id, { "name": "Updates" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["name"], "Updates");
+
+    let (status, list, meta) = post(
+        &router,
+        "emailTopicsAPI/privateListWorkspaceEmailTopicsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "name": "upd" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["pageCount"], 1);
+    assert_eq!(list["data"][0]["id"], id);
+    assert!(
+        meta.as_array()
+            .unwrap()
+            .contains(&json!([1, "data", 0, "createdAt"]))
+    );
+
+    let (status, _, _) = post(
+        &router,
+        "actions/deleteEmailTopicAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "ids": [id] }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list, _) = post(
+        &router,
+        "emailTopicsAPI/privateListWorkspaceEmailTopicsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(list["data"], json!([]));
+}
+
+/// Port of `create-trigger-action`, `update-trigger-action`,
+/// `update-trigger-settings-action` (Q.D5): the trigger actions are wired.
+#[tokio::test]
+async fn trigger_actions_are_wired() {
+    let (router, _) = router().await;
+    let (status, trigger, _) = post(
+        &router,
+        "actions/createTriggerAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "name": "My trigger", "folderId": null }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{trigger}");
+    assert_eq!(trigger["name"], "My trigger");
+    assert_eq!(trigger["actions"], json!([]));
+    let id = trigger["id"].as_str().unwrap().to_string();
+
+    let (status, updated, _) = post(
+        &router,
+        "actions/updateTriggerAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), id, {
+            "actions": [],
+            "conditions": [{ "type": "shoppingCartSent", "sourceId": "" }, { "type": "incomingCall" }],
+        }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["trigger"]["id"], id);
+    assert_eq!(updated["conditions"].as_array().map(Vec::len), Some(2));
+
+    let (status, _, _) = post(
+        &router,
+        "actions/updateTriggerSettingsAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), id, { "active": false }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, missing, _) = post(
+        &router,
+        "actions/updateTriggerSettingsAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), "999", { "active": false }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["message"], "Trigger not found");
+
+    let (status, _, _) = post(
+        &router,
+        "actions/deleteTriggersAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "ids": [id] }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+/// Port of `create-sequence.action`, `delete-sequence.action`,
+/// `upsert-sequence-step.action`, `delete-sequence-step.action` and
+/// `update-contact-sequence.action` (Q.D5): the sequence actions are wired.
+#[tokio::test]
+async fn sequence_actions_are_wired() {
+    let (router, _) = router().await;
+    let call = |path: &'static str, args: Value| {
+        let router = router.clone();
+        async move {
+            let (status, body, _) = post(
+                &router,
+                path,
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": args }),
+            )
+            .await;
+            (status, body)
+        }
+    };
+    let (status, created) = call(
+        "actions/createSequenceAction",
+        json!([ws(), { "name": "Welcome" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let id = created["sequenceId"].as_str().unwrap().to_string();
+    // maps a validationException(name) to returnValidationErrors
+    let (status, taken) = call(
+        "actions/createSequenceAction",
+        json!([ws(), { "name": "Welcome" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{taken}");
+    assert_eq!(
+        taken["data"]["validationErrors"]["name"]["_errors"],
+        json!(["Sequence name already exists"])
+    );
+
+    // upsert: create path, then the update path with stepId.
+    let (status, step) = call(
+        "actions/upsertSequenceStepAction",
+        json!([ws(), { "sequenceId": id, "order": 0 }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{step}");
+    let step_id = step["stepId"].as_str().unwrap().to_string();
+    let (status, again) = call(
+        "actions/upsertSequenceStepAction",
+        json!([ws(), { "sequenceId": id, "stepId": step_id, "order": 0, "delayDays": 2 }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["stepId"], step_id);
+    let (status, missing) = call(
+        "actions/upsertSequenceStepAction",
+        json!([ws(), { "sequenceId": "999", "order": 0 }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["message"], "Sequence not found");
+
+    // updateContactSequenceAction: the set replace answers the sequences.
+    let (status, rows) = call(
+        "actions/updateContactSequenceAction",
+        json!([ws(), { "contactId": CONTACT_ID.to_string(), "sequences": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rows}");
+    assert_eq!(
+        rows,
+        json!([{ "sequence": { "id": id, "name": "Welcome" } }])
+    );
+
+    let (status, gone) = call(
+        "actions/deleteSequenceStepAction",
+        json!([ws(), { "stepId": "998", "sequenceId": id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{gone}");
+    assert_eq!(gone["message"], "Step not found");
+    let (status, deleted) = call(
+        "actions/deleteSequenceStepAction",
+        json!([ws(), { "stepId": step_id, "sequenceId": id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    assert_eq!(deleted, json!({ "success": true }));
+
+    let (status, _) = call("actions/deleteSequenceAction", json!([ws(), id])).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, missing) = call("actions/deleteSequenceAction", json!([ws(), id])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["message"], "Sequence not found");
+}

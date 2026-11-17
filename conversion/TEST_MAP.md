@@ -301,9 +301,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/create-flow-request-schema.test.ts` | B | - | todo | Flow builder and execution; builder jsdom |
 | `apps/builder/__tests__/create-message-action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
 | `apps/builder/__tests__/create-message-schema.test.ts` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
-| `apps/builder/__tests__/create-sequence.action.test.ts` | C | tbd | todo | Sequences; builder server code |
+| `apps/builder/__tests__/create-sequence.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/create-template-dialog.test.tsx` | B | - | todo | Template marketplace (install/share/sync); builder jsdom |
-| `apps/builder/__tests__/create-trigger-action.test.ts` | C | tbd | todo | Triggers; builder server code |
+| `apps/builder/__tests__/create-trigger-action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/trigger_service.rs` | ported | Triggers; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/create-webchat-message-action.test.ts` | C | tbd | todo | Webchat channel; builder server code |
 | `apps/builder/__tests__/create-webhook-action.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/create-workspace-token-action.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
@@ -316,8 +316,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/delete-me-data-action.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/delete-message-action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
 | `apps/builder/__tests__/delete-mini-apps-whatsapp-flows.test.ts` | C | tbd | todo | Mini-apps; builder server code |
-| `apps/builder/__tests__/delete-sequence-step.action.test.ts` | C | tbd | todo | Sequences; builder server code |
-| `apps/builder/__tests__/delete-sequence.action.test.ts` | C | tbd | todo | Sequences; builder server code |
+| `apps/builder/__tests__/delete-sequence-step.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/delete-sequence.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/delete-tag-action.test.ts` | C | tbd | todo | Tags and labels; builder server code |
 | `apps/builder/__tests__/delete-webhooks-action.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/delete-workspace-token-action.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
@@ -335,8 +335,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/email-topic-click-route.test.ts` | C | tbd | todo | Email topics and tracking; builder server code |
 | `apps/builder/__tests__/email-topic-open-route.test.ts` | C | tbd | todo | Email topics and tracking; builder server code |
 | `apps/builder/__tests__/email-topics-columns.test.ts` | B | - | todo | Email topics and tracking; builder node-env, client logic |
-| `apps/builder/__tests__/email-topics-public-api.test.ts` | C | tbd | todo | Email topics and tracking; builder server code |
-| `apps/builder/__tests__/email-topics-public-scope.test.ts` | C | tbd | todo | Email topics and tracking; builder server code |
+| `apps/builder/__tests__/email-topics-public-api.test.ts` | C | `crates/api/tests/email_topics_public_api.rs` | ported | Email topics and tracking; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/email-topics-public-scope.test.ts` | C | `crates/api/tests/email_topics_public_api.rs` | ported | Email topics and tracking; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/email-topics-public-sort.test.ts` | B | - | todo | Email topics and tracking; builder node-env, client logic |
 | `apps/builder/__tests__/ensure-live-comments-subscription.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/enterprise-feature-gates.test.ts` | C | tbd | todo | Multi-tenancy (white-label tenants); builder server code |
@@ -747,10 +747,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/select-facebook-accounts.test.tsx` | B | - | todo | Facebook Ads integration; builder jsdom |
 | `apps/builder/__tests__/sequence-delay.test.ts` | B | - | todo | Sequences; builder jsdom |
 | `apps/builder/__tests__/sequence-detail-resource.test.ts` | B | - | todo | Sequences; builder node-env, client logic |
-| `apps/builder/__tests__/sequence-folders-public-api.test.ts` | C | tbd | todo | Sequences; builder server code |
+| `apps/builder/__tests__/sequence-folders-public-api.test.ts` | C | `crates/api/tests/sequences_public_api.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/sequences-list-step-contacts-api.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
-| `apps/builder/__tests__/sequences-public-api.test.ts` | C | tbd | todo | Sequences; builder server code |
-| `apps/builder/__tests__/sequences-public-scope.test.ts` | C | tbd | todo | Sequences; builder server code |
+| `apps/builder/__tests__/sequences-public-api.test.ts` | C | `crates/api/tests/sequences_public_api.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/sequences-public-scope.test.ts` | C | `crates/api/tests/sequences_public_api.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/set-custom-field-boolean-value.test.tsx` | B | - | todo | Custom fields; builder jsdom |
 | `apps/builder/__tests__/settings-channels-add-button-gating.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/settings-channels-visibility.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
@@ -839,15 +839,15 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/token-scope.test.ts` | B | - | todo | Workspace API tokens and public API; builder node-env, client logic |
 | `apps/builder/__tests__/tools-list-config.test.ts` | B | - | todo | Flow builder and execution; builder jsdom |
 | `apps/builder/__tests__/tools-list-visibility.test.tsx` | B | - | todo | Flow builder and execution; builder jsdom |
-| `apps/builder/__tests__/trigger-actions-public-api-schema.test.ts` | C | tbd | todo | Triggers; builder server code |
-| `apps/builder/__tests__/trigger-pipeline-action-schema.test.ts` | C | tbd | todo | Pipelines (CRM deals); builder server code |
-| `apps/builder/__tests__/trigger-send-google-ads-conversion-schema.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
-| `apps/builder/__tests__/trigger-send-meta-capi-event-schema.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
-| `apps/builder/__tests__/trigger-set-custom-field-schema.test.ts` | C | tbd | todo | Custom fields; builder server code |
-| `apps/builder/__tests__/trigger-start-external-step-schema.test.ts` | C | tbd | todo | Triggers; builder server code |
-| `apps/builder/__tests__/triggers-public-api.test.ts` | C | tbd | todo | Triggers; builder server code |
+| `apps/builder/__tests__/trigger-actions-public-api-schema.test.ts` | C | `crates/api/tests/triggers_public_api.rs` | ported | Triggers; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/trigger-pipeline-action-schema.test.ts` | C | `crates/api/tests/triggers_public_api.rs` | ported | Pipelines (CRM deals); builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/trigger-send-google-ads-conversion-schema.test.ts` | C | `crates/api/tests/triggers_public_api.rs` | ported | Google Ads integration; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/trigger-send-meta-capi-event-schema.test.ts` | C | `crates/api/tests/triggers_public_api.rs` | ported | Meta Conversions API (CAPI); builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/trigger-set-custom-field-schema.test.ts` | C | `crates/api/tests/triggers_public_api.rs` | ported | Custom fields; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/trigger-start-external-step-schema.test.ts` | C | `crates/api/tests/triggers_public_api.rs` | ported | Triggers; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/triggers-public-api.test.ts` | C | `crates/api/tests/triggers_public_api.rs` | ported | Triggers; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/update-contact-field.action.test.ts` | C | tbd | todo | Custom fields; builder server code |
-| `apps/builder/__tests__/update-contact-sequence.action.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
+| `apps/builder/__tests__/update-contact-sequence.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Contacts (profiles, notes, activity); builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/update-conversation-assignee.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/update-handover-resume-flow-action.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
 | `apps/builder/__tests__/update-instagram-action.test.ts` | C | tbd | todo | Instagram channel; builder server code |
@@ -856,8 +856,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/update-messenger-handover-resume-flow-action.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
 | `apps/builder/__tests__/update-pix-redirect-action.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/update-smart-response-delay-schema.test.ts` | B | - | todo | Smart delay; builder jsdom |
-| `apps/builder/__tests__/update-trigger-action.test.ts` | C | tbd | todo | Triggers; builder server code |
-| `apps/builder/__tests__/update-trigger-settings-action.test.ts` | C | tbd | todo | Triggers; builder server code |
+| `apps/builder/__tests__/update-trigger-action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/trigger_service.rs` | ported | Triggers; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `apps/builder/__tests__/update-trigger-settings-action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/trigger_service.rs` | ported | Triggers; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/update-webchat-action-permission.test.ts` | C | tbd | todo | Webchat channel; builder server code |
 | `apps/builder/__tests__/update-webhook-action.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/update-webhook-settings-action.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
@@ -865,7 +865,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/upload-handlers.test.ts` | C | `crates/api/tests/presigned_upload_route.rs` | passing | Media library and file storage; builder server code |
 | `apps/builder/__tests__/upload-logo-action.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/upsert-sequence-step-schema.test.ts` | B | - | todo | Sequences; builder jsdom |
-| `apps/builder/__tests__/upsert-sequence-step.action.test.ts` | C | tbd | todo | Sequences; builder server code |
+| `apps/builder/__tests__/upsert-sequence-step.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/usage-number-formatting.test.tsx` | C | tbd | todo | Analytics dashboards; builder server code |
 | `apps/builder/__tests__/use-ads-range-url.test.tsx` | B | - | todo | Ads analytics and CTWA tracking; builder jsdom |
 | `apps/builder/__tests__/use-ai-agents.test.tsx` | B | - | todo | AI flow steps (text, image, speech, extraction); builder jsdom |
@@ -2397,8 +2397,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/select-labels-by-ids.test.ts` | C | tbd | todo | Tags and labels |
 | `packages/business/__tests__/self-serve-config-fields.test.ts` | C | tbd | todo | Instagram channel |
 | `packages/business/__tests__/sequence-service-list-step-contacts.test.ts` | C | tbd | todo | Sequences |
-| `packages/business/__tests__/sequence-service.test.ts` | C | tbd | todo | Sequences |
-| `packages/business/__tests__/sequence-step-payload.test.ts` | C | tbd | todo | Sequences |
+| `packages/business/__tests__/sequence-service.test.ts` | C | `crates/business/tests/sequence_service.rs` | ported | Sequences; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/sequence-step-payload.test.ts` | C | `crates/business/tests/sequence_service.rs` | ported | Sequences; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/smart-delay-service.test.ts` | C | tbd | todo | Smart delay |
 | `packages/business/__tests__/spreadsheet.service.test.ts` | C | tbd | todo | Google Sheets integration |
 | `packages/business/__tests__/support-consent.test.ts` | C | tbd | todo | Workspace support access |
@@ -2515,9 +2515,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/thread-control-service.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `packages/business/__tests__/tiktok-post-details.test.ts` | C | tbd | todo | TikTok channel |
 | `packages/business/__tests__/trigger-service-executions.test.ts` | C | tbd | todo | Triggers |
-| `packages/business/__tests__/trigger-service-update-settings.test.ts` | C | tbd | todo | Triggers |
-| `packages/business/__tests__/trigger-service-update-with-conditions.test.ts` | C | tbd | todo | Triggers |
-| `packages/business/__tests__/trigger.service.test.ts` | C | tbd | todo | Triggers |
+| `packages/business/__tests__/trigger-service-update-settings.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/trigger-service-update-with-conditions.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/trigger.service.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/update-from-message.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/__tests__/user-persistent-menu-service.test.ts` | C | tbd | todo | Messenger channel |
 | `packages/business/__tests__/user-quota-access-state.test.ts` | C | tbd | todo | Licensing, billing and quotas |
