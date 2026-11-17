@@ -1228,34 +1228,67 @@ async fn settings_admin_and_invitation_actions_check_the_caller() {
     .expect("seed");
 
     // The token DTO never carries the hash.
-    let (status, tokens) = act(&router, "admintoken", "listWorkspaceTokens", json!([{ "workspaceId": ws() }])).await;
+    let (status, tokens) = act(
+        &router,
+        "admintoken",
+        "listWorkspaceTokens",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{tokens}");
     assert_eq!(tokens[0]["tokenPrefix"], "cbx_ab");
     assert!(tokens[0].get("tokenHash").is_none());
 
-    let (status, logs) = act(&router, "admintoken", "listErrorLogs", json!([{ "workspaceId": ws() }])).await;
+    let (status, logs) = act(
+        &router,
+        "admintoken",
+        "listErrorLogs",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{logs}");
     assert_eq!(logs["data"][0]["detail"], "boom");
     assert_eq!(logs["data"][0]["contact"]["firstName"], "Ada");
 
     // Audit logs: enterprise + workspace super admin.
-    let (status, _) = act(&router, "assignedtoken", "listAuditLogs", json!([{ "workspaceId": ws() }])).await;
+    let (status, _) = act(
+        &router,
+        "assignedtoken",
+        "listAuditLogs",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
     assert_ne!(status, StatusCode::OK);
 
     // Platform admin reads: no `PlatformAdmin` row = 404.
-    let (status, _, _) = post(&router, "actions/listPlatformAdmins", "admintoken", json!({ "args": [1] })).await;
+    let (status, _, _) = post(
+        &router,
+        "actions/listPlatformAdmins",
+        "admintoken",
+        json!({ "args": [1] }),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // Invitations: a member cannot accept again; a new user joins as an agent.
     let accept = |token: &'static str| {
         let router = router.clone();
         async move {
-            post(&router, "actions/acceptInvitationAction", token, json!({ "args": [{ "code": "invite-code" }] })).await
+            post(
+                &router,
+                "actions/acceptInvitationAction",
+                token,
+                json!({ "args": [{ "code": "invite-code" }] }),
+            )
+            .await
         }
     };
     let (status, error, _) = accept("assignedtoken").await;
     assert_ne!(status, StatusCode::OK);
-    assert_eq!(error["message"], "You are already a member of this workspace");
+    assert_eq!(
+        error["message"],
+        "You are already a member of this workspace"
+    );
     let (status, out, _) = accept("guesttoken").await;
     assert_eq!(status, StatusCode::OK, "{out}");
     let role: String = db
@@ -1269,6 +1302,12 @@ async fn settings_admin_and_invitation_actions_check_the_caller() {
         .await
         .expect("member");
     assert_eq!(role, "agent");
-    let (status, error, _) = post(&router, "actions/acceptInvitationAction", "guesttoken", json!({ "args": [{ "code": "nope" }] })).await;
+    let (status, error, _) = post(
+        &router,
+        "actions/acceptInvitationAction",
+        "guesttoken",
+        json!({ "args": [{ "code": "nope" }] }),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
 }

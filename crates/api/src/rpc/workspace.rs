@@ -541,7 +541,12 @@ pub async fn run_action(
                     format!("disabled platform support access for workspace {ws}"),
                 ),
             };
-            tracing::info!(action, user_id = context.user_id, workspace_id = ws, "{detail}");
+            tracing::info!(
+                action,
+                user_id = context.user_id,
+                workspace_id = ws,
+                "{detail}"
+            );
             api.audit
                 .record(chatbotx_business::audit::AuditRecordInput {
                     user_id: Some(context.user_id.to_string()),

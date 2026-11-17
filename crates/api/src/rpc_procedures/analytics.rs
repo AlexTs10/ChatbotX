@@ -94,7 +94,10 @@ mod tests {
                 Some("analytics.macActiveContactCount"),
             ),
             ("analyticsRoutes.getBroadcastStatsAnalyticsAPI", None),
-            ("analyticsRoutes.refLinkStats", Some("analytics.refLinkStats")),
+            (
+                "analyticsRoutes.refLinkStats",
+                Some("analytics.refLinkStats"),
+            ),
         ];
         for (path, want) in cases {
             assert_eq!(route(path).as_deref(), want, "{path}");

@@ -234,9 +234,7 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             Err(error) => Err(action_fail(error)),
         },
         "listMinigameHistory" => minigame_history(ctx, search).await,
-        "createMinigameAction" | "updateMinigameAction" => {
-            minigame_write(ctx, name, args).await
-        }
+        "createMinigameAction" | "updateMinigameAction" => minigame_write(ctx, name, args).await,
         "getMinigamePlaysAction" => {
             let input = In(arg(args, 1));
             let plays = minigame::contact::list_plays(
@@ -286,11 +284,25 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
         "listQuestionnaireSubmissions" => {
             let id = In(search).id("questionnaireId")?.to_string();
             let query = list_query(search, &["name"]);
-            public(ctx, "questionnaires.listSubmissions", &[("id", id)], Some(&query), None).await
+            public(
+                ctx,
+                "questionnaires.listSubmissions",
+                &[("id", id)],
+                Some(&query),
+                None,
+            )
+            .await
         }
         "getQuestionnaireDashboardSummary" => {
             let id = In(search).id("questionnaireId")?.to_string();
-            public(ctx, "questionnaires.getSubmissionStats", &[("id", id)], Some(""), None).await
+            public(
+                ctx,
+                "questionnaires.getSubmissionStats",
+                &[("id", id)],
+                Some(""),
+                None,
+            )
+            .await
         }
         "getQuestionnaireSubmissionDetailAction" | "deleteQuestionnaireSubmissionAction" => {
             let input = In(arg(args, 1));

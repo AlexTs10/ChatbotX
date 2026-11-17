@@ -64,11 +64,13 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
                 listed.page_count,
             ))
         }
-        _ => Ok(chatbotx_business::tenant_help_item::list_by_tenant(db, ROOT_TENANT_ID)
-            .await
-            .map_err(fail)?
-            .iter()
-            .map(|item| item.to_json())
-            .collect()),
+        _ => Ok(
+            chatbotx_business::tenant_help_item::list_by_tenant(db, ROOT_TENANT_ID)
+                .await
+                .map_err(fail)?
+                .iter()
+                .map(|item| item.to_json())
+                .collect(),
+        ),
     }
 }

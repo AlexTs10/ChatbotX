@@ -167,8 +167,14 @@ mod tests {
             (day("2026-08-20"), day("2026-11-18") - 1)
         );
         // Longer than 90 days → `from` moves up.
-        assert_eq!(date_range("2025-01-01", "2026-11-17", today).0, day("2026-08-20"));
+        assert_eq!(
+            date_range("2025-01-01", "2026-11-17", today).0,
+            day("2026-08-20")
+        );
         // `from` after `to` → the default range.
-        assert_eq!(date_range("2026-11-10", "2026-11-01", today).0, day("2026-08-20"));
+        assert_eq!(
+            date_range("2026-11-10", "2026-11-01", today).0,
+            day("2026-08-20")
+        );
     }
 }
