@@ -11,6 +11,8 @@ import type {
   P111ContactInput,
   P111Fixtures,
   P111MessageInput,
+  P111MessengerPage,
+  P111MessengerPageInput,
 } from "../../../src/fixtures/ext/p1-11.ts"
 
 const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
@@ -37,6 +39,16 @@ const createId = (): bigint => {
 
 const uniqueText = (prefix: string) => `${prefix}-${Date.now().toString(36)}${randomBytes(4).toString("hex")}`
 const ms = (iso: string | null | undefined): number | null => (iso == null ? null : Date.parse(iso))
+
+const oauth2Auth = (accessToken: string, metadata: Record<string, unknown>, redirectUrl: string) => ({
+  authType: "oauth2",
+  clientId: "parity-client",
+  clientSecret: "parity-secret",
+  redirectUrl,
+  version: "v23.0",
+  tokens: { accessToken },
+  metadata,
+})
 
 const notPorted = (name: string) => (): never => {
   throw new Error(`p1-11 fixture ${name} is not ported to the Rust stack yet`)
@@ -75,7 +87,63 @@ class SqliteP111Fixtures implements P111Fixtures {
     }
   }
 
-  createMessengerPage = notPorted("createMessengerPage")
+  private insertInbox(
+    db: DatabaseSync,
+    input: { workspaceId: string; name: string; channel: string; sourceId: string },
+  ): bigint {
+    const inboxId = createId()
+    db.prepare(
+      `INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId", "status")
+       VALUES (?, ?, ?, ?, ?, 'connected')`,
+    ).run(inboxId, input.name, input.channel, input.sourceId, BigInt(input.workspaceId))
+    return inboxId
+  }
+
+  async createMessengerPage(input: P111MessengerPageInput): Promise<P111MessengerPage> {
+    const accessToken = `page-token-${input.pageId}`
+    return this.transaction((db) => {
+      const inboxId = this.insertInbox(db, {
+        workspaceId: input.workspaceId,
+        name: input.name,
+        channel: "messenger",
+        sourceId: input.pageId,
+      })
+      const integrationId = createId()
+      const auth = oauth2Auth(
+        accessToken,
+        { pageId: input.pageId, pageName: input.name, version: "v23.0" },
+        "http://app/integrations/messenger/callback",
+      )
+      db.prepare(
+        `INSERT INTO "IntegrationMessenger"
+           ("id", "auth", "pageId", "name", "workspaceId", "inboxId", "conversationStarters", "persistentMenus",
+            "personas", "personaId", "hasCapiScope", "datasetId", "capiTestEventCode", "capiDisconnectedAt",
+            "tokenRefreshError")
+         VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        integrationId,
+        JSON.stringify(auth),
+        input.pageId,
+        input.name,
+        BigInt(input.workspaceId),
+        inboxId,
+        JSON.stringify(input.personas ?? []),
+        input.personaId ?? null,
+        input.hasCapiScope ? 1 : 0,
+        input.datasetId ?? null,
+        input.capiTestEventCode ?? null,
+        input.capiDisconnected ? Date.now() : null,
+        input.tokenRefreshError ?? null,
+      )
+      db.prepare(
+        `INSERT INTO "Connection"
+           ("id", "workspaceId", "provider", "kind", "channel", "inboxId", "sourceId", "displayName", "status", "connectedAt")
+         VALUES (?, ?, 'messenger', 'channel', 'messenger', ?, ?, ?, 'connected', ?)`,
+      ).run(createId(), BigInt(input.workspaceId), inboxId, input.pageId, input.name, Date.now())
+      return { integrationId: integrationId.toString(), inboxId: inboxId.toString(), accessToken }
+    })
+  }
+
   createInstagramForPage = notPorted("createInstagramForPage")
   createWhatsappChannel = notPorted("createWhatsappChannel")
   createWhatsappTemplate = notPorted("createWhatsappTemplate")

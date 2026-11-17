@@ -18,6 +18,7 @@ pub mod default_queue;
 pub mod events;
 pub mod flow;
 pub mod inbound;
+pub mod inbound_events;
 pub mod integration;
 pub mod meta_catalog;
 pub mod notification;

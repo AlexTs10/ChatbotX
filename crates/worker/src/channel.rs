@@ -457,6 +457,10 @@ impl Channels {
                 "whatsapp",
                 Arc::new(crate::channels::whatsapp::Whatsapp::new()),
             )
+            .with(
+                "messenger",
+                Arc::new(crate::channels::messenger::Messenger::new()),
+            )
     }
 
     pub fn with(mut self, channel: &str, implementation: Arc<dyn Channel>) -> Channels {
@@ -600,7 +604,7 @@ impl Channels {
 }
 
 /// The identifier column of each channel's integration table.
-fn identifier_column(channel: &str) -> Option<(&'static str, &'static str)> {
+pub fn identifier_column(channel: &str) -> Option<(&'static str, &'static str)> {
     Some(match channel {
         "whatsapp" => ("IntegrationWhatsapp", "phoneNumberId"),
         "telegram" => ("IntegrationTelegram", "botId"),

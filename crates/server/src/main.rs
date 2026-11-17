@@ -1,6 +1,7 @@
 //! `chatbotx-server`: the single ChatbotX binary.
 
 mod config;
+mod meta_webhook;
 mod web;
 mod whatsapp;
 
@@ -293,6 +294,15 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     app = app.merge(whatsapp::router(
         Arc::clone(&shared.db),
         Arc::clone(&jobs) as _,
+    ));
+    app = app.merge(meta_webhook::router(
+        chatbotx_worker::channels::meta_webhook::MetaWebhook {
+            db: Arc::clone(&shared.db),
+            jobs: Arc::clone(&jobs) as _,
+            encryption: chatbotx_worker::channels::meta_webhook::encryption_from_env(),
+            is_cloud: is_cloud(),
+            broker_host: chatbotx_worker::channels::meta_webhook::broker_host_from_env(),
+        },
     ));
     // The public API and the SPA (`apps/web/dist`, P4) answer every path no
     // route matched: the SPA takes the GETs outside the API paths.
