@@ -16,6 +16,14 @@ use crate::{Deps, fail, meta_catalog, str_of};
 pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     let kind = str_of(&job.data, "type").unwrap_or("");
     let data = &job.data["data"];
+    // `withBlockedOwnerGuard(resolveWorkspaceId(job.data.data))`.
+    if crate::is_blocked_workspace(&deps.db, str_of(data, "workspaceId").unwrap_or("")).await? {
+        tracing::info!(
+            job_type = kind,
+            "Skipping workspace job for frozen workspace"
+        );
+        return Ok(Value::Null);
+    }
     match kind {
         "importMetaCatalogProducts" => meta_catalog::import::handle(&deps, data).await?,
         "submitMetaCatalogSync" => meta_catalog::sync::submit(&deps, data).await?,
@@ -134,6 +142,30 @@ mod tests {
         ) -> chatbotx_jobs::BoxFuture<'_, Result<Vec<AddResult>, JobsError>> {
             Box::pin(async { Ok(Vec::new()) })
         }
+    }
+
+    /// `default-worker.test.ts` "skips member revocations for blocked
+    /// workspaces" / "skips bulk tag contact jobs for frozen workspaces": a
+    /// blocked workspace completes the job without running it.
+    #[tokio::test]
+    async fn blocked_workspaces_skip_the_job() {
+        let f = crate::steps::test_support::Fixture::new().await;
+        let job = |ws: &str| {
+            crate::steps::test_support::job(
+                json!({ "type": "bulkTagContacts", "data": { "workspaceId": ws } }),
+            )
+        };
+        assert!(
+            handle(f.deps.clone(), job("2")).await.is_err(),
+            "an active workspace runs (unported: fails)"
+        );
+        f.exec(r#"UPDATE "Workspace" SET "scheduledDeletionAt" = 1 WHERE "id" = 2"#)
+            .await;
+        assert_eq!(handle(f.deps.clone(), job("2")).await.unwrap(), Value::Null);
+        assert_eq!(
+            handle(f.deps.clone(), job("999")).await.unwrap(),
+            Value::Null
+        );
     }
 
     #[tokio::test]

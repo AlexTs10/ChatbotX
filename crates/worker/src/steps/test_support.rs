@@ -171,6 +171,9 @@ impl Fixture {
             variables: None,
             ai: Arc::new(crate::ai::Ai::live()),
             files: None,
+            webhook_http: Arc::new(crate::webhook::RecordingWebhookHttp::default()),
+            events: None,
+            push: None,
         };
         Fixture { deps, jobs, dir }
     }
@@ -291,4 +294,26 @@ impl Fixture {
         }
         crate::flow::run_flow_node(&self.deps, &data, "job-1:1".into()).await
     }
+}
+
+/// A first-attempt job carrying `data`.
+pub fn job(data: Value) -> chatbotx_jobs::JobCtx {
+    chatbotx_jobs::JobCtx {
+        id: 1,
+        job_id: "1".into(),
+        name: str_name(&data),
+        data,
+        attempts: None,
+        attempts_made: 0,
+        attempts_started: 1,
+        priority: 0,
+        lease_token: None,
+    }
+}
+
+fn str_name(data: &Value) -> String {
+    data.get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("job")
+        .to_owned()
 }

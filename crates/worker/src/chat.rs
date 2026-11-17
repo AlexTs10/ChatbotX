@@ -298,9 +298,24 @@ pub async fn send_message_to_channel(
         Ok(result) => result,
         Err(error) => {
             tracing::error!(err = %error, "An error occurred while sending the message");
-            let _will_retry = will_send_retry(&error, &contact_inbox.channel, will_retry_on_throw);
-            // ponytail: the `message:failed` event (error log, analytics) is
-            // the events unit's (Q.W2); the send error and realtime stay here.
+            let will_retry = will_send_retry(&error, &contact_inbox.channel, will_retry_on_throw);
+            crate::events::emit_message_failed(
+                deps.events.as_ref(),
+                &crate::events::MessageContext {
+                    workspace_id: conversation.workspace_id,
+                    contact_id: conversation.contact_id,
+                    conversation_id: conversation.id,
+                    channel: contact_inbox.channel.clone(),
+                    contact_inbox_id: contact_inbox.id,
+                    inbox_id: contact_inbox.inbox_id,
+                    source_id: contact_inbox.source_id.clone(),
+                },
+                message_id,
+                crate::events::parsed_error(&error),
+                metadata,
+                will_retry,
+            )
+            .await;
             if let (Some(id), Some(created_at)) = (message_id, created_at) {
                 let text: String = error
                     .message()
