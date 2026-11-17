@@ -136,8 +136,7 @@ fn attach_images(
     replies: Vec<SavedReply>,
 ) -> Result<Vec<WithImages>> {
     let ids: Vec<i64> = replies.iter().map(|r| r.id).collect();
-    let images =
-        small_repos::saved_reply_image_list_by_saved_reply_ids(conn, workspace_id, &ids)?;
+    let images = small_repos::saved_reply_image_list_by_saved_reply_ids(conn, workspace_id, &ids)?;
     Ok(replies
         .into_iter()
         .map(|reply| {

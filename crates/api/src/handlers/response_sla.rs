@@ -9,7 +9,11 @@ use super::input::{Input, Num};
 use super::{ApiState, Call, FINDING, MUTATING, Reply, business_error, json, no_content};
 
 /// The routes of this module.
-pub const ROUTES: &[&str] = &["responseSla.get", "responseSla.update", "responseSla.delete"];
+pub const ROUTES: &[&str] = &[
+    "responseSla.get",
+    "responseSla.update",
+    "responseSla.delete",
+];
 
 const TARGET: Num = Num::int(MIN_TARGET_SECONDS as f64, MAX_TARGET_SECONDS as f64);
 

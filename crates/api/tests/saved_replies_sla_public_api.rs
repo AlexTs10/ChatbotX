@@ -57,8 +57,19 @@ async fn saved_reply_create_get_update_list_and_delete() {
     // `delegates to savedReplyService.findByIdOrFail`; other workspaces 404.
     let (status, got) = call(&fx, "savedReplies.get", WS, &[("id", &id)], None, None).await;
     assert_eq!((status, got["id"].clone()), (200, json!(id)));
-    let (status, got) = call(&fx, "savedReplies.get", OTHER_WS, &[("id", &id)], None, None).await;
-    assert_eq!((status, got["message"].clone()), (404, json!("Saved reply not found")));
+    let (status, got) = call(
+        &fx,
+        "savedReplies.get",
+        OTHER_WS,
+        &[("id", &id)],
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, got["message"].clone()),
+        (404, json!("Saved reply not found"))
+    );
 
     // `accepts a rename that leaves text and images out`: both are kept.
     let (status, out) = call(
@@ -71,7 +82,10 @@ async fn saved_reply_create_get_update_list_and_delete() {
     )
     .await;
     assert_eq!(status, 200, "{out}");
-    assert_eq!((out["shortcut"].clone(), out["text"].clone()), (json!("hey"), json!("Hello")));
+    assert_eq!(
+        (out["shortcut"].clone(), out["text"].clone()),
+        (json!("hey"), json!("Hello"))
+    );
     assert_eq!(out["images"].as_array().unwrap().len(), 2);
 
     // `[]` removes the images; empty text then has nothing left.
@@ -84,17 +98,32 @@ async fn saved_reply_create_get_update_list_and_delete() {
         Some(json!({ "shortcut": "hey", "text": "", "imageFileIds": [] })),
     )
     .await;
-    assert_eq!((status, out["code"].clone()), (422, json!("validation")), "{out}");
+    assert_eq!(
+        (status, out["code"].clone()),
+        (422, json!("validation")),
+        "{out}"
+    );
 
     let (status, list) = call(&fx, "savedReplies.list", WS, &[], Some("perPage=1"), None).await;
     assert_eq!(status, 200);
-    assert_eq!((list["data"].as_array().unwrap().len(), list["pageCount"].clone()), (1, json!(1)));
+    assert_eq!(
+        (
+            list["data"].as_array().unwrap().len(),
+            list["pageCount"].clone()
+        ),
+        (1, json!(1))
+    );
 
     // `delegates to savedReplyService.delete`; the image links cascade.
     let (status, _) = call(&fx, "savedReplies.delete", WS, &[("id", &id)], None, None).await;
     assert_eq!(status, 204);
     assert_eq!(
-        scalar(&fx, r#"SELECT COUNT(*) FROM "SavedReplyImage" WHERE "savedReplyId" = ?1"#, id.parse().unwrap()).await,
+        scalar(
+            &fx,
+            r#"SELECT COUNT(*) FROM "SavedReplyImage" WHERE "savedReplyId" = ?1"#,
+            id.parse().unwrap()
+        )
+        .await,
         Some(json!(0))
     );
     let (status, _) = call(&fx, "savedReplies.delete", WS, &[("id", &id)], None, None).await;
@@ -117,10 +146,21 @@ async fn saved_reply_request_checks() {
     .await;
     assert_eq!((status, out["text"].clone()), (201, json!("")), "{out}");
     // `rejects a reply with neither text nor images` (refine on `text`).
-    let (status, out) = call(&fx, "savedReplies.create", WS, &[], None, Some(json!({ "shortcut": "x" }))).await;
+    let (status, out) = call(
+        &fx,
+        "savedReplies.create",
+        WS,
+        &[],
+        None,
+        Some(json!({ "shortcut": "x" })),
+    )
+    .await;
     assert_eq!(status, 422, "{out}");
     assert_eq!(out["data"]["issues"][0]["path"], json!(["text"]));
-    assert_eq!(out["data"]["issues"][0]["message"], "A saved reply needs text or at least one image");
+    assert_eq!(
+        out["data"]["issues"][0]["message"],
+        "A saved reply needs text or at least one image"
+    );
     // `rejects more than 10 images`.
     let many: Vec<String> = (0..11).map(|i| i.to_string()).collect();
     let (status, out) = call(
@@ -144,7 +184,11 @@ async fn saved_reply_request_checks() {
         Some(json!({ "shortcut": "x", "imageFileIds": ["33"] })),
     )
     .await;
-    assert_eq!((status, out["code"].clone()), (422, json!("validation")), "{out}");
+    assert_eq!(
+        (status, out["code"].clone()),
+        (422, json!("validation")),
+        "{out}"
+    );
     let (status, out) = call(
         &fx,
         "savedReplies.create",
@@ -154,7 +198,10 @@ async fn saved_reply_request_checks() {
         Some(json!({ "shortcut": "x", "imageFileIds": ["99"] })),
     )
     .await;
-    assert_eq!((status, out["message"].clone()), (404, json!("MediaLibraryFile 99 not found")));
+    assert_eq!(
+        (status, out["message"].clone()),
+        (404, json!("MediaLibraryFile 99 not found"))
+    );
 }
 
 #[tokio::test]
@@ -200,7 +247,10 @@ async fn response_sla_get_update_and_delete() {
     .await;
     assert_eq!(status, 422);
     let (status, out) = call(&fx, "responseSla.get", WS, &[], None, None).await;
-    assert_eq!((status, out["firstResponseTargetSeconds"].clone()), (200, json!(600)));
+    assert_eq!(
+        (status, out["firstResponseTargetSeconds"].clone()),
+        (200, json!(600))
+    );
     // `delete returns 204 and removes the workspace policy`.
     let (status, _) = call(&fx, "responseSla.delete", WS, &[], None, None).await;
     assert_eq!(status, 204);

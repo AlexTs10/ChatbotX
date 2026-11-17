@@ -110,7 +110,11 @@ fn date_time_value(value: Option<&Value>) -> Result<Value, ()> {
         Some(raw) => {
             let n = match raw {
                 Value::Number(n) => n.as_f64(),
-                Value::String(t) => Some(if t.trim().is_empty() { 0.0 } else { t.trim().parse().map_err(|_| ())? }),
+                Value::String(t) => Some(if t.trim().is_empty() {
+                    0.0
+                } else {
+                    t.trim().parse().map_err(|_| ())?
+                }),
                 Value::Bool(b) => Some(f64::from(u8::from(*b))),
                 Value::Null => Some(0.0),
                 _ => None,
@@ -232,10 +236,13 @@ mod tests {
 
     #[test]
     fn date_time_refinement() {
-        let base = |value| {
-            json!({ "type": "dateTimeBasedTrigger", "sourceId": "9", "operator": "eq", "value": value })
-        };
-        assert!(parse(&base(json!({ "triggerType": "before", "timeValue": "2", "timeType": "hours" }))).is_ok());
+        let base = |value| json!({ "type": "dateTimeBasedTrigger", "sourceId": "9", "operator": "eq", "value": value });
+        assert!(
+            parse(&base(
+                json!({ "triggerType": "before", "timeValue": "2", "timeType": "hours" })
+            ))
+            .is_ok()
+        );
         assert!(parse(&base(json!({ "triggerType": "before", "timeValue": 2 }))).is_err());
         assert!(parse(&base(json!({ "triggerType": "atTheDayOf", "at": "" }))).is_err());
         assert!(parse(&base(json!({ "triggerType": "atTheDayOf", "at": "09:00" }))).is_ok());

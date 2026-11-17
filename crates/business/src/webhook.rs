@@ -76,10 +76,7 @@ pub async fn assert_deliverable_url(url: &str) -> Result<()> {
 }
 
 /// `webhookService.list`: one SQL page with the conditions joined in.
-pub async fn list(
-    db: &Db,
-    input: ListWebhooksInput,
-) -> Result<(Vec<WebhookWithConditions>, i64)> {
+pub async fn list(db: &Db, input: ListWebhooksInput) -> Result<(Vec<WebhookWithConditions>, i64)> {
     let per_page = input.limit.max(1);
     tx::read(db, move |c| {
         let (rows, total) = repo::list_webhooks_paginated(c, &input)?;
@@ -184,7 +181,11 @@ pub async fn find_with_conditions_or_fail(
     id: i64,
 ) -> Result<WebhookWithConditions> {
     tx::read(db, move |c| {
-        Ok(repo::find_webhook_with_conditions(c, Some(id), Some(workspace_id))?)
+        Ok(repo::find_webhook_with_conditions(
+            c,
+            Some(id),
+            Some(workspace_id),
+        )?)
     })
     .await?
     .ok_or_else(not_found)

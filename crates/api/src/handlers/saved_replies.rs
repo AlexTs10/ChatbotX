@@ -62,11 +62,13 @@ fn reply_id(input: &mut Input) -> i64 {
 /// `{ data }` of `listSavedReplies`.
 pub async fn list(state: &ApiState, workspace_id: i64) -> chatbotx_business::Result<Vec<Value>> {
     let storage = super::contacts::tenant_urls(state).storage_url;
-    Ok(service::list_by_workspace_id(&state.db, &storage, workspace_id)
-        .await?
-        .iter()
-        .map(service::WithImages::to_json)
-        .collect())
+    Ok(
+        service::list_by_workspace_id(&state.db, &storage, workspace_id)
+            .await?
+            .iter()
+            .map(service::WithImages::to_json)
+            .collect(),
+    )
 }
 
 /// Runs one of [`ROUTES`].
@@ -84,7 +86,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .map_err(|e| business_error(e, LISTING))?;
             let start = ((page - 1) * per_page).max(0) as usize;
             let page_count = ((rows.len() as i64 + per_page - 1) / per_page).max(1);
-            let data: Vec<Value> = rows.into_iter().skip(start).take(per_page as usize).collect();
+            let data: Vec<Value> = rows
+                .into_iter()
+                .skip(start)
+                .take(per_page as usize)
+                .collect();
             Ok(json(200, json!({ "data": data, "pageCount": page_count })))
         }
         "savedReplies.get" => {

@@ -32,13 +32,20 @@ fn parse_policy(data: &ResponseSlaPolicyInput) -> Result<()> {
     if !in_range(data.first_response_target_seconds) {
         return Err(BusinessError::validation(
             "firstResponseTargetSeconds",
-            format!("Must be a whole number of seconds between {MIN_TARGET_SECONDS} and {MAX_TARGET_SECONDS}"),
+            format!(
+                "Must be a whole number of seconds between {MIN_TARGET_SECONDS} and {MAX_TARGET_SECONDS}"
+            ),
         ));
     }
-    if data.next_response_target_seconds.is_some_and(|v| !in_range(v)) {
+    if data
+        .next_response_target_seconds
+        .is_some_and(|v| !in_range(v))
+    {
         return Err(BusinessError::validation(
             "nextResponseTargetSeconds",
-            format!("Must be null or a whole number of seconds between {MIN_TARGET_SECONDS} and {MAX_TARGET_SECONDS}"),
+            format!(
+                "Must be null or a whole number of seconds between {MIN_TARGET_SECONDS} and {MAX_TARGET_SECONDS}"
+            ),
         ));
     }
     if !(1..=99).contains(&data.breaching_threshold_percent) {
