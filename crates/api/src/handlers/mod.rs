@@ -8,6 +8,7 @@ pub mod ai_functions;
 pub mod ai_handover;
 pub mod ai_mcp_servers;
 pub mod analytics;
+pub mod appointments;
 pub mod bot_fields;
 pub mod capabilities;
 pub mod channel_integrations;
@@ -541,7 +542,9 @@ async fn route(
     call: Call<'_>,
     principal: &Principal,
 ) -> Option<Response> {
-    let reply = if contact_scans::ROUTES.contains(&route_id) {
+    let reply = if appointments::ROUTES.contains(&route_id) {
+        appointments::handle(state, route_id, call, principal).await
+    } else if contact_scans::ROUTES.contains(&route_id) {
         contact_scans::handle(state, route_id, call).await
     } else if comment_automations::ROUTES.contains(&route_id) {
         comment_automations::handle(state, route_id, call).await

@@ -24,6 +24,7 @@ pub const PORTED: &[&str] = &[
     "purgeCoexistStaging",
     "purgeExpiredOAuthTokens",
     "purgeAutomationThrottle",
+    "scanAppointmentReminders",
 ];
 
 /// `registerSchedules()` for the [`PORTED`] ids. The other config fields
@@ -64,6 +65,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "purgeCoexistStaging" => purge::purge_coexist_staging(&deps.db).await?,
         "purgeExpiredOAuthTokens" => purge::purge_expired_oauth_tokens(&deps.db).await?,
         "purgeAutomationThrottle" => purge::purge_automation_throttle(&deps.db).await?,
+        "scanAppointmentReminders" => crate::appointment::scan_reminders(&deps).await?,
         other => tracing::warn!(job_type = other, "Unknown schedule job type"),
     }
     Ok(Value::Null)
