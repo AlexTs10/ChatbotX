@@ -130,7 +130,7 @@ fn date_overrides(input: &mut Input) -> Option<Vec<DateOverrideInput>> {
         "dateOverrides",
         0,
         WORKING_HOURS_MAX_DATE_OVERRIDES,
-        |input, path, value| date_override_at(input, path, value),
+        date_override_at,
     )?;
     let mut seen = std::collections::HashSet::new();
     if let Some(dup) = rows.iter().find(|o| !seen.insert(o.date.clone())) {
