@@ -52,6 +52,23 @@ fn not_found() -> BusinessError {
     BusinessError::not_found("Google Calendar connection not found")
 }
 
+/// A form body (reqwest is built without the `form` feature).
+fn form(pairs: &[(&str, &str)]) -> String {
+    url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(pairs)
+        .finish()
+}
+
+/// A JSON body (reqwest is built without the `json` feature).
+fn body_bytes(value: &Value) -> Vec<u8> {
+    serde_json::to_vec(value).unwrap_or_default()
+}
+
+async fn read_json(response: reqwest::Response) -> std::result::Result<Value, String> {
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+}
+
 fn sdk_error(message: impl std::fmt::Display) -> BusinessError {
     BusinessError::exception(
         format!("Google Calendar API error: {message}"),
@@ -289,18 +306,22 @@ impl ExternalCalendars {
         let response = self
             .http
             .post(&self.endpoints.token_url)
-            .form(&[
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .body(form(&[
                 ("client_id", client_id.as_str()),
                 ("client_secret", client_secret.as_str()),
                 ("refresh_token", refresh.as_str()),
                 ("grant_type", "refresh_token"),
-            ])
+            ]))
             .timeout(Duration::from_secs(30))
             .send()
             .await
             .map_err(sdk_error)?;
         let status = response.status();
-        let body: Value = response.json().await.unwrap_or(Value::Null);
+        let body: Value = read_json(response).await.unwrap_or(Value::Null);
         let Some(access) = body.get("access_token").and_then(Value::as_str) else {
             return Err(BusinessError::exception(
                 if status.as_u16() == 400 {
@@ -403,13 +424,14 @@ impl ExternalCalendars {
             .http
             .post(format!("{}/freeBusy", self.endpoints.api_base))
             .bearer_auth(token)
-            .json(&body)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body_bytes(&body))
             .timeout(Duration::from_millis(timeout_ms))
             .send()
             .await
             .map_err(sdk_error)?;
         let status = response.status();
-        let data: Value = response.json().await.map_err(sdk_error)?;
+        let data: Value = read_json(response).await.map_err(sdk_error)?;
         if !status.is_success() {
             return Err(sdk_error(google_message(&data, status.as_u16())));
         }
@@ -440,13 +462,14 @@ impl ExternalCalendars {
             .http
             .post(format!("{events}?sendUpdates=all"))
             .bearer_auth(&token)
-            .json(event)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body_bytes(event))
             .timeout(Duration::from_secs(60))
             .send()
             .await
             .map_err(sdk_error)?;
         let mut status = response.status().as_u16();
-        let mut data: Value = response.json().await.unwrap_or(Value::Null);
+        let mut data: Value = read_json(response).await.unwrap_or(Value::Null);
         if status == 409 {
             let id = event["id"].as_str().unwrap_or_default();
             let response = self
@@ -458,7 +481,7 @@ impl ExternalCalendars {
                 .await
                 .map_err(sdk_error)?;
             status = response.status().as_u16();
-            data = response.json().await.unwrap_or(Value::Null);
+            data = read_json(response).await.unwrap_or(Value::Null);
         }
         match data.get("id").and_then(Value::as_str) {
             Some(id) if (200..300).contains(&status) && !id.is_empty() => Ok(id.to_string()),
@@ -493,7 +516,7 @@ impl ExternalCalendars {
         if (200..300).contains(&status) || status == 404 || status == 410 {
             return Ok(());
         }
-        let data: Value = response.json().await.unwrap_or(Value::Null);
+        let data: Value = read_json(response).await.unwrap_or(Value::Null);
         Err(sdk_error(google_message(&data, status)))
     }
 
@@ -503,7 +526,11 @@ impl ExternalCalendars {
         let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
         self.http
             .post(&self.endpoints.revoke_url)
-            .form(&[("token", token)])
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .body(form(&[("token", token)]))
             .timeout(Duration::from_secs(30))
             .send()
             .await

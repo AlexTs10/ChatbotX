@@ -4,7 +4,7 @@
 //! transaction: every check and the insert run under the single writer.
 
 use chatbotx_core::encryption::Encryption;
-use chatbotx_core::encryption::tokens::{
+use chatbotx_core::encryption::{
     APPOINTMENT_TOKEN_TTL_MS, AppointmentClaims, AppointmentWebviewClaims,
 };
 use chatbotx_core::utils::tz::{DateArg, format_in_time_zone, is_intl_time_zone};
@@ -904,7 +904,7 @@ pub async fn create_inbox_booking_link(
         ));
     }
     let claims = AppointmentWebviewClaims {
-        source: chatbotx_core::encryption::tokens::AppointmentTokenSource::Inbox,
+        source: chatbotx_core::encryption::AppointmentTokenSource::Inbox,
         workspace_id: workspace_id.to_string(),
         calendar_id: calendar.id.to_string(),
         contact_id: conversation.contact_id.to_string(),
@@ -916,7 +916,7 @@ pub async fn create_inbox_booking_link(
         .encryption()?
         .sign_appointment_webview_token_with_expiry(
             &claims,
-            chatbotx_core::encryption::tokens::APPOINTMENT_INBOX_LINK_TTL_MS,
+            chatbotx_core::encryption::APPOINTMENT_INBOX_LINK_TTL_MS,
         )
         .map_err(token_error)?;
     let url = appointment_url(app_url, "/booking/picker", &token);

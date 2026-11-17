@@ -6,7 +6,7 @@ use chatbotx_business::appointment::external::ExternalCalendars;
 use chatbotx_business::appointment::{booking::scheduling_copy, calendar};
 use chatbotx_business::contact_custom_field::{self, SetValueByKeyInput};
 use chatbotx_business::tx;
-use chatbotx_core::encryption::tokens::{
+use chatbotx_core::encryption::{
     APPOINTMENT_WEBVIEW_TOKEN_TTL_MS, AppointmentTokenSource, AppointmentWebviewClaims,
     AppointmentWebviewMode,
 };

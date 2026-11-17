@@ -646,7 +646,7 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
     // action left); the button title is not matched as a typed reply.
     if !suppress
         && let Some(payload) = received.postback_action.as_deref().filter(|p| {
-            chatbotx_core::encryption::tokens::parse_appointment_cancel_postback(Some(p)).is_some()
+            chatbotx_core::encryption::parse_appointment_cancel_postback(Some(p)).is_some()
         })
     {
         crate::appointment::cancel_postback(deps, stored, payload, workspace_active).await;
