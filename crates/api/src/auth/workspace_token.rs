@@ -95,6 +95,18 @@ pub struct MobileWorkspacePrincipal {
     pub device_id: Option<String>,
     /// `mobileCredentialId(mobile)`.
     pub credential_id: String,
+    /// `context.member` (Q.A1 §3): what `lib/public-api/member-scope.ts` reads.
+    pub member: std::sync::Arc<MobileMember>,
+}
+
+/// The member of a mobile principal: its user, stored permissions and the
+/// resolved `conversationMemberScope` (resolved once per request, as the
+/// original caches `memberConversationScope`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MobileMember {
+    pub user_id: i64,
+    pub permissions: serde_json::Value,
+    pub conversation: chatbotx_business::member_scope::ConversationMemberScope,
 }
 
 /// `withAuditContext` input.

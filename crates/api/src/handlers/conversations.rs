@@ -206,7 +206,9 @@ pub(crate) fn conversation_json(state: &ApiState, row: &ConversationRow, compact
             &|key| Some(key.to_owned()),
         );
         out.insert("avatar".into(), json!(avatar));
-        Value::Object(out)
+        let mut out = Value::Object(out);
+        super::member_scope::mask_contact(&mut out);
+        out
     });
     let messages: Vec<Value> = row
         .last_message
@@ -378,6 +380,7 @@ pub(crate) fn list_input(input: &mut Input, workspace_id: i64) -> (ListInput, bo
             per_page,
             cursor: cursor.as_deref().and_then(decode_cursor),
             hide_email_and_phone: false,
+            member_scope: None,
         },
         compact,
     )
@@ -450,8 +453,20 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     match route_id {
         "conversations.list" => {
             let mut input = Input::from_query(call.params, call.query);
-            let (request, compact) = list_input(&mut input, ws);
+            let (mut request, compact) = list_input(&mut input, ws);
             input.finish()?;
+            // Mobile members: their chat scope; email / phone search and
+            // filters off without the permission.
+            request.member_scope = super::member_scope::conversation_scope();
+            request.hide_email_and_phone = !super::member_scope::can_view_email_and_phone();
+            if request.member_scope.as_ref().is_some_and(|s| {
+                s.chat_scope == chatbotx_business::member_scope::ChatScope::None
+            }) {
+                return Err(business_error(
+                    BusinessError::not_found("Conversation not found"),
+                    LISTING,
+                ));
+            }
             let page = list::list(db, request)
                 .await
                 .map_err(|e| business_error(e, LISTING))?;
@@ -476,6 +491,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let row = list::find(db, ws, conversation.unwrap_or(-1))
                 .await
                 .map_err(found)?;
+            super::member_scope::assert_conversation_allowed(
+                row.conversation.assigned_user_id,
+                row.conversation.assigned_inbox_team_id,
+                FINDING,
+            )?;
             Ok(json(
                 200,
                 json!({ "data": conversation_json(state, &row, false) }),
@@ -487,9 +507,14 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let conversation = input.digits_id("id");
             input.finish()?;
             let conversation = conversation.unwrap_or(-1);
-            list::find_or_fail(db, ws, conversation)
+            let found = list::find_or_fail(db, ws, conversation)
                 .await
                 .map_err(mutated)?;
+            super::member_scope::assert_conversation_allowed(
+                found.assigned_user_id,
+                found.assigned_inbox_team_id,
+                MUTATING,
+            )?;
             let done = actions::assign_one(db, ws, conversation, assigned.flatten())
                 .await
                 .map_err(mutated)?;
@@ -501,9 +526,14 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "conversations.archive" | "conversations.unarchive" => {
             let conversation = path_id(&call)?;
-            list::find_or_fail(db, ws, conversation)
+            let found = list::find_or_fail(db, ws, conversation)
                 .await
                 .map_err(mutated)?;
+            super::member_scope::assert_conversation_allowed(
+                found.assigned_user_id,
+                found.assigned_inbox_team_id,
+                MUTATING,
+            )?;
             actions::set_archived(db, ws, conversation, route_id == "conversations.archive")
                 .await
                 .map_err(mutated)?;
@@ -511,9 +541,14 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "conversations.read" | "conversations.unread" => {
             let conversation = path_id(&call)?;
-            list::find_or_fail(db, ws, conversation)
+            let found = list::find_or_fail(db, ws, conversation)
                 .await
                 .map_err(mutated)?;
+            super::member_scope::assert_conversation_allowed(
+                found.assigned_user_id,
+                found.assigned_inbox_team_id,
+                MUTATING,
+            )?;
             let event = if route_id == "conversations.read" {
                 actions::mark_read(db, ws, conversation).await
             } else {
@@ -527,9 +562,14 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "conversations.follow" | "conversations.unfollow" => {
             let conversation = path_id(&call)?;
-            list::find_or_fail(db, ws, conversation)
+            let found = list::find_or_fail(db, ws, conversation)
                 .await
                 .map_err(mutated)?;
+            super::member_scope::assert_conversation_allowed(
+                found.assigned_user_id,
+                found.assigned_inbox_team_id,
+                MUTATING,
+            )?;
             actions::set_followed(db, ws, conversation, route_id == "conversations.follow")
                 .await
                 .map_err(mutated)?;
@@ -537,9 +577,14 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "conversations.enableBot" | "conversations.disableBot" => {
             let conversation = path_id(&call)?;
-            list::find_or_fail(db, ws, conversation)
+            let found = list::find_or_fail(db, ws, conversation)
                 .await
                 .map_err(mutated)?;
+            super::member_scope::assert_conversation_allowed(
+                found.assigned_user_id,
+                found.assigned_inbox_team_id,
+                MUTATING,
+            )?;
             actions::set_bot_enabled(db, ws, conversation, route_id == "conversations.enableBot")
                 .await
                 .map_err(mutated)?;

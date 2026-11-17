@@ -52,6 +52,9 @@ pub struct ListInput {
     /// `!includeEmailAndPhone`: a member without `emailAndPhone` (the private
     /// list) cannot search or filter by email / phone. Tokens see them.
     pub hide_email_and_phone: bool,
+    /// `conversationMemberScope.where` of a mobile member (Q.A1 §3); `None`
+    /// = workspace-level. A `none` scope matches nothing (callers 404 first).
+    pub member_scope: Option<crate::member_scope::ConversationMemberScope>,
 }
 
 /// One conversation with `contact`, `contactInboxes.inbox`, the assignees
@@ -156,6 +159,26 @@ fn bind(text: &str, value: impl Into<chatbotx_db::rusqlite::types::Value>) -> Op
 pub fn build_conversation_where(input: &ListInput, now: i64) -> Sql {
     let has = |tag: &str| input.tags.iter().any(|t| t == tag);
     let mut parts: Vec<Option<Sql>> = vec![bind("c.\"workspaceId\" = ", input.workspace_id)];
+    if let Some(scope) = &input.member_scope {
+        use crate::member_scope::ChatScope;
+        match scope.chat_scope {
+            ChatScope::All => {}
+            ChatScope::None => parts.push(Some(Sql::raw("1 = 0"))),
+            ChatScope::Assigned => {
+                let teams = serde_json::to_string(&scope.team_ids).unwrap_or_else(|_| "[]".into());
+                parts.push(Some(Sql::or([
+                    bind("c.\"assignedUserId\" = ", scope.user_id),
+                    Some(
+                        Sql::bind(
+                            "c.\"assignedInboxTeamId\" IN (SELECT value FROM json_each(",
+                            teams,
+                        )
+                        .closed("))"),
+                    ),
+                ])));
+            }
+        }
+    }
     parts.push(Some(Sql::raw(if has("archived") {
         "c.\"archivedAt\" IS NOT NULL"
     } else {

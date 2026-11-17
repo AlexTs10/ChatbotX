@@ -59,6 +59,7 @@ pub mod keyword_match;
 pub mod license;
 pub mod mcp_oauth;
 pub mod media_library;
+pub mod member_scope;
 pub mod message;
 pub mod message_actions;
 pub mod messenger_menu;

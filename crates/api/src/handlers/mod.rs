@@ -42,6 +42,7 @@ pub mod integrations_ai;
 pub mod keywords;
 pub mod media_library;
 pub mod messages;
+pub mod member_scope;
 pub mod messenger_menus;
 pub mod messenger_templates;
 pub mod meta_catalog;
@@ -318,6 +319,14 @@ tokio::task_local! {
     /// The signed-in member of a `/rpc` call that runs a public route
     /// ([`dispatch_as_member`]).
     static MEMBER: Option<Member>;
+    /// The mobile member of the running [`dispatch_as`] (Q.A1 §3).
+    static MOBILE: Option<Arc<crate::auth::MobileMember>>;
+}
+
+/// `context.member` of a mobile principal; `None` for a workspace token,
+/// MCP OAuth or a `/rpc` member call.
+pub fn mobile_member() -> Option<Arc<crate::auth::MobileMember>> {
+    MOBILE.try_with(Clone::clone).ok().flatten()
 }
 
 /// A workspace member calling a public route through `/rpc` (P4): the
@@ -370,6 +379,8 @@ pub struct Principal {
     pub scopes: Option<Vec<String>>,
     /// `context.apiToken.permission === "read_only"` (default: a `full` token).
     pub read_only: bool,
+    /// `context.member` of a mobile principal (Q.A1 §3); `None` for a token.
+    pub mobile: Option<Arc<crate::auth::MobileMember>>,
 }
 
 /// A handler outcome.
@@ -534,8 +545,23 @@ pub async fn dispatch_as(
     call: Call<'_>,
     principal: &Principal,
 ) -> Option<Response> {
-    TOKEN_ID
-        .scope(principal.token_id, route(state, route_id, call, principal))
+    // Fail closed: a mobile principal only reaches the allowlisted routes
+    // (also checked before the member lookup, `resolve_mobile_principal`).
+    if principal.mobile.is_some() && !crate::auth::is_mobile_member_route_id(route_id) {
+        return Some(
+            OrpcError::new(
+                "FORBIDDEN",
+                None,
+                Some("This operation is not available to mobile sessions"),
+            )
+            .into_response(),
+        );
+    }
+    MOBILE
+        .scope(
+            principal.mobile.clone(),
+            TOKEN_ID.scope(principal.token_id, route(state, route_id, call, principal)),
+        )
         .await
 }
 
