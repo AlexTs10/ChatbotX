@@ -5,6 +5,7 @@
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::appointment::{booking, calendar};
+use chatbotx_business::google_oauth;
 use chatbotx_business::tx;
 use serde_json::{Value, json};
 
@@ -26,6 +27,8 @@ pub(super) const ACTIONS: &[&str] = &[
     "deleteAppointmentAction",
     "createInboxBookingLinkAction",
     "disconnectGoogleCalendarAction",
+    "connectGoogleCalendarAction",
+    "updateGoogleCalendarIdAction",
 ];
 
 /// `DEFAULT_SLOT_WINDOW_DAYS` (the availability range cap).
@@ -212,6 +215,18 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             .await
             .map(|_| Value::Null)
         }
+        "connectGoogleCalendarAction" => {
+            connect_google(ctx, google_oauth::Kind::Calendar, arg(args, 1)).await
+        }
+        "updateGoogleCalendarIdAction" => {
+            let integration_id = bound(args, 1)?;
+            let calendar_id = In(arg(args, 2)).str("providerCalendarId", true, 1, 255)?;
+            done(
+                externals(ctx.api)
+                    .update_calendar_id(db, ws, integration_id, &calendar_id)
+                    .await,
+            )
+        }
         "createInboxBookingLinkAction" => {
             let conversation_id = bound(args, 1)?;
             let input = In(arg(args, 2));
@@ -243,6 +258,31 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
         "bookContactAppointmentAction" => book(ctx, arg(args, 1)).await,
         _ => Err(fail(BusinessError::not_found("Action not found"))),
     }
+}
+
+/// `connectGoogleCalendarAction` / `connectGoogleSheets`: the original
+/// `redirect(authUrl)`; here `{ url }`, which the SPA opens.
+pub(super) async fn connect_google(
+    ctx: &Ctx<'_>,
+    kind: google_oauth::Kind,
+    input: &Value,
+) -> Result<Value, OrpcError> {
+    let referer = match In(input).get("referer") {
+        Some(Value::String(text)) if url::Url::parse(text).is_ok() => text.clone(),
+        _ => return Err(invalid()),
+    };
+    let url = google_oauth::start(
+        &ctx.api.db,
+        &externals(ctx.api),
+        &ctx.api.app_url,
+        kind,
+        ctx.workspace_id,
+        ctx.user_id,
+        Some(&referer),
+    )
+    .await
+    .map_err(action_fail)?;
+    Ok(json!({ "url": url }))
 }
 
 /// `bookContactAppointmentAction`: a stale slot, an already held start or a

@@ -27,6 +27,10 @@ pub struct GoogleEndpoints {
     pub api_base: String,
     pub token_url: String,
     pub revoke_url: String,
+    /// The OAuth consent page (`generateAuthUrl`).
+    pub auth_url: String,
+    /// `OAuth2Client.getTokenInfo`.
+    pub tokeninfo_url: String,
 }
 
 impl Default for GoogleEndpoints {
@@ -35,6 +39,8 @@ impl Default for GoogleEndpoints {
             api_base: "https://www.googleapis.com/calendar/v3".into(),
             token_url: "https://oauth2.googleapis.com/token".into(),
             revoke_url: "https://oauth2.googleapis.com/revoke".into(),
+            auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+            tokeninfo_url: "https://oauth2.googleapis.com/tokeninfo".into(),
         }
     }
 }
@@ -53,23 +59,23 @@ fn not_found() -> BusinessError {
 }
 
 /// A form body (reqwest is built without the `form` feature).
-fn form(pairs: &[(&str, &str)]) -> String {
+pub(crate) fn form(pairs: &[(&str, &str)]) -> String {
     url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(pairs)
         .finish()
 }
 
 /// A JSON body (reqwest is built without the `json` feature).
-fn body_bytes(value: &Value) -> Vec<u8> {
+pub(crate) fn body_bytes(value: &Value) -> Vec<u8> {
     serde_json::to_vec(value).unwrap_or_default()
 }
 
-async fn read_json(response: reqwest::Response) -> std::result::Result<Value, String> {
+pub(crate) async fn read_json(response: reqwest::Response) -> std::result::Result<Value, String> {
     let bytes = response.bytes().await.map_err(|e| e.to_string())?;
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
-fn sdk_error(message: impl std::fmt::Display) -> BusinessError {
+pub(crate) fn sdk_error(message: impl std::fmt::Display) -> BusinessError {
     BusinessError::exception(
         format!("Google Calendar API error: {message}"),
         "sdkException",
@@ -190,7 +196,7 @@ pub fn create_google_from_oauth(
     Ok(integration_id)
 }
 
-fn seal(encryption: &Encryption, integration_id: i64, auth: &Value) -> Result<String> {
+pub(crate) fn seal(encryption: &Encryption, integration_id: i64, auth: &Value) -> Result<String> {
     let blob = encryption
         .encrypt_object(auth, Some(&aad(integration_id)))
         .map_err(|e| BusinessError::Repo(RepoError::msg(e.to_string())))?;
@@ -356,7 +362,11 @@ impl ExternalCalendars {
     }
 
     /// The Google OAuth app (`clientId`, `clientSecret`) for the workspace owner.
-    async fn client_credential(&self, db: &Db, workspace_id: i64) -> Result<(String, String)> {
+    pub(crate) async fn client_credential(
+        &self,
+        db: &Db,
+        workspace_id: i64,
+    ) -> Result<(String, String)> {
         let owner =
             crate::tenant::resolve_credential_owner_id_for_workspace(db, workspace_id, None)
                 .await?;
@@ -520,6 +530,63 @@ impl ExternalCalendars {
         Err(sdk_error(google_message(&data, status)))
     }
 
+    /// `verifyCalendarAccess` (`calendarList.get`): the provider calendar id
+    /// and its email (the id when it is an address, else the summary).
+    pub async fn verify_calendar(
+        &self,
+        token: &str,
+        calendar_id: &str,
+    ) -> Result<(String, Option<String>)> {
+        let response = self
+            .http
+            .get(format!(
+                "{}/users/me/calendarList/{}",
+                self.endpoints.api_base,
+                urlencode(calendar_id)
+            ))
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(sdk_error)?;
+        let status = response.status();
+        let data: Value = read_json(response).await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(sdk_error(google_message(&data, status.as_u16())));
+        }
+        let id = data["id"].as_str().unwrap_or(calendar_id).to_string();
+        let email = if id.contains('@') {
+            Some(id.clone())
+        } else {
+            data["summary"].as_str().map(str::to_string)
+        };
+        Ok((id, email))
+    }
+
+    /// `updateGoogleCalendarIdAction`: verify the calendar with the
+    /// connection's token, then store its id and email.
+    pub async fn update_calendar_id(
+        &self,
+        db: &Db,
+        workspace_id: i64,
+        integration_id: i64,
+        calendar_id: &str,
+    ) -> Result<()> {
+        let (_, token) = self.connection(db, workspace_id, integration_id).await?;
+        let (id, email) = self.verify_calendar(&token, calendar_id).await?;
+        tx::write(db, move |conn| {
+            google_connection(conn, workspace_id, integration_id)?;
+            conn.execute(
+                "UPDATE \"IntegrationGoogleCalendar\" SET \"providerCalendarId\" = ?3, \"email\" = ?4, \"updatedAt\" = ?5 \
+                 WHERE \"workspaceId\" = ?1 AND \"integrationId\" = ?2",
+                params![workspace_id, integration_id, id, email, now_ms()],
+            )
+            .map_err(RepoError::from)?;
+            Ok(())
+        })
+        .await
+    }
+
     /// `disconnect` (`revokeToken(accessToken)`).
     pub async fn revoke(&self, row: &IntegrationGoogleCalendar) -> Result<()> {
         let auth = open_auth(self.encryption()?, row)?;
@@ -542,7 +609,7 @@ impl ExternalCalendars {
 }
 
 /// The joined `error.errors[].message` of a Google error body.
-fn google_message(data: &Value, status: u16) -> String {
+pub(crate) fn google_message(data: &Value, status: u16) -> String {
     let messages: Vec<&str> = data["error"]["errors"]
         .as_array()
         .into_iter()
@@ -560,7 +627,7 @@ fn google_message(data: &Value, status: u16) -> String {
     }
 }
 
-fn urlencode(text: &str) -> String {
+pub(crate) fn urlencode(text: &str) -> String {
     url::form_urlencoded::byte_serialize(text.as_bytes())
         .collect::<String>()
         .replace('+', "%20")
