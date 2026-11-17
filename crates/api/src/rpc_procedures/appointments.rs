@@ -147,8 +147,8 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
     let (db, ws) = (&ctx.api.db, ctx.workspace_id);
     let done =
         |result: chatbotx_business::Result<()>| result.map(|()| Value::Null).map_err(action_fail);
-    let route = |route: &'static str, id: i64, body: Option<&Value>| async move {
-        public(ctx, route, &[("id", id.to_string())], None, body).await
+    let route = |route: &'static str, id: i64, body: Option<Value>| async move {
+        public(ctx, route, &[("id", id.to_string())], None, body.as_ref()).await
     };
     match name {
         "createAppointmentCalendarAction" => {
@@ -189,7 +189,7 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
         .map_err(schema_errors),
         "cancelAppointmentAction" => {
             let appointment_id = In(arg(args, 1)).id("appointmentId")?;
-            route("appointments.cancel", appointment_id, Some(&json!({})))
+            route("appointments.cancel", appointment_id, Some(json!({})))
                 .await
                 .map(|_| Value::Null)
         }

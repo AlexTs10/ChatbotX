@@ -414,28 +414,6 @@ fn parse_attendees(value: &str) -> Option<Vec<Value>> {
     (!out.is_empty()).then_some(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn attendees_are_split_validated_and_deduplicated() {
-        let parsed = parse_attendees("a@x.io, A@x.io;bad\nb@y.com").unwrap();
-        assert_eq!(
-            parsed,
-            vec![json!({ "email": "a@x.io" }), json!({ "email": "b@y.com" })]
-        );
-        assert!(parse_attendees(" , bad").is_none());
-    }
-
-    #[test]
-    fn event_id_is_deterministic() {
-        let id = deterministic_event_id(42);
-        assert!(id.starts_with("abe") && id.len() == 67);
-        assert_eq!(id, deterministic_event_id(42));
-    }
-}
-
 /// `APPOINTMENT_CANCEL_FEEDBACK_COPY`: `(unavailable, workspaceInactive)`.
 fn cancel_feedback(language: Option<String>, inactive: bool) -> &'static str {
     match (language.as_deref() == Some("vi"), inactive) {
@@ -539,4 +517,26 @@ async fn cancel_by_postback(
     .await
     .map_err(|e| e.to_string())?;
     Ok(cancellable)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attendees_are_split_validated_and_deduplicated() {
+        let parsed = parse_attendees("a@x.io, A@x.io;bad\nb@y.com").unwrap();
+        assert_eq!(
+            parsed,
+            vec![json!({ "email": "a@x.io" }), json!({ "email": "b@y.com" })]
+        );
+        assert!(parse_attendees(" , bad").is_none());
+    }
+
+    #[test]
+    fn event_id_is_deterministic() {
+        let id = deterministic_event_id(42);
+        assert!(id.starts_with("abe") && id.len() == 67);
+        assert_eq!(id, deterministic_event_id(42));
+    }
 }

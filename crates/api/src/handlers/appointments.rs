@@ -24,7 +24,7 @@ use super::{
     ApiState, Call, ErrorMap, FINDING, LISTING, MUTATING, Principal, Reply, business_error, date,
     id, json, no_content, opt_date, opt_id,
 };
-use crate::auth::token_scope::token_has_any_scope;
+use crate::auth::token_has_any_scope;
 use crate::orpc::OrpcError;
 
 /// The routes of this module.
