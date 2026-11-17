@@ -136,7 +136,7 @@ fn is_iso_datetime(text: &str) -> bool {
     }
 }
 
-fn datetime_at(input: &mut Input, name: &str, required: bool) -> Option<i64> {
+pub(super) fn datetime_at(input: &mut Input, name: &str, required: bool) -> Option<i64> {
     let value = input.get(name).cloned();
     let text = input.string_at(&key(name), value.as_ref(), Str::default(), required)?;
     let parsed = if is_iso_datetime(&text) {

@@ -327,7 +327,7 @@ pub fn parse_config(
     Ok(parsed)
 }
 
-fn credentials_rejected() -> BusinessError {
+pub(super) fn credentials_rejected() -> BusinessError {
     // `toPublicErrorMessage(ConnectionProviderRejectedError, fallback)`: not a
     // `ChatbotXException`, so the fallback.
     BusinessError::exception(
@@ -338,10 +338,15 @@ fn credentials_rejected() -> BusinessError {
 }
 
 fn provider_unavailable() -> BusinessError {
+    provider_unavailable_status(502)
+}
+
+/// `connectionProviderUnavailableException(retryStatus)` (502 or 503).
+pub(super) fn provider_unavailable_status(status: u16) -> BusinessError {
     BusinessError::exception(
         "The provider is temporarily unavailable. Please try again.",
         "connectionProviderUnavailable",
-        502,
+        status,
     )
 }
 
@@ -465,6 +470,47 @@ pub async fn connect_ai_key_with(
         KeyValidation::Unknown => return Err(provider_unavailable()),
     }
     let auth = json!({ "authType": "secretText", "secretText": api_key }).to_string();
+    let target = SatelliteTarget {
+        provider: provider.provider,
+        display_name: provider.display_name,
+        table: provider.table,
+        ai_defaults: Some((provider.model, provider.max_output_tokens)),
+    };
+    persist_key_connection(
+        db,
+        workspace_id,
+        target,
+        auth,
+        extra,
+        actor_user_id,
+        allow_update,
+    )
+    .await
+}
+
+/// The `Connection` + satellite target of a key connect
+/// (`makeWorkspaceIntegrationBinding`).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SatelliteTarget {
+    pub provider: &'static str,
+    pub display_name: &'static str,
+    pub table: &'static str,
+    /// `AI_KEY_PROVIDER_DEFAULTS` (`model`, `maxOutputTokens`); `None` for a
+    /// satellite with only `auth`.
+    pub ai_defaults: Option<(&'static str, i64)>,
+}
+
+/// The write half of `connectFromCredentials`: revive / update / insert the
+/// satellite and the `connected` `Connection`.
+pub(super) async fn persist_key_connection(
+    db: &Db,
+    workspace_id: i64,
+    provider: SatelliteTarget,
+    auth: String,
+    extra: Vec<(String, Value)>,
+    actor_user_id: Option<i64>,
+    allow_update: bool,
+) -> Result<ConnectionRow> {
     let now = repo::now_ms();
     tx::write(db, move |tx| {
         let existing = find_by_source(tx, workspace_id, provider.provider, "workspace")?;
@@ -571,7 +617,7 @@ fn unique_or(error: chatbotx_db::rusqlite::Error, table: &str) -> BusinessError 
 fn insert_satellite(
     conn: &Connection,
     workspace_id: i64,
-    provider: &AiKeyProvider,
+    provider: &SatelliteTarget,
     auth: &str,
     extra: &[(String, Value)],
     now: i64,
@@ -583,10 +629,11 @@ fn insert_satellite(
         params![integration_id, now, workspace_id, provider.provider],
     )
     .map_err(repo_err)?;
-    let mut values: Vec<(String, chatbotx_db::rusqlite::types::Value)> = vec![
-        ("model".into(), provider.model.to_string().into()),
-        ("maxOutputTokens".into(), provider.max_output_tokens.into()),
-    ];
+    let mut values: Vec<(String, chatbotx_db::rusqlite::types::Value)> = Vec::new();
+    if let Some((model, max_output_tokens)) = provider.ai_defaults {
+        values.push(("model".into(), model.to_string().into()));
+        values.push(("maxOutputTokens".into(), max_output_tokens.into()));
+    }
     for (key, value) in extra {
         values.retain(|(column, _)| column != key);
         values.push((key.clone(), sql_value(value)));
@@ -666,6 +713,17 @@ pub async fn verify_ai_key_connection(
         KeyValidation::Invalid => ("needs_reauth", Some("token_revoked")),
         KeyValidation::Unknown => ("degraded", Some("verify_failed")),
     };
+    set_health(db, current, status, reason).await
+}
+
+/// The `verify.ok` / `markUnhealthy(token_revoked)` / `verify.failed_non_auth`
+/// write of a verify.
+pub(super) async fn set_health(
+    db: &Db,
+    current: ConnectionRow,
+    status: &'static str,
+    reason: Option<&'static str>,
+) -> Result<ConnectionRow> {
     let now = repo::now_ms();
     tx::write(db, move |tx| {
         tx.execute(

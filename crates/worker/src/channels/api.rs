@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::channel::{
     Channel, ChannelCtx, ChannelResult, IncomingAttachment, IncomingContact, IncomingMessage,
-    Received, SendFailure, SendFlowStep, SendMessage, SendResult,
+    MessageStatus, Received, SendFailure, SendFlowStep, SendMessage, SendResult,
 };
 
 /// `DELIVERY_TIMEOUT_MS`.
@@ -300,6 +300,34 @@ impl Channel for ApiChannel {
         payload: Value,
     ) -> BoxFuture<'static, ChannelResult<Option<Received>>> {
         Box::pin(std::future::ready(parse_incoming(&payload).map(Some)))
+    }
+
+    /// `handleMessageStatus` (`handlers/message/outgoing-message.ts`):
+    /// `messageStatusPayloadSchema` (`messageSourceId` min 1, `status`). The
+    /// public `deliveryStatus` route queues `messageId`, so, as in the
+    /// original, such a job fails its parse.
+    fn message_status(
+        &self,
+        _ctx: &ChannelCtx,
+        payload: Value,
+    ) -> BoxFuture<'static, ChannelResult<Option<MessageStatus>>> {
+        let text_of = |k: &str| payload.get(k).and_then(Value::as_str).map(str::to_owned);
+        let parsed = match (
+            text_of("messageSourceId").filter(|s| !s.is_empty()),
+            text_of("status"),
+        ) {
+            (Some(message_id), Some(status)) => Ok(Some(MessageStatus {
+                message_id,
+                status,
+                timestamp: None,
+                error: None,
+                recipient: None,
+            })),
+            _ => Err(SendFailure::Other(
+                "Invalid API channel message status payload".into(),
+            )),
+        };
+        Box::pin(std::future::ready(parsed))
     }
 }
 

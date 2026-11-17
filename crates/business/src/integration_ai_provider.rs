@@ -182,3 +182,36 @@ pub async fn update_auto_reply(
     }
     Ok(())
 }
+
+/// The per-provider `disconnect(workspaceId)` (a workspace without a
+/// `Connection` row): deletes the parent `Integration` (the satellite
+/// cascades) and audits `disconnected the <Name> integration`; a no-op
+/// when nothing is connected.
+pub async fn disconnect_legacy(
+    db: &Db,
+    audit: &AuditService,
+    provider: &str,
+    workspace_id: i64,
+) -> Result<()> {
+    let (table, name) = provider_table(provider).ok_or_else(|| unknown_provider(provider))?;
+    let deleted = tx::write(db, move |conn| {
+        conn.execute(
+            &format!(
+                r#"DELETE FROM "Integration" WHERE "id" =
+                   (SELECT "integrationId" FROM "{table}" WHERE "workspaceId" = ?1)"#
+            ),
+            [workspace_id],
+        )
+        .map_err(|e| BusinessError::Repo(e.into()))
+    })
+    .await?;
+    if deleted > 0 {
+        audit
+            .audit(
+                "disconnect",
+                &format!("disconnected the {name} integration"),
+            )
+            .await;
+    }
+    Ok(())
+}

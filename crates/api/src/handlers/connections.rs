@@ -5,7 +5,10 @@
 //! provider answers "Operation not ported yet".
 
 use chatbotx_business::BusinessError;
+use chatbotx_business::connect_session::SessionRow;
+use chatbotx_business::connection::api_key;
 use chatbotx_business::connection::credentials::{self, HttpUpstream};
+use chatbotx_business::connection::oauth::{self, Actor, StartSession};
 use chatbotx_business::connection::providers::{
     self, CHANNEL_TYPES, CONNECTION_KINDS, CONNECTION_STATUSES, INTEGRATION_TYPES,
 };
@@ -130,6 +133,95 @@ pub fn connection_json(row: &ConnectionRow) -> Value {
     })
 }
 
+/// `toConnectSessionResource` (never `encryptedAuth`, the claims or the
+/// nonce hash).
+pub fn session_json(row: &SessionRow) -> Value {
+    json!({
+        "id": id(row.id),
+        "provider": row.provider,
+        "purpose": row.purpose,
+        "status": row.status,
+        "step": row.step,
+        "nextAction": row.next_action.clone().unwrap_or(Value::Null),
+        "targets": row.targets,
+        "connectionIds": row.result_connection_ids,
+        "errorCode": row.error_code,
+        "expiresAt": date(row.expires_at),
+    })
+}
+
+/// `toSessionReturn` (`sanitizeOptionalReturnUrl`): an absolute
+/// `redirectUrl` on the app origin becomes the session's relative return
+/// URL and its origin host; any other is ignored.
+fn session_return(app_url: &str, redirect: Option<String>) -> (Option<String>, Option<String>) {
+    let (Some(redirect), Ok(app)) = (redirect, url::Url::parse(app_url)) else {
+        return (None, None);
+    };
+    match url::Url::parse(&redirect) {
+        Ok(url) if url.origin() == app.origin() => {
+            let mut path = url.path().to_string();
+            if let Some(query) = url.query() {
+                path.push('?');
+                path.push_str(query);
+            }
+            if let Some(fragment) = url.fragment() {
+                path.push('#');
+                path.push_str(fragment);
+            }
+            (
+                Some(path),
+                url.host_str().map(|h| match url.port() {
+                    Some(port) => format!("{h}:{port}"),
+                    None => h.to_string(),
+                }),
+            )
+        }
+        _ => (None, None),
+    }
+}
+
+/// `startConnect` / `startReconnect` (OAuth part): the owner's platform
+/// credential (else `connectionNotConfigured`), then a `pending` session.
+async fn start_oauth(
+    state: &ApiState,
+    principal: &Principal,
+    workspace_id: i64,
+    provider: &str,
+    target_connection_id: Option<i64>,
+    redirect: Option<String>,
+) -> Result<SessionRow, BusinessError> {
+    let owner = oauth::workspace_owner(&state.db, workspace_id).await?;
+    let Some(encryption) = state.encryption.as_deref() else {
+        return Err(oauth::not_configured(provider));
+    };
+    let credential =
+        oauth::resolve_credential(&state.db, encryption, &state.app_url, provider, owner)
+            .await?
+            .ok_or_else(|| oauth::not_configured(provider))?;
+    let (return_url, origin_host) = session_return(&state.app_url, redirect);
+    oauth::start_session(
+        &state.db,
+        &credential,
+        StartSession {
+            workspace_id,
+            provider: provider.to_string(),
+            purpose: if target_connection_id.is_some() {
+                "reconnect"
+            } else {
+                "connect"
+            },
+            target_connection_id,
+            platform_owner_id: owner,
+            origin_host,
+            return_url,
+            actor: super::member()
+                .map(|m| Actor::User(m.user_id))
+                .or(principal.token_id.map(Actor::Token)),
+        },
+    )
+    .await
+}
+
 /// `connectionIdField` (any string; a value that is not a bigint matches no
 /// row).
 fn path_id(input: &mut Input) -> i64 {
@@ -233,18 +325,23 @@ pub async fn handle(
                     providers::assert_generic_provider_allowed(&row.provider)?;
                 }
                 let ai_key = credentials::ai_key_provider(&row.provider);
-                match (route_id, ai_key) {
-                    ("connections.disconnect", Some(_)) => {
+                let email = api_key::api_key_provider(&row.provider);
+                let active = connection::is_active(&row.status);
+                match (route_id, ai_key, email) {
+                    ("connections.disconnect", Some(_), _)
+                    | ("connections.disconnect", _, Some(_)) => {
                         credentials::disconnect_integration(&state.db, row).await
                     }
-                    ("connections.disconnect", None) if row.provider == "telegram" => {
+                    ("connections.disconnect", _, _) if row.provider == "telegram" => {
                         credentials::disconnect_telegram(&state.db, &HttpUpstream, row).await
                     }
-                    ("connections.disconnect", None) => {
+                    ("connections.disconnect", _, _) => {
                         connection::disconnect(&state.db, row.id, ws).await
                     }
-                    ("connections.refresh", _) => connection::refresh(&state.db, row.id, ws).await,
-                    (_, Some(provider)) if connection::is_active(&row.status) => {
+                    ("connections.refresh", _, _) => {
+                        connection::refresh(&state.db, row.id, ws).await
+                    }
+                    (_, Some(provider), _) if active => {
                         credentials::verify_ai_key_connection(
                             &state.db,
                             &HttpUpstream,
@@ -253,9 +350,10 @@ pub async fn handle(
                         )
                         .await
                     }
-                    (_, None)
-                        if row.provider == "telegram" && connection::is_active(&row.status) =>
-                    {
+                    (_, _, Some(provider)) if active => {
+                        api_key::verify(&state.db, &HttpUpstream, provider, row).await
+                    }
+                    _ if row.provider == "telegram" && active => {
                         credentials::verify_telegram(&state.db, &HttpUpstream, row).await
                     }
                     _ => connection::verify(&state.db, row.id, ws).await,
@@ -268,17 +366,25 @@ pub async fn handle(
         "connections.reconnect" => {
             let mut input = Input::from_body(call.params, call.body);
             let connection_id = path_id(&mut input);
-            let _redirect = input.nullish_url("redirectUrl", usize::MAX);
+            let redirect = input.nullish_url("redirectUrl", usize::MAX).flatten();
             if let Err(error) = input.finish() {
                 return Some(Err(error));
             }
             async {
                 let row = load_scoped(state, principal, connection_id, ws).await?;
                 providers::assert_generic_provider_allowed(&row.provider)?;
-                connection::reconnect(&state.db, &row).await
+                if oauth::adapter(&row.provider).is_none() {
+                    connection::reconnect(&state.db, &row).await?;
+                }
+                start_oauth(state, principal, ws, &row.provider, Some(row.id), redirect).await
             }
             .await
-            .map(|row| json(201, connection_json(&row)))
+            .map(|session| {
+                json(
+                    201,
+                    json!({ "connection": null, "session": session_json(&session), "secret": null }),
+                )
+            })
             .map_err(|e| with_idempotency(RECONNECTING, e))
         }
         _ => return None,
@@ -349,7 +455,7 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
             None
         }
     };
-    let _redirect = input.nullish_url("redirectUrl", usize::MAX);
+    let redirect = input.nullish_url("redirectUrl", usize::MAX).flatten();
     if let Err(error) = input.finish() {
         return Some(Err(error));
     }
@@ -449,6 +555,39 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
                         &state.db,
                         &HttpUpstream,
                         call.workspace_id,
+                        &config,
+                        None,
+                    )
+                    .await
+                    .map(|row| {
+                        json(
+                            201,
+                            json!({ "connection": connection_json(&row), "session": null, "secret": null }),
+                        )
+                    })
+                    .map_err(|e| with_idempotency(CREATING, e)),
+                );
+            }
+            if oauth::adapter(other).is_some() {
+                return Some(
+                    start_oauth(state, principal, call.workspace_id, other, None, redirect)
+                        .await
+                        .map(|session| {
+                            json(
+                                201,
+                                json!({ "connection": null, "session": session_json(&session), "secret": null }),
+                            )
+                        })
+                        .map_err(|e| with_idempotency(CREATING, e)),
+                );
+            }
+            if let Some(provider) = api_key::api_key_provider(other) {
+                return Some(
+                    api_key::connect(
+                        &state.db,
+                        &HttpUpstream,
+                        call.workspace_id,
+                        provider,
                         &config,
                         None,
                     )
