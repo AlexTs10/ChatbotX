@@ -25,6 +25,7 @@ mod media_library;
 mod pipeline_board;
 mod pipelines;
 mod products;
+mod rest;
 mod sequences;
 mod settings;
 mod templates;
@@ -168,6 +169,9 @@ pub async fn procedure(
     if let Some(outcome) = templates::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = rest::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = user_persistent_menus::procedure(ctx, path).await {
         return Some(outcome);
     }
@@ -215,6 +219,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || pipeline_board::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
                 || comments::is_action(n)
+                || rest::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n)
                 || email_topics::ACTIONS.contains(&n)
                 || sequences::ACTIONS.contains(&n)
@@ -281,6 +286,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = user_persistent_menus::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = rest::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

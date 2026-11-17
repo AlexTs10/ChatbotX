@@ -17,6 +17,7 @@ pub mod channels;
 pub mod comment_automations;
 pub mod comment_channels;
 pub mod comment_crud;
+pub mod conditions;
 pub mod connect_sessions;
 pub mod connections;
 pub mod contact_custom_fields;
@@ -35,12 +36,15 @@ pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod email_topics;
 pub mod error_logs;
+pub mod external_webhooks;
 pub mod flows;
 pub mod folders;
+pub mod inbound_webhooks;
 pub mod inbox_teams;
 pub mod input;
 pub mod integrations_ai;
 pub mod keywords;
+pub mod magic_links;
 pub mod media_library;
 pub mod messages;
 pub mod messenger_menus;
@@ -58,12 +62,17 @@ pub mod products;
 pub mod qr_codes;
 pub mod questionnaires;
 pub mod reflinks;
+pub mod response_sla;
+pub mod saved_replies;
 pub mod sequences;
 pub mod smtp_integrations;
+pub mod spreadsheets;
 pub mod tags;
 pub mod templates;
 pub mod triggers;
 pub mod webchats;
+pub mod webhooks;
+pub mod working_hours;
 pub mod workspace_members;
 pub mod workspace_settings;
 
@@ -669,6 +678,22 @@ async fn route(
         messenger_menus::handle(state, route_id, call).await
     } else if messenger_templates::ROUTES.contains(&route_id) {
         messenger_templates::handle(state, route_id, call).await
+    } else if saved_replies::ROUTES.contains(&route_id) {
+        saved_replies::handle(state, route_id, call).await
+    } else if response_sla::ROUTES.contains(&route_id) {
+        response_sla::handle(state, route_id, call).await
+    } else if webhooks::ROUTES.contains(&route_id) {
+        webhooks::handle(state, route_id, call).await
+    } else if inbound_webhooks::ROUTES.contains(&route_id) {
+        inbound_webhooks::handle(state, route_id, call, principal).await
+    } else if external_webhooks::ROUTES.contains(&route_id) {
+        external_webhooks::handle(state, route_id, call).await
+    } else if magic_links::ROUTES.contains(&route_id) {
+        magic_links::handle(state, route_id, call).await
+    } else if spreadsheets::ROUTES.contains(&route_id) {
+        spreadsheets::handle(state, route_id, call).await
+    } else if working_hours::ROUTES.contains(&route_id) {
+        working_hours::handle(state, route_id, call).await
     } else {
         return None;
     };
