@@ -191,7 +191,7 @@ fn condition_rows(value: &Value) -> Vec<&Value> {
 }
 
 /// `SOURCE_KIND_BY_EVENT_TYPE`.
-fn condition_source_kind(event: &str) -> Option<&'static str> {
+pub(crate) fn condition_source_kind(event: &str) -> Option<&'static str> {
     Some(match event {
         "tagApplied" | "tagRemoved" => "tag",
         "customFieldValueChanged" | "dateTimeBasedTrigger" => "customField",

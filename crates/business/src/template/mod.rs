@@ -2,13 +2,17 @@
 //!
 //! Ported: permissions, the view-only / undeletable lookups, the publisher
 //! reads and share settings ([`service`]) and the installer's installation
-//! reads and settings ([`installations`]). The snapshot save, install, sync,
-//! uninstall engines and their worker jobs are not ported yet (specs/Q.D4.md).
+//! reads and settings ([`installations`]), the snapshot save ([`save`],
+//! [`collect`], [`snapshot`]) and the install engine, preview and install job
+//! ([`install`], [`request`]). Sync, uninstall and the tenant default are not
+//! ported yet (specs/Q.D4.md).
 //! Postgres advisory locks are the one SQLite writer.
 
 pub mod collect;
+pub mod install;
 pub mod installations;
 pub mod permissions;
+pub mod request;
 pub mod save;
 pub mod service;
 pub mod snapshot;

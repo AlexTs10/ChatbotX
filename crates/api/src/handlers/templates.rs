@@ -7,7 +7,8 @@
 use chatbotx_business::template::collect::CATEGORIES;
 use chatbotx_business::template::permissions::Actor;
 use chatbotx_business::template::{
-    RESOURCE_KINDS, installations, list_locked_resource_ids, save as template_save, service,
+    RESOURCE_KINDS, installations, list_locked_resource_ids, request as install_request,
+    save as template_save, service,
 };
 use serde_json::{Value, json};
 
@@ -37,6 +38,11 @@ pub const ROUTES: &[&str] = &[
     "templateInstallations.update",
     "templateInstallations.listSyncs",
     "templateInstallations.getSync",
+    "templateInstallations.install",
+    "templateInstallations.retry",
+    "templateInstallations.get",
+    "templateInstallations.listResources",
+    "templatePreviews.get",
 ];
 
 const INSTALLATION_STATUSES: &[&str] = &[
@@ -77,6 +83,11 @@ pub async fn handle(
         "templateInstallations.update" => update_installation(state, call, &actor).await,
         "templateInstallations.listSyncs" => list_syncs(state, call).await,
         "templateInstallations.getSync" => get_sync(state, call).await,
+        "templateInstallations.install" => install(state, call, actor).await,
+        "templateInstallations.retry" => retry(state, call, actor).await,
+        "templateInstallations.get" => get_installation(state, call, actor).await,
+        "templateInstallations.listResources" => list_resources(state, call).await,
+        "templatePreviews.get" => preview(state, call, principal).await,
         _ => Err(crate::routes::not_ported_error()),
     }
 }
@@ -630,4 +641,136 @@ async fn preview_dependencies(state: &ApiState, call: Call<'_>, actor: &Actor) -
     .await
     .map_err(|e| business_error(e, LISTING))?;
     Ok(json(200, out))
+}
+
+// ---------------------------------------------------------------------------
+// Slice 3: install, retry, detail, resources, preview
+// ---------------------------------------------------------------------------
+
+/// `inboxBindingsSchema`: `zodBigintAsString` keys and values.
+fn inbox_bindings_at(input: &mut Input, name: &str) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let Some(value) = input.get(name).cloned() else {
+        return out;
+    };
+    let Value::Object(map) = value else {
+        input.issue(&key(name), "invalid_type", "Invalid input: expected record");
+        return out;
+    };
+    for (source, target) in map {
+        let mut at = key(name);
+        at.push(Seg::Key(source.clone()));
+        let ok_key = super::input::is_bigint_id(&source);
+        match target.as_str() {
+            Some(t) if ok_key && super::input::is_bigint_id(t) => {
+                out.insert(source, t.to_string());
+            }
+            _ => input.issue(&at, "invalid_type", "Invalid input"),
+        }
+    }
+    out
+}
+
+async fn install(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
+    let mut input = Input::from_body(call.params, call.body);
+    let share_token = input.string("shareToken", Str::trimmed(1, usize::MAX));
+    let inbox_bindings = inbox_bindings_at(&mut input, "inboxBindings");
+    let allow_duplicate = input.opt_bool("allowDuplicate");
+    let accept = input.opt_bool("acceptPublisherUninstall");
+    let auto_update = input.opt_bool("autoUpdate");
+    input.finish()?;
+    let requested = install_request::request(
+        &state.db,
+        state.jobs.as_deref(),
+        install_request::InstallRequest {
+            share_token: share_token.unwrap_or_default(),
+            workspace_id: call.workspace_id,
+            installed_by: None,
+            allow_duplicate: allow_duplicate.unwrap_or_default(),
+            accept_publisher_uninstall: accept,
+            auto_update,
+            idempotency_key: None,
+            inbox_bindings,
+        },
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, CREATING))?;
+    let mut out = json!({ "installationId": id(requested.installation_id) });
+    if let Some(sync_id) = requested.sync_id {
+        out["syncId"] = json!(id(sync_id));
+    }
+    Ok(json(202, out))
+}
+
+async fn retry(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
+    let installation_id = path_id(call, "id")?;
+    let retried = install_request::retry(
+        &state.db,
+        state.jobs.as_deref(),
+        call.workspace_id,
+        installation_id,
+        actor,
+        None,
+    )
+    .await
+    .map_err(|e| business_error(e, MUTATING))?;
+    Ok(json(202, json!({ "installationId": id(retried) })))
+}
+
+async fn get_installation(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
+    let installation_id = path_id(call, "id")?;
+    let detail = install_request::get_detail(&state.db, call.workspace_id, installation_id, actor)
+        .await
+        .map_err(|e| business_error(e, FINDING))?;
+    Ok(json(200, detail))
+}
+
+async fn list_resources(state: &ApiState, call: Call<'_>) -> Reply {
+    let mut input = Input::from_query(call.params, call.query);
+    let installation_id = input.digits_id("id");
+    let after_id = if input.has("cursor") {
+        input.digits_id("cursor")
+    } else {
+        None
+    };
+    let limit = input.opt_coerce_int("limit", Num::int(1.0, 200.0));
+    let category_value = input.get("category").cloned();
+    let category = input.enum_at(&key("category"), category_value.as_ref(), CATEGORIES, false);
+    input.finish()?;
+    let page = install_request::list_resources(
+        &state.db,
+        call.workspace_id,
+        installation_id.unwrap_or(-1),
+        after_id,
+        limit,
+        category,
+    )
+    .await
+    .map_err(|e| business_error(e, FINDING))?;
+    Ok(json(200, page))
+}
+
+/// `templatePreviews.get`: a `read_only` token sees `installable: false`
+/// (`templateManagePermissionDenied`) and never the collisions.
+async fn preview(state: &ApiState, call: Call<'_>, principal: &Principal) -> Reply {
+    let mut input = Input::from_query(call.params, call.query);
+    let share_token = input.string("id", Str::trimmed(1, usize::MAX));
+    input.finish()?;
+    let preview = install_request::preview(
+        &state.db,
+        share_token.unwrap_or_default(),
+        call.workspace_id,
+        Actor::ApiToken { full: true },
+        !principal.read_only,
+    )
+    .await
+    .map_err(|e| business_error(e, FINDING))?;
+    if principal.read_only && preview["installable"] == true {
+        return Ok(json(
+            200,
+            json!({ "installable": false, "reason": "templateManagePermissionDenied" }),
+        ));
+    }
+    Ok(json(200, preview))
 }

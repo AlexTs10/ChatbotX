@@ -210,8 +210,24 @@ pub async fn create(
     app_url: &str,
     now: i64,
 ) -> Result<(WebchatRow, ConnectionRow)> {
-    let menus = brand_webchat_menus(data.persistent_menus.clone(), app_url);
+    let app_url = app_url.to_string();
     tx::write(db, move |tx| {
+        create_in(tx, workspace_id, created_by, data, &app_url, now)
+    })
+    .await
+}
+
+/// [`create`] on the caller's transaction (the template install).
+pub fn create_in(
+    tx: &Connection,
+    workspace_id: i64,
+    created_by: Option<i64>,
+    data: WebchatData,
+    app_url: &str,
+    now: i64,
+) -> Result<(WebchatRow, ConnectionRow)> {
+    let menus = brand_webchat_menus(data.persistent_menus.clone(), app_url);
+    {
         let welcome_flow_id = resolve_welcome_flow_id(tx, data.welcome_flow_id, workspace_id)?;
         let webchat_id: i64 = chatbotx_core::utils::id::create_id()
             .parse()
@@ -257,8 +273,7 @@ pub async fn create(
             ))
         })?;
         Ok((webchat, connection))
-    })
-    .await
+    }
 }
 
 /// `findByIdForWorkspace` (`404 Integration Webchat not found`).
