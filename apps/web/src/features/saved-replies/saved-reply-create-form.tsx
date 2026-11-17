@@ -1,0 +1,114 @@
+"use client"
+
+import { InputField } from "@chatbotx.io/ui/components/form/input-field"
+import { TextareaField } from "@chatbotx.io/ui/components/form/textarea-field"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import { Form } from "@chatbotx.io/ui/components/ui/form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useHookFormAction } from "@next-safe-action/adapter-react-hook-form/hooks"
+import { Loader2Icon } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { toast } from "sonner"
+import { createSavedReplyAction } from "./actions/create-saved-reply.action"
+import { SavedReplyImagesField } from "./saved-reply-images-field"
+import { buildSavedReplyFormSchema } from "./schema/mutation"
+import type { SavedReplyResource } from "./schema/resource"
+
+const NO_IMAGES: never[] = []
+
+type SavedReplyCreateFormProps = {
+  workspaceId: string
+  onCancel: () => void
+  onSaved: (item: SavedReplyResource) => void
+}
+
+const SavedReplyCreateForm = ({
+  workspaceId,
+  onCancel,
+  onSaved,
+}: SavedReplyCreateFormProps) => {
+  const t = useTranslations()
+
+  const {
+    form,
+    handleSubmitWithAction,
+    resetFormAndAction: resetForm,
+  } = useHookFormAction(
+    createSavedReplyAction.bind(null, workspaceId),
+    zodResolver(
+      buildSavedReplyFormSchema(t("messages.savedReplyTextOrImageRequired")),
+    ),
+    {
+      actionProps: {
+        onSuccess: ({ data }) => {
+          if (data) {
+            onSaved(data)
+          }
+
+          toast.success(
+            t("messages.createdSuccess", {
+              feature: t("fields.savedReplies.label"),
+            }),
+          )
+          resetForm()
+          onCancel()
+        },
+        onError: ({ error }) => {
+          if (error.serverError) {
+            toast.error(error.serverError)
+          }
+        },
+      },
+      formProps: {
+        mode: "onChange",
+        defaultValues: {
+          shortcut: "",
+          text: "",
+          imageFileIds: [],
+        },
+      },
+      errorMapProps: {},
+    },
+  )
+
+  return (
+    <Form {...form}>
+      <form className="space-y-4 p-4" onSubmit={handleSubmitWithAction}>
+        <InputField
+          label={t("fields.shortcut.label")}
+          name="shortcut"
+          placeholder="/hello"
+          required
+        />
+
+        <TextareaField
+          label={t("fields.messages.label")}
+          name="text"
+          placeholder="..."
+        />
+
+        <SavedReplyImagesField
+          initialImages={NO_IMAGES}
+          workspaceId={workspaceId}
+        />
+
+        <div className="flex items-center justify-between pt-2">
+          <Button onClick={onCancel} type="button" variant="outline">
+            {t("actions.cancel")}
+          </Button>
+          <Button
+            disabled={!form.formState.isValid || form.formState.isSubmitting}
+            type="submit"
+          >
+            {form.formState.isSubmitting ? (
+              <Loader2Icon className="animate-spin" />
+            ) : null}
+            {t("actions.save")}
+          </Button>
+        </div>
+      </form>
+    </Form>
+  )
+}
+
+export { SavedReplyCreateForm }

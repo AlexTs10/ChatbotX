@@ -119,6 +119,11 @@ const workspacePages = [
       "ContactsPage",
     ),
   }),
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path: "inbox",
+    component: lazyRouteComponent(() => import("@/routes/inbox"), "InboxPage"),
+  }),
 ]
 const flowsRoute = createRoute({
   getParentRoute: () => workspaceRoute,

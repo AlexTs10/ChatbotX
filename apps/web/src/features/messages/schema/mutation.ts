@@ -1,0 +1,303 @@
+import { channelTypes } from "@chatbotx.io/database/partials"
+import { sendProductsContentSchema } from "@chatbotx.io/flow-config"
+import { zodBigintAsString } from "@chatbotx.io/utils"
+import { z } from "zod"
+import { zodGuestConversationId } from "@/features/integration-webchat/lib/guest-conversation-id"
+
+const MAX_FILE_SIZE = 5 * 1000 * 1000
+
+const mediaLibraryFileRequest = z.object({
+  path: z
+    .string()
+    .min(1)
+    .describe(
+      "Storage path of an existing Media Library file (`path` from `mediaLibrary.listFiles` or `mediaLibrary.createFile`). The file is looked up by this value.",
+    ),
+  // Display-only; the server resolves the public URL from `path` itself.
+  url: z
+    .string()
+    .optional()
+    .describe(
+      "Optional public URL, display only; the server resolves the real URL from `path`.",
+    ),
+  mimeType: z
+    .string()
+    .min(1)
+    .describe("File MIME type, e.g. `image/png`; informational."),
+  name: z.string().nullish().describe("File display name; informational."),
+  size: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("File size in bytes; informational."),
+})
+
+const bypassField = z
+  .boolean()
+  .optional()
+  .describe("Skip the WhatsApp standby send gate (agent dismissed the lock).")
+
+export const createMessageRequest = z
+  .union([
+    // Listed first, like the Media Library branches below: z.object() strips
+    // unknown keys, so a body that also carries `text` would otherwise match the
+    // text branch and silently lose its products. A valid `products` wins; one
+    // that fails its own schema falls through to the other branches, as a
+    // body with an invalid `flowId` already does.
+    z.object({
+      products: sendProductsContentSchema.describe(
+        "Catalog products to send instead of text, on channels with product messages (WhatsApp today) inside the customer-service window. Product ids come from `products.listSendable` (scope `ecommerce`); put the text in `products.body`. Cannot be combined with text, files, media, `flowId` or a comment reply: when `products` is valid only it is sent. Fails with `validation` (422) when the message breaks the channel's rules, and `productMessageUnresolvable` (422, `data.reason`) when the channel has no product messages, no catalog is connected, or some ids are not sendable.",
+      ),
+    }),
+    z.object({
+      text: z.string().trim().min(1).max(1000).describe("Message text."),
+      files: z
+        .array(
+          z.instanceof(File).refine((file) => file.size <= MAX_FILE_SIZE, {
+            message: "Max image size is 5MB.",
+          }),
+        )
+        .min(1)
+        .describe("Media files to attach, up to 5MB each."),
+    }),
+    z.object({
+      text: z.string().trim().min(1).max(1000).describe("Message text."),
+      mediaFile: mediaLibraryFileRequest.describe(
+        "Media library file reference to attach.",
+      ),
+    }),
+    // Media Library selection identified by DB id — must be listed before
+    // the text-only branch below, since z.object() strips unknown keys: if
+    // the text-only branch matched first, mediaFileId would be silently
+    // dropped and the message would send as plain text.
+    z.object({
+      text: z.string().trim().min(1).max(1000).describe("Message text."),
+      mediaFileId: zodBigintAsString().describe(
+        "Media library file id (numeric string) to attach.",
+      ),
+    }),
+    // Multi-select Media Library variant — several images sent as one
+    // message. Same union-ordering constraint as mediaFileId above.
+    z.object({
+      text: z.string().trim().min(1).max(1000).describe("Message text."),
+      mediaFileIds: z
+        .array(zodBigintAsString())
+        .min(1)
+        .max(10)
+        .describe(
+          "Media library file ids (numeric strings) to attach, up to 10.",
+        ),
+    }),
+    z.object({
+      text: z.string().trim().min(1).max(1000).describe("Message text."),
+    }),
+    z.object({
+      files: z
+        .array(
+          z.instanceof(File).refine((file) => file.size <= MAX_FILE_SIZE, {
+            message: "Max image size is 5MB.",
+          }),
+        )
+        .min(1)
+        .describe("Media files to attach, up to 5MB each."),
+    }),
+    z.object({
+      mediaFile: mediaLibraryFileRequest.describe(
+        "Media library file reference to attach.",
+      ),
+    }),
+    z.object({
+      mediaFileId: zodBigintAsString().describe(
+        "Media library file id (numeric string) to attach.",
+      ),
+    }),
+    z.object({
+      mediaFileIds: z
+        .array(zodBigintAsString())
+        .min(1)
+        .max(10)
+        .describe(
+          "Media library file ids (numeric strings) to attach, up to 10.",
+        ),
+    }),
+    z.object({
+      flowId: zodBigintAsString().describe(
+        "Flow id (numeric string) to send instead of a plain message. Get it from `flows.list`.",
+      ),
+      nodeId: zodBigintAsString()
+        .optional()
+        .describe(
+          "Node id within the flow to start from. Defaults to the flow's start node.",
+        ),
+    }),
+  ])
+  .and(
+    z.object({
+      inboxId: zodBigintAsString()
+        .optional()
+        .describe(
+          "Optional numeric channel inbox ID. Omit this field to use the existing inbox resolution fallback.",
+        ),
+      clientId: zodBigintAsString()
+        .optional()
+        .describe("Client-generated id echoed back for de-duplication."),
+      replyToMessageId: z
+        .string()
+        .optional()
+        .describe("Id of the message this one replies to."),
+      replyToMessageCreatedAt: z.coerce
+        .date()
+        .optional()
+        .describe("Creation timestamp of the message this one replies to."),
+      // When true, the outgoing comment is sent as a comment-anchored private
+      // reply DM instead of a public comment reply.
+      isPrivateReply: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, sends as a comment-anchored private reply DM instead of a public comment reply.",
+        ),
+    }),
+  )
+export type CreateMessageRequest = z.infer<typeof createMessageRequest>
+
+/**
+ * Builder-only variant of `createMessageRequest`: the interactive composer may
+ * set `bypassThreadControlLock` to skip the WhatsApp standby send gate after the
+ * agent dismisses the routing lock. Kept off `createMessageRequest` itself so the
+ * public and private message APIs never accept or advertise it.
+ */
+export const createMessageWithRoutingBypassRequest = createMessageRequest.and(
+  z.object({ bypassThreadControlLock: bypassField }),
+)
+
+export const createWebchatMessageRequest = z
+  .union([
+    z.object({
+      text: z.string().trim().min(1).max(1000),
+      postback: z.string().trim().optional(),
+    }),
+    z.object({
+      flowId: zodBigintAsString(),
+    }),
+    z.object({
+      initRef: z.string(),
+    }),
+    z.object({
+      init: z.literal(true),
+    }),
+    z.object({
+      files: z
+        .array(
+          z.instanceof(File).refine((file) => file.size <= MAX_FILE_SIZE, {
+            message: "Max image size is 5MB.",
+          }),
+        )
+        .min(1),
+    }),
+  ])
+  .and(
+    z.object({
+      clientId: z.string().optional(),
+      workspaceId: zodBigintAsString(),
+      webchatId: zodBigintAsString(),
+      guestConversationId: zodGuestConversationId(),
+      ref: z.string().optional(),
+      parentUrl: z.url().max(2048).optional(),
+      locale: z.string().max(35).optional(),
+      timezone: z.string().max(64).optional(),
+      accessToken: z.string().optional(),
+      parentOrigin: z.string().optional(),
+    }),
+  )
+export type CreateWebchatMessageRequest = z.infer<
+  typeof createWebchatMessageRequest
+>
+
+export const deleteMessageRequest = z.object({
+  id: z.string().min(1),
+  createdAt: z.coerce.date(),
+})
+export type DeleteMessageRequest = z.infer<typeof deleteMessageRequest>
+
+export const editMessageRequest = z.object({
+  messageId: zodBigintAsString().describe("Message id."),
+  createdAt: z.coerce
+    .date()
+    .describe(
+      "The message's createdAt timestamp, exactly as returned by `messages.list`. Required to locate the message.",
+    ),
+  newText: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2000)
+    .describe("Replacement message text."),
+  newAttachmentPath: z
+    .string()
+    .optional()
+    .describe("Path of a replacement attachment, if changing it."),
+  newAttachmentPublicUrl: z
+    .string()
+    .optional()
+    .describe("Public URL of the replacement attachment."),
+  newAttachmentMimeType: z
+    .string()
+    .optional()
+    .describe("MIME type of the replacement attachment."),
+  newAttachmentName: z
+    .string()
+    .optional()
+    .describe("Display name of the replacement attachment."),
+  newAttachmentSize: z
+    .number()
+    .int()
+    .optional()
+    .describe("Size in bytes of the replacement attachment."),
+  removeAttachment: z
+    .boolean()
+    .optional()
+    .describe("Whether to remove the message's existing attachment entirely."),
+})
+export type EditMessageRequest = z.infer<typeof editMessageRequest>
+
+export const sendFileMessageRequest = z.object({
+  contactId: zodBigintAsString(),
+  channel: channelTypes,
+  file: z.file().refine((file) => file.size <= MAX_FILE_SIZE, {
+    message: "Max image size is 5MB.",
+  }),
+})
+
+export const sendFlowMessageRequest = z.object({
+  contactId: zodBigintAsString(),
+  channel: channelTypes,
+  flowId: zodBigintAsString(),
+})
+
+export const changeMessageAttributesRequest = z.object({
+  messageId: zodBigintAsString().describe("Message id."),
+  createdAt: z.coerce
+    .date()
+    .describe(
+      "The message's createdAt timestamp, exactly as returned by `messages.list`. Required to locate the message.",
+    ),
+  liked: z
+    .boolean()
+    .optional()
+    .describe("Whether the message should be marked liked."),
+  hidden: z
+    .boolean()
+    .optional()
+    .describe("Whether the message should be hidden."),
+})
+export type ChangeMessageAttributesRequest = z.infer<
+  typeof changeMessageAttributesRequest
+>
+
+export const developerAccessTokenCreateMessageRequest =
+  createMessageRequest.and(
+    z.object({
+      channel: channelTypes,
+    }),
+  )
