@@ -19,7 +19,7 @@ fn region_id(region: Option<&str>) -> Option<country::Id> {
 
 /// `parsePhoneNumberFromString(raw, region)`: the parsed number, or `None`
 /// when `raw` is not a phone number (a national number needs the region).
-fn parse(raw: &str, region: Option<&str>) -> Option<PhoneNumber> {
+pub(crate) fn parse(raw: &str, region: Option<&str>) -> Option<PhoneNumber> {
     if raw.trim().is_empty() {
         return None;
     }

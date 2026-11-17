@@ -12,7 +12,8 @@ use ring::rand::{SecureRandom as _, SystemRandom};
 use serde_json::{Value, json};
 
 use crate::channel::{
-    Channel, ChannelCtx, ChannelResult, SendFailure, SendFlowStep, SendMessage, SendResult,
+    Channel, ChannelCtx, ChannelResult, IncomingAttachment, IncomingContact, IncomingMessage,
+    Received, SendFailure, SendFlowStep, SendMessage, SendResult,
 };
 
 /// `DELIVERY_TIMEOUT_MS`.
@@ -290,6 +291,75 @@ impl Channel for ApiChannel {
             ))
         })
     }
+
+    /// `receiveMessage` (`handlers/message/incoming-message.ts`): the body
+    /// the public route validated (`incomingApiMessageSchema`).
+    fn receive_message(
+        &self,
+        _ctx: &ChannelCtx,
+        payload: Value,
+    ) -> BoxFuture<'static, ChannelResult<Option<Received>>> {
+        Box::pin(std::future::ready(parse_incoming(&payload).map(Some)))
+    }
+}
+
+/// The `incomingApiMessageSchema` payload as a [`Received`].
+pub fn parse_incoming(payload: &Value) -> ChannelResult<Received> {
+    let text_of = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
+    let contact = &payload["contact"];
+    let message = &payload["message"];
+    let (Some(contact_source), Some(message_source)) = (
+        text_of(contact, "sourceId").filter(|s| !s.is_empty()),
+        text_of(message, "sourceId").filter(|s| !s.is_empty()),
+    ) else {
+        return Err(SendFailure::Other(
+            "Invalid API channel message payload".into(),
+        ));
+    };
+    let attachments = message["attachments"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|a| {
+            let url = text_of(a, "url").unwrap_or_default();
+            IncomingAttachment {
+                source_id: Some(url.clone()),
+                file_type: text_of(a, "fileType").unwrap_or_else(|| "file".into()),
+                mime_type: text_of(a, "mimeType").unwrap_or_default(),
+                origin_path: url,
+                size: Some(0),
+                name: text_of(a, "name"),
+                is_photo_message: false,
+            }
+        })
+        .collect();
+    let mut incoming = IncomingMessage::incoming(Some(message_source));
+    incoming.content_type = if text_of(message, "contentType").as_deref() == Some("location") {
+        "location".into()
+    } else {
+        "text".into()
+    };
+    incoming.text = text_of(message, "text");
+    incoming.content_attributes = message
+        .get("contentAttributes")
+        .filter(|v| v.is_object())
+        .cloned();
+    incoming.attachments = attachments;
+    Ok(Received {
+        message: Some(incoming),
+        contact: IncomingContact {
+            source_id: contact_source,
+            first_name: text_of(contact, "firstName"),
+            last_name: text_of(contact, "lastName"),
+            email: text_of(contact, "email"),
+            phone_number: text_of(contact, "phoneNumber"),
+            avatar: text_of(contact, "avatar"),
+            locale: text_of(contact, "locale"),
+            ..IncomingContact::default()
+        },
+        postback_action: text_of(payload, "postbackPayload"),
+        ..Received::default()
+    })
 }
 
 #[cfg(test)]

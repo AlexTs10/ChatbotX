@@ -142,6 +142,12 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
                 .unwrap_or_else(|| flow_execution_key(&job));
             crate::flow::run_flow_node(&deps, data, key).await?;
         }
+        crate::inbound::INCOMING_MESSAGE => {
+            crate::inbound::incoming_message(&deps, &job.data["data"]).await?
+        }
+        crate::inbound::MESSAGE_STATUS => {
+            crate::inbound::message_status(&deps, &job.data["data"]).await?
+        }
         other => {
             // ponytail: every other integration action is a later unit
             // (inbound channels Q.I*, steps, sequences, ...).
