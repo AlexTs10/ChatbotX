@@ -1296,7 +1296,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/drip-handler.test.ts` | C | tbd | todo | Drip integration |
 | `apps/worker/__tests__/enqueue-attachment-downloads.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/enqueue-broadcast.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
-| `apps/worker/__tests__/enqueue-recurring-broadcasts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/enqueue-recurring-broadcasts.test.ts` | C | `crates/worker/tests/schedule_recurring.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5b (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/evaluate-conversion-trigger.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `apps/worker/__tests__/evaluate-template-sent.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/events-worker-shutdown.test.ts` | C | `crates/jobs/tests/events_worker_shutdown.rs` | passing | Worker runtime (boot, queues, shutdown) |
@@ -1383,7 +1383,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/marketing-message-webhook.test.ts` | C | tbd | todo | Facebook Marketing Messages |
 | `apps/worker/__tests__/marketing-message-worker-boot.test.ts` | C | tbd | todo | Facebook Marketing Messages |
 | `apps/worker/__tests__/marketing-messages-schedule.test.ts` | C | tbd | todo | Facebook Marketing Messages |
-| `apps/worker/__tests__/materialize-recurring-broadcasts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/materialize-recurring-broadcasts.test.ts` | C | `crates/worker/tests/schedule_recurring.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5b (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/message-analytics-quota.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `apps/worker/__tests__/message-failed-error-stack.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `apps/worker/__tests__/message-listener.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -1479,7 +1479,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/schedule-worker-connect-session-purge.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `apps/worker/__tests__/schedule-worker-contact-export-purge.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/schedule-worker-google-ads-dispatch.test.ts` | C | tbd | todo | Google Ads integration |
-| `apps/worker/__tests__/schedule-worker-recurring-broadcasts-dispatch.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `apps/worker/__tests__/schedule-worker-recurring-broadcasts-dispatch.test.ts` | C | `crates/worker/tests/schedule_recurring.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5b (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/schedule-worker-register-failure.test.ts` | C | `crates/jobs/tests/schedule_worker_register_failure.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/scheduler-tick-interval-env.test.ts` | C | `crates/jobs/tests/scheduler_tick_interval_env.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/segment-image-handler.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
@@ -2046,7 +2046,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/branding-menu.test.ts` | C | tbd | todo | Multi-tenancy (white-label tenants) |
 | `packages/business/__tests__/broadcast-plan-policy-service.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/business/__tests__/broadcast-recurrence-ledger.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-recurrence-service.test.ts` | C | `crates/business/tests/broadcast_history.rs` | todo | Broadcasts (incl. recurring); Q.D5, partial: history and skip ported; materializeOccurrence waits for Q.D5 slice 5 (see specs/Q.D5-test-map.tsv) |
+| `packages/business/__tests__/broadcast-recurrence-service.test.ts` | C | `crates/business/tests/broadcast_history.rs`, `crates/business/tests/broadcast_materialize.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-audience.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-clone.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-create.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |

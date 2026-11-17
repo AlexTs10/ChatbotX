@@ -50,16 +50,16 @@ const PURGE_MAX_RUN_DURATION_MS: i64 = 4 * 60 * 1000;
 pub const PURGE_DRAFT_RETRY_DELAY_MS: i64 = 5000;
 pub const PURGE_DRAFT_MAX_PASSES: u32 = 120;
 
-fn biz(error: chatbotx_business::errors::BusinessError) -> JobError {
+pub(super) fn biz(error: chatbotx_business::errors::BusinessError) -> JobError {
     db_fail(error)
 }
 
-fn queue_err(error: chatbotx_jobs::JobsError) -> JobError {
+pub(super) fn queue_err(error: chatbotx_jobs::JobsError) -> JobError {
     db_fail(error)
 }
 
 /// `removeOnComplete: true, removeOnFail: true` under a fixed job id.
-fn once(job_id: String) -> JobOptions {
+pub(super) fn once(job_id: String) -> JobOptions {
     JobOptions {
         job_id: Some(job_id),
         remove_on_complete: Some(Retention::Remove),
@@ -69,13 +69,13 @@ fn once(job_id: String) -> JobOptions {
 }
 
 /// `startOfMinute(now)`.
-fn start_of_minute(now: i64) -> i64 {
+pub(super) fn start_of_minute(now: i64) -> i64 {
     now - now.rem_euclid(60_000)
 }
 
 // ponytail: `distributedLock.runExclusive` is a process-local mutex (one
 // server process); a second process needs the kv locks.
-fn cron_lock(deps: &Deps, key: &'static str) -> &'static AsyncMutex<()> {
+pub fn cron_lock(deps: &Deps, key: &'static str) -> &'static AsyncMutex<()> {
     type Locks = Mutex<HashMap<(usize, &'static str), &'static AsyncMutex<()>>>;
     static LOCKS: OnceLock<Locks> = OnceLock::new();
     // One lock per database (a deployment), so parallel tests do not share it.

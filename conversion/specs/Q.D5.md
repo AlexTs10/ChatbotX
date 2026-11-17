@@ -16,7 +16,7 @@ Q.W1 runtime (`crates/worker`, `specs/Q.W1.md`).
 | 4 | Broadcasts (business + routes) | `broadcast/` (`mod` reads + transitions, `write` create / draft / schedule / clone / resend, `audience` count / preview / calendar, `recurrence` arm / disarm / ledger / preview, `plan_policy`), `template_params.rs` | `broadcasts.*` except `listContacts` and the 4 recurrence-history routes | `privatePreviewBroadcastRecurrenceAPI`, `privateListBroadcastOptionsAPI`, `privateListBroadcastTemplateDetailsAPI`; 11 actions (all but `setBroadcastRunSkippedAction`) | done |
 | 4b | Broadcast recurrence history | `broadcast/history.rs` (skip / restore, run groups, occurrences, recipient stats) | `skipOccurrence`, `restoreOccurrence`, `listRunGroups`, `listOccurrences` | `privateListBroadcastRunGroupsAPI`, `privateListBroadcastOccurrencesAPI`, `setBroadcastRunSkippedAction` | done |
 | 5a | Broadcast worker jobs: enqueue, prepare, send, reconcile, finalize, purge, draft purge | `broadcast/send.rs`, `broadcast/audience.rs` (`AudienceWalk`); `crates/worker/src/schedule` (`schedule` queue worker, broadcast schedulers) | worker part of `broadcast/service.ts` | — | done |
-| 5b | Recurring broadcast jobs: `enqueueRecurringBroadcasts`, `materializeRecurringBroadcasts` (`materializeOccurrence`, `skipOccurrence`) | | | | todo |
+| 5b | Recurring broadcast jobs: `enqueueRecurringBroadcasts`, `materializeRecurringBroadcasts` (`materializeOccurrence`, `skipOccurrence`) | `broadcast/materialize.rs`; `crates/worker/src/schedule/recurring.rs`; `Enqueuer::backlog_count` | materialize part of `broadcast/recurrence.service.ts` | — | done |
 | 6 | Sequence scheduler in the worker (producer / consumer / reconcile, step executor) | | | | todo |
 | 7 | Smart delay | | | | todo |
 | 8 | Trigger worker | | | | todo |
@@ -69,8 +69,11 @@ Per test case: `specs/Q.D5-test-map.tsv` (file, line, name, Rust test, status, n
   and purge run one at a time. `isBlockedWorkspace` = the workspace row
   is gone or scheduled for deletion (cloud `ownerBlocked` waits for the
   user-quota port). The chat template send handlers are Q.I1.
+- Recurring broadcast jobs (slice 5b): one item at a time (one SQLite
+  writer); the backlog check is `Enqueuer::backlog_count`; plan capacity
+  resolves unrestricted until the quota service is ported.
 
 ## 4. State
 
-Slices 1–3 done (`641f599f2`). Slice 4 done (`8b3cfe662`), 4b done (`e67dd7857`), 5a done. Gate per commit: fmt, clippy `-D warnings`, `cargo test`
+Slices 1–3 done (`641f599f2`). Slice 4 done (`8b3cfe662`), 4b done (`e67dd7857`), 5a done (`59388ee17`), 5b done (gate: 2215 tests pass). Gate per commit: fmt, clippy `-D warnings`, `cargo test`
 for `chatbotx-business`, `chatbotx-api`, `chatbotx-jobs`, `chatbotx-worker` (Dell).

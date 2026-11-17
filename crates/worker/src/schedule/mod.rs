@@ -2,6 +2,7 @@
 //! Q.D5 ports the broadcast jobs; the other schedule jobs are Q.W2.
 
 pub mod broadcast;
+pub mod recurring;
 
 use chatbotx_jobs::schedules::{
     Edition, PURGE_BROADCASTS_INTERVAL_MINUTES, PURGE_WORKSPACES_INTERVAL_MINUTES,
@@ -21,6 +22,8 @@ pub const BROADCAST_JOBS: &[&str] = &[
     "finalizeBroadcasts",
     "purgeBroadcasts",
     "purgeDraftBroadcastRecipients",
+    "enqueueRecurringBroadcasts",
+    "materializeRecurringBroadcasts",
 ];
 
 /// The `createQueueWorker(schedule, ..)` switch.
@@ -37,6 +40,11 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "reconcileBroadcasts" => broadcast::reconcile_broadcasts(&deps).await?,
         "finalizeBroadcasts" => broadcast::finalize_broadcasts(&deps).await?,
         "purgeBroadcasts" => broadcast::purge_broadcasts(&deps).await?,
+        "enqueueRecurringBroadcasts" => recurring::enqueue_recurring_broadcasts(&deps).await?,
+        "materializeRecurringBroadcasts" => {
+            let items = data["items"].as_array().cloned().unwrap_or_default();
+            recurring::materialize_recurring_broadcasts(&deps, &items).await?
+        }
         "purgeDraftBroadcastRecipients" => {
             broadcast::purge_draft_broadcast_recipients(
                 &deps,

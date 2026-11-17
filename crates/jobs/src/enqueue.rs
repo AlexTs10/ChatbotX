@@ -62,6 +62,12 @@ pub trait Enqueuer: Send + Sync {
         queue: QueueName,
         jobs: Vec<NewJob>,
     ) -> BoxFuture<'_, Result<Vec<AddResult>, JobsError>>;
+
+    /// `getPrioritizedCount() + getDelayedCount()` of `queue`: the jobs still to
+    /// run. A producer without a store (a test fake) reports none.
+    fn backlog_count(&self, _queue: QueueName) -> BoxFuture<'_, Result<u64, JobsError>> {
+        Box::pin(async { Ok(0) })
+    }
 }
 
 impl From<chatbotx_db::DbError> for JobsError {
@@ -87,5 +93,9 @@ impl<T: Enqueuer + ?Sized> Enqueuer for std::sync::Arc<T> {
         jobs: Vec<NewJob>,
     ) -> BoxFuture<'_, Result<Vec<AddResult>, JobsError>> {
         (**self).add_bulk(queue, jobs)
+    }
+
+    fn backlog_count(&self, queue: QueueName) -> BoxFuture<'_, Result<u64, JobsError>> {
+        (**self).backlog_count(queue)
     }
 }

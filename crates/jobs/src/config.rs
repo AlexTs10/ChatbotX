@@ -141,6 +141,10 @@ impl Enqueuer for LazyEnqueuer {
             store.add_bulk(queue, jobs).await
         })
     }
+
+    fn backlog_count(&self, queue: QueueName) -> BoxFuture<'_, Result<u64, JobsError>> {
+        Box::pin(async move { self.inner.started().await?.backlog_count(queue).await })
+    }
 }
 
 impl Jobs {

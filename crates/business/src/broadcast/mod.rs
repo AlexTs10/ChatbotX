@@ -3,6 +3,7 @@
 
 pub mod audience;
 pub mod history;
+pub mod materialize;
 pub mod plan_policy;
 pub mod recurrence;
 pub mod send;

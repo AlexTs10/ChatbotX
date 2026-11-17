@@ -695,7 +695,7 @@ fn replace_targets(conn: &Connection, broadcast_id: i64, data: &Value) -> Result
 }
 
 /// `copyBroadcastTargets`.
-fn copy_targets(conn: &Connection, source_id: i64, broadcast_id: i64) -> Result<()> {
+pub(crate) fn copy_targets(conn: &Connection, source_id: i64, broadcast_id: i64) -> Result<()> {
     conn.execute(
         r#"INSERT INTO "BroadcastTarget" ("broadcastId", "inboxId", "flowId", "templateId", "templateData")
            SELECT ?2, "inboxId", "flowId", "templateId", "templateData" FROM "BroadcastTarget" WHERE "broadcastId" = ?1"#,
@@ -704,7 +704,10 @@ fn copy_targets(conn: &Connection, source_id: i64, broadcast_id: i64) -> Result<
     Ok(())
 }
 
-fn insert_broadcast(conn: &Connection, columns: &[(&str, SqlValue)]) -> Result<Broadcast> {
+pub(crate) fn insert_broadcast(
+    conn: &Connection,
+    columns: &[(&str, SqlValue)],
+) -> Result<Broadcast> {
     let id = new_id();
     let names: Vec<String> = columns.iter().map(|(c, _)| format!("\"{c}\"")).collect();
     let marks: Vec<String> = (2..=columns.len() + 1).map(|i| format!("?{i}")).collect();
@@ -1252,7 +1255,7 @@ fn pruned_filter(
         .map_or(SqlValue::Null, SqlValue::Text)
 }
 
-fn copied_columns(source: &Broadcast) -> Vec<(&'static str, SqlValue)> {
+pub(crate) fn copied_columns(source: &Broadcast) -> Vec<(&'static str, SqlValue)> {
     let int = |v: Option<i64>| v.map_or(SqlValue::Null, SqlValue::Integer);
     vec![
         ("workspaceId", SqlValue::Integer(source.workspace_id)),
