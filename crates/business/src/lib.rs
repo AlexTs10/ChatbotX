@@ -48,6 +48,7 @@ pub mod events;
 pub mod flow;
 pub mod flow_version;
 pub mod folder;
+pub mod google_ads;
 pub mod google_sheets;
 pub mod import;
 pub mod inbox;

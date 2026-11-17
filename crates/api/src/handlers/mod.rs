@@ -37,6 +37,7 @@ pub mod email_topics;
 pub mod error_logs;
 pub mod flows;
 pub mod folders;
+pub mod google_ads;
 pub mod inbox_teams;
 pub mod input;
 pub mod integrations_ai;
@@ -635,6 +636,8 @@ async fn route(
         product_vendors::handle(state, route_id, call).await
     } else if products::ROUTES.contains(&route_id) {
         products::handle(state, route_id, call).await
+    } else if google_ads::ROUTES.contains(&route_id) {
+        google_ads::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
     } else if meta_catalog::ROUTES.contains(&route_id) {

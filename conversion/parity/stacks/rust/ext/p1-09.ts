@@ -5,7 +5,7 @@
 // added as the P3.6 ports need them; the others throw.
 
 import { DatabaseSync } from "node:sqlite"
-import type { P109Fixtures } from "../../../src/fixtures/ext/p1-09.ts"
+import type { P109Fixtures, P109GoogleAdsEventRow } from "../../../src/fixtures/ext/p1-09.ts"
 
 const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
 const PLACE_ID = 6n
@@ -180,9 +180,172 @@ class SqliteP109Fixtures implements P109Fixtures {
       )
     return { memberId: String(memberId) }
   }
-  createGoogleAdsConnection = notPorted("createGoogleAdsConnection")
-  setGoogleAdsSettings = notPorted("setGoogleAdsSettings")
-  insertGoogleAdsEvents = notPorted("insertGoogleAdsEvents")
+  // Same rows as stacks/original/ext/p1-09.ts (Integration + IntegrationGoogleAds + Connection).
+  async createGoogleAdsConnection(
+    input: Parameters<P109Fixtures["createGoogleAdsConnection"]>[0],
+  ): Promise<{ integrationGoogleAdsId: string }> {
+    const db = this.open()
+    const integrationId = createId()
+    const integrationGoogleAdsId = createId()
+    const now = Date.now()
+    const ms = (iso: string | null) => (iso === null ? null : Date.parse(iso))
+    const auth = {
+      authType: "oauth2",
+      clientId: "parity-google-ads-client",
+      clientSecret: "parity-google-ads-secret",
+      redirectUrl: "http://app/integrations/googleAds/callback",
+      tokens: {
+        accessToken: "parity-google-ads-access",
+        refreshToken: "parity-google-ads-refresh",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+      metadata: input.uploadMethod ? { uploadMethod: input.uploadMethod } : {},
+    }
+    const reason: Record<string, string | null> = {
+      connected: null,
+      degraded: "verify_failed",
+      needs_reauth: "token_revoked",
+      paused: "manual",
+      disconnected: "manual",
+    }
+    db.exec("BEGIN")
+    try {
+      db.prepare(`INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (?, ?, 'googleAds')`).run(
+        integrationId,
+        BigInt(input.workspaceId),
+      )
+      db.prepare(
+        `INSERT INTO "IntegrationGoogleAds"
+           ("id", "workspaceId", "integrationId", "auth", "customerId", "descriptiveName", "currencyCode",
+            "conversionCustomerId", "acceptedCustomerDataTerms", "conversionActions",
+            "conversionActionsSyncedAt", "setupError", "setupErrorAt")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        integrationGoogleAdsId,
+        BigInt(input.workspaceId),
+        integrationId,
+        JSON.stringify(auth),
+        input.customerId,
+        input.descriptiveName,
+        input.currencyCode,
+        input.conversionCustomerId,
+        input.acceptedCustomerDataTerms === null ? null : input.acceptedCustomerDataTerms ? 1 : 0,
+        input.conversionActions === null
+          ? null
+          : JSON.stringify(
+              input.conversionActions.map((action) => ({
+                id: action.id,
+                resourceName: `customers/${input.customerId}/conversionActions/${action.id}`,
+                name: action.name,
+                category: action.category,
+                status: action.status,
+                countingType: action.countingType,
+                clickThroughLookbackWindowDays: 30,
+                ...(action.attributionModel === undefined ? {} : { attributionModel: action.attributionModel }),
+              })),
+            ),
+        ms(input.conversionActionsSyncedAt),
+        input.setupError,
+        input.setupError ? now : null,
+      )
+      db.prepare(
+        `INSERT INTO "Connection"
+           ("id", "createdAt", "updatedAt", "workspaceId", "provider", "kind", "channel", "integrationId", "sourceId",
+            "displayName", "status", "statusReason", "connectedAt", "disconnectedAt")
+         VALUES (?, ?, ?, ?, 'googleAds', 'integration', NULL, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        createId(),
+        now,
+        now,
+        BigInt(input.workspaceId),
+        integrationId,
+        input.customerId,
+        input.descriptiveName ?? input.customerId,
+        input.connectionStatus,
+        reason[input.connectionStatus] ?? null,
+        now,
+        input.connectionStatus === "disconnected" ? now : null,
+      )
+      db.exec("COMMIT")
+    } catch (error) {
+      db.exec("ROLLBACK")
+      throw error
+    }
+    return { integrationGoogleAdsId: integrationGoogleAdsId.toString() }
+  }
+
+  async setGoogleAdsSettings(input: { workspaceId: string; settings: unknown }): Promise<void> {
+    const now = Date.now()
+    this.open()
+      .prepare(
+        `INSERT INTO "GoogleAdsSettings" ("id", "createdAt", "updatedAt", "workspaceId", "settings") VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT ("workspaceId") DO UPDATE SET "settings" = excluded."settings", "updatedAt" = excluded."updatedAt"`,
+      )
+      .run(createId(), now, now, BigInt(input.workspaceId), JSON.stringify(input.settings))
+  }
+
+  async insertGoogleAdsEvents(input: {
+    workspaceId: string
+    integrationGoogleAdsId: string | null
+    customerId: string
+    rows: P109GoogleAdsEventRow[]
+  }): Promise<{ ids: string[] }> {
+    const db = this.open()
+    const ids: string[] = []
+    const ms = (iso: string | null | undefined) => (iso === null || iso === undefined ? null : Date.parse(iso))
+    const insert = db.prepare(
+      `INSERT INTO "GoogleAdsConversionEvent"
+         ("id", "createdAt", "updatedAt", "workspaceId", "integrationGoogleAdsId", "customerId", "conversionCustomerId",
+          "conversionActionId", "conversionActionName", "conversionActionCategory", "lookbackWindowDays",
+          "channel", "source", "scopeId", "clickIdType", "clickId", "googleClickReceivedAt", "occurredAt",
+          "value", "currency", "transactionId", "options", "uploadMethod", "status", "attempt",
+          "requestId", "sentAt", "error", "failureStage", "processingStatus", "processingAttempts")
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 30, ?, 'flowStep', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0)`,
+    )
+    db.exec("BEGIN")
+    try {
+      for (const row of input.rows) {
+        const id = createId()
+        ids.push(id.toString())
+        const now = Date.now()
+        const occurredAt = ms(row.occurredAt)
+        insert.run(
+          id,
+          now,
+          now,
+          BigInt(input.workspaceId),
+          input.integrationGoogleAdsId === null ? null : BigInt(input.integrationGoogleAdsId),
+          input.customerId,
+          input.customerId,
+          row.conversionActionId,
+          row.conversionActionName,
+          row.conversionActionCategory,
+          row.channel,
+          `flow-${id}`,
+          row.clickIdType,
+          row.clickId,
+          occurredAt,
+          occurredAt,
+          row.value ?? null,
+          row.currency ?? null,
+          row.transactionId,
+          row.options === undefined || row.options === null ? null : JSON.stringify(row.options),
+          row.uploadMethod,
+          row.status,
+          row.requestId ?? null,
+          ms(row.sentAt),
+          row.error ?? null,
+          row.failureStage ?? null,
+          row.processingStatus ?? null,
+        )
+      }
+      db.exec("COMMIT")
+    } catch (error) {
+      db.exec("ROLLBACK")
+      throw error
+    }
+    return { ids }
+  }
 
   async close(): Promise<void> {
     this.db?.close()
