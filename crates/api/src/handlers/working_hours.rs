@@ -42,7 +42,7 @@ fn override_json(o: &WorkingHoursDateOverride) -> serde_json::Map<String, Value>
 }
 
 /// `toWorkingHoursResource` (`dateOverrides` only for get / update).
-fn schedule_json(s: &Schedule, overrides: Option<&[WorkingHoursDateOverride]>) -> Value {
+pub(crate) fn schedule_json(s: &Schedule, overrides: Option<&[WorkingHoursDateOverride]>) -> Value {
     let mut out = json!({
         "id": id(s.row.id),
         "name": s.row.name,
@@ -61,7 +61,7 @@ fn schedule_json(s: &Schedule, overrides: Option<&[WorkingHoursDateOverride]>) -
 }
 
 /// `toHolidayResource`.
-fn holiday_json(o: &WorkingHoursDateOverride) -> Value {
+pub(crate) fn holiday_json(o: &WorkingHoursDateOverride) -> Value {
     let mut out = override_json(o);
     out.insert("id".into(), id(o.id));
     out.insert("createdAt".into(), date(o.created_at));
