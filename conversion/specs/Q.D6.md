@@ -14,6 +14,7 @@ is unit Q.W2: this unit only enqueues jobs with the original payload.
 | 3 | AI provider integrations | `integration_ai_provider.rs` (key probe, find, autoReply update), `integration_openai_compatible.rs` | `integrations.getAiProvider`, `updateAiProvider` | `update<Provider>Action` (6) | done (connect / disconnect: P3.6-D2) |
 | 4 | AI files / RAG | `ai_file.rs` (DB vector scan: `ai_file_embedding::vector_search`) | `aiFiles.*` except `search` | `aiFilesAPI.*`, create / delete / reindex actions | done |
 | 5 | AI handover settings + bulk run | `ai_handover.rs` | `aiHandover.*` | `aiHandoverAPIs.*`, save / set / retry actions | done (engine / sweeper: Q.W2) |
+| 7 | OpenAI-compatible update actions + `/rpc` wiring | `integration_openai_compatible.rs` (existing) | - | `updateOpenaiCompatibleAction`, `updateOpenaiCompatibleEnabledAction`; all AI procedures / actions wired into `rpc_procedures` | done |
 | 6 | `packages/ai` provider layer (server part) | `ai/knowledge.rs` (embedding model, query embedding, `searchKnowledgeChunks`, `performFileSearch`, `searchAIFiles`, `isInvalidApiKeyError`), `ai/models.rs` catalog tests | `aiFiles.search` | `searchAIFilesAction` | done (LLM runtime: Q.W2 / Q.D12) |
 
 ## 2. Test map
@@ -112,6 +113,33 @@ Per test case: `specs/Q.D6-test-map.tsv` (file, line, name, Rust test, status, n
   the original's unhandled `EmbeddingProviderNotConfiguredError` /
   `APICallError`; `noEmbeddingProvider` (400) is checked first.
 
+- Slice 7 (2026-11-17): the `/rpc` table is merged, so `rpc_ai::call` is
+  wired in `rpc_procedures::{procedure, action}` (super admin from the
+  member permissions; no support sessions in Rust yet = `false`). The
+  OpenAI-compatible update action keeps the original's zod 4 behaviour: a
+  `.partial()` field with a default still gets it, so an omitted `preset`
+  is `lmstudio` (and `defaultModel` its preset default), `autoReply` false,
+  `enabled` true. `RpcAiContext.cloud` = `isCloud()`. The builder tests
+  `openai-compatible-actions` (update case) and the base-URL schema rules
+  are ported as Rust tests in `crates/api/tests/integrations_ai_public_api.rs`;
+  the connect cases go with the connection engine (P3.6-D2).
+- Parity Rust ext `stacks/rust/ext/p1-03.ts`: `createInbox`, `createContact`,
+  `addMember`; the analytics rows throw (Q.D11).
+
 ## 4. State
 
-- Slices 1–6 committed (see TRACKER). Parity p1-02 / p1-03: see TRACKER.
+- Slices 1–7 committed; `origin/conversion` merged (D3, p35f `/rpc` table).
+- Gate 2026-11-17 (Dell): fmt, clippy workspace `--all-targets -D warnings`
+  clean; `cargo test -p chatbotx-api -p chatbotx-business` 2403 passed, 0 failed.
+- Parity (Rust stack, 2026-11-17): p1-02 `ai-agents` + `ai-functions` and
+  p1-03 `ai-mcp-servers` all pass (48 cases); p1-03 `ai-handover` 30/34;
+  p1-02 `ai-files` 0/15.
+- Waiting for other units:
+  - `ai-files` (15): the setup connects OpenAI through
+    `PUT /v1/integrations/ai/openai` = `connectFromCredentials` (connection
+    engine, P3.6-D2); the embedded-file cases also need the heavy worker
+    `processAIFile` (Q.W2).
+  - `ai-handover` (4: enable run, disable run, retry, history): the
+    `aiHandoverBulkToggle` worker must end the run (Q.W2).
+  - Engine / sweeper / chunk refund of the bulk run, `inboxService.disconnect`
+    hook, LLM runtime: Q.W2 / Q.D12; AI key connect / disconnect: P3.6-D2.
