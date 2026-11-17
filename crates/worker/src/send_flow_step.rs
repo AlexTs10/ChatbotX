@@ -3,6 +3,7 @@
 //! a flow step becomes a stored outgoing message, then the channel sends it.
 
 use chatbotx_business::message::message_json;
+use chatbotx_business::product_message::service::prepare_outgoing;
 use chatbotx_core::flow_config::{
     ButtonPayload, CHANNEL_DELIVERABLE_STEP_TYPES, append_code_to_magic_link,
     encode_button_payload, extract_metadata, get_channel_flow_policy, is_native_button_type,
@@ -313,10 +314,10 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         return Ok(());
     }
     let resolved = spin(&step);
-    // ponytail: product collections / product messages need
-    // `resolveCollectionStep` / `prepareOutgoing` (product-message slice).
-    if matches!(step_type.as_str(), "sendCollection" | "sendProducts") {
-        tracing::warn!(conversation_id, step_type = %step_type, "Product flow steps are not ported yet; skipped");
+    // ponytail: `resolveCollectionStep` (shop-token card links, ecommerce
+    // settings) comes with the webshop unit Q.D8; a collection is skipped.
+    if step_type == "sendCollection" {
+        tracing::warn!(conversation_id, step_type = %step_type, "Product collection steps are not ported yet; skipped");
         return Ok(());
     }
     if is_blank_text_carrier_step(&resolved) {
@@ -324,6 +325,34 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         return Ok(());
     }
     let stored = resolve_stored_step_content(&resolved);
+    // `resolveProductMessageForStep`: before any Message row, so a step
+    // that cannot be sent leaves no phantom message. A failure is the
+    // terminal catch (logged, the job completes).
+    let product = if step_type == "sendProducts" {
+        match prepare_outgoing(
+            &deps.db,
+            conversation.workspace_id,
+            &contact_inbox.channel,
+            &resolved,
+            false,
+        )
+        .await
+        {
+            Ok(prepared) => {
+                if !prepared.missing.is_empty() {
+                    // ponytail: the provider ErrorLog row (`logProviderErrorForChannel`) comes with Q.W2.
+                    tracing::warn!(conversation_id, flow_id = %flow_id, product_ids = ?prepared.missing, "Product message sent without products that are no longer sendable");
+                }
+                Some(prepared)
+            }
+            Err(error) => {
+                tracing::error!(err = %error, "sendFlowStep error for conversationId: {conversation_id}");
+                return Ok(());
+            }
+        }
+    } else {
+        None
+    };
     let channel = contact_inbox.channel.clone();
     let contact_inbox_text = contact_inbox.id.to_string();
     let convert = |buttons: &[Value]| {
@@ -373,6 +402,14 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         if !value.is_null() {
             attributes.insert(key.into(), value);
         }
+    }
+    if let Some(product) = &product
+        && let Value::Object(base) = product.content_attributes.clone()
+    {
+        // `{ ...prepared.contentAttributes, ...contentAttributes }`.
+        let mut merged = base;
+        merged.extend(attributes);
+        attributes = merged;
     }
     let display_buttons: Vec<Value> = step_buttons.iter().chain(&quick_replies).cloned().collect();
     // `{ type, payload, ...contentAttributes }`: the step's own keys win.
@@ -439,7 +476,10 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
             content_type: stored.content_type.to_owned(),
             message_type: "outgoing".into(),
             sender_type: "bot".into(),
-            text: stored.text.clone(),
+            text: stored
+                .text
+                .clone()
+                .or_else(|| product.as_ref().and_then(|p| p.text.clone())),
             r#type: Some(
                 if is_public_reply {
                     "comment"
@@ -491,7 +531,7 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
                 flow_id: flow_id.clone(),
                 flow_version_id: flow_version_id.clone(),
                 step: resolved.clone(),
-                product_message: None,
+                product_message: product.map(|p| p.message),
                 quick_replies,
                 metadata: metadata.clone(),
                 rich_response: data.get("richResponse").filter(|v| !v.is_null()).cloned(),

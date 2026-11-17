@@ -15,7 +15,7 @@ use chatbotx_db::Db;
 use chatbotx_jobs::runtime::Runtime;
 use chatbotx_jobs::shutdown::{Shutdown, ShutdownReason};
 use chatbotx_kv::{Clock, Kv, KvConfig, SystemClock};
-use chatbotx_rt::{KvPresence, NoRevokeRetry, Realtime, RtConfig};
+use chatbotx_rt::{KvPresence, Realtime, RtConfig};
 use config::Config;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -133,13 +133,17 @@ fn files_uploader() -> std::io::Result<Arc<chatbotx_files::Uploader>> {
 }
 
 /// Starts the realtime hub on the shared kv stores.
-fn start_realtime(shared: &Shared, rt_config: RtConfig) -> Realtime {
+fn start_realtime(
+    shared: &Shared,
+    rt_config: RtConfig,
+    jobs: Arc<dyn chatbotx_jobs::Enqueuer>,
+) -> Realtime {
     Realtime::start(
         Arc::clone(&shared.kv),
         Arc::clone(&shared.clock),
         rt_config,
         Arc::new(KvPresence::new(Arc::clone(&shared.kv))),
-        Arc::new(NoRevokeRetry),
+        Arc::new(chatbotx_worker::default_queue::JobsRevokeRetry(jobs)),
     )
 }
 
@@ -202,8 +206,15 @@ fn is_cloud() -> bool {
 
 async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<()> {
     let shared = open_shared(&config).await?;
+    // One job store for the API (enqueue) and the workers: the wake-up
+    // notifications are in-process.
+    let jobs = Arc::new(
+        chatbotx_jobs::JobStore::open(Arc::clone(&shared.db), Arc::new(chatbotx_jobs::SystemClock))
+            .await
+            .map_err(std::io::Error::other)?,
+    );
     let realtime = match rt_config {
-        Some(rt_config) => Some(start_realtime(&shared, rt_config)),
+        Some(rt_config) => Some(start_realtime(&shared, rt_config, Arc::clone(&jobs) as _)),
         None => {
             tracing::info!("realtime gateway off: REALTIME_BROADCAST_SECRET is not set");
             None
@@ -222,13 +233,6 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         now_ms,
     });
     chatbotx_api::session::bootstrap_platform_admin_at_startup(&shared.db).await;
-    // One job store for the API (enqueue) and the workers: the wake-up
-    // notifications are in-process.
-    let jobs = Arc::new(
-        chatbotx_jobs::JobStore::open(Arc::clone(&shared.db), Arc::new(chatbotx_jobs::SystemClock))
-            .await
-            .map_err(std::io::Error::other)?,
-    );
     let (shutdown, exited) = start_workers(&shared, &jobs, realtime.as_ref())?;
     let api = Arc::new(api_state(&shared, Arc::clone(&jobs), realtime.as_ref()));
     let mut app = chatbotx_api::router()
