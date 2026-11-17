@@ -182,7 +182,7 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
         "updateAppointmentCalendarAction" => route(
             "appointmentCalendars.update",
             bound(args, 1)?,
-            Some(arg(args, 2)),
+            Some(arg(args, 2).clone()),
         )
         .await
         .map(|_| Value::Null)
