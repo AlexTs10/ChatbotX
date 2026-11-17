@@ -433,8 +433,8 @@ async fn save_message(
             mime_type: a.mime_type.clone(),
             origin_path: a.origin_path.clone(),
             created_at: None,
-            height: None,
-            width: None,
+            height: a.height,
+            width: a.width,
             keep_original: Some(
                 !(a.is_photo_message && matches!(a.file_type.as_str(), "image" | "gif")),
             ),

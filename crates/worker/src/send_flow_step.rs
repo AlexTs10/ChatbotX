@@ -211,7 +211,7 @@ fn spin(value: &Value) -> Value {
     }
 }
 
-async fn store_message(
+pub(crate) async fn store_message(
     deps: &Deps,
     input: CreateMessageInput,
 ) -> Result<MessageWithAttachments, JobError> {
@@ -236,7 +236,7 @@ async fn store_message(
 /// The bot-close condition (`?5` = at, `?6` = close requested).
 const CLOSES: &str = r#"(?6 AND "sourceId" IS NULL AND "botEnabled" AND "awaitingHumanReplySince" IS NOT NULL AND "awaitingHumanReplySince" <= ?5)"#;
 
-async fn record_outbound(
+pub(crate) async fn record_outbound(
     deps: &Deps,
     conversation: &Conversation,
     contact_inbox: &ContactInbox,
@@ -288,7 +288,12 @@ async fn record_outbound(
     }
 }
 
-fn queue_message_created(deps: &Deps, conversation: &Conversation, inbox_id: i64, message: &Value) {
+pub(crate) fn queue_message_created(
+    deps: &Deps,
+    conversation: &Conversation,
+    inbox_id: i64,
+    message: &Value,
+) {
     let Some(realtime) = deps.realtime.clone() else {
         return;
     };
@@ -325,6 +330,40 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         .is_some_and(|support| *support == "unsupported")
     {
         tracing::debug!(conversation_id, step_type = %step_type, channel = %contact_inbox.channel, "Skipping a flow step the channel does not support");
+        return Ok(());
+    }
+    // `processWhatsappTemplate`: the template path stores and sends itself
+    // (variables, payment checks, flow buttons); its error is logged only.
+    if step_type == "sendWaTemplateMessage" {
+        if contact_inbox.channel != "whatsapp" {
+            return Ok(());
+        }
+        let template = &step["template"];
+        let input = crate::wa_template::ProcessTemplate {
+            flow: Some(crate::wa_template::TemplateFlow {
+                id: flow_id.clone(),
+                version_id: flow_version_id.clone(),
+                buttons: step["buttons"].as_array().cloned().unwrap_or_default(),
+            }),
+            step: Some((
+                str_of(&step, "id").unwrap_or("").to_owned(),
+                str_of(&step, "nodeId").unwrap_or("").to_owned(),
+            )),
+            metadata: metadata.clone(),
+            is_bulk_broadcast: data["isBulkBroadcast"] == json!(true),
+            sent_by_user_id: data
+                .get("sentByUserId")
+                .filter(|v| !v.is_null())
+                .map(js_string),
+            template: json!({ "id": template["id"], "name": template["name"],
+                "language": template["language"], "params": template["params"] }),
+            ..crate::wa_template::ProcessTemplate::default()
+        };
+        if let Err(error) =
+            crate::wa_template::process_template(deps, &conversation, &contact_inbox, input).await
+        {
+            tracing::error!(err = %error.message(), "sendFlowStep WhatsApp template error for conversationId: {conversation_id}");
+        }
         return Ok(());
     }
     if !CHANNEL_DELIVERABLE_STEP_TYPES.contains(&step_type.as_str()) {
@@ -639,7 +678,7 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
 
 /// `sendFlowStepToChannel`: the channel's `sendFlowStep`, then the
 /// provider id as the row's `sourceId`.
-async fn send_flow_step_to_channel(
+pub(crate) async fn send_flow_step_to_channel(
     deps: &Deps,
     conversation: &Conversation,
     contact_inbox: &ContactInbox,

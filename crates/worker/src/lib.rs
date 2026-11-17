@@ -27,6 +27,7 @@ pub mod send_flow_step;
 pub mod steps;
 pub mod trigger;
 pub mod variables;
+pub mod wa_template;
 pub mod webhook;
 
 use std::sync::Arc;

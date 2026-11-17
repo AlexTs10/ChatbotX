@@ -293,6 +293,8 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     app = app.merge(whatsapp::router(
         Arc::clone(&shared.db),
         Arc::clone(&jobs) as _,
+        is_cloud(),
+        &app_url(),
     ));
     // The public API and the SPA (`apps/web/dist`, P4) answer every path no
     // route matched: the SPA takes the GETs outside the API paths.
@@ -397,7 +399,21 @@ fn start_workers(
         jobs: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::Enqueuer>,
         waiter: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::JobWaiter>,
         realtime: realtime.cloned(),
-        channels: chatbotx_worker::Channels::builtin(),
+        channels: chatbotx_worker::Channels::builtin().with(
+            "whatsapp",
+            Arc::new(
+                chatbotx_worker::channels::whatsapp::Whatsapp::new().with_media(
+                    chatbotx_worker::channels::whatsapp_media::WhatsappMedia {
+                        files: Arc::clone(&shared.files),
+                        storage_url: chatbotx_business::contact::avatar::TenantUrls::from_app_url(
+                            &app_url(),
+                            std::env::var("NEXT_PUBLIC_STORAGE_URL").ok().as_deref(),
+                        )
+                        .storage_url,
+                    },
+                ),
+            ),
+        ),
         app_url: app_url(),
         variables: chatbotx_worker::variables::VariableDeps::from_env(
             Arc::clone(&shared.db),

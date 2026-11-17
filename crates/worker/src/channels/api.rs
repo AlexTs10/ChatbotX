@@ -330,6 +330,7 @@ pub fn parse_incoming(payload: &Value) -> ChannelResult<Received> {
                 size: Some(0),
                 name: text_of(a, "name"),
                 is_photo_message: false,
+                ..IncomingAttachment::default()
             }
         })
         .collect();

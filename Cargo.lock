@@ -445,6 +445,7 @@ dependencies = [
  "axum",
  "chatbotx-api",
  "chatbotx-business",
+ "chatbotx-core",
  "chatbotx-db",
  "chatbotx-files",
  "chatbotx-jobs",
@@ -456,12 +457,14 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
 name = "chatbotx-worker"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chatbotx-business",
  "chatbotx-core",
  "chatbotx-db",

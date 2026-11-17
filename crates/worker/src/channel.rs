@@ -194,6 +194,8 @@ pub struct IncomingAttachment {
     /// The stored object key, or the provider URL of a lazy attachment.
     pub origin_path: String,
     pub size: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
     pub name: Option<String>,
     /// A photo message (re-encoded in the background; files keep their bytes).
     pub is_photo_message: bool,

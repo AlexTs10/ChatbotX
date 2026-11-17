@@ -75,6 +75,7 @@ pub mod tenant_help_item;
 pub mod tx;
 pub mod user_quota;
 pub mod vendor;
+pub mod whatsapp;
 pub mod workspace;
 pub mod workspace_api_token;
 pub mod workspace_member;

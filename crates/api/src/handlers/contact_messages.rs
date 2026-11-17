@@ -113,8 +113,16 @@ pub(crate) async fn deliver(state: &ApiState, conversation: &Conversation, outgo
         event.route = Some(route);
         state.queue_realtime(conversation.workspace_id, event).await;
     }
+    queue_outgoing_jobs(state, outgoing.jobs).await;
+}
+
+/// Adds the jobs of a business call (`queue.add(name, data, opts)`).
+pub(crate) async fn queue_outgoing_jobs(
+    state: &ApiState,
+    jobs_to_add: Vec<chatbotx_business::message::OutgoingJob>,
+) {
     if let Some(jobs) = &state.jobs {
-        for job in outgoing.jobs {
+        for job in jobs_to_add {
             let opts = JobOptions {
                 attempts: job.attempts,
                 ..JobOptions::default()
