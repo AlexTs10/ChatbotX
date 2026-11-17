@@ -189,7 +189,11 @@ fn pick(row: &Value, keys: &[&str]) -> Value {
     Value::Object(out)
 }
 
-fn of_parent<'a>(rows: &'a [Value], column: &'a str, parent: &'a Value) -> impl Iterator<Item = &'a Value> {
+fn of_parent<'a>(
+    rows: &'a [Value],
+    column: &'a str,
+    parent: &'a Value,
+) -> impl Iterator<Item = &'a Value> {
     rows.iter().filter(move |row| &row[column] == parent)
 }
 
@@ -221,7 +225,10 @@ const DEPENDENCY_CATEGORY_BY_KIND: &[(&str, &str)] = &[
 
 /// `collectResourceDependencies`: the shipped-category rows `value` names.
 pub(crate) fn resource_dependencies(value: &Value) -> Vec<(&'static str, String)> {
-    let kinds: Vec<&str> = DEPENDENCY_CATEGORY_BY_KIND.iter().map(|(k, _)| *k).collect();
+    let kinds: Vec<&str> = DEPENDENCY_CATEGORY_BY_KIND
+        .iter()
+        .map(|(k, _)| *k)
+        .collect();
     let by_kind = collect_references_by_kind(value, Some(&kinds));
     DEPENDENCY_CATEGORY_BY_KIND
         .iter()
@@ -296,7 +303,15 @@ fn find_ids(
 ) -> Result<Vec<String>> {
     if category == "settings" {
         let mut out = query_ids(conn, "SavedReply", "", workspace_id, ids, limit, r#""id""#)?;
-        out.extend(query_ids(conn, "BotField", "", workspace_id, ids, limit, r#""id""#)?);
+        out.extend(query_ids(
+            conn,
+            "BotField",
+            "",
+            workspace_id,
+            ids,
+            limit,
+            r#""id""#,
+        )?);
         return Ok(out);
     }
     let Some((table, extra)) = id_source(category) else {
@@ -312,12 +327,22 @@ fn find_ids(
 }
 
 /// `resolveIds`: `mode: "all"`.
-pub fn resolve_ids(conn: &Connection, workspace_id: i64, category: &str, limit: i64) -> Result<Vec<String>> {
+pub fn resolve_ids(
+    conn: &Connection,
+    workspace_id: i64,
+    category: &str,
+    limit: i64,
+) -> Result<Vec<String>> {
     find_ids(conn, workspace_id, category, None, Some(limit))
 }
 
 /// `verifyOwnership`: the ids, among `ids`, the workspace owns.
-pub fn verify_ownership(conn: &Connection, workspace_id: i64, category: &str, ids: &[String]) -> Result<Vec<String>> {
+pub fn verify_ownership(
+    conn: &Connection,
+    workspace_id: i64,
+    category: &str,
+    ids: &[String],
+) -> Result<Vec<String>> {
     let numeric = numeric_ids(ids);
     if numeric.is_empty() {
         return Ok(Vec::new());
@@ -326,7 +351,12 @@ pub fn verify_ownership(conn: &Connection, workspace_id: i64, category: &str, id
 }
 
 /// `collect` of one resource category.
-pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[String]) -> Result<Collected> {
+pub fn collect(
+    conn: &Connection,
+    workspace_id: i64,
+    category: &str,
+    ids: &[String],
+) -> Result<Collected> {
     if ids.is_empty() {
         return Ok(Collected::default());
     }
@@ -337,10 +367,24 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
         "aiFunctions" => {
             let rows = rows::<m::AiFunction>(conn, workspace_id, ids, "")?;
             Ok(Collected {
-                hard_dependencies: dependencies_on("flows", strings(rows.iter().map(|r| &r["triggerFlowId"]))),
+                hard_dependencies: dependencies_on(
+                    "flows",
+                    strings(rows.iter().map(|r| &r["triggerFlowId"])),
+                ),
                 entries: rows
                     .iter()
-                    .map(|r| entry(r, &["name", "purpose", "dataCollect", "outputMessage", "triggerFlowId"]))
+                    .map(|r| {
+                        entry(
+                            r,
+                            &[
+                                "name",
+                                "purpose",
+                                "dataCollect",
+                                "outputMessage",
+                                "triggerFlowId",
+                            ],
+                        )
+                    })
                     .collect(),
                 ..Default::default()
             })
@@ -372,7 +416,11 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
                 .flat_map(|e| strings(e["tools"].as_array().into_iter().flatten()))
                 .collect();
             let mut hard_dependencies = Vec::new();
-            for (prefix, category) in [("mcp:", "aiMcpServers"), ("file:", "aiFiles"), ("fn:", "aiFunctions")] {
+            for (prefix, category) in [
+                ("mcp:", "aiMcpServers"),
+                ("file:", "aiFiles"),
+                ("fn:", "aiFunctions"),
+            ] {
                 hard_dependencies.extend(dependencies_on(
                     category,
                     tools
@@ -392,7 +440,10 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
         "webchats" => {
             let rows = rows::<m::IntegrationWebchat>(conn, workspace_id, ids, "")?;
             Ok(Collected {
-                hard_dependencies: dependencies_on("flows", strings(rows.iter().map(|r| &r["welcomeFlowId"]))),
+                hard_dependencies: dependencies_on(
+                    "flows",
+                    strings(rows.iter().map(|r| &r["welcomeFlowId"])),
+                ),
                 // `auth` is the webchat's own client-side embed credential, carried
                 // over as the original does (never a third-party token).
                 entries: rows
@@ -421,13 +472,33 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
             })
         }
         "keywords" => {
-            let rows = rows::<m::AutomatedResponse>(conn, workspace_id, ids, r#" AND "type" = 'inbound'"#)?;
+            let rows = rows::<m::AutomatedResponse>(
+                conn,
+                workspace_id,
+                ids,
+                r#" AND "type" = 'inbound'"#,
+            )?;
             Ok(Collected {
                 folder_ids: strings(rows.iter().map(|r| &r["folderId"])),
-                hard_dependencies: dependencies_on("flows", strings(rows.iter().map(|r| &r["flowId"]))),
+                hard_dependencies: dependencies_on(
+                    "flows",
+                    strings(rows.iter().map(|r| &r["flowId"])),
+                ),
                 entries: rows
                     .iter()
-                    .map(|r| entry(r, &["type", "text", "keywords", "conditions", "flowId", "folderId"]))
+                    .map(|r| {
+                        entry(
+                            r,
+                            &[
+                                "type",
+                                "text",
+                                "keywords",
+                                "conditions",
+                                "flowId",
+                                "folderId",
+                            ],
+                        )
+                    })
                     .collect(),
                 ..Default::default()
             })
@@ -435,7 +506,10 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
         "entryPointLinks" => {
             let rows = rows::<m::Reflink>(conn, workspace_id, ids, "")?;
             Ok(Collected {
-                hard_dependencies: dependencies_on("flows", strings(rows.iter().map(|r| &r["flowId"]))),
+                hard_dependencies: dependencies_on(
+                    "flows",
+                    strings(rows.iter().map(|r| &r["flowId"])),
+                ),
                 entries: rows
                     .iter()
                     .map(|r| entry(r, &["name", "type", "flowId", "customFieldId", "qrStyles"]))
@@ -480,7 +554,12 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
             for (kind, category) in [("flow", "flows"), ("AIAgent", "aiAgents")] {
                 hard_dependencies.extend(dependencies_on(
                     category,
-                    strings(replies.iter().filter(|r| r["type"] == kind).map(|r| &r["value"])),
+                    strings(
+                        replies
+                            .iter()
+                            .filter(|r| r["type"] == kind)
+                            .map(|r| &r["value"]),
+                    ),
                 ));
             }
             Ok(Collected {
@@ -493,11 +572,12 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
         }
         "sequences" => {
             let rows = rows::<m::Sequence>(conn, workspace_id, ids, "")?;
-            let steps: Vec<Value> = children::<m::SequenceStep>(conn, "sequenceId", &row_ids(&rows), r#""order", "#)?
-                .into_iter()
-                // `isContentStep`: an off step that sends nothing is no content.
-                .filter(|s| s["isActive"] == true || !s["flowId"].is_null())
-                .collect();
+            let steps: Vec<Value> =
+                children::<m::SequenceStep>(conn, "sequenceId", &row_ids(&rows), r#""order", "#)?
+                    .into_iter()
+                    // `isContentStep`: an off step that sends nothing is no content.
+                    .filter(|s| s["isActive"] == true || !s["flowId"].is_null())
+                    .collect();
             let step_keys = [
                 "order",
                 "delayDays",
@@ -523,7 +603,10 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
                     })
                     .collect(),
                 folder_ids: strings(rows.iter().map(|r| &r["folderId"])),
-                hard_dependencies: dependencies_on("flows", strings(steps.iter().map(|s| &s["flowId"]))),
+                hard_dependencies: dependencies_on(
+                    "flows",
+                    strings(steps.iter().map(|s| &s["flowId"])),
+                ),
                 ..Default::default()
             })
         }
@@ -533,7 +616,8 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
                 entries: rows
                     .iter()
                     .map(|r| {
-                        let (url, had_secret) = strip_url_secrets(r["url"].as_str().unwrap_or_default());
+                        let (url, had_secret) =
+                            strip_url_secrets(r["url"].as_str().unwrap_or_default());
                         let auth_type = r["auth"]["type"].clone();
                         let header_names: Vec<Value> = if auth_type == "header" {
                             r["auth"]["headers"]
@@ -572,7 +656,8 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
             })
         }
         "questionnaires" => {
-            let rows = rows::<m::Questionnaire>(conn, workspace_id, ids, r#" AND "deletedAt" IS NULL"#)?;
+            let rows =
+                rows::<m::Questionnaire>(conn, workspace_id, ids, r#" AND "deletedAt" IS NULL"#)?;
             let questions: Vec<Value> = children::<m::QuestionnaireQuestion>(
                 conn,
                 "questionnaireId",
@@ -595,7 +680,10 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
                 "config",
             ];
             Ok(Collected {
-                hard_dependencies: dependencies_on("flows", strings(rows.iter().map(|r| &r["triggerFlowId"]))),
+                hard_dependencies: dependencies_on(
+                    "flows",
+                    strings(rows.iter().map(|r| &r["triggerFlowId"])),
+                ),
                 entries: rows
                     .iter()
                     .map(|r| {
@@ -619,7 +707,8 @@ pub fn collect(conn: &Connection, workspace_id: i64, category: &str, ids: &[Stri
             })
         }
         "couponTopics" => {
-            let rows = rows::<m::CouponTopic>(conn, workspace_id, ids, r#" AND "deletedAt" IS NULL"#)?;
+            let rows =
+                rows::<m::CouponTopic>(conn, workspace_id, ids, r#" AND "deletedAt" IS NULL"#)?;
             Ok(Collected {
                 entries: rows
                     .iter()
@@ -727,7 +816,9 @@ fn collect_flows(conn: &Connection, workspace_id: i64, ids: &[String]) -> Result
                 .filter(|id| is_numeric_id(id))
                 .cloned(),
         );
-        hard_dependencies.extend(resource_dependencies(&json!({ "nodes": e["nodes"], "edges": e["edges"] })));
+        hard_dependencies.extend(resource_dependencies(
+            &json!({ "nodes": e["nodes"], "edges": e["edges"] }),
+        ));
     }
     Ok(Collected {
         folder_ids: strings(flows.iter().map(|f| &f["folderId"])),
@@ -835,17 +926,20 @@ fn collect_settings(conn: &Connection, workspace_id: i64, ids: &[String]) -> Res
             )
             .map_err(super::db_error)?;
         images = stmt
-            .query_map(chatbotx_db::rusqlite::params![workspace_id, id_list(&reply_ids)], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?.to_string(),
-                    json!({
-                        "path": r.get::<_, String>(1)?,
-                        "name": r.get::<_, String>(2)?,
-                        "mimeType": r.get::<_, String>(3)?,
-                        "size": r.get::<_, i64>(4)?,
-                    }),
-                ))
-            })
+            .query_map(
+                chatbotx_db::rusqlite::params![workspace_id, id_list(&reply_ids)],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?.to_string(),
+                        json!({
+                            "path": r.get::<_, String>(1)?,
+                            "name": r.get::<_, String>(2)?,
+                            "mimeType": r.get::<_, String>(3)?,
+                            "size": r.get::<_, i64>(4)?,
+                        }),
+                    ))
+                },
+            )
             .map_err(super::db_error)?
             .collect::<chatbotx_db::rusqlite::Result<_>>()
             .map_err(super::db_error)?;
@@ -878,8 +972,10 @@ fn collect_settings(conn: &Connection, workspace_id: i64, ids: &[String]) -> Res
 fn collect_calendars(conn: &Connection, workspace_id: i64, ids: &[String]) -> Result<Collected> {
     let calendars = rows::<m::AppointmentCalendar>(conn, workspace_id, ids, "")?;
     let calendar_ids = row_ids(&calendars);
-    let slots = children::<m::AppointmentCalendarAvailability>(conn, "calendarId", &calendar_ids, "")?;
-    let reminders = children::<m::AppointmentCalendarReminder>(conn, "calendarId", &calendar_ids, "")?;
+    let slots =
+        children::<m::AppointmentCalendarAvailability>(conn, "calendarId", &calendar_ids, "")?;
+    let reminders =
+        children::<m::AppointmentCalendarReminder>(conn, "calendarId", &calendar_ids, "")?;
     let entries = calendars
         .iter()
         .map(|c| {
@@ -958,7 +1054,12 @@ fn collect_triggers(conn: &Connection, workspace_id: i64, ids: &[String]) -> Res
         .collect();
     hard_dependencies.extend(dependencies_on(
         "sequences",
-        references.get("sequence").cloned().unwrap_or_default().into_iter().collect(),
+        references
+            .get("sequence")
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
     ));
     Ok(Collected {
         folder_ids: strings(triggers.iter().map(|t| &t["folderId"])),
@@ -997,7 +1098,10 @@ mod tests {
 
     #[test]
     fn strips_url_secrets() {
-        assert_eq!(strip_url_secrets("https://mcp.example.com/"), ("https://mcp.example.com/".into(), false));
+        assert_eq!(
+            strip_url_secrets("https://mcp.example.com/"),
+            ("https://mcp.example.com/".into(), false)
+        );
         assert_eq!(
             strip_url_secrets("https://u:p@mcp.example.com/sse?key=1"),
             ("https://mcp.example.com/".into(), true)
@@ -1007,6 +1111,9 @@ mod tests {
 
     #[test]
     fn numeric_ids_dedupe_and_drop_names() {
-        assert_eq!(numeric_ids(&["2".into(), "x".into(), "2".into(), "10".into()]), vec![2, 10]);
+        assert_eq!(
+            numeric_ids(&["2".into(), "x".into(), "2".into(), "10".into()]),
+            vec![2, 10]
+        );
     }
 }

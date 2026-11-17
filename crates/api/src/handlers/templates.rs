@@ -4,8 +4,8 @@
 //! the snapshot save, install, sync, uninstall or preview engines answer the
 //! "not ported" 404 (specs/Q.D4.md).
 
-use chatbotx_business::template::permissions::Actor;
 use chatbotx_business::template::collect::CATEGORIES;
+use chatbotx_business::template::permissions::Actor;
 use chatbotx_business::template::{
     RESOURCE_KINDS, installations, list_locked_resource_ids, save as template_save, service,
 };
@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 
 use super::input::{Input, Num, Seg, Str, key};
 use super::{
-    ApiState, CREATING, Call, FINDING, LISTING, MUTATING, Principal, Reply, business_error, date, id, json,
-    no_content, opt_date,
+    ApiState, CREATING, Call, FINDING, LISTING, MUTATING, Principal, Reply, business_error, date,
+    id, json, no_content, opt_date,
 };
 use crate::orpc::OrpcError;
 
@@ -400,11 +400,19 @@ async fn get_sync(state: &ApiState, call: Call<'_>) -> Reply {
 fn selection_at(input: &mut Input, name: &str) -> Value {
     let path = key(name);
     let Some(value) = input.get(name).cloned() else {
-        input.issue(&path, "invalid_type", "Invalid input: expected record, received undefined");
+        input.issue(
+            &path,
+            "invalid_type",
+            "Invalid input: expected record, received undefined",
+        );
         return json!({});
     };
     let Value::Object(map) = value else {
-        input.issue(&path, "invalid_type", "Invalid input: expected record, received string");
+        input.issue(
+            &path,
+            "invalid_type",
+            "Invalid input: expected record, received string",
+        );
         return json!({});
     };
     let mut out = serde_json::Map::new();
@@ -455,15 +463,17 @@ fn permissions_at(input: &mut Input, name: &str) -> Value {
     let path = key(name);
     let value = input.get(name).cloned();
     let Some(Value::Object(map)) = value else {
-        input.issue(&path, "invalid_type", "Invalid input: expected object, received undefined");
+        input.issue(
+            &path,
+            "invalid_type",
+            "Invalid input: expected object, received undefined",
+        );
         return json!({});
     };
     let mut flag = |field: &str, default: bool| -> bool {
         let mut at = path.clone();
         at.push(Seg::Key(field.to_string()));
-        input
-            .bool_at(&at, map.get(field), false)
-            .unwrap_or(default)
+        input.bool_at(&at, map.get(field), false).unwrap_or(default)
     };
     let allow_edit = flag("allowEdit", true);
     let allow_delete = flag("allowDelete", false);
@@ -471,7 +481,12 @@ fn permissions_at(input: &mut Input, name: &str) -> Value {
 }
 
 /// `optionalText(max)`: `""` = null, else trimmed, at most `max`.
-fn optional_text(input: &mut Input, name: &str, max: usize, check: Option<fn(&str) -> bool>) -> Option<String> {
+fn optional_text(
+    input: &mut Input,
+    name: &str,
+    max: usize,
+    check: Option<fn(&str) -> bool>,
+) -> Option<String> {
     match input.get(name) {
         None | Some(Value::Null) => None,
         Some(Value::String(t)) if t.is_empty() => None,
@@ -576,7 +591,15 @@ async fn selectable(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
     let mut input = Input::from_query(call.params, call.query);
     let category_value = input.get("category").cloned();
     let category = input.enum_at(&key("category"), category_value.as_ref(), CATEGORIES, true);
-    let keyword = input.opt_string("keyword", Str { trim: true, min: None, max: Some(255), pattern: None });
+    let keyword = input.opt_string(
+        "keyword",
+        Str {
+            trim: true,
+            min: None,
+            max: Some(255),
+            pattern: None,
+        },
+    );
     let cursor = input.opt_string("cursor", Str::default());
     let limit = input.opt_coerce_int("limit", Num::int(1.0, 200.0));
     input.finish()?;
@@ -598,8 +621,13 @@ async fn preview_dependencies(state: &ApiState, call: Call<'_>, actor: &Actor) -
     let mut input = Input::from_body(call.params, call.body);
     let selection = selection_at(&mut input, "selection");
     input.finish()?;
-    let out = template_save::preview_selection_dependencies(&state.db, call.workspace_id, selection, actor)
-        .await
-        .map_err(|e| business_error(e, LISTING))?;
+    let out = template_save::preview_selection_dependencies(
+        &state.db,
+        call.workspace_id,
+        selection,
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, LISTING))?;
     Ok(json(200, out))
 }

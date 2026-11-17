@@ -7,9 +7,12 @@
 use chatbotx_db::Db;
 use chatbotx_db::repo::models::Template as TemplateRow;
 use chatbotx_db::repo::template::{
-    SaveWithVersion, TemplateVersionSnapshot, create_with_first_version, find_live, save_with_version,
+    SaveWithVersion, TemplateVersionSnapshot, create_with_first_version, find_live,
+    save_with_version,
 };
-use chatbotx_db::repo::template_selectable_resource::{self as selectable, CategoryInput, KeysetCursor};
+use chatbotx_db::repo::template_selectable_resource::{
+    self as selectable, CategoryInput, KeysetCursor,
+};
 use chatbotx_db::repo::{Json, new_id};
 use chatbotx_db::rusqlite::types::Value as Sql;
 use chatbotx_jobs::{Enqueuer, JobOptions, QueueName, Retention};
@@ -17,7 +20,9 @@ use serde_json::{Value, json};
 
 use super::collect::{CATEGORIES, RESOURCE_CATEGORIES};
 use super::permissions::{Actor, assert_can_manage, assert_can_read, assert_can_use_categories};
-use super::snapshot::{self, Snapshot, describe_version_changes, entries_for_category, hash_content};
+use super::snapshot::{
+    self, Snapshot, describe_version_changes, entries_for_category, hash_content,
+};
 use super::{Blocking, blocking_ids_in, decode_text_cursor, encode_text_cursor};
 use crate::errors::{BusinessError, Result};
 use crate::tx;
@@ -48,7 +53,10 @@ pub struct Saved {
 }
 
 /// `context.workspace.tenantId`.
-pub(crate) fn workspace_tenant_id(conn: &chatbotx_db::rusqlite::Connection, workspace_id: i64) -> Result<i64> {
+pub(crate) fn workspace_tenant_id(
+    conn: &chatbotx_db::rusqlite::Connection,
+    workspace_id: i64,
+) -> Result<i64> {
     conn.query_row(
         r#"SELECT "tenantId" FROM "Workspace" WHERE "id" = ?1"#,
         [workspace_id],
@@ -67,7 +75,12 @@ fn categories_in_use(counts: &Value) -> Vec<String> {
         .collect()
 }
 
-fn assert_cover_image(conn: &chatbotx_db::rusqlite::Connection, workspace_id: i64, image: Option<&str>, current: Option<&str>) -> Result<()> {
+fn assert_cover_image(
+    conn: &chatbotx_db::rusqlite::Connection,
+    workspace_id: i64,
+    image: Option<&str>,
+    current: Option<&str>,
+) -> Result<()> {
     let Some(image) = image.filter(|i| !i.is_empty() && Some(*i) != current) else {
         return Ok(());
     };
@@ -96,8 +109,11 @@ pub async fn save_template(db: &Db, input: SaveInput, actor: &Actor) -> Result<S
     tx::write(db, move |tx| {
         let conn: &chatbotx_db::rusqlite::Connection = tx;
         let tenant_id = workspace_tenant_id(conn, input.workspace_id)?;
-        let Snapshot { payload, category_counts, .. } =
-            snapshot::build_snapshot(conn, input.workspace_id, tenant_id, &input.selection)?;
+        let Snapshot {
+            payload,
+            category_counts,
+            ..
+        } = snapshot::build_snapshot(conn, input.workspace_id, tenant_id, &input.selection)?;
         // Checked on the final payload: pulled-in dependencies count too.
         let used = categories_in_use(&category_counts);
         assert_can_use_categories(&actor, used.iter().map(String::as_str))?;
@@ -115,8 +131,14 @@ pub async fn save_template(db: &Db, input: SaveInput, actor: &Actor) -> Result<S
             ("categoryCounts", json_text(&category_counts)),
             ("formatVersion", Sql::Integer(format_version)),
             ("defaultPermissions", json_text(&input.default_permissions)),
-            ("createInstallFolder", Sql::Integer(input.create_install_folder.into())),
-            ("defaultAutoUpdate", Sql::Integer(input.default_auto_update.into())),
+            (
+                "createInstallFolder",
+                Sql::Integer(input.create_install_folder.into()),
+            ),
+            (
+                "defaultAutoUpdate",
+                Sql::Integer(input.default_auto_update.into()),
+            ),
         ];
         let Some(existing_id) = input.existing_template_id else {
             assert_cover_image(conn, input.workspace_id, input.image_url.as_deref(), None)?;
@@ -124,8 +146,14 @@ pub async fn save_template(db: &Db, input: SaveInput, actor: &Actor) -> Result<S
             values.extend([
                 ("workspaceId", Sql::Integer(input.workspace_id)),
                 ("tenantId", Sql::Integer(tenant_id)),
-                ("createdBy", input.created_by.map_or(Sql::Null, Sql::Integer)),
-                ("shareToken", Sql::Text(super::service::generate_share_token())),
+                (
+                    "createdBy",
+                    input.created_by.map_or(Sql::Null, Sql::Integer),
+                ),
+                (
+                    "shareToken",
+                    Sql::Text(super::service::generate_share_token()),
+                ),
                 ("shareEnabled", Sql::Integer(0)),
                 ("version", Sql::Integer(1)),
                 ("payloadHash", Sql::Text(payload_hash.clone())),
@@ -141,7 +169,10 @@ pub async fn save_template(db: &Db, input: SaveInput, actor: &Actor) -> Result<S
                     changes: None,
                 },
             )?;
-            return Ok(Saved { template, version_advanced: false });
+            return Ok(Saved {
+                template,
+                version_advanced: false,
+            });
         };
         let existing = find_live(conn, existing_id, input.workspace_id)?
             .ok_or_else(|| BusinessError::not_found("Template not found"))?;
@@ -154,9 +185,10 @@ pub async fn save_template(db: &Db, input: SaveInput, actor: &Actor) -> Result<S
         // The stored content hashed with today's algorithm: an older stored
         // hash must not advance the version when nothing changed.
         let legacy_payload_hash = hash_content(&existing.payload.0);
-        let changes = chatbotx_core::flow_config::import_export::parse_template_export(&existing.payload.0)
-            .ok()
-            .map(|previous| Json(describe_version_changes(&previous, &payload)));
+        let changes =
+            chatbotx_core::flow_config::import_export::parse_template_export(&existing.payload.0)
+                .ok()
+                .map(|previous| Json(describe_version_changes(&previous, &payload)));
         let saved = save_with_version(
             conn,
             &SaveWithVersion {
@@ -191,7 +223,13 @@ pub async fn save_template(db: &Db, input: SaveInput, actor: &Actor) -> Result<S
 pub const PRIORITY_INTERACTIVE: u32 = 1;
 pub const PRIORITY_BACKGROUND: u32 = 10;
 
-async fn enqueue(jobs: &dyn Enqueuer, name: &str, data: Value, job_id: String, priority: u32) -> Result<()> {
+async fn enqueue(
+    jobs: &dyn Enqueuer,
+    name: &str,
+    data: Value,
+    job_id: String,
+    priority: u32,
+) -> Result<()> {
     jobs.add(
         QueueName::Template,
         name,
@@ -237,7 +275,11 @@ pub async fn enqueue_fan_out(
 }
 
 /// `enqueueInstallTemplate`.
-pub async fn enqueue_install(jobs: &dyn Enqueuer, installation_id: i64, workspace_id: i64) -> Result<()> {
+pub async fn enqueue_install(
+    jobs: &dyn Enqueuer,
+    installation_id: i64,
+    workspace_id: i64,
+) -> Result<()> {
     enqueue(
         jobs,
         "installTemplate",
@@ -249,7 +291,12 @@ pub async fn enqueue_install(jobs: &dyn Enqueuer, installation_id: i64, workspac
 }
 
 /// `enqueueSyncTemplateInstallation`.
-pub async fn enqueue_sync(jobs: &dyn Enqueuer, sync_id: i64, workspace_id: i64, priority: u32) -> Result<()> {
+pub async fn enqueue_sync(
+    jobs: &dyn Enqueuer,
+    sync_id: i64,
+    workspace_id: i64,
+    priority: u32,
+) -> Result<()> {
     enqueue(
         jobs,
         "syncTemplateInstallation",
@@ -261,7 +308,12 @@ pub async fn enqueue_sync(jobs: &dyn Enqueuer, sync_id: i64, workspace_id: i64, 
 }
 
 /// `enqueueUninstallTemplate`.
-pub async fn enqueue_uninstall(jobs: &dyn Enqueuer, installation_id: i64, workspace_id: i64, attempt: i64) -> Result<()> {
+pub async fn enqueue_uninstall(
+    jobs: &dyn Enqueuer,
+    installation_id: i64,
+    workspace_id: i64,
+    attempt: i64,
+) -> Result<()> {
     enqueue(
         jobs,
         "uninstallTemplate",
@@ -325,10 +377,15 @@ pub async fn list_selectable_resources(
         Some(c) => {
             let (key, id) = decode_text_cursor(c).ok_or_else(invalid_cursor)?;
             // Keywords page by `createdAt`: the key is its unix-ms text here.
-            if category == "keywords" && !(!key.is_empty() && key.bytes().all(|b| b.is_ascii_digit())) {
+            if category == "keywords"
+                && !(!key.is_empty() && key.bytes().all(|b| b.is_ascii_digit()))
+            {
                 return Err(invalid_cursor());
             }
-            input.after = Some(KeysetCursor { key, id: id.to_string() });
+            input.after = Some(KeysetCursor {
+                key,
+                id: id.to_string(),
+            });
         }
     }
     tx::read(db, move |conn| {
@@ -341,7 +398,13 @@ pub async fn list_selectable_resources(
         let ids: Vec<i64> = page.rows.iter().filter_map(|r| r.id.parse().ok()).collect();
         let mut locked = std::collections::BTreeSet::new();
         for kind in snapshot::view_only_check_kinds(&category) {
-            locked.extend(blocking_ids_in(conn, workspace_id, kind, &ids, Blocking::Edit)?);
+            locked.extend(blocking_ids_in(
+                conn,
+                workspace_id,
+                kind,
+                &ids,
+                Blocking::Edit,
+            )?);
         }
         let items: Vec<Value> = page
             .rows
@@ -358,7 +421,9 @@ pub async fn list_selectable_resources(
             })
             .collect();
         let next_cursor = match (page.has_more, page.rows.last(), page.last_key.as_ref()) {
-            (true, Some(last), Some(key)) => last.id.parse().ok().map(|id| encode_text_cursor(key, id)),
+            (true, Some(last), Some(key)) => {
+                last.id.parse().ok().map(|id| encode_text_cursor(key, id))
+            }
             _ => None,
         };
         let mut out = json!({ "items": items, "nextCursor": next_cursor, "total": page.total });
@@ -382,7 +447,11 @@ pub fn display_name_of(entry: &Value) -> String {
         }
     }
     if let Some(words) = entry["keywords"].as_array().filter(|w| !w.is_empty()) {
-        return words.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+        return words
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
     }
     entry["text"]
         .as_str()
@@ -404,7 +473,9 @@ pub async fn preview_selection_dependencies(
         .as_object()
         .into_iter()
         .flatten()
-        .filter(|(_, chosen)| chosen["mode"] == "all" || chosen["ids"].as_array().is_some_and(|ids| !ids.is_empty()))
+        .filter(|(_, chosen)| {
+            chosen["mode"] == "all" || chosen["ids"].as_array().is_some_and(|ids| !ids.is_empty())
+        })
         .map(|(c, _)| c.clone())
         .collect();
     assert_can_read_categories(actor, &picked)?;
@@ -477,7 +548,10 @@ mod tests {
     #[test]
     fn display_names_fall_back() {
         assert_eq!(display_name_of(&json!({ "name": "Flow" })), "Flow");
-        assert_eq!(display_name_of(&json!({ "keywords": ["hi", "hello"] })), "hi, hello");
+        assert_eq!(
+            display_name_of(&json!({ "keywords": ["hi", "hello"] })),
+            "hi, hello"
+        );
         assert_eq!(display_name_of(&json!({ "sourceId": "7" })), "7");
     }
 }

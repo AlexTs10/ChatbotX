@@ -15,12 +15,16 @@ use chatbotx_core::utils::id::is_numeric_id;
 use chatbotx_core::utils::variables::variable_placeholder_re;
 use chatbotx_core::variables::system_field::SystemFieldType;
 use chatbotx_db::repo::models as m;
-use chatbotx_db::repo::template::{ManifestLookup, snapshot_find_custom_fields, snapshot_find_tags};
+use chatbotx_db::repo::template::{
+    ManifestLookup, snapshot_find_custom_fields, snapshot_find_tags,
+};
 use chatbotx_db::repo::{RowJson, find_many, id_list, iso_millis, now_ms};
 use chatbotx_db::rusqlite::Connection;
 use serde_json::{Map, Value, json};
 
-use super::collect::{self, Collected, RESOURCE_CATEGORIES, RESOURCE_CATEGORY_ENUM, V2_CATEGORIES, numeric_ids};
+use super::collect::{
+    self, Collected, RESOURCE_CATEGORIES, RESOURCE_CATEGORY_ENUM, V2_CATEGORIES, numeric_ids,
+};
 use super::{Blocking, blocking_ids_in};
 use crate::errors::{BusinessError, Result};
 
@@ -111,7 +115,10 @@ pub struct ManifestReferences {
 /// `customFieldNameFromToken`.
 pub fn custom_field_name_from_token(token: &str) -> Option<String> {
     let name = token.trim();
-    if name.starts_with("coupon:") || name.starts_with("bot_field:") || name.starts_with("pipelines.") {
+    if name.starts_with("coupon:")
+        || name.starts_with("bot_field:")
+        || name.starts_with("pipelines.")
+    {
         return None;
     }
     let custom = name.strip_prefix("raw:").unwrap_or(name);
@@ -155,7 +162,9 @@ fn collect_step_tag_names(value: &Value, names: &mut BTreeSet<String>) {
                     }
                 }
             }
-            record.values().for_each(|child| collect_step_tag_names(child, names));
+            record
+                .values()
+                .for_each(|child| collect_step_tag_names(child, names));
         }
         _ => {}
     }
@@ -174,7 +183,11 @@ fn condition_rows(value: &Value) -> Vec<&Value> {
             && row.get("sourceId").is_some()
             && row.get("operator").is_some()
     });
-    if valid { rows.iter().collect() } else { Vec::new() }
+    if valid {
+        rows.iter().collect()
+    } else {
+        Vec::new()
+    }
 }
 
 /// `SOURCE_KIND_BY_EVENT_TYPE`.
@@ -183,7 +196,10 @@ fn condition_source_kind(event: &str) -> Option<&'static str> {
         "tagApplied" | "tagRemoved" => "tag",
         "customFieldValueChanged" | "dateTimeBasedTrigger" => "customField",
         "subscribedToSequence" | "unsubscribedFromSequence" => "sequence",
-        "shoppingCartSent" | "userAskedAboutProduct" | "productOrdered" | "productAddedToCart"
+        "shoppingCartSent"
+        | "userAskedAboutProduct"
+        | "productOrdered"
+        | "productAddedToCart"
         | "productRemovedFromCart" => "product",
         "categoryAddedToCart" => "productCategory",
         "pipelineItemCreated"
@@ -227,7 +243,9 @@ pub fn trigger_condition_references(rows: &[Value]) -> BTreeMap<&'static str, BT
 }
 
 /// `collectManifestReferences`.
-pub fn collect_manifest_references<'a>(entries: impl IntoIterator<Item = &'a Value>) -> ManifestReferences {
+pub fn collect_manifest_references<'a>(
+    entries: impl IntoIterator<Item = &'a Value>,
+) -> ManifestReferences {
     let mut refs = ManifestReferences::default();
     for entry in entries {
         collect_step_tag_names(entry, &mut refs.tag_names);
@@ -238,7 +256,8 @@ pub fn collect_manifest_references<'a>(entries: impl IntoIterator<Item = &'a Val
             }
         }
         collect_bot_field_token_ids(entry, &mut refs.bot_field_ids);
-        refs.tag_ids.extend(by_kind.get("tag").into_iter().flatten().cloned());
+        refs.tag_ids
+            .extend(by_kind.get("tag").into_iter().flatten().cloned());
         for id in by_kind.get("customField").into_iter().flatten() {
             if is_numeric_id(id) {
                 refs.custom_field_ids.insert(id.clone());
@@ -249,7 +268,10 @@ pub fn collect_manifest_references<'a>(entries: impl IntoIterator<Item = &'a Val
                 refs.custom_field_names.insert(name);
             }
         });
-        let rows: Vec<Value> = condition_rows(&entry["conditions"]).into_iter().cloned().collect();
+        let rows: Vec<Value> = condition_rows(&entry["conditions"])
+            .into_iter()
+            .cloned()
+            .collect();
         for (kind, ids) in trigger_condition_references(&rows) {
             match kind {
                 "tag" => refs.tag_ids.extend(ids),
@@ -331,9 +353,19 @@ fn selection_ids(chosen: &Value) -> Vec<String> {
         .collect()
 }
 
-fn resolve_category(conn: &Connection, workspace_id: i64, category: &str, chosen: &Value) -> Result<Vec<String>> {
+fn resolve_category(
+    conn: &Connection,
+    workspace_id: i64,
+    category: &str,
+    chosen: &Value,
+) -> Result<Vec<String>> {
     match chosen["mode"].as_str() {
-        Some("all") => collect::resolve_ids(conn, workspace_id, category, MAX_PAYLOAD_RESOURCES as i64 + 1),
+        Some("all") => collect::resolve_ids(
+            conn,
+            workspace_id,
+            category,
+            MAX_PAYLOAD_RESOURCES as i64 + 1,
+        ),
         Some("ids") => {
             let unique = dedupe(&selection_ids(chosen));
             if unique.is_empty() {
@@ -351,14 +383,28 @@ fn resolve_category(conn: &Connection, workspace_id: i64, category: &str, chosen
 }
 
 /// `resolveSnapshotSelection`.
-pub fn resolve_selection(conn: &Connection, workspace_id: i64, selection: &Value) -> Result<ResolvedSelection> {
+pub fn resolve_selection(
+    conn: &Connection,
+    workspace_id: i64,
+    selection: &Value,
+) -> Result<ResolvedSelection> {
     let mut ids_by_category = BTreeMap::new();
     for category in RESOURCE_CATEGORIES {
-        ids_by_category.insert(*category, resolve_category(conn, workspace_id, category, &selection[*category])?);
+        ids_by_category.insert(
+            *category,
+            resolve_category(conn, workspace_id, category, &selection[*category])?,
+        );
     }
     let tag_ids = resolve_category(conn, workspace_id, "tags", &selection["tags"])?;
-    let custom_field_ids = resolve_category(conn, workspace_id, "customFields", &selection["customFields"])?;
-    let total = ids_by_category.values().map(Vec::len).sum::<usize>() + tag_ids.len() + custom_field_ids.len();
+    let custom_field_ids = resolve_category(
+        conn,
+        workspace_id,
+        "customFields",
+        &selection["customFields"],
+    )?;
+    let total = ids_by_category.values().map(Vec::len).sum::<usize>()
+        + tag_ids.len()
+        + custom_field_ids.len();
     if total > MAX_PAYLOAD_RESOURCES {
         return Err(too_large_error());
     }
@@ -391,7 +437,8 @@ pub fn collect_closure(
     while !pending.is_empty() {
         let mut dependencies = Vec::new();
         for category in &pending {
-            let result = collect::collect(conn, workspace_id, category, &ids_by_category[category])?;
+            let result =
+                collect::collect(conn, workspace_id, category, &ids_by_category[category])?;
             dependencies.extend(result.hard_dependencies.iter().cloned());
             results.insert(category, result);
         }
@@ -465,7 +512,10 @@ fn ancestry<M: chatbotx_db::repo::Model + RowJson>(
     let mut manifest = Map::new();
     let mut pending = start;
     while !pending.is_empty() {
-        let fetch: Vec<String> = pending.drain(..).filter(|id| !manifest.contains_key(id)).collect();
+        let fetch: Vec<String> = pending
+            .drain(..)
+            .filter(|id| !manifest.contains_key(id))
+            .collect();
         if fetch.is_empty() {
             break;
         }
@@ -490,7 +540,9 @@ fn pipeline_manifest(
 ) -> Result<Map<String, Value>> {
     let mut referenced: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for graph in flow_graphs {
-        for (kind, ids) in collect_references_by_kind(graph, Some(&["pipeline", "pipelineStage", "pipelineField"])) {
+        for (kind, ids) in
+            collect_references_by_kind(graph, Some(&["pipeline", "pipelineStage", "pipelineField"]))
+        {
             referenced.entry(kind).or_default().extend(ids);
         }
     }
@@ -498,7 +550,12 @@ fn pipeline_manifest(
     let mut pipeline_ids: BTreeSet<String> = referenced.remove("pipeline").unwrap_or_default();
     pipeline_ids.extend(from_triggers.get("pipeline").cloned().unwrap_or_default());
     let mut stage_ids = referenced.remove("pipelineStage").unwrap_or_default();
-    stage_ids.extend(from_triggers.get("pipelineStage").cloned().unwrap_or_default());
+    stage_ids.extend(
+        from_triggers
+            .get("pipelineStage")
+            .cloned()
+            .unwrap_or_default(),
+    );
     let field_ids = referenced.remove("pipelineField").unwrap_or_default();
     let stage_ids: Vec<String> = stage_ids.into_iter().collect();
     let field_ids: Vec<String> = field_ids.into_iter().collect();
@@ -523,7 +580,11 @@ fn pipeline_manifest(
         .collect())
 }
 
-fn place_category_manifest(conn: &Connection, workspace_id: i64, flow_graphs: &[Value]) -> Result<Map<String, Value>> {
+fn place_category_manifest(
+    conn: &Connection,
+    workspace_id: i64,
+    flow_graphs: &[Value],
+) -> Result<Map<String, Value>> {
     let mut ids = BTreeSet::new();
     for graph in flow_graphs {
         ids.extend(
@@ -533,24 +594,37 @@ fn place_category_manifest(conn: &Connection, workspace_id: i64, flow_graphs: &[
         );
     }
     let ids: Vec<String> = ids.into_iter().collect();
-    Ok(json_rows::<m::PlaceCategory>(conn, workspace_id, &numeric_ids(&ids))?
-        .iter()
-        .map(|r| (r["id"].as_str().unwrap_or_default().to_string(), json!({ "name": r["name"] })))
-        .collect())
-}
-
-fn inbox_manifest(conn: &Connection, workspace_id: i64, inbox_ids: &[String]) -> Result<Map<String, Value>> {
     Ok(
-        chatbotx_db::repo::inbox::list_identities_by_ids(conn, workspace_id, &numeric_ids(inbox_ids))?
-            .into_iter()
-            .map(|row| {
+        json_rows::<m::PlaceCategory>(conn, workspace_id, &numeric_ids(&ids))?
+            .iter()
+            .map(|r| {
                 (
-                    row.id.to_string(),
-                    json!({ "channelType": row.channel, "name": row.name }),
+                    r["id"].as_str().unwrap_or_default().to_string(),
+                    json!({ "name": r["name"] }),
                 )
             })
             .collect(),
     )
+}
+
+fn inbox_manifest(
+    conn: &Connection,
+    workspace_id: i64,
+    inbox_ids: &[String],
+) -> Result<Map<String, Value>> {
+    Ok(chatbotx_db::repo::inbox::list_identities_by_ids(
+        conn,
+        workspace_id,
+        &numeric_ids(inbox_ids),
+    )?
+    .into_iter()
+    .map(|row| {
+        (
+            row.id.to_string(),
+            json!({ "channelType": row.channel, "name": row.name }),
+        )
+    })
+    .collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -576,7 +650,14 @@ fn count_dropped_resource_references<'a>(
     shipped: &BTreeMap<&str, BTreeSet<String>>,
 ) -> usize {
     let mut kinds: Vec<&str> = SHIPPED_CATEGORY_BY_KIND.iter().map(|(k, _)| *k).collect();
-    kinds.extend(["pipeline", "pipelineStage", "pipelineField", "productCategory", "placeCategory", "botField"]);
+    kinds.extend([
+        "pipeline",
+        "pipelineStage",
+        "pipelineField",
+        "productCategory",
+        "placeCategory",
+        "botField",
+    ]);
     let mut dropped = BTreeSet::new();
     for entry in entries {
         // Trigger condition rows are counted separately.
@@ -618,7 +699,10 @@ pub struct Snapshot {
 }
 
 /// `buildItemPermissions`.
-fn item_permissions(selection: &Value, present: &BTreeMap<&str, Vec<String>>) -> Result<Map<String, Value>> {
+fn item_permissions(
+    selection: &Value,
+    present: &BTreeMap<&str, Vec<String>>,
+) -> Result<Map<String, Value>> {
     let mut permissions = Map::new();
     let Some(selection) = selection.as_object() else {
         return Ok(permissions);
@@ -626,7 +710,11 @@ fn item_permissions(selection: &Value, present: &BTreeMap<&str, Vec<String>>) ->
     for (category, chosen) in selection {
         let present_ids = present.get(category.as_str()).cloned().unwrap_or_default();
         let locked: Vec<String> = if chosen["mode"] == "all" {
-            if chosen["lockAll"] == true { present_ids } else { Vec::new() }
+            if chosen["lockAll"] == true {
+                present_ids
+            } else {
+                Vec::new()
+            }
         } else {
             let ids = selection_ids(chosen);
             let locked: Vec<String> = chosen["lockedIds"]
@@ -642,12 +730,18 @@ fn item_permissions(selection: &Value, present: &BTreeMap<&str, Vec<String>>) ->
                     400,
                 ));
             }
-            locked.into_iter().filter(|id| present_ids.contains(id)).collect()
+            locked
+                .into_iter()
+                .filter(|id| present_ids.contains(id))
+                .collect()
         };
         if !locked.is_empty() {
             permissions.insert(
                 category.clone(),
-                locked.into_iter().map(|id| (id, json!({ "allowEdit": false }))).collect(),
+                locked
+                    .into_iter()
+                    .map(|id| (id, json!({ "allowEdit": false })))
+                    .collect(),
             );
         }
     }
@@ -669,7 +763,12 @@ fn folder_ref(row_folder: Option<i64>, mut entry: Value) -> Value {
 }
 
 /// `buildTemplateSnapshot`.
-pub fn build_snapshot(conn: &Connection, workspace_id: i64, tenant_id: i64, selection: &Value) -> Result<Snapshot> {
+pub fn build_snapshot(
+    conn: &Connection,
+    workspace_id: i64,
+    tenant_id: i64,
+    selection: &Value,
+) -> Result<Snapshot> {
     let mut resolved = resolve_selection(conn, workspace_id, selection)?;
     let results = collect_closure(conn, workspace_id, &mut resolved.ids_by_category)?;
     assert_no_view_only_copies(conn, workspace_id, &resolved.ids_by_category)?;
@@ -696,10 +795,16 @@ pub fn build_snapshot(conn: &Connection, workspace_id: i64, tenant_id: i64, sele
             ..Default::default()
         },
     )?;
-    let mut referenced_tag_ids: Vec<String> = references.tag_ids.iter().filter(|id| is_numeric_id(id)).cloned().collect();
+    let mut referenced_tag_ids: Vec<String> = references
+        .tag_ids
+        .iter()
+        .filter(|id| is_numeric_id(id))
+        .cloned()
+        .collect();
     referenced_tag_ids.extend(named_tags.iter().map(|t| t.id.to_string()));
     let referenced_tag_ids = dedupe(&referenced_tag_ids);
-    let mut referenced_field_ids: Vec<String> = references.custom_field_ids.iter().cloned().collect();
+    let mut referenced_field_ids: Vec<String> =
+        references.custom_field_ids.iter().cloned().collect();
     referenced_field_ids.extend(
         by_name
             .values()
@@ -707,7 +812,13 @@ pub fn build_snapshot(conn: &Connection, workspace_id: i64, tenant_id: i64, sele
             .map(|ids| ids[0].to_string()),
     );
     let tag_ids = dedupe(&[resolved.tag_ids.clone(), referenced_tag_ids.clone()].concat());
-    let custom_field_ids = dedupe(&[resolved.custom_field_ids.clone(), referenced_field_ids.clone()].concat());
+    let custom_field_ids = dedupe(
+        &[
+            resolved.custom_field_ids.clone(),
+            referenced_field_ids.clone(),
+        ]
+        .concat(),
+    );
     if collected_count(&results) + tag_ids.len() + custom_field_ids.len() > MAX_PAYLOAD_RESOURCES {
         return Err(too_large_error());
     }
@@ -746,7 +857,10 @@ pub fn build_snapshot(conn: &Connection, workspace_id: i64, tenant_id: i64, sele
             ..Default::default()
         },
     )?;
-    let mut folder_ids: Vec<String> = results.values().flat_map(|r| r.folder_ids.iter().cloned()).collect();
+    let mut folder_ids: Vec<String> = results
+        .values()
+        .flat_map(|r| r.folder_ids.iter().cloned())
+        .collect();
     folder_ids.extend(
         tag_rows
             .iter()
@@ -754,30 +868,40 @@ pub fn build_snapshot(conn: &Connection, workspace_id: i64, tenant_id: i64, sele
             .chain(field_rows.iter().filter_map(|f| f.folder_id))
             .map(|id| id.to_string()),
     );
-    let folders = ancestry::<m::Folder>(conn, workspace_id, dedupe(&folder_ids), |r| {
-        json!({ "name": r["name"], "folderType": r["folderType"], "parentSourceId": r["parentId"] })
-    })?;
+    let folders = ancestry::<m::Folder>(
+        conn,
+        workspace_id,
+        dedupe(&folder_ids),
+        |r| json!({ "name": r["name"], "folderType": r["folderType"], "parentSourceId": r["parentId"] }),
+    )?;
     let category_ids: Vec<String> = results
         .values()
         .flat_map(|r| r.product_category_ids.iter().cloned())
         .collect();
-    let product_categories = ancestry::<m::ProductCategory>(conn, workspace_id, dedupe(&category_ids), |r| {
-        let mut entry = json!({ "name": r["name"], "parentSourceId": r["parentId"] });
-        if r["rank"] != 10 {
-            entry["rank"] = r["rank"].clone();
-        }
-        entry
-    })?;
+    let product_categories =
+        ancestry::<m::ProductCategory>(conn, workspace_id, dedupe(&category_ids), |r| {
+            let mut entry = json!({ "name": r["name"], "parentSourceId": r["parentId"] });
+            if r["rank"] != 10 {
+                entry["rank"] = r["rank"].clone();
+            }
+            entry
+        })?;
     let pipelines = pipeline_manifest(conn, workspace_id, &flow_graphs, &trigger_conditions)?;
     let places = place_category_manifest(conn, workspace_id, &flow_graphs)?;
-    let inbox_ids: Vec<String> = results.values().flat_map(|r| r.inbox_ids.iter().cloned()).collect();
+    let inbox_ids: Vec<String> = results
+        .values()
+        .flat_map(|r| r.inbox_ids.iter().cloned())
+        .collect();
     let inboxes = inbox_manifest(conn, workspace_id, &dedupe(&inbox_ids))?;
 
     // `countDroppedReferences`.
     let found_tags: BTreeSet<String> = tag_rows.iter().map(|t| t.id.to_string()).collect();
     let found_fields: BTreeSet<String> = field_rows.iter().map(|f| f.id.to_string()).collect();
     let selected_pipelines = &result("pipelines").entries;
-    let pipeline_values: Vec<&Value> = pipelines.values().chain(selected_pipelines.iter()).collect();
+    let pipeline_values: Vec<&Value> = pipelines
+        .values()
+        .chain(selected_pipelines.iter())
+        .collect();
     let mut pipeline_set: BTreeSet<String> = pipelines.keys().cloned().collect();
     pipeline_set.extend(ids_of(selected_pipelines));
     let nested_ids = |key: &str| -> BTreeSet<String> {
@@ -791,7 +915,10 @@ pub fn build_snapshot(conn: &Connection, workspace_id: i64, tenant_id: i64, sele
     let field_set = nested_ids("fields");
     let product_category_set: BTreeSet<String> = product_categories.keys().cloned().collect();
     let place_set: BTreeSet<String> = places.keys().cloned().collect();
-    let dropped_manifest = referenced_tag_ids.iter().filter(|id| !found_tags.contains(*id)).count()
+    let dropped_manifest = referenced_tag_ids
+        .iter()
+        .filter(|id| !found_tags.contains(*id))
+        .count()
         + dedupe(&referenced_field_ids)
             .iter()
             .filter(|id| !found_fields.contains(*id))
@@ -829,11 +956,26 @@ pub fn build_snapshot(conn: &Connection, workspace_id: i64, tenant_id: i64, sele
 
     let mut present: BTreeMap<&str, Vec<String>> = RESOURCE_CATEGORIES
         .iter()
-        .map(|c| (*c, result(c).entries.iter().filter_map(|e| e["sourceId"].as_str().map(str::to_string)).collect()))
+        .map(|c| {
+            (
+                *c,
+                result(c)
+                    .entries
+                    .iter()
+                    .filter_map(|e| e["sourceId"].as_str().map(str::to_string))
+                    .collect(),
+            )
+        })
         .collect();
     present.insert("tags", tag_rows.iter().map(|t| t.id.to_string()).collect());
-    present.insert("customFields", field_rows.iter().map(|f| f.id.to_string()).collect());
-    present.insert("productCategories", product_categories.keys().cloned().collect());
+    present.insert(
+        "customFields",
+        field_rows.iter().map(|f| f.id.to_string()).collect(),
+    );
+    present.insert(
+        "productCategories",
+        product_categories.keys().cloned().collect(),
+    );
     let permissions = item_permissions(selection, &present)?;
 
     let mut resources = Map::new();
@@ -900,7 +1042,9 @@ pub fn category_counts(payload: &Value) -> Value {
     }
     counts.insert(
         "settings".into(),
-        json!(len(&resources["settings"]["savedReplies"]) + len(&resources["settings"]["botFields"])),
+        json!(
+            len(&resources["settings"]["savedReplies"]) + len(&resources["settings"]["botFields"])
+        ),
     );
     for category in RESOURCE_CATEGORY_ENUM.iter().filter(|c| **c != "settings") {
         counts.insert((*category).into(), json!(len(&resources[*category])));
@@ -966,7 +1110,9 @@ pub fn hash_payload(payload: &Value) -> String {
             let mut resources = Map::new();
             for (category, list) in value.as_object().into_iter().flatten() {
                 let project = |c: &str, v: &Value| match v {
-                    Value::Array(items) => Value::Array(items.iter().map(|e| fingerprint_entry(c, e)).collect()),
+                    Value::Array(items) => {
+                        Value::Array(items.iter().map(|e| fingerprint_entry(c, e)).collect())
+                    }
                     other => other.clone(),
                 };
                 let out = if category == "settings" && list.is_object() {
@@ -1014,7 +1160,11 @@ pub fn entries_for_category(resources: &Value, category: &str) -> Vec<Value> {
                 })
                 .collect()
         };
-        return [tag("savedReplies", "savedReply"), tag("botFields", "botField")].concat();
+        return [
+            tag("savedReplies", "savedReply"),
+            tag("botFields", "botField"),
+        ]
+        .concat();
     }
     resources[category].as_array().cloned().unwrap_or_default()
 }
@@ -1022,19 +1172,20 @@ pub fn entries_for_category(resources: &Value, category: &str) -> Vec<Value> {
 /// `describeVersionChanges`.
 pub fn describe_version_changes(previous: &Value, next: &Value) -> Value {
     let items = |payload: &Value, category: &str| -> BTreeMap<String, (String, String)> {
-        let rows: Vec<(String, Value)> = if matches!(category, "tags" | "customFields" | "productCategories") {
-            payload["manifests"][category]
-                .as_object()
-                .into_iter()
-                .flatten()
-                .map(|(id, e)| (id.clone(), e.clone()))
-                .collect()
-        } else {
-            entries_for_category(&payload["resources"], category)
-                .into_iter()
-                .map(|e| (e["sourceId"].as_str().unwrap_or_default().to_string(), e))
-                .collect()
-        };
+        let rows: Vec<(String, Value)> =
+            if matches!(category, "tags" | "customFields" | "productCategories") {
+                payload["manifests"][category]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(id, e)| (id.clone(), e.clone()))
+                    .collect()
+            } else {
+                entries_for_category(&payload["resources"], category)
+                    .into_iter()
+                    .map(|e| (e["sourceId"].as_str().unwrap_or_default().to_string(), e))
+                    .collect()
+            };
         rows.into_iter()
             .map(|(id, e)| {
                 let name = ["name", "shortcut", "title"]
@@ -1077,7 +1228,10 @@ mod tests {
 
     #[test]
     fn token_names_skip_system_and_prefixed_fields() {
-        assert_eq!(custom_field_name_from_token(" raw:budget "), Some("budget".into()));
+        assert_eq!(
+            custom_field_name_from_token(" raw:budget "),
+            Some("budget".into())
+        );
         assert_eq!(custom_field_name_from_token("first_name"), None);
         assert_eq!(custom_field_name_from_token("coupon:7"), None);
         let refs = collect_manifest_references([&json!({
@@ -1116,10 +1270,27 @@ mod tests {
     #[test]
     fn item_permissions_lock_only_selected() {
         let present = BTreeMap::from([("flows", vec!["1".to_string(), "2".to_string()])]);
-        let ok = item_permissions(&json!({ "flows": { "mode": "ids", "ids": ["1", "3"], "lockedIds": ["1", "3"] } }), &present).unwrap();
-        assert_eq!(Value::Object(ok), json!({ "flows": { "1": { "allowEdit": false } } }));
-        assert!(item_permissions(&json!({ "flows": { "mode": "ids", "ids": ["1"], "lockedIds": ["2"] } }), &present).is_err());
-        let all = item_permissions(&json!({ "flows": { "mode": "all", "lockAll": true } }), &present).unwrap();
+        let ok = item_permissions(
+            &json!({ "flows": { "mode": "ids", "ids": ["1", "3"], "lockedIds": ["1", "3"] } }),
+            &present,
+        )
+        .unwrap();
+        assert_eq!(
+            Value::Object(ok),
+            json!({ "flows": { "1": { "allowEdit": false } } })
+        );
+        assert!(
+            item_permissions(
+                &json!({ "flows": { "mode": "ids", "ids": ["1"], "lockedIds": ["2"] } }),
+                &present
+            )
+            .is_err()
+        );
+        let all = item_permissions(
+            &json!({ "flows": { "mode": "all", "lockAll": true } }),
+            &present,
+        )
+        .unwrap();
         assert_eq!(all["flows"].as_object().map(Map::len), Some(2));
     }
 }
