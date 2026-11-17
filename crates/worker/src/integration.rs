@@ -181,6 +181,14 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }
+        // Queued by the Q.I4 store webhook receivers; the job side
+        // (`processShopifyWebhook` / `processWooCommerceWebhook`) is the
+        // Q.D8 store sync. Failed jobs stay in the failed set for a retry.
+        "shopifyWebhook" | "woocommerceWebhook" => {
+            return Err(JobError::unrecoverable(format!(
+                "{kind}: the store sync (Q.D8) is not ported yet"
+            )));
+        }
         other => {
             // ponytail: every other integration action is a later unit
             // (inbound channels Q.I*, steps, sequences, ...).
