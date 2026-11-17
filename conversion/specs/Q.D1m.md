@@ -42,7 +42,7 @@ See `conversion/DECISIONS.md` (2026-11-17 "Q.D1m" lines).
 ## Tests
 
 - `crates/core/tests/mini_app_{display_text,runtime,serialize,validate,validate_issue_codes}.rs`.
-- `crates/business/tests/mini_app_definition.rs`, `mini_app_service.rs`.
+- `crates/business/tests/mini_app_definition.rs`, `mini_app_service.rs`, `mini_app_upload_service.rs`.
 - `crates/api/tests/mini_apps_public_api.rs`.
 - Unit tests: `server::mini_apps` (cross-site check), `worker::mini_app_buttons`
   (links, dropped buttons), `rpc_procedures::mini_apps` (number label).
@@ -57,6 +57,6 @@ Not run in this unit. Suites: `50-mini-apps`, `51-mini-apps-whatsapp`
 
 - WhatsApp Flows (publish, draft, preview, Flow removal on delete).
 - The Messenger template Mini App button.
-- `mini-app-upload-service.test.ts`, the `resolveContactVariables` cases of
+- The `resolveContactVariables` cases of
   `mini-app-contact-variables.test.ts`, the "files in the response message"
   cases of `validate.test.ts`.

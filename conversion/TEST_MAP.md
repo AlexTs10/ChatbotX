@@ -2340,7 +2340,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/mini-app-definition.test.ts` | C | `crates/business/tests/mini_app_definition.rs` | ported | Mini-apps; Q.D1m |
 | `packages/business/__tests__/mini-app-duplicate.test.ts` | C | `crates/business/tests/mini_app_service.rs` | ported | Mini-apps; Q.D1m; parallel-insert retries in `copy_name.rs` |
 | `packages/business/__tests__/mini-app-submission-custom-fields.test.ts` | C | `crates/business/tests/mini_app_service.rs` | ported | Mini-apps; Q.D1m |
-| `packages/business/__tests__/mini-app-upload-service.test.ts` | C | tbd | todo | Mini-apps |
+| `packages/business/__tests__/mini-app-upload-service.test.ts` | C | `crates/business/tests/mini_app_upload_service.rs` | ported | Mini-apps; Q.D1m |
 | `packages/business/__tests__/minigame-contact-service-scoping.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/minigame-leaderboard-award.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/minigame-outcome-message-text.test.ts` | C | tbd | todo | Minigames |
