@@ -572,6 +572,20 @@ impl Input {
         self.bool_at(&key(name), value.as_ref(), false)
     }
 
+    /// An optional boolean key with oRPC's coercion: `"true"` / `"on"` and
+    /// `"false"` / `"off"` are booleans.
+    pub fn opt_coerced_bool(&mut self, name: &str) -> Option<bool> {
+        let value = match self.obj.get(name).cloned() {
+            Some(Value::String(text)) => match text.as_str() {
+                "true" | "on" => Some(Value::Bool(true)),
+                "false" | "off" => Some(Value::Bool(false)),
+                _ => Some(Value::String(text)),
+            },
+            other => other,
+        };
+        self.bool_at(&key(name), value.as_ref(), false)
+    }
+
     /// A required boolean key.
     pub fn bool(&mut self, name: &str) -> Option<bool> {
         let value = self.obj.get(name).cloned();

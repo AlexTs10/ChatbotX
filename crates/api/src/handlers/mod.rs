@@ -13,6 +13,8 @@ pub mod capabilities;
 pub mod channel_integrations;
 pub mod channel_settings;
 pub mod channels;
+pub mod comment_automations;
+pub mod connect_sessions;
 pub mod connections;
 pub mod contact_custom_fields;
 pub mod contact_exports;
@@ -21,6 +23,7 @@ pub mod contact_imports;
 pub mod contact_inboxes;
 pub mod contact_messages;
 pub mod contact_notes;
+pub mod contact_scans;
 pub mod contact_sequences;
 pub mod contacts;
 pub mod contacts_bulk;
@@ -97,8 +100,9 @@ pub struct ApiState {
     pub files: Option<Arc<chatbotx_files::Uploader>>,
     /// `NEXT_PUBLIC_EDITION` (read once at start; tests set it).
     pub edition: chatbotx_business::keys::Edition,
-    /// `encryptUtils` (`ENCRYPTION_KEY*`, read once at start); `None` = the
-    /// keys are unset (credential writes fail).
+    /// `encryptUtils` (`ENCRYPTION_KEY*`, read once at start: credential
+    /// writes, connect-session auth, platform credentials); `None` = the keys
+    /// are unset (credential writes fail, an OAuth connect is not configured).
     pub encryption: Option<Arc<chatbotx_core::encryption::Encryption>>,
     /// `LICENSE_KEY` (read once at start; tests set it).
     pub license_token: Option<String>,
@@ -163,7 +167,21 @@ impl ApiState {
         }
     }
 
-    /// Encrypts and decrypts with `encryption`.
+    /// Uses the `ENCRYPTION_KEY` keys of the process env (a missing or
+    /// invalid key is logged; OAuth connects are then not configured).
+    pub fn with_encryption_from_env(self) -> ApiState {
+        match chatbotx_core::encryption::Keys::from_env(&chatbotx_core::env::ProcessEnv) {
+            Ok(keys) => {
+                self.with_encryption(Arc::new(chatbotx_core::encryption::Encryption::new(keys)))
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "OAuth connects off: ENCRYPTION_KEY is not valid");
+                self
+            }
+        }
+    }
+
+    /// Uses `encryption` (`encryptUtils`).
     pub fn with_encryption(
         mut self,
         encryption: Arc<chatbotx_core::encryption::Encryption>,
@@ -520,7 +538,13 @@ async fn route(
     call: Call<'_>,
     principal: &Principal,
 ) -> Option<Response> {
-    let reply = if connections::ROUTES.contains(&route_id) {
+    let reply = if contact_scans::ROUTES.contains(&route_id) {
+        contact_scans::handle(state, route_id, call).await
+    } else if comment_automations::ROUTES.contains(&route_id) {
+        comment_automations::handle(state, route_id, call).await
+    } else if connect_sessions::ROUTES.contains(&route_id) {
+        connect_sessions::handle(state, route_id, call, principal).await
+    } else if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
     } else if integrations_ai::ROUTES.contains(&route_id) {
         integrations_ai::handle(state, route_id, call).await
@@ -572,6 +596,8 @@ async fn route(
         flows::handle(state, route_id, call).await
     } else if webchats::ROUTES.contains(&route_id) {
         webchats::handle(state, route_id, call).await
+    } else if channel_integrations::ROUTES.contains(&route_id) {
+        channel_integrations::handle(state, route_id, call).await
     } else if places::ROUTES.contains(&route_id) {
         places::handle(state, route_id, call).await
     } else if open_hours::ROUTES.contains(&route_id) {
@@ -620,8 +646,6 @@ async fn route(
         messenger_menus::handle(state, route_id, call).await
     } else if messenger_templates::ROUTES.contains(&route_id) {
         messenger_templates::handle(state, route_id, call).await
-    } else if channel_integrations::ROUTES.contains(&route_id) {
-        channel_integrations::handle(state, route_id, call).await
     } else {
         return None;
     };

@@ -2,11 +2,15 @@
 //! `createHandoverResumeFlowRoute`) and the Messenger / Instagram channel
 //! routes of `features/integration-{messenger,instagram}/api/public.ts`
 //! (scope `channels`; Q.I1b slice 6): list / get, tag sync, handover resume
-//! flow, settings (writes in `channel_settings`).
+//! flow, settings (writes in `channel_settings`); the TikTok / Zalo routes
+//! of `integration-{tiktok,zalo}/api/public.ts` (Q.I2) in
+//! [`handle_tiktok_zalo`].
 //!
 //! ponytail: no `assertReferencable` template locks (P3.6-D1 rule) and no
 //! `#messengers` cache tags (no read cache in Rust).
 
+use chatbotx_business::channel_integration::{self, TIKTOK_BUSINESS_API_URL};
+use chatbotx_business::connection::credentials::HttpUpstream;
 use chatbotx_business::{BusinessError, tx};
 use chatbotx_db::repo::models::{IntegrationInstagram, IntegrationMessenger};
 use chatbotx_db::repo::{find_many, find_one, integration_messenger, now_ms};
@@ -22,6 +26,7 @@ use super::messenger_templates::{
 use super::tags::digits_at;
 use super::{
     ApiState, Call, FINDING, LISTING, MUTATING, Reply, business_error, date, json, no_content,
+    opt_date,
 };
 
 /// The routes of this module.
@@ -40,6 +45,13 @@ pub const ROUTES: &[&str] = &[
     "instagramChannels.patchSettings",
     "messengerChannels.disconnect",
     "instagramChannels.disconnect",
+    "tiktokChannels.list",
+    "tiktokChannels.get",
+    "tiktokChannels.getCommentToMessage",
+    "tiktokChannels.updateCommentToMessage",
+    "zaloChannels.list",
+    "zaloChannels.get",
+    "zaloChannels.updateTagSync",
 ];
 
 /// `resolveCapiConnection(...) === "connected"`; Messenger and Instagram
@@ -186,6 +198,9 @@ pub async fn find_instagram(
 
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
+    if route_id.starts_with("tiktokChannels.") || route_id.starts_with("zaloChannels.") {
+        return handle_tiktok_zalo(state, route_id, call).await;
+    }
     let db = &state.db;
     let ws = call.workspace_id;
     let not_found = || BusinessError::not_found("Channel integration not found");
@@ -556,4 +571,86 @@ async fn disconnect_instagram(state: &ApiState, ws: i64, id: i64) -> Result<(), 
         .map_err(|e| business_error(e, MUTATING))?;
     audit_disconnect(state, ws, "Instagram", id).await;
     Ok(())
+}
+
+/// The `tiktokChannels.*` / `zaloChannels.*` routes (Q.I2).
+async fn handle_tiktok_zalo(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
+    let db = &state.db;
+    let ws = call.workspace_id;
+    let (group, action) = route_id.split_once('.').unwrap_or_default();
+    let channel = if group == "tiktokChannels" {
+        "tiktok"
+    } else {
+        "zalo"
+    };
+    match action {
+        "list" => {
+            Input::from_query(call.params, call.query).finish()?;
+            let rows = channel_integration::list(db, channel, ws, None)
+                .await
+                .map_err(|e| business_error(e, LISTING))?;
+            Ok(json(200, Value::Array(rows.unwrap_or_default())))
+        }
+        "get" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id = input.id("id");
+            input.finish()?;
+            let row = channel_integration::list(db, channel, ws, id)
+                .await
+                .and_then(|rows| {
+                    rows.and_then(|mut rows| rows.pop())
+                        .ok_or_else(|| BusinessError::not_found("Channel integration not found"))
+                })
+                .map_err(|e| business_error(e, FINDING))?;
+            Ok(json(200, row))
+        }
+        "getCommentToMessage" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id = input.id("id");
+            input.finish()?;
+            let status = channel_integration::refresh_comment_to_message(
+                db,
+                &HttpUpstream,
+                TIKTOK_BUSINESS_API_URL,
+                ws,
+                id.unwrap_or_default(),
+            )
+            .await
+            .map_err(|e| business_error(e, FINDING))?;
+            Ok(json(200, json!({ "status": status })))
+        }
+        "updateCommentToMessage" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let id = input.id("id");
+            let enabled = input.bool("enabled");
+            input.finish()?;
+            let status = channel_integration::set_comment_to_message(
+                db,
+                &HttpUpstream,
+                &state.audit,
+                TIKTOK_BUSINESS_API_URL,
+                ws,
+                id.unwrap_or_default(),
+                enabled.unwrap_or_default(),
+            )
+            .await
+            .map_err(|e| business_error(e, MUTATING))?;
+            Ok(json(200, json!({ "status": status })))
+        }
+        _ => {
+            let mut input = Input::from_body(call.params, call.body);
+            let id = input.id("id");
+            let enabled = input.bool("enabled");
+            input.finish()?;
+            let at = channel_integration::update_zalo_tag_sync(
+                db,
+                ws,
+                id.unwrap_or_default(),
+                enabled.unwrap_or_default(),
+            )
+            .await
+            .map_err(|e| business_error(e, MUTATING))?;
+            Ok(json(200, json!({ "syncTagEnabledAt": opt_date(at) })))
+        }
+    }
 }

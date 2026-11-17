@@ -351,6 +351,42 @@ async fn execute(
     Ok(true)
 }
 
+/// `executeActions` of the date/time sweep: every action in order with the
+/// key `datetime:{trigger}:{contact}:{index}:{occurrence}`; failures are
+/// logged (no run limiter, history or stats, like the original).
+pub(crate) async fn run_datetime_actions(
+    deps: &Deps,
+    trigger_id: i64,
+    workspace_id: i64,
+    contact_id: i64,
+    actions: &[Value],
+    occurrence: &str,
+) {
+    let input = RunInput {
+        contact_inbox_id: None,
+        decision_flow_id: None,
+        occurrence: None,
+        channel_originated: false,
+    };
+    let mut scope = Scope::default();
+    for (index, action) in actions.iter().enumerate() {
+        let ctx = ActionCtx {
+            deps,
+            action,
+            trigger_id,
+            workspace_id,
+            contact_id,
+            input: &input,
+            occurrence_key: Some(format!(
+                "datetime:{trigger_id}:{contact_id}:{index}:{occurrence}"
+            )),
+        };
+        if let Err(err) = execute_action(&ctx, &mut scope).await {
+            tracing::error!(err = %err, "Failed to execute action for trigger {trigger_id} for contact {contact_id}");
+        }
+    }
+}
+
 /// `incrementStats` for the day (local midnight; the worker runs in UTC).
 fn increment_stats(
     tx: &chatbotx_db::rusqlite::Connection,

@@ -22,6 +22,10 @@ const fields = () => import("@/routes/fields")
 const sequences = () => import("@/routes/sequences")
 const ai = () => import("@/routes/ai")
 const settings = () => import("@/routes/settings")
+const dashboard = () => import("@/routes/dashboard")
+const ecommerce = () => import("@/routes/ecommerce")
+const tools = () => import("@/routes/tools")
+const toolEditors = () => import("@/routes/tool-editors")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -174,6 +178,130 @@ const sectionRoutes = [
   sectionRoute("sequences", sequences, "SequencesLayout", "SequencesPage"),
 ]
 
+// `dashboard/layout.tsx`: the analytics section (inbox cards + sub-pages).
+const dashboardRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "dashboard",
+  component: lazyRouteComponent(dashboard, "DashboardLayout"),
+})
+const dashboardRoutes = dashboardRoute.addChildren(
+  (
+    [
+      ["/", "DashboardIndexPage"],
+      ["contacts", "DashboardContactsPage"],
+      ["conversations", "DashboardConversationsPage"],
+      ["ads", "DashboardAdsPage"],
+      ["ads/$channel", "DashboardAdsPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => dashboardRoute,
+      path,
+      component: lazyRouteComponent(dashboard, page),
+    }),
+  ),
+)
+
+// `(e-commerce)`: a pathless layout (ecommerce permission, tabs, shop link);
+// `products/*`: the product forms outside it.
+const ecommerceRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "e-commerce",
+  component: lazyRouteComponent(ecommerce, "EcommerceLayout"),
+})
+const ecommercePages = (
+  [
+    ["products", "ProductsPage"],
+    ["product-categories", "ProductCategoriesPage"],
+    ["product-vendors", "ProductVendorsPage"],
+    ["orders", "OrdersPage"],
+    ["orders/$orderId", "OrdersPage"],
+    ["discount-codes", "DiscountCodesPage"],
+    ["discount-codes/$discountCodeId", "DiscountCodesPage"],
+    ["ecommerce-settings", "EcommerceSettingsPage"],
+    ["ecommerce-settings/$section", "EcommerceSettingsPage"],
+    ["ecommerce-analytics", "EcommerceAnalyticsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => ecommerceRoute,
+    path,
+    component: lazyRouteComponent(ecommerce, page),
+  }),
+)
+const productFormsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "product-forms",
+  component: lazyRouteComponent(ecommerce, "ProductsLayout"),
+})
+const productFormPages = (
+  [
+    ["products/create", "CreateProductPage"],
+    ["products/$id/edit", "EditProductPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => productFormsRoute,
+    path,
+    component: lazyRouteComponent(ecommerce, page),
+  }),
+)
+
+// The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
+const toolPages = (
+  [
+    ["polls", "PollsPage"],
+    ["questionnaires", "QuestionnairesPage"],
+    ["reflinks", "ReflinksPage"],
+    ["qr-codes", "QrCodesPage"],
+    ["minigames", "MinigamesPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(tools, page),
+  }),
+)
+const toolEditorPages = (
+  [
+    ["questionnaires/$id/edit", "EditQuestionnairePage"],
+    ["questionnaires/$id/applicants", "QuestionnaireApplicantsPage"],
+    ["polls/create", "CreatePollPage"],
+    ["polls/$id/edit", "EditPollPage"],
+    ["polls/$id/analytics", "PollAnalyticsPage"],
+    ["qr-codes/create", "CreateQrCodePage"],
+    ["qr-codes/$id/edit", "EditQrCodePage"],
+    ["minigames/create", "CreateMinigamePage"],
+    ["minigames/$id/edit", "EditMinigamePage"],
+    ["minigames/$id/history", "MinigameHistoryPage"],
+    ["reflinks/$reflinkId/analytics", "ReflinkAnalyticsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(toolEditors, page),
+  }),
+)
+const pipelinesRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "pipelines",
+  component: lazyRouteComponent(tools, "PipelinesLayout"),
+})
+const pipelinesRoutes = pipelinesRoute.addChildren([
+  createRoute({
+    getParentRoute: () => pipelinesRoute,
+    path: "/",
+    component: lazyRouteComponent(tools, "PipelinesPage"),
+  }),
+  createRoute({
+    getParentRoute: () => pipelinesRoute,
+    path: "$id",
+    component: lazyRouteComponent(toolEditors, "PipelineBoardPage"),
+  }),
+])
+
 // `(ai)`: a pathless layout (flows permission, AI integration check).
 const aiRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -282,6 +410,12 @@ const routeTree = rootRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
       ...sectionRoutes,
+      dashboardRoutes,
+      ecommerceRoute.addChildren(ecommercePages),
+      productFormsRoute.addChildren(productFormPages),
+      ...toolPages,
+      ...toolEditorPages,
+      pipelinesRoutes,
       aiRoute.addChildren(aiPages),
       settingsRoutes,
     ]),

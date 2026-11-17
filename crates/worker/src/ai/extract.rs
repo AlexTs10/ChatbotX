@@ -1,10 +1,9 @@
-//! `ai-agent/lib/text-extractor.ts` for the text formats: plain text, CSV
-//! (as a table), Markdown, HTML, RTF, XML, VTT and properties files.
+//! `ai-agent/lib/text-extractor.ts`: plain text, CSV and XLSX (as tables),
+//! Markdown, HTML, RTF, XML, VTT and properties files; the binary formats
+//! (PDF, DOCX, PPTX, PPT, EPUB, e-mail) are in [`super::office`].
 //!
-//! ponytail: PDF, DOCX, XLSX, PPTX, PPT, EPUB and e-mail need parser crates
-//! (pdf-parse, mammoth, SheetJS, mailparser in the original); until they are
-//! added such a file is rejected (`fileUnreadable`) instead of being read as
-//! garbage text.
+//! ponytail: a legacy `.xls` (BIFF) workbook is not read (the ZIP reader
+//! rejects it, `fileUnreadable`); add a BIFF reader when such files matter.
 
 use std::sync::LazyLock;
 
@@ -89,7 +88,7 @@ fn decode(bytes: &[u8]) -> String {
 }
 
 /// `s.slice(0, n)` in UTF-16 units.
-fn cut(s: String, n: usize) -> String {
+pub(super) fn cut(s: String, n: usize) -> String {
     if u16len(&s) <= n {
         return s;
     }
@@ -118,25 +117,29 @@ pub fn normalize_whitespace(input: &str) -> String {
     super::chunk::js_trim(&out).to_owned()
 }
 
-fn unsupported(kind: &str) -> String {
-    format!("{kind} text extraction is not available")
-}
-
 /// `extractTextFromBuffer`. `Err` = the file cannot be read as text.
 pub fn text_from_bytes(bytes: &[u8], mime: &str, max: usize) -> Result<String, String> {
+    use super::office;
     let is = |set: &[&str]| set.contains(&mime);
-    for (set, kind) in [
-        (PDF, "PDF"),
-        (DOCX, "DOCX"),
-        (SPREADSHEET, "Spreadsheet"),
-        (EMAIL, "E-mail"),
-        (PPTX, "PPTX"),
-        (PPT, "PPT"),
-        (EPUB, "EPUB"),
-    ] {
-        if is(set) {
-            return Err(unsupported(kind));
-        }
+    let binary = if is(PDF) {
+        Some(office::pdf(bytes)?)
+    } else if is(DOCX) {
+        Some(office::docx(bytes)?)
+    } else if is(SPREADSHEET) {
+        Some(office::xlsx(bytes)?)
+    } else if is(EMAIL) {
+        Some(office::email(bytes))
+    } else if is(PPTX) {
+        Some(office::pptx(bytes)?)
+    } else if is(PPT) {
+        Some(office::ppt(bytes))
+    } else if is(EPUB) {
+        Some(office::epub(bytes)?)
+    } else {
+        None
+    };
+    if let Some(text) = binary {
+        return Ok(cut(text, max));
     }
     let text = decode(bytes);
     let out = if is(HTML) {
@@ -167,6 +170,23 @@ pub fn knowledge_document(bytes: &[u8], mime: &str, opts: &Options) -> Result<Do
             opts.max_text_chars,
             opts.tabular_header_row,
         );
+        return Ok(Document::Tabular { sheets, truncated });
+    }
+    if !opts.force_prose && SPREADSHEET.contains(&mime) {
+        // `read` throws outside the table build: a corrupt workbook fails.
+        let workbook = super::office::xlsx_matrices(bytes)?
+            .into_iter()
+            .map(|(name, rows)| {
+                let name = if name.is_empty() {
+                    opts.source_name.clone()
+                } else {
+                    name
+                };
+                (name, rows)
+            })
+            .collect();
+        let (sheets, truncated) =
+            tabular_sheets(workbook, opts.max_text_chars, opts.tabular_header_row);
         return Ok(Document::Tabular { sheets, truncated });
     }
     if !opts.force_prose && MARKDOWN.contains(&mime) {
@@ -356,7 +376,7 @@ fn xml_to_text(xml: &str) -> String {
 /// head are dropped, block tags and `<br>` break lines, headings are upper
 /// case, links keep their text.
 // ponytail: not the full html-to-text formatter (tables, link URLs, lists).
-fn html_to_text(html: &str) -> String {
+pub(super) fn html_to_text(html: &str) -> String {
     static DROP: LazyLock<Regex> = LazyLock::new(|| {
         re(r"(?is)<(script|style|head|noscript)\b.*?</(script|style|head|noscript)\s*>")
     });
@@ -638,10 +658,9 @@ mod tests {
     }
 
     #[test]
-    fn a_binary_office_or_pdf_file_is_rejected_not_read_as_text() {
-        // Changed: the original parses these (pdf-parse, mammoth, SheetJS);
-        // the parsers are not ported yet (module doc).
-        assert!(text_from_bytes(b"%PDF-1.4", "application/pdf", MAX_TEXT_CHARS).is_err());
-        assert!(knowledge_document(b"PK", SPREADSHEET[0], &opts("a.xlsx")).is_err());
+    fn rejects_a_corrupt_xlsx_instead_of_embedding_binary_garbage() {
+        let bytes = b"PK\x03\x04garbage-bytes-not-a-zip";
+        assert!(knowledge_document(bytes, SPREADSHEET[0], &opts("broken.xlsx")).is_err());
+        assert!(text_from_bytes(bytes, "application/pdf", MAX_TEXT_CHARS).is_err());
     }
 }

@@ -81,3 +81,128 @@ pub async fn create_with_token(
     .await?;
     Ok((row, token))
 }
+
+/// `findIntegrationApiByWorkspaceAndId`: 404 `Integration API not found`.
+fn find_auth(
+    tx: &chatbotx_db::rusqlite::Connection,
+    workspace_id: i64,
+    id: i64,
+) -> Result<(String, i64)> {
+    use chatbotx_db::rusqlite::OptionalExtension as _;
+    tx.query_row(
+        r#"SELECT "auth", "inboxId" FROM "IntegrationApi" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+        params![id, workspace_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|e| BusinessError::Repo(e.into()))?
+    .ok_or_else(|| BusinessError::not_found("Integration API not found"))
+}
+
+/// `updateApiAction`: the SSRF check of a new `callbackUrl`, then `name` /
+/// `callbackUrl` (each only when given) and the auth's `callbackUrl`.
+/// `callback_url: Some(None)` clears it.
+pub async fn update_settings(
+    db: &Db,
+    workspace_id: i64,
+    id: i64,
+    name: Option<String>,
+    callback_url: Option<Option<String>>,
+    doh: &impl DohFetch,
+) -> Result<()> {
+    if let Some(Some(url)) = &callback_url {
+        // The guard throws a plain `Error`: the action answers the default
+        // `serverError` (`handleServerError`).
+        assert_public_url_with(url, "API channel callback URL", doh)
+            .await
+            .map_err(|_| {
+                BusinessError::exception(
+                    "Something went wrong while executing the operation.",
+                    "internalServerError",
+                    500,
+                )
+            })?;
+    }
+    tx::write(db, move |tx| {
+        let (auth, _) = find_auth(tx, workspace_id, id)?;
+        let mut auth: serde_json::Value = serde_json::from_str(&auth).unwrap_or(json!({}));
+        if let (Some(url), Some(object)) = (&callback_url, auth.as_object_mut()) {
+            object.insert("callbackUrl".into(), json!(url));
+        }
+        tx.execute(
+            r#"UPDATE "IntegrationApi" SET
+                   "name" = COALESCE(?3, "name"),
+                   "callbackUrl" = CASE WHEN ?4 THEN ?5 ELSE "callbackUrl" END,
+                   "auth" = ?6, "updatedAt" = ?7
+               WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+            params![
+                id,
+                workspace_id,
+                name,
+                callback_url.is_some(),
+                callback_url.flatten(),
+                auth.to_string(),
+                chatbotx_db::repo::now_ms(),
+            ],
+        )
+        .map_err(|e| BusinessError::Repo(e.into()))?;
+        Ok(())
+    })
+    .await
+}
+
+/// `rotateApiTokenAction`: a new token (hash + prefix stored); returns it.
+pub async fn rotate_token(db: &Db, workspace_id: i64, id: i64) -> Result<String> {
+    let credentials = generate_api_channel_token();
+    let token = credentials.token.clone();
+    tx::write(db, move |tx| {
+        find_auth(tx, workspace_id, id)?;
+        tx.execute(
+            r#"UPDATE "IntegrationApi" SET "tokenHash" = ?3, "tokenPrefix" = ?4, "updatedAt" = ?5
+               WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+            params![
+                id,
+                workspace_id,
+                credentials.token_hash,
+                credentials.token_prefix,
+                chatbotx_db::repo::now_ms(),
+            ],
+        )
+        .map_err(|e| BusinessError::Repo(e.into()))?;
+        Ok(())
+    })
+    .await?;
+    Ok(token)
+}
+
+/// `deleteApiAction` → `integrationApiService.disconnect`: the row goes, the
+/// inbox's connection is marked disconnected (`disconnectInbox`). The API
+/// channel has no provider to call (`integrationApi.disconnect` is a no-op).
+pub async fn disconnect(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
+    let now = chatbotx_db::repo::now_ms();
+    tx::write(db, move |tx| {
+        use chatbotx_db::rusqlite::OptionalExtension as _;
+        let (_, inbox_id) = find_auth(tx, workspace_id, id)?;
+        tx.execute(
+            r#"DELETE FROM "IntegrationApi" WHERE "id" = ?1"#,
+            params![id],
+        )
+        .map_err(|e| BusinessError::Repo(e.into()))?;
+        let current = tx
+            .query_row(
+                &format!(
+                    r#"SELECT {} FROM "Connection" WHERE "inboxId" = ?1 AND "workspaceId" = ?2"#,
+                    connection::COLUMNS
+                ),
+                params![inbox_id, workspace_id],
+                connection::row,
+            )
+            .optional()
+            .map_err(|e| BusinessError::Repo(e.into()))?;
+        if let Some(current) = current {
+            connection::mark_disconnected(tx, &current, now)?;
+        }
+        Ok(())
+    })
+    .await
+}

@@ -759,3 +759,324 @@ async fn settings_integration_queries_hide_secrets_and_disconnect() {
     let (_, none, _) = query("findIntegrationClaude", json!([{ "workspaceId": ws() }])).await;
     assert_eq!(none, Value::Null);
 }
+
+/// `actions/<name>` as the admin in [`WS`].
+async fn act(router: &axum::Router, token: &str, name: &str, args: Value) -> (StatusCode, Value) {
+    let (status, json, _) = post(
+        router,
+        &format!("actions/{name}"),
+        token,
+        json!({ "workspaceId": ws(), "args": args }),
+    )
+    .await;
+    (status, json)
+}
+
+#[tokio::test]
+async fn api_channel_update_rotate_and_delete() {
+    let (router, db) = router().await;
+    let (status, created) = act(
+        &router,
+        "admintoken",
+        "createApiAction",
+        json!([{ "name": "Bot", "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let row = |db: Arc<Db>| async move {
+        db.read(|conn| {
+            Ok(conn.query_row(
+                r#"SELECT "id", "name", "tokenHash" FROM "IntegrationApi" WHERE "workspaceId" = ?1"#,
+                params![WS],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+            )?)
+        })
+        .await
+    };
+    let (id, _, hash) = row(Arc::clone(&db)).await.unwrap();
+    let id_arg = id.to_string();
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateApiAction",
+        json!([ws(), id_arg, { "name": "Renamed" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(row(Arc::clone(&db)).await.unwrap().1, "Renamed");
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "rotateApiTokenAction",
+        json!([ws(), id_arg]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert!(out["token"].as_str().is_some_and(|t| !t.is_empty()));
+    assert_ne!(row(Arc::clone(&db)).await.unwrap().2, hash);
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteApiAction",
+        json!([ws(), id_arg]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert!(row(Arc::clone(&db)).await.is_err());
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "rotateApiTokenAction",
+        json!([ws(), id_arg]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn ecommerce_pages_need_the_permission_and_list_categories() {
+    let (router, _) = router().await;
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createProductCategoryAction",
+        json!([ws(), { "name": "Drinks" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, page) = act(
+        &router,
+        "admintoken",
+        "productCategoriesPage",
+        json!([ws(), {}]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["data"][0]["name"], "Drinks");
+    assert_eq!(page["parent"], Value::Null);
+    let (status, page) = act(&router, "admintoken", "productsPage", json!([ws(), {}])).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["categories"][0]["name"], "Drinks");
+    // An agent without `ecommerce` gets the layout's 404.
+    let (status, _) = act(
+        &router,
+        "assignedtoken",
+        "productCategoriesPage",
+        json!([ws(), {}]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn pipelines_and_questionnaires_round_trip() {
+    let (router, _) = router().await;
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createPipelineAction",
+        json!([ws(), { "type": "opportunity", "name": "Sales" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, list, _) = post(
+        &router,
+        "pipelinesAPI/privateListPipelinesAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list[0]["pipeline"]["name"], "Sales");
+    assert_eq!(list[0]["itemsCount"], 0);
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createQuestionnaireAction",
+        json!([ws(), { "name": " Survey " }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "renameQuestionnaireAction",
+        json!([ws(), id, { "name": "Poll" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, list) = act(
+        &router,
+        "admintoken",
+        "listQuestionnaires",
+        json!([{ "page": 1, "perPage": 10, "sort": [{ "id": "name", "desc": false }] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["data"][0]["name"], "Poll");
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteQuestionnairesAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, list) = act(&router, "admintoken", "listQuestionnaires", json!([{}])).await;
+    assert_eq!(list["data"], json!([]));
+}
+
+#[tokio::test]
+async fn dashboard_analytics_procedures_run_the_public_routes() {
+    let (router, _) = router().await;
+    let range = json!({
+        "workspaceId": ws(),
+        "from": "2027-01-01T00:00:00.000Z",
+        "to": "2027-01-31T23:59:59.999Z",
+        "timezone": "UTC",
+    });
+    let (status, json, _) = post(
+        &router,
+        "analyticsRoutes/contactsCountAnalyticsAPI",
+        "admintoken",
+        range.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    // `InboxContactStat` totals: the seed has no inbox.
+    assert_eq!(json["data"]["count"], 0);
+    let (status, json, _) = post(
+        &router,
+        "analyticsRoutes/contactCountsPerDayAnalyticsAPI",
+        "assignedtoken",
+        range.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert!(json["data"].as_array().unwrap().len() >= 28);
+    let mut by_dimension = range.clone();
+    by_dimension["dimension"] = json!("channel");
+    by_dimension["inboxIds"] = json!(["9"]);
+    let (status, json, _) = post(
+        &router,
+        "analyticsRoutes/contactsByDimensionAnalyticsAPI",
+        "admintoken",
+        by_dimension,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"], json!([]));
+    let mut bad = range;
+    bad["granularity"] = json!("week");
+    let (status, _, _) = post(
+        &router,
+        "analyticsRoutes/botMessagesByResultAnalyticsAPI",
+        "admintoken",
+        bad,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn spa_stub_path_runs_the_workspace_actions_with_their_gates() {
+    let (router, db) = router().await;
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateWorkspaceBasicAction",
+        json!([ws(), { "name": "Renamed" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let name: String = db
+        .read(|conn| {
+            Ok(conn.query_row(
+                r#"SELECT "name" FROM "Workspace" WHERE "id" = ?1"#,
+                [WS],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(name, "Renamed");
+    // An agent is no workspace super admin.
+    let (status, out) = act(
+        &router,
+        "assignedtoken",
+        "scheduleWorkspaceDeletionAction",
+        json!([ws()]),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK, "{out}");
+    // A bad input is the next-safe-action validation error.
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateWorkspaceBasicAction",
+        json!([ws(), { "name": "" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    assert!(out["data"]["validationErrors"]["name"].is_object(), "{out}");
+}
+
+#[tokio::test]
+async fn locked_template_ids_answer_for_a_member() {
+    let (router, _) = router().await;
+    let (status, json, _) = post(
+        &router,
+        "templatesAPI/listLockedIdsAPI",
+        "assignedtoken",
+        json!({ "workspaceId": ws(), "resourceKind": "flow", "resourceIds": ["1", "2"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json, json!({ "lockedIds": [], "undeletableIds": [] }));
+    let (status, _, _) = post(
+        &router,
+        "templatesAPI/listLockedIdsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "resourceKind": "nope", "resourceIds": [] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn questionnaire_editor_loads_through_the_public_route() {
+    let (router, _) = router().await;
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createQuestionnaireAction",
+        json!([ws(), { "name": "Survey" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let id = out["id"].as_str().unwrap().to_string();
+    let (status, found) = act(
+        &router,
+        "assignedtoken",
+        "getQuestionnaire",
+        json!([{ "workspaceId": ws(), "id": id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["name"], "Survey");
+    assert_eq!(found["questions"], json!([]));
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateQuestionnaireAction",
+        json!([ws(), id, { "enableScore": "yes" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    assert!(out["data"]["validationErrors"].is_object(), "{out}");
+}

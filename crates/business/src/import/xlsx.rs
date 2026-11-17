@@ -59,7 +59,13 @@ fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
 }
 
 /// The entries of a ZIP archive (`assertXlsxArchiveWithinLimits` + unzip).
-fn unzip(bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
+pub fn unzip(bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
+    Ok(unzip_entries(bytes)?.into_iter().collect())
+}
+
+/// The entries of a ZIP archive in central directory order (JSZip
+/// `Object.keys(zip.files)`).
+pub fn unzip_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
     let corrupt = || "Can't find end of central directory : is this a zip file ?".to_string();
     // End of central directory: the last `PK\x05\x06` (a comment may follow).
     let eocd = (0..=bytes.len().saturating_sub(22))
@@ -72,7 +78,7 @@ fn unzip(bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
     }
     let mut at = u32_at(bytes, eocd + 16).ok_or_else(corrupt)? as usize;
     let mut total: u64 = 0;
-    let mut entries = HashMap::new();
+    let mut entries = Vec::new();
     for _ in 0..count {
         if !bytes
             .get(at..)
@@ -117,7 +123,7 @@ fn unzip(bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
             }
             other => return Err(format!("Unsupported compression method {other}")),
         };
-        entries.insert(name, content);
+        entries.push((name, content));
     }
     Ok(entries)
 }
@@ -254,11 +260,32 @@ pub fn read_first_sheet(bytes: &[u8]) -> Result<Vec<Vec<Cell>>, String> {
     let path = first_sheet_path(&entries).ok_or("The workbook has no worksheets")?;
     let sheet = xml(&entries, &path).ok_or("The workbook has no worksheets")?;
     let strings = shared_strings(&entries);
-    let mut reader = Reader::from_str(&sheet);
     let mut rows = Vec::new();
-    let mut row: Vec<Cell> = Vec::new();
-    // The open cell: its column and type, the `<v>` / inline text read.
-    let mut cell: Option<(usize, String)> = None;
+    for (_, cells) in sheet_cells(&sheet, &strings)? {
+        let mut row = Vec::new();
+        for (column, value, _) in cells {
+            set_cell(&mut row, column, value);
+        }
+        if row.iter().any(|c| *c != Cell::Empty) {
+            rows.push(row);
+        }
+    }
+    Ok(rows)
+}
+
+/// The `<c>` elements of a worksheet per `<row>`: (row index, [(column,
+/// value, style index)]), zero-based.
+#[allow(clippy::type_complexity)]
+fn sheet_cells(
+    sheet: &str,
+    strings: &[String],
+) -> Result<Vec<(usize, Vec<(usize, Cell, usize)>)>, String> {
+    let mut reader = Reader::from_str(sheet);
+    let mut rows = Vec::new();
+    let mut row: Vec<(usize, Cell, usize)> = Vec::new();
+    let mut row_index = 0usize;
+    // The open cell: its column, type and style, the `<v>` / inline text read.
+    let mut cell: Option<(usize, String, usize)> = None;
     let (mut value, mut in_value) = (String::new(), false);
     loop {
         let event = reader.read_event().map_err(|e| e.to_string())?;
@@ -266,17 +293,30 @@ pub fn read_first_sheet(bytes: &[u8]) -> Result<Vec<Vec<Cell>>, String> {
             Event::Start(e) | Event::Empty(e) => {
                 let empty = matches!(event, Event::Empty(_));
                 match e.local_name().as_ref() {
-                    b"row" if !empty => row.clear(),
+                    b"row" => {
+                        row.clear();
+                        row_index = attribute(e, b"r")
+                            .and_then(|r| r.trim().parse::<usize>().ok())
+                            .map_or(rows.last().map_or(0, |(i, _)| i + 1), |r| {
+                                r.saturating_sub(1)
+                            });
+                        if empty {
+                            rows.push((row_index, Vec::new()));
+                        }
+                    }
                     b"c" => {
                         let column = attribute(e, b"r")
                             .and_then(|r| column_of(&r))
-                            .unwrap_or(row.len());
+                            .unwrap_or_else(|| row.last().map_or(0, |(c, _, _)| c + 1));
                         let kind = attribute(e, b"t").unwrap_or_default();
+                        let style = attribute(e, b"s")
+                            .and_then(|s| s.trim().parse().ok())
+                            .unwrap_or(0);
                         value.clear();
                         if empty {
-                            set_cell(&mut row, column, Cell::Empty);
+                            row.push((column, Cell::Empty, style));
                         } else {
-                            cell = Some((column, kind));
+                            cell = Some((column, kind, style));
                         }
                     }
                     b"v" | b"t" if !empty => in_value = true,
@@ -286,16 +326,11 @@ pub fn read_first_sheet(bytes: &[u8]) -> Result<Vec<Vec<Cell>>, String> {
             Event::End(e) => match e.local_name().as_ref() {
                 b"v" | b"t" => in_value = false,
                 b"c" => {
-                    if let Some((column, kind)) = cell.take() {
-                        set_cell(&mut row, column, cell_value(&kind, &value, &strings));
+                    if let Some((column, kind, style)) = cell.take() {
+                        row.push((column, cell_value(&kind, &value, strings), style));
                     }
                 }
-                b"row" => {
-                    if row.iter().any(|c| *c != Cell::Empty) {
-                        rows.push(std::mem::take(&mut row));
-                    }
-                    row.clear();
-                }
+                b"row" => rows.push((row_index, std::mem::take(&mut row))),
                 _ => {}
             },
             Event::Eof => break,
@@ -310,6 +345,187 @@ pub fn read_first_sheet(bytes: &[u8]) -> Result<Vec<Vec<Cell>>, String> {
         }
     }
     Ok(rows)
+}
+
+/// The sheets of [`read_workbook`]: name and rows.
+pub type Workbook = Vec<(String, Vec<Vec<SheetCell>>)>;
+
+/// A cell of [`read_workbook`]: its value and number format code.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetCell {
+    pub value: Cell,
+    /// The format code (`"General"` when the cell has none).
+    pub format: String,
+}
+
+/// Built-in number formats (SheetJS `table_fmt`).
+fn builtin_format(id: usize) -> &'static str {
+    match id {
+        1 => "0",
+        2 => "0.00",
+        3 => "#,##0",
+        4 => "#,##0.00",
+        9 => "0%",
+        10 => "0.00%",
+        11 => "0.00E+00",
+        12 => "# ?/?",
+        13 => "# ??/??",
+        14 => "m/d/yy",
+        15 => "d-mmm-yy",
+        16 => "d-mmm",
+        17 => "mmm-yy",
+        18 => "h:mm AM/PM",
+        19 => "h:mm:ss AM/PM",
+        20 => "h:mm",
+        21 => "h:mm:ss",
+        22 => "m/d/yy h:mm",
+        37 => "#,##0 ;(#,##0)",
+        38 => "#,##0 ;[Red](#,##0)",
+        39 => "#,##0.00;(#,##0.00)",
+        40 => "#,##0.00;[Red](#,##0.00)",
+        45 => "mm:ss",
+        46 => "[h]:mm:ss",
+        47 => "mmss.0",
+        48 => "##0.0E+0",
+        49 => "@",
+        _ => "General",
+    }
+}
+
+/// `xl/styles.xml`: the format code of each `cellXfs` entry.
+fn cell_formats(entries: &HashMap<String, Vec<u8>>) -> Vec<String> {
+    let Some(text) = xml(entries, "xl/styles.xml") else {
+        return Vec::new();
+    };
+    let mut custom: HashMap<usize, String> = HashMap::new();
+    let mut ids = Vec::new();
+    let mut in_cell_xfs = false;
+    let mut reader = Reader::from_str(&text);
+    while let Ok(event) = reader.read_event() {
+        match &event {
+            Event::Start(e) | Event::Empty(e) => match e.local_name().as_ref() {
+                b"numFmt" => {
+                    if let (Some(id), Some(code)) = (
+                        attribute(e, b"numFmtId").and_then(|v| v.parse().ok()),
+                        attribute(e, b"formatCode"),
+                    ) {
+                        custom.insert(id, code);
+                    }
+                }
+                b"cellXfs" if matches!(event, Event::Start(_)) => in_cell_xfs = true,
+                b"xf" if in_cell_xfs => ids.push(
+                    attribute(e, b"numFmtId")
+                        .and_then(|v| v.parse::<usize>().ok())
+                        .unwrap_or(0),
+                ),
+                _ => {}
+            },
+            Event::End(e) if e.local_name().as_ref() == b"cellXfs" => in_cell_xfs = false,
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    ids.into_iter()
+        .map(|id| {
+            custom
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| builtin_format(id).to_owned())
+        })
+        .collect()
+}
+
+/// Every worksheet of the workbook in tab order, as SheetJS reads it: the
+/// name and the rows of the used range (from its first row and column;
+/// blank rows kept as empty rows).
+pub fn read_workbook(bytes: &[u8]) -> Result<Workbook, String> {
+    let entries = unzip(bytes)?;
+    let workbook = xml(&entries, "xl/workbook.xml").ok_or("The workbook has no worksheets")?;
+    let rels = xml(&entries, "xl/_rels/workbook.xml.rels").unwrap_or_default();
+    let mut targets = HashMap::new();
+    let mut reader = Reader::from_str(&rels);
+    while let Ok(event) = reader.read_event() {
+        match event {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"Relationship" => {
+                if let (Some(id), Some(target)) = (attribute(&e, b"Id"), attribute(&e, b"Target")) {
+                    let path = match target.strip_prefix('/') {
+                        Some(absolute) => absolute.to_string(),
+                        None => format!("xl/{target}"),
+                    };
+                    targets.insert(id, path);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    let mut sheets = Vec::new();
+    let mut reader = Reader::from_str(&workbook);
+    while let Ok(event) = reader.read_event() {
+        match event {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"sheet" => {
+                let name = attribute(&e, b"name").unwrap_or_default();
+                if let Some(path) = attribute(&e, b"r:id").and_then(|id| targets.get(&id)) {
+                    sheets.push((name, path.clone()));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    let strings = shared_strings(&entries);
+    let formats = cell_formats(&entries);
+    let mut out = Vec::new();
+    for (name, path) in sheets {
+        let Some(sheet) = xml(&entries, &path) else {
+            continue;
+        };
+        let rows = sheet_cells(&sheet, &strings)?;
+        let used = |(_, cells): &&(usize, Vec<(usize, Cell, usize)>)| !cells.is_empty();
+        let first_row = rows.iter().filter(used).map(|(r, _)| *r).min();
+        let first_col = rows
+            .iter()
+            .flat_map(|(_, cells)| cells.iter().map(|(c, _, _)| *c))
+            .min();
+        let (Some(first_row), Some(first_col)) = (first_row, first_col) else {
+            out.push((name, Vec::new()));
+            continue;
+        };
+        let mut matrix: Vec<Vec<SheetCell>> = Vec::new();
+        for (index, cells) in rows {
+            if cells.is_empty() || index < first_row {
+                continue;
+            }
+            let at = index - first_row;
+            if matrix.len() <= at {
+                matrix.resize(at + 1, Vec::new());
+            }
+            let row = &mut matrix[at];
+            for (column, value, style) in cells {
+                let Some(column) = column.checked_sub(first_col) else {
+                    continue;
+                };
+                if row.len() <= column {
+                    row.resize(
+                        column + 1,
+                        SheetCell {
+                            value: Cell::Empty,
+                            format: "General".to_owned(),
+                        },
+                    );
+                }
+                row[column] = SheetCell {
+                    value,
+                    format: formats
+                        .get(style)
+                        .cloned()
+                        .unwrap_or_else(|| "General".to_owned()),
+                };
+            }
+        }
+        out.push((name, matrix));
+    }
+    Ok(out)
 }
 
 fn set_cell(row: &mut Vec<Cell>, column: usize, value: Cell) {
@@ -399,7 +615,7 @@ fn escape(text: &str) -> String {
 }
 
 /// The ZIP archive of `parts` (stored entries).
-fn zip(parts: &[(&str, String)]) -> Vec<u8> {
+pub fn zip(parts: &[(&str, String)]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut central = Vec::new();
     for (name, content) in parts {

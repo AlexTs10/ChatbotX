@@ -28,6 +28,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     let kind = str_of(&job.data, "type").unwrap_or("").to_owned();
     match kind.as_str() {
         PROCESS_AUTOMATED_RESPONSE => process_automated_response(&deps, &job.data["data"]).await?,
+        "processPendingEmbedding" => return crate::ai_file::handle_ai_agent(deps, job).await,
         // ponytail: handoff re-entry, comment AI replies / moderation and
         // story automations are Q.D6.
         other => {

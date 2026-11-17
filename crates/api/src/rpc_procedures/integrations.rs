@@ -45,6 +45,9 @@ pub(super) const ACTIONS: &[&str] = &[
     "disconnectOpenaiCompatibleAction",
     "disconnectTelegramAction",
     "deleteWebchatAction",
+    "updateApiAction",
+    "rotateApiTokenAction",
+    "deleteApiAction",
     "findIntegrationOpenAI",
     "findIntegrationClaude",
     "findIntegrationDeepSeek",
@@ -116,6 +119,22 @@ pub(super) async fn auth_action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Ou
             )
             .await
             .map_err(action_fail)?;
+            // `onConnected`: the webhook secret and `setWebhook`.
+            if let Some(inbox_id) = row.inbox_id {
+                let broker = std::env::var("NEXT_PUBLIC_BROKER_URL")
+                    .ok()
+                    .filter(|u| !u.is_empty())
+                    .unwrap_or_else(|| ctx.api.app_url.clone());
+                credentials::register_telegram_webhook(
+                    &ctx.api.db,
+                    &HttpUpstream,
+                    workspace_id,
+                    inbox_id,
+                    &broker,
+                )
+                .await
+                .map_err(action_fail)?;
+            }
             if row.created_at == row.updated_at {
                 let telegram_id = telegram_id_of_inbox(ctx, workspace_id, row.inbox_id).await?;
                 audit(
@@ -152,6 +171,56 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             Ok(Value::Null)
         }
         "disconnectTelegramAction" => disconnect_telegram(ctx, bind_id(args, 1)?).await,
+        // `features/integration-api/actions/*`: audit as the builder records it.
+        "updateApiAction" => {
+            let id = bind_id(args, 1)?;
+            let input = In(arg(args, 2));
+            let name = match input.opt_str("name")? {
+                Some(name) if !(1..=40).contains(&name.chars().count()) => return Err(invalid()),
+                name => name,
+            };
+            // `z.url().nullish()`: absent keeps the URL, `null` clears it.
+            let callback_url = match arg(args, 2).get("callbackUrl") {
+                None => None,
+                Some(Value::Null) => Some(None),
+                Some(Value::String(url)) if url::Url::parse(url).is_ok() => Some(Some(url.clone())),
+                Some(_) => return Err(invalid()),
+            };
+            chatbotx_business::integration_api::update_settings(
+                db,
+                ws,
+                id,
+                name,
+                callback_url,
+                &HttpDoh,
+            )
+            .await
+            .map_err(action_fail)?;
+            audit(
+                ctx,
+                ws,
+                "update",
+                format!("updated the API key configuration (#{id})"),
+            )
+            .await;
+            Ok(Value::Null)
+        }
+        "rotateApiTokenAction" => {
+            let id = bind_id(args, 1)?;
+            let token = chatbotx_business::integration_api::rotate_token(db, ws, id)
+                .await
+                .map_err(action_fail)?;
+            audit(ctx, ws, "update", format!("rotated the API key (#{id})")).await;
+            Ok(json!({ "token": token }))
+        }
+        "deleteApiAction" => {
+            let id = bind_id(args, 1)?;
+            chatbotx_business::integration_api::disconnect(db, ws, id)
+                .await
+                .map_err(action_fail)?;
+            audit(ctx, ws, "delete", format!("revoked an API key (#{id})")).await;
+            Ok(Value::Null)
+        }
         "deleteWebchatAction" => {
             let id = bind_id(args, 1)?.to_string();
             public(ctx, "webchats.delete", &[("id", id)], None, None).await?;

@@ -10,6 +10,10 @@ use chatbotx_core::flow_config::util::{
 };
 use chatbotx_core::utils::graph_error::{GraphErrorSource, format_graph_error_message};
 use chatbotx_jobs::BoxFuture;
+use std::sync::Arc;
+
+use super::whatsapp_media::WhatsappMedia;
+use super::whatsapp_steps as steps;
 use serde_json::{Map, Value, json};
 
 use crate::channel::{
@@ -26,8 +30,12 @@ pub const DEFAULT_API_VERSION: &str = "v23.0";
 const NATIVE_LOCATION_REQUEST: &str = "whatsapp:native:location_request";
 
 /// `messageLimits`.
-mod limits {
+pub(crate) mod limits {
     pub const BODY_TEXT: usize = 1024;
+    pub const CAPTION: usize = 1024;
+    pub const CAROUSEL_CARD_BODY: usize = 160;
+    pub const FOOTER_TEXT: usize = 60;
+    pub const TEXT: usize = 4096;
     pub const BUTTON_ID: usize = 256;
     pub const BUTTON_TITLE: usize = 20;
     pub const ROW_ID: usize = 200;
@@ -41,6 +49,9 @@ const EMPTY_BODY_PLACEHOLDER: &str = ".";
 pub struct Whatsapp {
     client: reqwest::Client,
     base_url: String,
+    /// `ctx.uploader` + `storageUrl`; `None` keeps media links and ids as given.
+    media: Option<Arc<WhatsappMedia>>,
+    media_client: reqwest::Client,
 }
 
 impl Whatsapp {
@@ -55,7 +66,15 @@ impl Whatsapp {
                 .build()
                 .unwrap_or_default(),
             base_url: base_url.into(),
+            media: None,
+            media_client: super::whatsapp_media::media_client(),
         }
+    }
+
+    /// Copies received media to the file store and re-hosts outbound links.
+    pub fn with_media(mut self, media: WhatsappMedia) -> Whatsapp {
+        self.media = Some(Arc::new(media));
+        self
     }
 }
 
@@ -205,7 +224,7 @@ pub struct WaMessage {
 }
 
 impl WaMessage {
-    fn lib(kind: &str, payload: Value) -> WaMessage {
+    pub(crate) fn lib(kind: &str, payload: Value) -> WaMessage {
         WaMessage {
             kind: kind.into(),
             payload,
@@ -213,7 +232,7 @@ impl WaMessage {
         }
     }
 
-    fn raw(kind: &str, payload: Value) -> WaMessage {
+    pub(crate) fn raw(kind: &str, payload: Value) -> WaMessage {
         WaMessage {
             kind: kind.into(),
             payload,
@@ -222,11 +241,11 @@ impl WaMessage {
     }
 }
 
-fn text_message(body: &str) -> WaMessage {
+pub(crate) fn text_message(body: &str) -> WaMessage {
     WaMessage::lib("text", json!({ "body": body }))
 }
 
-fn media_message(kind: &str, link: &str) -> WaMessage {
+pub(crate) fn media_message(kind: &str, link: &str) -> WaMessage {
     WaMessage::lib(kind, json!({ "link": link }))
 }
 
@@ -283,7 +302,12 @@ pub fn split_text(value: &str, max: usize) -> Vec<String> {
     chunks
 }
 
-fn interactive(kind: &str, action: Value, body: &str, header: Option<Value>) -> WaMessage {
+pub(crate) fn interactive(
+    kind: &str,
+    action: Value,
+    body: &str,
+    header: Option<Value>,
+) -> WaMessage {
     let mut payload = json!({
         "type": kind,
         "action": action,
@@ -301,7 +325,7 @@ struct Reply {
 }
 
 /// `normalizeRawButton`.
-fn button_payload(data: &SendFlowStep, button_id: &str, with_contact: bool) -> String {
+pub(crate) fn button_payload(data: &SendFlowStep, button_id: &str, with_contact: bool) -> String {
     let metadata = data.metadata.as_ref();
     encode_button_payload(&ButtonPayload {
         flow_id: data.flow_id.clone(),
@@ -325,16 +349,26 @@ fn canonical_reply_payload(button: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn str_field<'a>(v: &'a Value, k: &str) -> &'a str {
+pub(crate) fn str_field<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or("")
 }
 
+/// `generateFooter`.
+fn with_footer(mut message: WaMessage, footer: Option<&str>) -> WaMessage {
+    if let Some(footer) = footer {
+        message.payload["footer"] = json!({ "text": clamp_text(footer, limits::FOOTER_TEXT) });
+    }
+    message
+}
+
 /// `buildWhatsappButtonMessages`.
-fn button_messages(
+pub(crate) fn button_messages(
     data: &SendFlowStep,
     buttons: &[Value],
+    quick: &[Value],
     body_text: &str,
     media: Option<WaMessage>,
+    footer: Option<&str>,
 ) -> Vec<WaMessage> {
     let links: Vec<(Reply, String)> = buttons
         .iter()
@@ -349,12 +383,6 @@ fn button_messages(
             ))
         })
         .collect();
-    let quick: Vec<Value> = data
-        .quick_replies
-        .as_ref()
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
     let candidates = buttons
         .iter()
         .filter(|b| get_button_link_url(b).is_none())
@@ -405,19 +433,22 @@ fn button_messages(
             let header = media
                 .as_ref()
                 .map(|m| json!({ "type": m.kind, m.kind.clone(): m.payload }));
-            out.push(interactive(
-                "button",
-                json!({ "buttons": replies.iter().map(|r| json!({ "type": "reply", "reply": {
+            out.push(with_footer(
+                interactive(
+                    "button",
+                    json!({ "buttons": replies.iter().map(|r| json!({ "type": "reply", "reply": {
                     "id": clamp_text(&r.id, limits::BUTTON_ID),
                     "title": clamp_text(&r.label, limits::BUTTON_TITLE),
                 }})).collect::<Vec<_>>() }),
-                &body,
-                header,
+                    &body,
+                    header,
+                ),
+                footer,
             ));
         } else {
             out.extend(media);
             for chunk in replies.chunks(MAX_LIST_ROWS) {
-                out.push(interactive(
+                out.push(with_footer(interactive(
                     "list",
                     json!({ "button": DEFAULT_LIST_BUTTON_LABEL, "sections": [{ "rows": chunk.iter().map(|r| json!({
                         "id": clamp_text(&r.id, limits::ROW_ID),
@@ -425,7 +456,7 @@ fn button_messages(
                     })).collect::<Vec<_>>() }] }),
                     &body,
                     None,
-                ));
+                ), footer));
             }
         }
         out.extend(links.iter().map(|(r, url)| cta(r, url, &r.label)));
@@ -434,7 +465,7 @@ fn button_messages(
     out.extend(media);
     let mut links = links.iter();
     if let Some((primary, url)) = links.next() {
-        out.push(cta(primary, url, &body));
+        out.push(with_footer(cta(primary, url, &body), footer));
     }
     out.extend(links.map(|(r, url)| cta(r, url, &r.label)));
     out
@@ -473,8 +504,17 @@ pub fn convert_message(message: &Value, quick_replies: Option<&Value>) -> Vec<Wa
                 "action": { "name": "call_permission_request" } }),
         )];
     }
-    // ponytail: `product_message` rows (`toWhatsappProductMessage`) are not
-    // ported; they fall through to their text preview.
+    // A product row carries its resolved products; the text is only a preview.
+    if entity == Some("product_message")
+        && let Some(payload) = attributes.get("payload").filter(|p| p.is_object())
+    {
+        return super::whatsapp_steps::product_message(payload)
+            .map(|m| vec![m])
+            .unwrap_or_else(|error| {
+                tracing::warn!(error = error.message(), "WhatsApp product message not sent");
+                Vec::new()
+            });
+    }
     if message
         .get("contentType")
         .and_then(Value::as_str)
@@ -507,25 +547,26 @@ pub fn convert_message(message: &Value, quick_replies: Option<&Value>) -> Vec<Wa
 }
 
 /// `convertFlowStepToWhatsappMessage` for the ported step types.
-pub fn convert_flow_step(data: &SendFlowStep) -> ChannelResult<Vec<WaMessage>> {
+pub fn convert_flow_step(data: &SendFlowStep, pix_redirect: bool) -> ChannelResult<Vec<WaMessage>> {
     let step = &data.step;
     let buttons: Vec<Value> = step
         .get("buttons")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let quick_count = data
+    let quick: &[Value] = data
         .quick_replies
         .as_ref()
         .and_then(Value::as_array)
-        .map_or(0, Vec::len);
+        .map_or(&[], Vec::as_slice);
+    let quick_count = quick.len();
     match str_field(step, "stepType") {
         "sendText" => {
             let text = str_field(step, "text");
             Ok(if buttons.len() + quick_count == 0 {
                 vec![text_message(text)]
             } else {
-                button_messages(data, &buttons, text, None)
+                button_messages(data, &buttons, quick, text, None, None)
             })
         }
         "sendImage" => {
@@ -533,7 +574,7 @@ pub fn convert_flow_step(data: &SendFlowStep) -> ChannelResult<Vec<WaMessage>> {
             Ok(if buttons.len() + quick_count == 0 {
                 vec![image]
             } else {
-                button_messages(data, &buttons, "", Some(image))
+                button_messages(data, &buttons, quick, "", Some(image), None)
             })
         }
         "sendMultipleImages" => Ok(step
@@ -543,8 +584,17 @@ pub fn convert_flow_step(data: &SendFlowStep) -> ChannelResult<Vec<WaMessage>> {
             .flatten()
             .map(|i| media_message("image", str_field(i, "url")))
             .collect()),
-        // ponytail: carousel, view catalog, templates, option lists, call
-        // buttons, location, Flows and product steps are not ported yet.
+        "sendWaTemplateMessage" => Ok(vec![super::whatsapp_template::convert_wa_template(
+            data,
+            pix_redirect,
+        )?]),
+        "sendCarousel" => Ok(steps::carousel(data, quick)),
+        "sendViewCatalog" => Ok(steps::view_catalog(step)),
+        "whatsappOptionList" => steps::option_list(data),
+        "whatsappCallButton" => Ok(steps::call_button(step)),
+        "whatsappLocation" => Ok(steps::location(step)),
+        "whatsappFlow" => steps::whatsapp_flow(data),
+        "sendProducts" => steps::send_products(data),
         other => Err(SendFailure::Other(format!(
             "Unsupported WhatsApp flow step: {other}"
         ))),
@@ -608,45 +658,57 @@ async fn post_json(
     Ok(parsed)
 }
 
-impl Whatsapp {
-    fn send_all(
-        &self,
-        ctx: &ChannelCtx,
-        contact: &OutgoingContact,
-        messages: ChannelResult<Vec<WaMessage>>,
-    ) -> BoxFuture<'static, ChannelResult<SendResult>> {
-        let client = self.client.clone();
-        let base = self.base_url.clone();
-        let auth = auth_of(ctx);
-        let (mode, to) = recipient_params(contact);
-        Box::pin(async move {
-            let auth = auth?;
-            let url = format!(
-                "{base}/{DEFAULT_API_VERSION}/{}/messages",
-                auth.phone_number_id
-            );
-            // ponytail: `prepareOutboundMedia` (re-hosting media links on our
-            // storage) is not ported; links go out as given.
-            let mut result = SendResult::default();
-            for message in messages? {
-                let response = post_json(
-                    &client,
-                    url.clone(),
-                    &auth.access_token,
-                    &message_body(&message, (mode, &to)),
-                )
-                .await?;
-                result.sent_count += 1;
-                match response.pointer("/messages/0/id").and_then(Value::as_str) {
-                    Some(id) => result.message_ids.push(id.to_owned()),
-                    None => {
-                        tracing::warn!(kind = %message.kind, "WhatsApp message could not be sent")
-                    }
-                }
+/// The Graph sends of one `sendMessage` / `sendFlowStep` call.
+async fn send_messages(
+    client: reqwest::Client,
+    base: String,
+    auth: ChannelResult<Auth>,
+    recipient: (&'static str, String),
+    messages: ChannelResult<Vec<WaMessage>>,
+    media: Option<(Arc<WhatsappMedia>, i64)>,
+) -> ChannelResult<SendResult> {
+    let auth = auth?;
+    let url = format!(
+        "{base}/{DEFAULT_API_VERSION}/{}/messages",
+        auth.phone_number_id
+    );
+    let mut result = SendResult::default();
+    for message in messages? {
+        let mut body = message_body(&message, (recipient.0, &recipient.1));
+        if let Some((media, workspace_id)) = &media {
+            super::whatsapp_media::prepare_outbound_media(
+                media,
+                &super::whatsapp_media::media_client(),
+                *workspace_id,
+                &mut body,
+            )
+            .await;
+        }
+        let response = post_json(&client, url.clone(), &auth.access_token, &body).await?;
+        result.sent_count += 1;
+        match response.pointer("/messages/0/id").and_then(Value::as_str) {
+            Some(id) => result.message_ids.push(id.to_owned()),
+            None => {
+                tracing::warn!(kind = %message.kind, "WhatsApp message could not be sent")
             }
-            Ok(result)
-        })
+        }
     }
+    Ok(result)
+}
+
+/// `ctx.integrationDetail.pixRedirectEnabled`.
+async fn pix_redirect_enabled(db: &chatbotx_db::Db, integration_id: i64) -> bool {
+    db.read(move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT "pixRedirectEnabled" FROM "IntegrationWhatsapp" WHERE "id" = ?1"#,
+                [integration_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false))
+    })
+    .await
+    .unwrap_or(false)
 }
 
 // ---- inbound (`incomming-message.ts`, `incoming-reply.ts`) ----------------
@@ -769,12 +831,11 @@ pub fn parse_incoming(payload: &Value) -> Received {
             source_id: s(m, "id"),
             file_type: file_type.into(),
             mime_type: str_field(m, "mime_type").to_owned(),
-            // ponytail: the media bytes are not copied to storage yet
-            // (`fetchMedia` + `storeIncomingImage`); the Graph media id is kept.
+            // The Graph media id until `receive_message` stores the bytes.
             origin_path: str_field(m, "id").to_owned(),
-            size: None,
             name: s(m, "filename"),
             is_photo_message: key == "image",
+            ..IncomingAttachment::default()
         }
     };
     match kind {
@@ -850,7 +911,11 @@ pub fn parse_incoming(payload: &Value) -> Received {
                 other => other,
             };
             incoming.attachments = vec![media(kind, file_type)];
-            incoming.text = s(&message[kind], "caption");
+            // Only `document` and `image` captions become the text (a video
+            // caption is ignored, as in the original).
+            if matches!(kind, "document" | "image") {
+                incoming.text = s(&message[kind], "caption");
+            }
         }
         other => incoming.text = Some(format!("Received {other}")),
     }
@@ -880,10 +945,36 @@ impl Channel for Whatsapp {
 
     fn receive_message(
         &self,
-        _ctx: &ChannelCtx,
+        ctx: &ChannelCtx,
         payload: Value,
     ) -> BoxFuture<'static, ChannelResult<Option<Received>>> {
-        Box::pin(std::future::ready(Ok(Some(parse_incoming(&payload)))))
+        let mut received = parse_incoming(&payload);
+        let media = self.media.clone();
+        let client = self.media_client.clone();
+        let base = self.base_url.clone();
+        let token = ctx
+            .auth
+            .pointer("/tokens/accessToken")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let loc = chatbotx_files::ChannelMediaLocation {
+            channel: ctx.channel.clone(),
+            workspace_id: ctx.workspace_id.to_string(),
+            integration_id: ctx.integration_id.to_string(),
+        };
+        Box::pin(async move {
+            // ponytail: without a file store the Graph media id is kept.
+            if let (Some(media), Some(message)) = (media, received.message.as_mut()) {
+                for attachment in &mut message.attachments {
+                    super::whatsapp_media::store_inbound_media(
+                        &media, &client, &base, &token, &loc, attachment,
+                    )
+                    .await?;
+                }
+            }
+            Ok(Some(received))
+        })
     }
 
     fn message_status(
@@ -913,7 +1004,14 @@ impl Channel for Whatsapp {
         data: SendMessage,
     ) -> BoxFuture<'static, ChannelResult<SendResult>> {
         let messages = Ok(convert_message(&data.message, data.quick_replies.as_ref()));
-        self.send_all(ctx, &data.contact, messages)
+        Box::pin(send_messages(
+            self.client.clone(),
+            self.base_url.clone(),
+            auth_of(ctx),
+            recipient_params(&data.contact),
+            messages,
+            self.media.clone().map(|m| (m, ctx.workspace_id)),
+        ))
     }
 
     fn send_flow_step(
@@ -921,7 +1019,16 @@ impl Channel for Whatsapp {
         ctx: &ChannelCtx,
         data: SendFlowStep,
     ) -> BoxFuture<'static, ChannelResult<SendResult>> {
-        self.send_all(ctx, &data.contact, convert_flow_step(&data))
+        let (client, base, auth) = (self.client.clone(), self.base_url.clone(), auth_of(ctx));
+        let recipient = recipient_params(&data.contact);
+        let (db, integration_id) = (ctx.db.clone(), ctx.integration_id);
+        let media = self.media.clone().map(|m| (m, ctx.workspace_id));
+        Box::pin(async move {
+            let pix_redirect = str_field(&data.step, "stepType") == "sendWaTemplateMessage"
+                && pix_redirect_enabled(&db, integration_id).await;
+            let messages = convert_flow_step(&data, pix_redirect);
+            send_messages(client, base, auth, recipient, messages, media).await
+        })
     }
 
     /// `sendTyping`: `markAsRead(phoneId, wamid, "text")` (typing on only).

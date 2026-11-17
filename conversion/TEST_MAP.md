@@ -904,7 +904,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/voip-attach-microphone.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/webchat-brand-color.test.ts` | B | - | todo | Webchat channel; builder jsdom |
 | `apps/builder/__tests__/webchat-browser-profile-fields.test.ts` | B | - | todo | Webchat channel; builder jsdom |
-| `apps/builder/__tests__/webchat-guest-session.test.ts` | C | tbd | todo | Webchat channel; builder server code |
+| `apps/builder/__tests__/webchat-guest-session.test.ts` | C | `crates/business/src/integration_webchat.rs` | passing | Webchat channel; builder server code |
 | `apps/builder/__tests__/webchat-message-schema.test.ts` | B | - | todo | Webchat channel; builder jsdom |
 | `apps/builder/__tests__/webchat-mutation-schema.test.ts` | B | - | todo | Webchat channel; builder jsdom |
 | `apps/builder/__tests__/webchat-page-guards.test.tsx` | C | tbd | todo | Webchat channel; builder server code |
@@ -1792,16 +1792,16 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/sendgrid/__tests__/integration.test.ts` | C | tbd | todo | SendGrid integration |
 | `integrations/shopify/__tests__/lib.test.ts` | C | tbd | todo | Shopify integration |
 | `integrations/smtp/__tests__/smoke.test.ts` | C | tbd | todo | SMTP email integration |
-| `integrations/telegram/__tests__/call-phone-number-button.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/connection.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/copy-text-button.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/error-mapper.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/group-routing.test.ts` | C | tbd | todo | Telegram channel |
+| `integrations/telegram/__tests__/call-phone-number-button.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/connection.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/copy-text-button.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/error-mapper.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/group-routing.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
 | `integrations/telegram/__tests__/incoming-image-compression.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/incoming-message.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/quick-replies-attachment.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/send-message-multiple-images.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/send-multiple-images.test.ts` | C | tbd | todo | Telegram channel |
+| `integrations/telegram/__tests__/incoming-message.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel; parse half (download cases use the shared WhatsApp copy, tested there) |
+| `integrations/telegram/__tests__/quick-replies-attachment.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/send-message-multiple-images.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/send-multiple-images.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
 | `integrations/threads/__tests__/auth.test.ts` | C | tbd | todo | Threads channel |
 | `integrations/threads/__tests__/comment-moderation.test.ts` | C | tbd | todo | Threads channel |
 | `integrations/threads/__tests__/comment.test.ts` | C | tbd | todo | Threads channel |
@@ -1813,19 +1813,19 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/tiktok/__tests__/call-phone-number-button.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/callback.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/comment-api.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/comment-webhook.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/comment-webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/connection-oauth.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/direct-reply-api.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/high-intent-comment-webhook.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/incoming-message.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/high-intent-comment-webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
+| `integrations/tiktok/__tests__/incoming-message.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/message-send.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/outgoing-comment.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/private-reply.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/quick-replies-attachment.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/quick-replies-attachment.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/scopes.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/send-multiple-images.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/subscribe-webhooks.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/webhook.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/webchat/__tests__/integration.test.ts` | C | tbd | todo | Webchat channel |
 | `integrations/webchat/__tests__/realtime-sender.test.ts` | C | tbd | todo | Webchat channel |
 | `integrations/webchat/__tests__/send-flow-step.test.ts` | C | tbd | todo | Webchat channel |
@@ -1897,21 +1897,21 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/whatsapp/__tests__/webhook-hmac.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/woocommerce/__tests__/client.test.ts` | C | tbd | todo | WooCommerce integration |
 | `integrations/woocommerce/__tests__/lib.test.ts` | C | tbd | todo | WooCommerce integration |
-| `integrations/zalo/__tests__/call-phone-number-button.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/call-phone-number-button.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/connection-oauth.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/error-mapper.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/follow-event.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/error-mapper.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
+| `integrations/zalo/__tests__/follow-event.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/get-user-profile.test.ts` | C | tbd | todo | Zalo channel |
 | `integrations/zalo/__tests__/google-click-partner-samples.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/incoming-gif-message.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/incoming-gif-message.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/incoming-image-compression.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/outgoing-message-ids.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/outgoing-text-with-images.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/quick-replies-attachment.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/outgoing-message-ids.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
+| `integrations/zalo/__tests__/outgoing-text-with-images.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
+| `integrations/zalo/__tests__/quick-replies-attachment.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/refresh-access-token.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/send-multiple-images.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/send-multiple-images.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/tag.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/webhook-routing.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/webhook-routing.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `packages/ai/__tests__/ai-context-service.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/ai/__tests__/call-summarizer.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/ai/__tests__/embedding-model.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |

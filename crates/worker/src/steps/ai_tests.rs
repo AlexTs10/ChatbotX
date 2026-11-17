@@ -388,3 +388,118 @@ mod ai_delete_message_history {
         assert_eq!(marker(&fx, 7).await, Some(81));
     }
 }
+
+/// `analyze-image` / `extract-data` (no TypeScript test file; the cases
+/// follow the handlers).
+mod ai_image_and_extract {
+    use super::*;
+
+    async fn photo(fx: &Fixture, value: &'static str) {
+        fx.exec(r#"INSERT INTO "CustomField" ("id", "name", "type", "workspaceId") VALUES (31, 'photo', 'shortText', 2)"#)
+            .await;
+        let sql: &'static str = Box::leak(
+            format!(r#"INSERT INTO "ContactCustomField" ("value", "contactId", "customFieldId") VALUES ('{value}', 3, 31)"#)
+                .into_boxed_str(),
+        );
+        fx.exec(sql).await;
+    }
+
+    fn analyze() -> Value {
+        json!({ "stepType": "aiAnalyzeImage", "provider": "muse", "model": "muse-spark-1.3",
+                "prompt": "Describe it", "inputFieldId": "31", "outputFieldId": "30" })
+    }
+
+    fn extract(extra: Value) -> Value {
+        let mut step = json!({ "stepType": "aiExtractData", "provider": "muse", "model": "muse-spark-1.3",
+            "inputType": "text", "inputFieldId": "  My name is Ada  ",
+            "extractFields": [{ "key": "name", "customFieldId": "30", "description": "Full name" },
+                              { "key": "city", "customFieldId": "30" }] });
+        for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+            step[k] = v;
+        }
+        step
+    }
+
+    #[tokio::test]
+    async fn analyze_image_sends_the_prompt_and_the_image_and_saves_the_answer() {
+        let mut fx = Fixture::new().await;
+        setup(&fx).await;
+        photo(&fx, "https://cdn.example.test/cat.PNG?size=2").await;
+        let http = with_ai(&mut fx, vec![FakeHttp::openai_text("A cat")]);
+        assert!(!run_step(&fx, analyze()).await);
+        assert_eq!(answer(&fx).await.as_deref(), Some("A cat"));
+        let body = &http.requests()[0].1;
+        assert_eq!(
+            body["messages"][1]["content"],
+            json!([{ "type": "text", "text": "Describe it" },
+                   { "type": "image_url", "image_url": { "url": "https://cdn.example.test/cat.PNG?size=2" } }])
+        );
+        assert!(
+            body["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .starts_with("Your answer will be sent as one")
+        );
+    }
+
+    #[tokio::test]
+    async fn analyze_image_rejects_a_value_that_is_not_an_image_url() {
+        let mut fx = Fixture::new().await;
+        setup(&fx).await;
+        photo(&fx, "https://cdn.example.test/doc.pdf").await;
+        let http = with_ai(&mut fx, vec![FakeHttp::openai_text("A cat")]);
+        assert!(run_step(&fx, analyze()).await);
+        assert!(http.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn extract_data_saves_each_non_null_value() {
+        let mut fx = Fixture::new().await;
+        setup(&fx).await;
+        let http = with_ai(
+            &mut fx,
+            vec![FakeHttp::openai_text(r#"{"name":"Ada","city":null}"#)],
+        );
+        assert!(!run_step(&fx, extract(json!({}))).await);
+        assert_eq!(answer(&fx).await.as_deref(), Some("Ada"));
+        let body = &http.requests()[0].1;
+        assert_eq!(body["response_format"], json!({ "type": "json_object" }));
+        assert_eq!(
+            body["messages"][0]["content"],
+            "You are a data extraction expert. Extract the following information from the provided text.\nFields to extract:\n- name: Full name\n- city"
+        );
+        assert_eq!(
+            body["messages"][1]["content"],
+            json!([{ "type": "text", "text": "My name is Ada" },
+                   { "type": "text", "text": "Please extract data from this text" }])
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_data_skips_without_fields_or_input() {
+        let mut fx = Fixture::new().await;
+        setup(&fx).await;
+        let http = with_ai(&mut fx, vec![]);
+        assert!(!run_step(&fx, extract(json!({ "extractFields": [] }))).await);
+        assert!(
+            !run_step(
+                &fx,
+                extract(json!({ "inputType": "image", "inputFieldId": "31" }))
+            )
+            .await
+        );
+        assert!(http.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn extract_data_failure_tells_the_contact_and_takes_the_error_route() {
+        let mut fx = Fixture::new().await;
+        setup(&fx).await;
+        with_ai(&mut fx, vec![FakeHttp::openai_text("not json")]);
+        assert!(run_step(&fx, extract(json!({}))).await);
+        let sent = fx.jobs.named("sendChatMessage");
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].data["data"]["text"], "Error extracting data");
+        assert_eq!(answer(&fx).await, None);
+    }
+}

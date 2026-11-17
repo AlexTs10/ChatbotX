@@ -144,6 +144,23 @@ pub struct OutgoingContact {
     pub source_conversation_id: Option<String>,
 }
 
+impl OutgoingContact {
+    /// `sourceConversationId: resolveChannelConversationId(conversation)`.
+    pub fn new(
+        contact_inbox: &ContactInbox,
+        conversation: &chatbotx_db::repo::models::Conversation,
+    ) -> OutgoingContact {
+        OutgoingContact {
+            contact_inbox: contact_inbox.clone(),
+            source_conversation_id:
+                chatbotx_db::repo::partials::channel::resolve_channel_conversation_id(
+                    conversation.source_id.as_deref(),
+                    conversation.additional_attributes.as_ref().map(|a| &a.0),
+                ),
+        }
+    }
+}
+
 /// `sendMessage` / `sendComment` / `sendPrivateReply` data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SendMessage {
@@ -194,6 +211,8 @@ pub struct IncomingAttachment {
     /// The stored object key, or the provider URL of a lazy attachment.
     pub origin_path: String,
     pub size: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
     pub name: Option<String>,
     /// A photo message (re-encoded in the background; files keep their bytes).
     pub is_photo_message: bool,
@@ -247,6 +266,9 @@ pub struct IncomingContact {
     pub source_username: Option<String>,
     /// Keys the conversation (a post id for comments); `None` for DMs.
     pub source_conversation_id: Option<String>,
+    /// The channel's own DM id (TikTok `conversation_id`), stored on
+    /// `Conversation.additionalAttributes.channelConversationId`.
+    pub channel_conversation_id: Option<String>,
 }
 
 /// `ReceivedMessageResult`: what a channel parser read from one webhook
@@ -480,7 +502,7 @@ impl Channels {
         Channels::default()
     }
 
-    /// The channels of this crate (webchat, API channel).
+    /// The channels of this crate.
     pub fn builtin() -> Channels {
         Channels::new()
             .with("webchat", Arc::new(crate::channels::webchat::Webchat))
@@ -505,6 +527,12 @@ impl Channels {
                 "threads",
                 Arc::new(crate::channels::threads::Threads::new()),
             )
+            .with(
+                "telegram",
+                Arc::new(crate::channels::telegram::Telegram::new()),
+            )
+            .with("tiktok", Arc::new(crate::channels::tiktok::Tiktok::new()))
+            .with("zalo", Arc::new(crate::channels::zalo::Zalo::new()))
     }
 
     /// `isInstagramViaFacebook`: an `instagram` row of `type = 'facebook'`

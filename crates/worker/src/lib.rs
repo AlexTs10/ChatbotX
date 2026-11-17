@@ -14,6 +14,8 @@ pub mod channel;
 pub mod channels;
 pub mod chat;
 pub mod condition;
+pub mod contact_scan;
+pub mod datetime_sweep;
 pub mod default_queue;
 pub mod events;
 pub mod flow;
@@ -21,6 +23,7 @@ pub mod inbound;
 pub mod inbound_events;
 pub mod inbox_labels;
 pub mod integration;
+pub mod low;
 pub mod meta_catalog;
 pub mod notification;
 pub mod purge;
@@ -29,6 +32,8 @@ pub mod send_flow_step;
 pub mod steps;
 pub mod trigger;
 pub mod variables;
+pub mod wa_template;
+pub mod webchat_guest;
 pub mod webhook;
 
 use std::sync::Arc;
@@ -232,10 +237,8 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
         handler(deps, |deps, job| Box::pin(ai_file::handle_heavy(deps, job))),
     )?;
     runtime.spawn_worker(
-        spec_of(QueueName::AiAgent),
-        handler(deps, |deps, job| {
-            Box::pin(ai_file::handle_ai_agent(deps, job))
-        }),
+        spec_of(QueueName::Low).concurrency(concurrency_env("LOW_WORKER_CONCURRENCY", 30, 200)),
+        handler(deps, |deps, job| Box::pin(low::handle(deps, job))),
     )?;
     runtime.spawn_worker(
         spec_of(QueueName::Webhook).concurrency(concurrency_env(

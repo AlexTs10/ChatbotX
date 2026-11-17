@@ -47,6 +47,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         SEND_FLOW_MESSAGE => crate::send_flow_step::send_flow_step(&deps, &data).await?,
         SEND_CHAT_MESSAGE => crate::send_flow_step::send_chat_message(&deps, &data).await?,
         SEND_TYPING => send_typing_to_channel(&deps, &data).await?,
+        crate::wa_template::SEND_TEMPLATE_TO_CONVERSATION => {
+            crate::wa_template::send_template_to_conversation(&deps, &data).await?
+        }
         DELETE_CHANNEL_MESSAGE => delete_message_from_channel(&deps, &data).await?,
         EDIT_CHANNEL_MESSAGE => edit_message_from_channel(&deps, &data).await?,
         CHANGE_CHANNEL_MESSAGE_STATE => change_message_state_on_channel(&deps, &data).await?,
@@ -61,7 +64,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "broadcastEvent" => {
             tracing::info!(job_id = %job.job_id, "Ignoring legacy broadcastEvent job during realtime v2 rollout");
         }
-        // Templates (WhatsApp / Messenger) are the channel units' (Q.D12, Q.I1).
+        // Messenger templates are the Messenger unit's (Q.I1b).
         other => {
             return Err(JobError::unrecoverable(format!(
                 "ChatJobAction action is not defined: {other}"
@@ -529,10 +532,7 @@ async fn dispatch_send(
     let is_private_reply =
         is_comment && message.pointer("/contentAttributes/isPrivateReply") == Some(&json!(true));
     let send = SendMessage {
-        contact: OutgoingContact {
-            contact_inbox: contact_inbox.clone(),
-            source_conversation_id: conversation.source_id.clone(),
-        },
+        contact: OutgoingContact::new(contact_inbox, conversation),
         message,
         quick_replies: if is_comment {
             None
@@ -739,10 +739,7 @@ pub async fn send_typing_to_channel(deps: &Deps, data: &Value) -> Result<(), Job
         .send_typing(
             &ctx,
             SendTyping {
-                contact: OutgoingContact {
-                    contact_inbox: contact_inbox.clone(),
-                    source_conversation_id: conversation.source_id.clone(),
-                },
+                contact: OutgoingContact::new(&contact_inbox, &conversation),
                 typing: data.get("typing").and_then(Value::as_bool).unwrap_or(true),
                 seconds: data.get("seconds").and_then(Value::as_f64),
                 message_source_id: None,

@@ -11,10 +11,12 @@ publish.workspace = true
 chatbotx-business = { workspace = true }
 chatbotx-core = { workspace = true }
 chatbotx-db = { workspace = true }
+# WhatsApp media: the file store (inbound copies, outbound re-hosting).
 chatbotx-files = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
+bytes = { workspace = true }
 # Smart-delay job ids and the on-shift check (working-hours zone).
 chrono = { workspace = true, features = ["std"] }
 chrono-tz = { workspace = true }
@@ -22,6 +24,9 @@ chrono-tz = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 # API channel HMAC-SHA256 signature and the delivery id.
 ring = { workspace = true }
+# AI files: e-mail (mailparser) and PDF (pdf-parse) text extraction.
+mail-parser = "0.11"
+pdf-extract = "0.12"
 # Meta catalog: the error sanitizer and the remote product URLs.
 regex = { workspace = true }
 serde_json = { workspace = true }
