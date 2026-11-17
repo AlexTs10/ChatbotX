@@ -31,31 +31,39 @@ struct Account {
     version: Option<String>,
 }
 
+const IG_SQL: &str = r#"SELECT "igId", "name", "inboxId", "auth" FROM "IntegrationInstagram"
+    WHERE "workspaceId" = ?1 AND "type" = 'instagram' ORDER BY "id""#;
+const IG_FACEBOOK_SQL: &str = r#"SELECT "igId", "name", "inboxId", "auth" FROM "IntegrationInstagram"
+    WHERE "workspaceId" = ?1 AND "type" = 'facebook' ORDER BY "id""#;
+/// `messengerIntegrationService.findByWorkspaceId`.
+const MESSENGER_SQL: &str = r#"SELECT "pageId", "name", "inboxId", "auth" FROM "IntegrationMessenger"
+    WHERE "workspaceId" = ?1 ORDER BY "id""#;
+/// `integrationThreadsService.listByWorkspaceId` (`@username` as the name).
+const THREADS_SQL: &str = r#"SELECT "threadsUserId", '@' || "username", "inboxId", "auth"
+    FROM "IntegrationThreads" WHERE "workspaceId" = ?1 ORDER BY "createdAt", "id""#;
+
+/// The accounts of `sql` (`id, name, inboxId, auth`); Messenger keeps the
+/// Graph version at `auth.version`, the others at `auth.metadata.version`.
 async fn accounts(
     db: &Db,
     workspace_id: i64,
-    row_type: &'static str,
+    sql: &'static str,
     inbox_id: Option<i64>,
 ) -> Result<Vec<Account>> {
+    let top_level_version = sql == MESSENGER_SQL;
     tx::read(db, move |conn| {
         let mut stmt = conn
-            .prepare(
-                r#"SELECT "igId", "name", "inboxId", "auth" FROM "IntegrationInstagram"
-                   WHERE "workspaceId" = ?1 AND "type" = ?2 ORDER BY "id""#,
-            )
+            .prepare(sql)
             .map_err(|e| BusinessError::Repo(e.into()))?;
         let rows = stmt
-            .query_map(
-                chatbotx_db::rusqlite::params![workspace_id, row_type],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, Option<i64>>(2)?,
-                        r.get::<_, String>(3)?,
-                    ))
-                },
-            )
+            .query_map(chatbotx_db::rusqlite::params![workspace_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })
             .map_err(|e| BusinessError::Repo(e.into()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| BusinessError::Repo(e.into()))?;
@@ -73,7 +81,11 @@ async fn accounts(
                         .as_str()
                         .unwrap_or_default()
                         .to_string(),
-                    version: auth["metadata"]["version"].as_str().map(str::to_string),
+                    version: if top_level_version {
+                        auth["version"].as_str().map(str::to_string)
+                    } else {
+                        auth["metadata"]["version"].as_str().map(str::to_string)
+                    },
                 }
             })
             .collect())
@@ -105,13 +117,8 @@ pub async fn list_instagram_media<U: Upstream>(
     stories: bool,
 ) -> Result<Value> {
     let facebook = variant == "instagramFacebook";
-    let list = accounts(
-        db,
-        workspace_id,
-        if facebook { "facebook" } else { "instagram" },
-        inbox_id,
-    )
-    .await?;
+    let sql = if facebook { IG_FACEBOOK_SQL } else { IG_SQL };
+    let list = accounts(db, workspace_id, sql, inbox_id).await?;
     let pages: Vec<Value> = list
         .iter()
         .map(|a| json!({ "id": a.ig_id, "name": a.name }))
@@ -193,7 +200,7 @@ pub async fn ensure_live_subscription<U: Upstream>(
     if kind != "instagram" || !live {
         return;
     }
-    let list = match accounts(db, workspace_id, "instagram", None).await {
+    let list = match accounts(db, workspace_id, IG_SQL, None).await {
         Ok(list) => list,
         Err(error) => {
             tracing::warn!(%error, "live_comments subscription: account read failed");
@@ -222,6 +229,189 @@ pub async fn ensure_live_subscription<U: Upstream>(
             tracing::warn!(ig_id = %account.ig_id, "failed to subscribe Instagram account to live_comments");
         }
     }
+}
+
+/// GETs a Graph list edge (`{ data: [...] }`); `None` = failed (logged).
+async fn graph_list<U: Upstream>(
+    upstream: &U,
+    url: url::Url,
+    bearer: Option<&str>,
+    what: &str,
+) -> Option<Vec<Value>> {
+    let headers = bearer
+        .map(|token| vec![("Authorization".into(), format!("Bearer {token}"))])
+        .unwrap_or_default();
+    let reply = upstream
+        .send(UpstreamRequest {
+            method: "GET",
+            url: url.to_string(),
+            headers,
+            body: None,
+        })
+        .await;
+    match reply {
+        Ok((status, body)) if (200..300).contains(&status) => {
+            let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            Some(body["data"].as_array().cloned().unwrap_or_default())
+        }
+        other => {
+            let status = other.as_ref().ok().map(|(status, _)| *status);
+            tracing::warn!(?status, what, "failed to list posts for an integration");
+            None
+        }
+    }
+}
+
+fn graph_url(base: &str, pairs: &[(&str, &str)]) -> url::Url {
+    let mut url = url::Url::parse(base).expect("fixed graph host");
+    url.query_pairs_mut().extend_pairs(pairs);
+    url
+}
+
+/// `listFacebookPostsForAutomation`: `{ published, ads, reels, pages }`
+/// (`/posts`, `/feed` filtered by `is_eligible_for_promotion`,
+/// `/video_reels` with the post id as the id).
+pub async fn list_facebook_posts<U: Upstream>(
+    db: &Db,
+    upstream: &U,
+    workspace_id: i64,
+    inbox_id: Option<i64>,
+) -> Result<Value> {
+    let list = accounts(db, workspace_id, MESSENGER_SQL, inbox_id).await?;
+    let pages: Vec<Value> = list
+        .iter()
+        .map(|a| json!({ "id": a.ig_id, "name": a.name }))
+        .collect();
+    let (mut published, mut ads, mut reels) = (Vec::new(), Vec::new(), Vec::new());
+    for account in &list {
+        let version = account.version.as_deref().unwrap_or("v23.0");
+        let base = format!("https://graph.facebook.com/{version}/{}", account.ig_id);
+        let token = Some(account.token.as_str());
+        let tag = |mut post: Map<String, Value>| {
+            post.insert("pageId".into(), json!(account.ig_id));
+            post.insert("inboxId".into(), inbox_json(account.inbox_id));
+            Value::Object(post)
+        };
+        const FIELDS: &str = "id,message,full_picture,created_time,permalink_url";
+        let url = graph_url(
+            &format!("{base}/posts"),
+            &[("fields", FIELDS), ("limit", "100")],
+        );
+        if let Some(items) = graph_list(upstream, url, token, "facebook published").await {
+            published.extend(items.iter().map(|i| tag(pick(i, &FB_KEYS))));
+        }
+        let fields = format!("{FIELDS},is_eligible_for_promotion");
+        let url = graph_url(
+            &format!("{base}/feed"),
+            &[("fields", &fields), ("limit", "100")],
+        );
+        if let Some(items) = graph_list(upstream, url, token, "facebook ads").await {
+            ads.extend(
+                items
+                    .iter()
+                    .filter(|i| i["is_eligible_for_promotion"] == Value::Bool(true))
+                    .map(|i| tag(pick(i, &FB_KEYS))),
+            );
+        }
+        let url = graph_url(
+            &format!("{base}/video_reels"),
+            &[
+                (
+                    "fields",
+                    "id,post_id,description,picture,created_time,permalink_url",
+                ),
+                ("limit", "100"),
+            ],
+        );
+        if let Some(items) = graph_list(upstream, url, token, "facebook reels").await {
+            reels.extend(items.iter().map(|i| {
+                let mut post = Map::new();
+                let id = i
+                    .get("post_id")
+                    .filter(|v| !v.is_null())
+                    .unwrap_or(&i["id"]);
+                post.insert("id".into(), id.clone());
+                put(&mut post, "message", i.get("description"));
+                put(&mut post, "full_picture", i.get("picture"));
+                put(&mut post, "created_time", i.get("created_time"));
+                put(&mut post, "permalink_url", i.get("permalink_url"));
+                tag(post)
+            }));
+        }
+    }
+    Ok(json!({ "published": published, "ads": ads, "reels": reels, "pages": pages }))
+}
+
+/// `listThreadsPostsForWorkspace`: `{ posts, accounts }` of `/me/threads`
+/// (reposts left out, `resolvePostPreviewImage`).
+pub async fn list_threads_posts<U: Upstream>(
+    db: &Db,
+    upstream: &U,
+    workspace_id: i64,
+    inbox_id: Option<i64>,
+) -> Result<Value> {
+    let list = accounts(db, workspace_id, THREADS_SQL, inbox_id).await?;
+    let accounts: Vec<Value> = list
+        .iter()
+        .map(|a| json!({ "id": a.ig_id, "name": a.name }))
+        .collect();
+    let mut posts = Vec::new();
+    for account in &list {
+        let version = account.version.as_deref().unwrap_or("v1.0");
+        let url = graph_url(
+            &format!("https://graph.threads.com/{version}/me/threads"),
+            &[
+                (
+                    "fields",
+                    "id,text,media_type,media_url,thumbnail_url,permalink,timestamp",
+                ),
+                ("limit", "100"),
+                ("access_token", &account.token),
+            ],
+        );
+        let Some(items) = graph_list(upstream, url, None, "threads").await else {
+            continue;
+        };
+        for item in items.iter().filter(|i| i["media_type"] != "REPOST_FACADE") {
+            let mut post = Map::new();
+            post.insert("id".into(), item["id"].clone());
+            put(&mut post, "message", item.get("text"));
+            put(&mut post, "full_picture", picture(item, false).as_ref());
+            put(&mut post, "created_time", item.get("timestamp"));
+            put(&mut post, "permalink_url", item.get("permalink"));
+            post.insert("accountId".into(), json!(account.ig_id));
+            post.insert("inboxId".into(), inbox_json(account.inbox_id));
+            posts.push(Value::Object(post));
+        }
+    }
+    Ok(json!({ "posts": posts, "accounts": accounts }))
+}
+
+const FB_KEYS: [&str; 5] = [
+    "id",
+    "message",
+    "full_picture",
+    "created_time",
+    "permalink_url",
+];
+
+/// The `keys` of a Graph item that are set.
+fn pick(item: &Value, keys: &[&str]) -> Map<String, Value> {
+    let mut out = Map::new();
+    for key in keys {
+        put(&mut out, key, item.get(*key));
+    }
+    out
+}
+
+fn put(out: &mut Map<String, Value>, key: &str, value: Option<&Value>) {
+    if let Some(value) = value.filter(|v| !v.is_null()) {
+        out.insert(key.into(), value.clone());
+    }
+}
+
+fn inbox_json(inbox_id: Option<i64>) -> Value {
+    inbox_id.map_or(Value::Null, |id| json!(id.to_string()))
 }
 
 #[cfg(test)]

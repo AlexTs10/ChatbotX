@@ -16,7 +16,7 @@ use super::{
     ApiState, CREATING, Call, FINDING, LISTING, MUTATING, Reply, business_error, json, no_content,
 };
 
-/// The routes of this module (`listPosts` waits for the Threads posts read).
+/// The routes of this module (`threadsComments.listPosts` is in `comment_crud`).
 pub const ROUTES: &[&str] = &[
     "threadsComments.list",
     "threadsComments.create",

@@ -25,6 +25,8 @@ pub const ROUTES: &[&str] = &[
     "fbComments.update",
     "fbComments.delete",
     "fbComments.deleteMany",
+    "fbComments.listPosts",
+    "threadsComments.listPosts",
     "igComments.list",
     "igComments.create",
     "igComments.get",
@@ -615,7 +617,10 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     let db = &state.db;
     let ws = call.workspace_id;
     let (group, op) = route_id.split_once('.').unwrap_or_default();
-    let reads = matches!(op, "list" | "get" | "listMedia" | "listStories");
+    let reads = matches!(
+        op,
+        "list" | "get" | "listMedia" | "listStories" | "listPosts"
+    );
     let mut input = if reads || op == "delete" {
         Input::from_query(call.params, call.query)
     } else {
@@ -660,6 +665,18 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .await
                 .map_err(|e| business_error(e, MUTATING))?;
             Ok(no_content())
+        }
+        "listPosts" => {
+            let inbox_id = nullish_digits(&mut input, "inboxId")
+                .and_then(|v| v.as_str().map(|t| t.parse().unwrap_or(-1)));
+            input.finish()?;
+            let body = if group == "fbComments" {
+                posts::list_facebook_posts(db, &HttpUpstream, ws, inbox_id).await
+            } else {
+                posts::list_threads_posts(db, &HttpUpstream, ws, inbox_id).await
+            }
+            .map_err(|e| business_error(e, LISTING))?;
+            Ok(json(200, body))
         }
         "listMedia" | "listStories" => {
             let value = input.get("variant").cloned();
