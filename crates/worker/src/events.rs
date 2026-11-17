@@ -4,8 +4,11 @@
 //! (`contact-inbox-send-failure`, `error-log`), and `logProviderErrors`
 //! (`business/error-log/service.ts`), which emits the error-log events.
 //!
-//! ponytail: the analytics listeners (broadcast / sequence / flow /
-//! comment-automation ops, MAC tracking, active hourly, contact blocked
+//! The `broadcast-ops` listeners (`message:sent` / `delivered` / `failed`)
+//! record the broadcast recipients' outcome.
+//!
+//! ponytail: the other analytics listeners (sequence / flow /
+//! comment-automation ops, broadcast `seen`, MAC tracking, active hourly, contact blocked
 //! detection, ads contact-replied, the dashboard bus) wait for the analytics
 //! package; their buses still run so the entries are acked.
 
@@ -221,39 +224,183 @@ pub struct MessageContext {
     pub source_id: String,
 }
 
-/// Emits `message:failed` (`sendMessageToChannel`'s catch block). A bus
-/// failure is logged, never raised.
-pub async fn emit_message_failed(
+impl MessageContext {
+    /// `eventLogData.context` of a send to `contact_inbox`.
+    pub fn of(
+        conversation: &chatbotx_db::repo::models::Conversation,
+        contact_inbox: &chatbotx_db::repo::models::ContactInbox,
+    ) -> Self {
+        Self {
+            workspace_id: conversation.workspace_id,
+            contact_id: conversation.contact_id,
+            conversation_id: conversation.id,
+            channel: contact_inbox.channel.clone(),
+            contact_inbox_id: contact_inbox.id,
+            inbox_id: contact_inbox.inbox_id,
+            source_id: contact_inbox.source_id.clone(),
+        }
+    }
+}
+
+fn context_json(ctx: &MessageContext) -> Value {
+    json!({
+        "workspaceId": ctx.workspace_id.to_string(),
+        "contactId": ctx.contact_id.to_string(),
+        "conversationId": ctx.conversation_id.to_string(),
+        "channel": ctx.channel,
+        "contactInboxId": ctx.contact_inbox_id.to_string(),
+        "inboxId": ctx.inbox_id.to_string(),
+        "sourceId": ctx.source_id,
+    })
+}
+
+/// Emits one message event (`eventLogData` + `occurredAt`); a bus failure is
+/// logged, never raised. `extra` adds the event's own fields.
+pub async fn emit_message_event(
     buses: Option<&EventBuses>,
+    event_type: &str,
     ctx: &MessageContext,
-    message_id: Option<i64>,
-    error_data: Value,
+    action: Value,
     metadata: Option<&Value>,
-    will_retry: bool,
+    extra: Value,
 ) {
     let Some(buses) = buses else { return };
     let mut payload = json!({
-        "context": {
-            "workspaceId": ctx.workspace_id.to_string(),
-            "contactId": ctx.contact_id.to_string(),
-            "conversationId": ctx.conversation_id.to_string(),
-            "channel": ctx.channel,
-            "contactInboxId": ctx.contact_inbox_id.to_string(),
-            "inboxId": ctx.inbox_id.to_string(),
-            "sourceId": ctx.source_id,
-        },
-        "action": { "messageId": message_id.map(|id| id.to_string()).unwrap_or_default() },
-        "errorData": error_data,
+        "context": context_json(ctx),
+        "action": action,
         "occurredAt": chatbotx_db::repo::iso(chatbotx_db::repo::now_ms()),
-        "willRetry": will_retry,
     });
     if let Some(metadata) = metadata.filter(|m| m.is_object()) {
         payload["metadata"] = metadata.clone();
     }
-    if let Some(future) = emit(buses, "message:failed", payload)
+    if let (Value::Object(target), Value::Object(extra)) = (&mut payload, extra) {
+        target.extend(extra);
+    }
+    if let Some(future) = emit(buses, event_type, payload)
         && let Err(err) = future.await
     {
-        tracing::warn!(err = %err, "message:failed emit failed");
+        tracing::warn!(err = %err, event_type, "message event emit failed");
+    }
+}
+
+/// Emits `message:sent` (`sendFlowStep`, the template sends) with the
+/// action `{ flowId?, flowVersionId?, messageId, sourceId? }`.
+pub async fn emit_message_sent(
+    buses: Option<&EventBuses>,
+    ctx: &MessageContext,
+    action: Value,
+    metadata: Option<&Value>,
+) {
+    emit_message_event(buses, "message:sent", ctx, action, metadata, json!({})).await;
+}
+
+/// Emits `message:failed` (`sendMessageToChannel`'s catch block and the
+/// terminal `sendFlowStep` catch).
+pub async fn emit_message_failed(
+    buses: Option<&EventBuses>,
+    ctx: &MessageContext,
+    action: Value,
+    error_data: Value,
+    metadata: Option<&Value>,
+    will_retry: bool,
+) {
+    emit_message_event(
+        buses,
+        "message:failed",
+        ctx,
+        action,
+        metadata,
+        json!({ "errorData": error_data, "willRetry": will_retry }),
+    )
+    .await;
+}
+
+/// `{ messageId }` of an event action (`""` when the row is unknown).
+pub fn message_action(message_id: Option<i64>) -> Value {
+    json!({ "messageId": message_id.map(|id| id.to_string()).unwrap_or_default() })
+}
+
+/// The broadcast recipient of a broadcast send's `metadata`
+/// (`BROADCAST_PAYLOAD_TYPE`): `(broadcastId, contactInboxId)`.
+fn broadcast_target(payload: &Value) -> Option<(i64, i64)> {
+    let m = payload.get("metadata")?;
+    if m.get("type").and_then(Value::as_str) != Some("broadcast") {
+        return None;
+    }
+    let id = |k: &str| m.get(k).and_then(Value::as_str)?.parse::<i64>().ok();
+    Some((id("broadcastId")?, id("contactInboxId")?))
+}
+
+fn occurred_at_ms(payload: &Value) -> i64 {
+    payload
+        .get("occurredAt")
+        .and_then(Value::as_str)
+        .and_then(chatbotx_db::repo::parse_iso)
+        .unwrap_or_else(chatbotx_db::repo::now_ms)
+}
+
+/// `broadcastAnalyticsService.onMessageSent` / `onDelivered`
+/// (`processBroadcastEvents(…, "deliveredAt")`): sets `deliveredAt` on the
+/// unread recipient rows. `message:sent` skips WhatsApp (its receipts report
+/// the delivery).
+pub async fn record_broadcast_delivered(db: &Db, payloads: &[Value], skip_whatsapp: bool) {
+    let items: Vec<(i64, i64, i64)> = payloads
+        .iter()
+        .filter(|p| {
+            !(skip_whatsapp
+                && p.pointer("/context/channel").and_then(Value::as_str) == Some("whatsapp"))
+        })
+        .filter_map(|p| broadcast_target(p).map(|(b, ci)| (b, ci, occurred_at_ms(p))))
+        .collect();
+    if items.is_empty() {
+        return;
+    }
+    let result = db
+        .write(move |tx| {
+            for (broadcast, contact_inbox, at) in &items {
+                tx.execute(
+                    r#"UPDATE "ContactOnBroadcast" SET "deliveredAt" = ?3
+                       WHERE "broadcastId" = ?1 AND "contactInboxId" = ?2 AND "isRead" = 0"#,
+                    params![broadcast, contact_inbox, at],
+                )?;
+            }
+            Ok(())
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::error!(err = %err, "broadcast-ops: deliveredAt update failed");
+    }
+}
+
+/// `broadcastAnalyticsService.onFailed` (`updateFailedBulk`): the first
+/// failure time and error of each recipient row.
+pub async fn record_broadcast_failed(db: &Db, payloads: &[Value]) {
+    let items: Vec<(i64, i64, i64, String)> = payloads
+        .iter()
+        .filter_map(|p| {
+            let (b, ci) = broadcast_target(p)?;
+            let error = serde_json::to_string(p.get("errorData").unwrap_or(&Value::Null)).ok()?;
+            Some((b, ci, occurred_at_ms(p), error))
+        })
+        .collect();
+    if items.is_empty() {
+        return;
+    }
+    let result = db
+        .write(move |tx| {
+            for (broadcast, contact_inbox, at, error) in &items {
+                tx.execute(
+                    r#"UPDATE "ContactOnBroadcast"
+                       SET "failedAt" = COALESCE("failedAt", ?3), "errorContent" = COALESCE("errorContent", ?4)
+                       WHERE "broadcastId" = ?1 AND "contactInboxId" = ?2"#,
+                    params![broadcast, contact_inbox, at, error],
+                )?;
+            }
+            Ok(())
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::error!(err = %err, "broadcast-ops: failedAt update failed");
     }
 }
 
@@ -528,6 +675,51 @@ pub async fn start(db: Arc<Db>) -> Result<(EventBuses, EventWorker), String> {
             ),
         ],
     );
+
+    let sent_db = Arc::clone(&db);
+    message_listeners.insert(
+        "message:sent".to_owned(),
+        vec![listener(
+            "broadcast-ops",
+            Arc::new(move |payloads, _| {
+                let db = Arc::clone(&sent_db);
+                Box::pin(async move {
+                    record_broadcast_delivered(&db, &payloads, true).await;
+                    Ok(ListenerOutcome::default())
+                })
+            }),
+        )],
+    );
+    let delivered_db = Arc::clone(&db);
+    message_listeners.insert(
+        "message:delivered".to_owned(),
+        vec![listener(
+            "broadcast-ops",
+            Arc::new(move |payloads, _| {
+                let db = Arc::clone(&delivered_db);
+                Box::pin(async move {
+                    record_broadcast_delivered(&db, &payloads, false).await;
+                    Ok(ListenerOutcome::default())
+                })
+            }),
+        )],
+    );
+    if let Some(failed) = message_listeners.get_mut("message:failed") {
+        let failed_db = Arc::clone(&db);
+        failed.insert(
+            0,
+            listener(
+                "broadcast-ops",
+                Arc::new(move |payloads, _| {
+                    let db = Arc::clone(&failed_db);
+                    Box::pin(async move {
+                        record_broadcast_failed(&db, &payloads).await;
+                        Ok(ListenerOutcome::default())
+                    })
+                }),
+            ),
+        );
+    }
 
     let worker = EventWorker::new();
     worker

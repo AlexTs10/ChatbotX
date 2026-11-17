@@ -313,7 +313,7 @@ pub async fn send_message_to_channel(
                     inbox_id: contact_inbox.inbox_id,
                     source_id: contact_inbox.source_id.clone(),
                 },
-                message_id,
+                crate::events::message_action(message_id),
                 crate::events::parsed_error(&error),
                 metadata,
                 will_retry,

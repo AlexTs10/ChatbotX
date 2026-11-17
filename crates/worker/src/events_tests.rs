@@ -280,7 +280,7 @@ async fn message_failed_reaches_the_error_log_and_the_contact_inbox() {
             inbox_id: 4,
             source_id: "s".into(),
         },
-        Some(77),
+        message_action(Some(77)),
         parsed_error(&SendFailure::Other("socket closed".into())),
         None,
         false,
@@ -297,4 +297,36 @@ async fn message_failed_reaches_the_error_log_and_the_contact_inbox() {
     assert_eq!(rows.as_deref(), Some("webchat|socket closed|400|s"));
     assert_eq!(f.text(r#"SELECT "lastErrorLog" || '|' || "consecutiveFailedReply" FROM "ContactInbox" WHERE "id" = 5"#).await.as_deref(), Some("socket closed|1"));
     worker.stop().await;
+}
+
+/// `broadcast-ops`: `message:sent` marks the recipient delivered (not on
+/// WhatsApp); `message:failed` keeps the first failure.
+#[tokio::test]
+async fn broadcast_ops_record_the_recipient_outcome() {
+    let f = Fixture::new().await;
+    f.exec(
+        r#"INSERT INTO "Broadcast" ("id", "name", "workspaceId", "status", "schedulesType", "schedulesAt", "subaction", "channel")
+             VALUES (20, 'B', 2, 'sending', 'now', 0, 'allContacts', 'omnichannel');
+           INSERT INTO "ContactOnBroadcast" ("broadcastId", "contactId", "contactInboxId", "conversationId", "sent")
+             VALUES (20, 3, 5, 6, 1);"#,
+    )
+    .await;
+    let meta = json!({ "type": "broadcast", "broadcastId": "20", "contactInboxId": "5" });
+    let event = |channel: &str, at: &str| {
+        json!({ "context": { "channel": channel }, "metadata": meta, "occurredAt": at,
+                "errorData": { "message": "boom" } })
+    };
+    record_broadcast_delivered(&f.deps.db, &[event("whatsapp", "2026-01-01T00:00:00.000Z")], true).await;
+    assert_eq!(f.text(r#"SELECT CAST("deliveredAt" AS TEXT) FROM "ContactOnBroadcast""#).await, None);
+    record_broadcast_delivered(&f.deps.db, &[event("webchat", "2026-01-01T00:00:00.000Z")], true).await;
+    assert_eq!(
+        f.text(r#"SELECT CAST("deliveredAt" AS TEXT) FROM "ContactOnBroadcast""#).await.as_deref(),
+        Some("1767225600000")
+    );
+    record_broadcast_failed(&f.deps.db, &[event("webchat", "2026-01-01T00:00:01.000Z")]).await;
+    record_broadcast_failed(&f.deps.db, &[event("webchat", "2026-01-01T00:00:02.000Z")]).await;
+    assert_eq!(
+        f.text(r#"SELECT "failedAt" || '|' || "errorContent" FROM "ContactOnBroadcast""#).await.as_deref(),
+        Some(r#"1767225601000|{"message":"boom"}"#)
+    );
 }
