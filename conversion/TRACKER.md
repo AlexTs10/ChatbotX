@@ -66,7 +66,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | Q.D1m | 3 | Mini apps (`packages/mini-app` needed part + domain + routes) | todo | P3.6-D2 | C + A | | |
 | Q.D4 | 3 | Templates (template marketplace, installations, previews, template messages; `packages/business/src/template` 23k) | todo | P3.6-D3 | C + A | | |
 | Q.D5 | 3 | Broadcasts, sequences, contact sequences, smart delay, triggers, email topics | todo | P3.6-D3 | C + A | | |
-| Q.D6 | 3 | AI: agents, files/RAG, functions, handover (+ bulk run), MCP servers, AI providers (`packages/ai`) | todo | P3.6-D3 | C + A | | |
+| Q.D6 | 3 | AI: agents, files/RAG, functions, handover (+ bulk run), MCP servers, AI providers (`packages/ai`) | done (worktree branch `feat/conversion-ai`, not merged; worker parts Q.W2, AI key connect P3.6-D2) | P3.6-D3 | C + A | Gate 2026-11-17 (Dell): manifest OK; fmt, clippy workspace `-D warnings` clean; api+business tests 2403 passed, 0 failed. Parity (Rust stack): p1-02 ai-agents + ai-functions, p1-03 ai-mcp-servers all pass (48); p1-03 ai-handover 30/34 (4 need the bulk-toggle worker, Q.W2); p1-02 ai-files 0/15 (setup needs AI key connect P3.6-D2, embeddings need the heavy worker Q.W2); see specs/Q.D6.md "State" | 12c791f83..9e509d305, e0a7d2d39 + next |
 | Q.D7 | 3 | Ads: ads conversion/analytics/retarget, Google Ads, Meta conversions, messaging ads, Facebook marketing messages, lead ads | todo | P3.6-D2 | C + A | | |
 | Q.D8 | 3 | Ecommerce rest: Shopify, WooCommerce, webshop, carts, coupons, discount codes, ecommerce analytics | todo | P3.6-D1o | C + A | | |
 | Q.D9 | 3 | Appointments: calendars, external calendars, reminders, working hours | todo | P3.6-D2 | C + A | | |

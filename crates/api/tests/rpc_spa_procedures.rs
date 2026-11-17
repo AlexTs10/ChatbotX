@@ -370,3 +370,41 @@ async fn the_first_api_channel_creates_the_workspace() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(json["message"], "Workspace not found");
 }
+
+#[tokio::test]
+async fn ai_procedures_and_actions_are_wired() {
+    let (router, _) = router().await;
+    let agent = json!({
+        "name": "Support agent",
+        "prompt": "You answer questions.",
+        "messages": [{ "role": "user", "content": "Hello" }],
+        "models": [{ "provider": "openai", "model": "gpt-4o-mini" }],
+        "temperature": 0.4,
+        "maxOutputTokens": 500,
+        "tools": [],
+        "webSearchAuthorizedDomains": [],
+        "isDefault": false,
+    });
+    let (status, out, _) = post(
+        &router,
+        "actions/createAIAgentAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), agent] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, list, meta) = post(
+        &router,
+        "aiAgentsAPI/listAIAgentsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["data"][0]["name"], "Support agent");
+    assert!(
+        meta.as_array()
+            .unwrap()
+            .contains(&json!([1, "data", 0, "createdAt"]))
+    );
+}
