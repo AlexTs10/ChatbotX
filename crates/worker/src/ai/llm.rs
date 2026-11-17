@@ -192,6 +192,8 @@ pub struct Request {
     /// `stopWhen: isStepCount(n)` (default 1).
     pub max_steps: usize,
     pub tool_choice: ToolChoice,
+    /// `output: Output.object({ schema })`: a JSON schema for the answer.
+    pub output_schema: Option<Value>,
 }
 
 impl Request {
@@ -203,6 +205,7 @@ impl Request {
             temperature: None,
             max_steps: 1,
             tool_choice: ToolChoice::Unset,
+            output_schema: None,
         }
     }
 }
@@ -275,32 +278,7 @@ pub async fn generate(
     let mut turns = request.messages.clone();
     let mut generated = Generated::default();
     loop {
-        let (url, headers, body) = build_request(model, request, &turns, &defs);
-        let (status, text) = http
-            .post(&url, &headers, &body, STEP_TIMEOUT)
-            .await
-            .map_err(|message| LlmError {
-                status: None,
-                body: None,
-                message,
-            })?;
-        let parsed: Option<Value> = serde_json::from_str(&text).ok();
-        if !(200..300).contains(&status) {
-            return Err(LlmError {
-                status: Some(status),
-                message: error_message(parsed.as_ref())
-                    .unwrap_or_else(|| format!("Provider request failed with status {status}")),
-                body: Some(text),
-            });
-        }
-        let answer = parsed
-            .as_ref()
-            .and_then(|body| parse_answer(model.wire, body))
-            .ok_or_else(|| LlmError {
-                status: Some(status),
-                body: Some(text.clone()),
-                message: "Invalid JSON response".into(),
-            })?;
+        let (answer, _) = step(http, model, request, &turns, &defs).await?;
         generated.steps.push(answer.text.clone());
         if answer.calls.is_empty() {
             return Ok(generated);
@@ -330,6 +308,84 @@ pub async fn generate(
             calls: answer.calls,
         });
         turns.push(Turn::Tool(outputs));
+    }
+}
+
+/// One model call: the parsed answer and the raw body.
+async fn step(
+    http: &dyn AiHttp,
+    model: &Model,
+    request: &Request,
+    turns: &[Turn],
+    defs: &[ToolDef],
+) -> Result<(StepAnswer, String), LlmError> {
+    let (url, headers, body) = build_request(model, request, turns, defs);
+    let (status, text) = http
+        .post(&url, &headers, &body, STEP_TIMEOUT)
+        .await
+        .map_err(|message| LlmError {
+            status: None,
+            body: None,
+            message,
+        })?;
+    let parsed: Option<Value> = serde_json::from_str(&text).ok();
+    if !(200..300).contains(&status) {
+        return Err(LlmError {
+            status: Some(status),
+            message: error_message(parsed.as_ref())
+                .unwrap_or_else(|| format!("Provider request failed with status {status}")),
+            body: Some(text),
+        });
+    }
+    match parsed
+        .as_ref()
+        .and_then(|body| parse_answer(model.wire, body))
+    {
+        Some(answer) => Ok((answer, text)),
+        None => Err(LlmError {
+            status: Some(status),
+            body: Some(text),
+            message: "Invalid JSON response".into(),
+        }),
+    }
+}
+
+/// The Anthropic forced tool that carries a JSON answer (`jsonResponseTool`).
+const JSON_TOOL: &str = "json";
+
+/// `generateText({ output: Output.object({ schema }) }).output`: one call,
+/// no tools; the answer must be a JSON object.
+pub async fn generate_object(
+    http: &dyn AiHttp,
+    model: &Model,
+    request: &Request,
+    schema: Value,
+) -> Result<Map<String, Value>, LlmError> {
+    let mut request = request.clone();
+    request.output_schema = Some(schema);
+    request.tool_choice = ToolChoice::Unset;
+    let (answer, raw) = step(http, model, &request, &request.messages, &[]).await?;
+    let text = match model.wire {
+        Wire::Anthropic => answer
+            .calls
+            .iter()
+            .find(|c| c.name == JSON_TOOL)
+            .map_or(answer.text, |c| c.args.to_string()),
+        _ => answer.text,
+    };
+    let trimmed = text.trim();
+    let unfenced = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .and_then(|t| t.strip_suffix("```"))
+        .unwrap_or(trimmed);
+    match serde_json::from_str::<Value>(unfenced.trim()) {
+        Ok(Value::Object(object)) => Ok(object),
+        _ => Err(LlmError {
+            status: None,
+            body: Some(raw),
+            message: "No object generated: could not parse the response.".into(),
+        }),
     }
 }
 
@@ -477,6 +533,16 @@ fn openai_body(model: &Model, request: &Request, turns: &[Turn], defs: &[ToolDef
         }
         _ => {}
     }
+    if let Some(schema) = &request.output_schema {
+        // `@ai-sdk/openai` sends the strict schema; OpenAI-compatible
+        // providers get `json_object` (no structured outputs).
+        let format = if model.provider == "openai" {
+            json!({ "type": "json_schema", "json_schema": { "name": "response", "strict": true, "schema": schema } })
+        } else {
+            json!({ "type": "json_object" })
+        };
+        body.insert("response_format".into(), format);
+    }
     match model.transform {
         Transform::None => {}
         Transform::StripReasoning => {
@@ -592,11 +658,46 @@ fn anthropic_body(model: &Model, request: &Request, turns: &[Turn], defs: &[Tool
             body.insert("tool_choice".into(), json!({ "type": "auto" }));
         }
     }
+    if let Some(schema) = &request.output_schema {
+        body.insert(
+            "tools".into(),
+            json!([{ "name": JSON_TOOL, "description": "Respond with a JSON object.", "input_schema": schema }]),
+        );
+        body.insert(
+            "tool_choice".into(),
+            json!({ "type": "tool", "name": JSON_TOOL }),
+        );
+    }
     Value::Object(body)
 }
 
-/// The OpenAPI subset Gemini takes (no `$schema` / `additionalProperties`).
+/// The OpenAPI subset Gemini takes (no `$schema` / `additionalProperties`;
+/// `anyOf: [X, { type: "null" }]` is `X` with `nullable: true`).
 fn gemini_schema(schema: &Value) -> Value {
+    if let Some([a, b]) = schema
+        .get("anyOf")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+    {
+        let null = json!({ "type": "null" });
+        let inner = if *b == null {
+            Some(a)
+        } else if *a == null {
+            Some(b)
+        } else {
+            None
+        };
+        if let Some(inner) = inner {
+            let mut out = gemini_schema(inner);
+            if let (Value::Object(out), Value::Object(outer)) = (&mut out, schema) {
+                out.insert("nullable".into(), json!(true));
+                for (k, v) in outer.iter().filter(|(k, _)| k.as_str() != "anyOf") {
+                    out.insert(k.clone(), gemini_schema(v));
+                }
+            }
+            return out;
+        }
+    }
     match schema {
         Value::Object(map) => Value::Object(
             map.iter()
@@ -646,6 +747,10 @@ fn gemini_body(request: &Request, turns: &[Turn], defs: &[ToolDef]) -> Value {
     let mut config = Map::new();
     set_opt(&mut config, "maxOutputTokens", request.max_output_tokens);
     set_opt(&mut config, "temperature", request.temperature);
+    if let Some(schema) = &request.output_schema {
+        config.insert("responseMimeType".into(), json!("application/json"));
+        config.insert("responseSchema".into(), gemini_schema(schema));
+    }
     body.insert("generationConfig".into(), Value::Object(config));
     if !defs.is_empty() {
         let declarations: Vec<Value> = defs
