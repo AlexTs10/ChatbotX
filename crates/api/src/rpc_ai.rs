@@ -17,6 +17,10 @@ use chatbotx_business::ai_function as functions;
 use chatbotx_business::ai_handover::{self as handover, SaveSettingsInput, SetApplyToAllInput};
 use chatbotx_business::ai_mcp_server::{self as mcp, McpEndpointPolicy};
 use chatbotx_business::integration_ai_provider as ai_providers;
+use chatbotx_business::integration_openai_compatible::{
+    self as openai_compatible, ProviderCheck, UpdateInput as OpenaiCompatibleUpdate,
+};
+use chatbotx_business::net::ssrf_guard::HttpDoh;
 use chatbotx_business::tx;
 use chatbotx_core::variables::bot_field::BotFieldVariableTextResolution;
 use chatbotx_db::repo::utils::{PaginationInput, SortItem};
@@ -46,6 +50,8 @@ pub const PORTED: &[&str] = &[
     "actions.updateIntegrationMuseAction",
     "actions.updateIntegrationOpenRouterAction",
     "actions.updateIntegrationOpenAIAction",
+    "actions.updateOpenaiCompatibleEnabledAction",
+    "actions.updateOpenaiCompatibleAction",
     "actions.createAIAgentAction",
     "actions.updateAIAgentAction",
     "actions.deleteAIAgentAction",
@@ -84,6 +90,8 @@ pub struct RpcAiContext {
     pub is_support_session: bool,
     /// The MCP endpoint guard (`assertSafeMcpEndpoint`).
     pub mcp_guard: Arc<dyn EndpointGuard>,
+    /// `isCloud()`: OpenAI-compatible base URLs must be public.
+    pub cloud: bool,
 }
 
 impl RpcAiContext {
@@ -102,6 +110,7 @@ impl RpcAiContext {
             is_super_admin: false,
             is_support_session: false,
             mcp_guard: Arc::new(McpEndpointPolicy::from_env()),
+            cloud: mcp::is_cloud(),
         }
     }
 }
@@ -527,6 +536,29 @@ async fn run(
                 .map_err(|e| business_error(e, MUTATING))?;
             Ok(RpcOutput::plain(Value::Null))
         }
+        "actions.updateOpenaiCompatibleEnabledAction" => {
+            let id = bind_id(&args, 1)?;
+            let mut parsed = action_input(&args, 2);
+            let auto_reply = parsed.opt_bool("autoReply");
+            let enabled = parsed.opt_bool("enabled");
+            finish_action(parsed)?;
+            let data = OpenaiCompatibleUpdate {
+                auto_reply,
+                enabled,
+                ..OpenaiCompatibleUpdate::default()
+            };
+            openai_compatible::update(db, &api.audit, ws, id, data, context.cloud, &HttpDoh)
+                .await
+                .map_err(|e| business_error(e, MUTATING))?;
+            Ok(RpcOutput::plain(Value::Null))
+        }
+        "actions.updateOpenaiCompatibleAction" => {
+            let id = bind_id(&args, 1)?;
+            let mut parsed = action_input(&args, 2);
+            let data = parse_openai_compatible_update(&mut parsed);
+            finish_action(parsed)?;
+            update_openai_compatible(api, context, id, data).await
+        }
         "aiHandoverAPIs.getApplyToAllStatus" => {
             let mut parsed = Input::from_object(input.as_object().cloned().unwrap_or_default());
             let inbox = parsed.id("inboxId");
@@ -910,5 +942,133 @@ async fn run(
             Ok(RpcOutput::plain(Value::Null))
         }
         _ => Err(crate::routes::not_ported_error()),
+    }
+}
+
+/// `openaiCompatible.validation.invalidBaseURL` / `.presetAlreadyConnected`
+/// and `validation.invalidApiKey` (en).
+const INVALID_BASE_URL_COPY: &str = "Base URL is invalid or not allowed.";
+const PRESET_ALREADY_CONNECTED_COPY: &str = "This preset is already connected for this workspace.";
+const INVALID_API_KEY_COPY: &str = "Invalid API key";
+
+fn field_error(field: &str, message: &str) -> OrpcError {
+    validation_errors(json!({ field: { "_errors": [message] } }))
+}
+
+fn is_base_url_error(error: &BusinessError) -> bool {
+    matches!(error.code(), Some("invalidBaseUrl" | "ssrfBlocked"))
+}
+
+/// `updateOpenaiCompatibleSchema`: `connectOpenaiCompatibleSchema` with an
+/// optional `apiKey`, `.partial()`. Zod 4 still applies the defaults of a
+/// partial field (`autoReply` false, `enabled` true, `preset` "lmstudio").
+fn parse_openai_compatible_update(input: &mut Input) -> OpenaiCompatibleUpdate {
+    let name = input.opt_string("name", Str::trimmed(1, 255));
+    let preset = match input.get("preset").cloned() {
+        None => Some("lmstudio".to_string()),
+        Some(value) => {
+            let options: Vec<&str> = openai_compatible::PRESETS.iter().map(|(p, _)| *p).collect();
+            input.enum_at(&key("preset"), Some(&value), &options, true)
+        }
+    };
+    let base_url = input.opt_string("baseURL", Str::trimmed(1, 2048));
+    let base_url = base_url.filter(|url| {
+        let ok = url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https"));
+        if !ok {
+            input.issue(&key("baseURL"), "custom", "Invalid input");
+        }
+        ok
+    });
+    let default_model = input.opt_string("defaultModel", Str::trimmed(1, 255));
+    let api_key = input.opt_string(
+        "apiKey",
+        Str {
+            trim: true,
+            ..Str::default()
+        },
+    );
+    let auto_reply = Some(input.opt_bool("autoReply").unwrap_or(false));
+    let enabled = Some(input.opt_bool("enabled").unwrap_or(true));
+    OpenaiCompatibleUpdate {
+        name,
+        preset,
+        base_url,
+        default_model,
+        api_key,
+        auto_reply,
+        enabled,
+    }
+}
+
+/// `updateOpenaiCompatibleAction`: a new key or base URL is checked for the
+/// environment and probed (`GET <baseURL>/models`) before the update.
+async fn update_openai_compatible(
+    api: &ApiState,
+    context: &RpcAiContext,
+    id: i64,
+    mut data: OpenaiCompatibleUpdate,
+) -> Result<RpcOutput, OrpcError> {
+    let db = &api.db;
+    let ws = context.workspace_id;
+    let api_key = data.api_key.take().filter(|key| !key.is_empty());
+    if api_key.is_some() || data.base_url.is_some() {
+        let existing = openai_compatible::find(db, ws, id)
+            .await
+            .map_err(|e| business_error(e, MUTATING))?;
+        let raw = data
+            .base_url
+            .clone()
+            .or_else(|| existing.as_ref().map(|row| row.base_url.clone()))
+            .unwrap_or_default();
+        let base_url = match openai_compatible::validate_base_url_for_environment(
+            &raw,
+            context.cloud,
+            &HttpDoh,
+        )
+        .await
+        {
+            Ok(url) => url,
+            Err(error) if is_base_url_error(&error) => {
+                return Err(field_error("baseURL", INVALID_BASE_URL_COPY));
+            }
+            Err(error) => return Err(business_error(error, MUTATING)),
+        };
+        let existing_key = existing
+            .as_ref()
+            .and_then(|row| row.auth.as_ref())
+            .filter(|auth| auth["authType"] == "secretText")
+            .and_then(|auth| auth["secretText"].as_str().map(str::to_string));
+        let key = api_key.clone().or(existing_key);
+        match openai_compatible::verify_provider(key.as_deref(), &base_url, context.cloud, &HttpDoh)
+            .await
+            .map_err(|e| business_error(e, MUTATING))?
+        {
+            ProviderCheck::UnsafeBaseUrl => {
+                return Err(field_error("baseURL", INVALID_BASE_URL_COPY));
+            }
+            ProviderCheck::Unauthorized(_) => {
+                return Err(field_error("apiKey", INVALID_API_KEY_COPY));
+            }
+            ProviderCheck::Ok | ProviderCheck::CouldNotVerify => {}
+        }
+        data.base_url = Some(base_url);
+    }
+    data.api_key = api_key;
+    if data.default_model.is_none() {
+        data.default_model = data
+            .preset
+            .as_deref()
+            .and_then(openai_compatible::default_model_of)
+            .map(str::to_string);
+    }
+    match openai_compatible::update(db, &api.audit, ws, id, data, context.cloud, &HttpDoh).await {
+        Ok(()) => Ok(RpcOutput::plain(Value::Null)),
+        Err(error) if is_base_url_error(&error) => {
+            Err(field_error("baseURL", INVALID_BASE_URL_COPY))
+        }
+        Err(error) if error.code() == Some("openaiCompatiblePresetAlreadyConnected") => {
+            Err(field_error("preset", PRESET_ALREADY_CONNECTED_COPY))
+        }
+        Err(error) => Err(business_error(error, MUTATING)),
     }
 }
