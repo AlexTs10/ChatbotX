@@ -133,7 +133,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return match name {
             n if contacts::ACTIONS.contains(&n)
                 || flows::ACTIONS.contains(&n)
-                || conversations::ACTIONS.contains(&n) =>
+                || conversations::ACTIONS.contains(&n)
+                || lists::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -144,6 +145,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = conversations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = lists::action(ctx, name, &args).await {
         return Some(outcome);
     }
     flows::action(ctx, name, &args).await

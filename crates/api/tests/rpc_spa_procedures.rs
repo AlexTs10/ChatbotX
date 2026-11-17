@@ -525,3 +525,50 @@ async fn contact_notes_keep_the_author_and_the_member_scope() {
         assert_eq!(status, StatusCode::OK);
     }
 }
+
+#[tokio::test]
+async fn tag_actions_create_validate_and_delete() {
+    let (router, _) = router().await;
+    let act = |name: &'static str, args: Value| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": args }),
+            )
+            .await
+        }
+    };
+    let (status, tag, _) = act("createTagAction", json!([ws(), { "name": "promo" }])).await;
+    assert_eq!(status, StatusCode::OK, "{tag}");
+    assert_eq!(tag["name"], "promo");
+
+    // A duplicate name is a form error on `name` (next-safe-action shape).
+    let (status, error, _) = act("createTagAction", json!([ws(), { "name": "promo" }])).await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(
+        error["data"]["validationErrors"]["name"]["_errors"][0].is_string(),
+        "{error}"
+    );
+
+    let id = tag["id"].as_str().unwrap().to_string();
+    let (status, _, _) = act("deleteTagAction", json!([ws(), { "ids": [id.clone()] }])).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, json, _) = post(
+        &router,
+        "tagsAPI/privateListWorkspaceTagsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert!(
+        json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["id"] != id),
+        "{json}"
+    );
+}
