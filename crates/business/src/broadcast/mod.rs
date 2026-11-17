@@ -18,8 +18,8 @@ use chatbotx_db::repo::broadcast_recurrence as recurrence_repo;
 use chatbotx_db::repo::models::{Broadcast, BroadcastRecurrence};
 use chatbotx_db::repo::utils::{PaginationInput, get_pagination_with_defaults};
 use chatbotx_db::repo::{self, now_ms};
-use chatbotx_db::rusqlite::Connection;
 use chatbotx_db::rusqlite::types::Value as SqlValue;
+use chatbotx_db::rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 use self::plan_policy::RestrictedContext;
@@ -179,6 +179,87 @@ pub async fn list_audience(
             })
             .collect::<Vec<_>>();
         Ok(json!({ "data": data, "pageCount": (total + pagination.limit - 1) / pagination.limit }))
+    })
+    .await
+}
+
+/// `listContactsPage` (+ `broadcastStatsRepository.getContacts`,
+/// `contactInboxService.findManyByIds`, `mapStatsContactRow`): the
+/// recipients that reached `event_type`, newest first, with their contact.
+/// A recipient whose contact inbox is gone is dropped from the page (not
+/// from `total`), as the original.
+pub async fn list_contacts_page(
+    db: &Db,
+    workspace_id: i64,
+    broadcast_id: i64,
+    event_type: String,
+    page: i64,
+    per_page: i64,
+) -> Result<Value> {
+    tx::read(db, move |conn| {
+        if list_existing_ids(conn, workspace_id, &[broadcast_id])?.is_empty() {
+            return Err(BusinessError::not_found("Broadcast not found"));
+        }
+        let condition = crate::contact::bulk_tag_stats::event_condition(&event_type);
+        let order = match event_type.as_str() {
+            "message:seen" => "seenAt",
+            "message:failed" => "failedAt",
+            "flow:clicked" => "clickedAt",
+            _ => "deliveredAt",
+        };
+        let recipients = format!(
+            r#"(SELECT t.* FROM "ContactOnBroadcast" t JOIN "Broadcast" b ON b."id" = t."broadcastId"
+                WHERE t."broadcastId" = ?1 AND b."workspaceId" = ?2 AND {condition})"#
+        );
+        let total: i64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM {recipients}"),
+            params![broadcast_id, workspace_id],
+            |row| row.get(0),
+        )?;
+        let sql = format!(
+            r#"SELECT r."contactId", r."contactInboxId", r."deliveredAt", r."failedAt", r."seenAt",
+                      r."clickedAt", r."errorContent", c."id", c."firstName", c."lastName",
+                      c."fullName", ci."sourceId", c."avatar", ci."channel",
+                      (SELECT v."id" FROM "Conversation" v WHERE v."contactId" = ci."contactId" LIMIT 1)
+               FROM {recipients} r
+               LEFT JOIN "ContactInbox" ci ON ci."id" = r."contactInboxId"
+               LEFT JOIN "Contact" c ON c."id" = ci."contactId" AND c."workspaceId" = ?2
+               ORDER BY r."{order}" DESC NULLS LAST LIMIT ?3 OFFSET ?4"#
+        );
+        let now = repo::iso(now_ms());
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![broadcast_id, workspace_id, per_page, (page - 1) * per_page],
+            |row| {
+                if row.get::<_, Option<i64>>(7)?.is_none() {
+                    return Ok(None);
+                }
+                let at = |i: usize| row.get::<_, Option<i64>>(i);
+                let occurred = match event_type.as_str() {
+                    "message:sent" => at(2)?.or(at(3)?),
+                    "message:delivered" => at(2)?,
+                    "message:seen" => at(4)?,
+                    "message:failed" => at(3)?,
+                    "flow:clicked" => at(5)?,
+                    _ => None,
+                };
+                Ok(Some(json!({
+                    "contactId": row.get::<_, i64>(0)?.to_string(),
+                    "contactInboxId": row.get::<_, i64>(1)?.to_string(),
+                    "firstName": row.get::<_, Option<String>>(8)?,
+                    "lastName": row.get::<_, Option<String>>(9)?,
+                    "fullName": row.get::<_, Option<String>>(10)?,
+                    "sourceId": row.get::<_, Option<String>>(11)?,
+                    "avatar": row.get::<_, Option<String>>(12)?,
+                    "channel": row.get::<_, String>(13)?,
+                    "errorContent": row.get::<_, Option<String>>(6)?,
+                    "occurredAt": occurred.map(repo::iso).unwrap_or_else(|| now.clone()),
+                    "conversationId": row.get::<_, Option<i64>>(14)?.map(|id| id.to_string()).unwrap_or_default(),
+                })))
+            },
+        )?;
+        let data = rows.filter_map(|row| row.transpose()).collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(json!({ "data": data, "total": total, "pageCount": (total + per_page - 1) / per_page }))
     })
     .await
 }

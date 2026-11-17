@@ -2052,7 +2052,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/broadcast-service-create.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-drafts.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-lifecycle.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-list-contacts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `packages/business/__tests__/broadcast-service-list-contacts.test.ts` | C | `crates/business/tests/broadcast_list_contacts.rs` | done | Broadcasts (incl. recurring) |
 | `packages/business/__tests__/broadcast-service-payment-request.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | WhatsApp message templates; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-prepare.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/business/__tests__/broadcast-service-resend.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
