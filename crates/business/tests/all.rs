@@ -156,6 +156,8 @@ mod flow_version_service;
 mod flow_version_service_publish;
 #[path = "folder_service_create.rs"]
 mod folder_service_create;
+#[path = "google_oauth_connect.rs"]
+mod google_oauth_connect;
 #[path = "import_column_map_and_template.rs"]
 mod import_column_map_and_template;
 #[path = "import_contacts_run.rs"]
