@@ -115,10 +115,11 @@ async fn get_json(url: &str, token: Option<&str>) -> Result<Value, String> {
     if !status.is_success() {
         return Err(format!("HTTP {status}"));
     }
-    response
-        .json()
+    let bytes = response
+        .bytes()
         .await
-        .map_err(|e| e.without_url().to_string())
+        .map_err(|e| e.without_url().to_string())?;
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
 /// `listFlows`: one page of `/{wabaId}/flows` (the original reads no next page).

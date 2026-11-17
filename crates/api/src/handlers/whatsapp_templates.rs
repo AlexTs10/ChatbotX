@@ -142,7 +142,8 @@ async fn get_page(url: String, token: String) -> Result<GraphPage<Value>, Fail> 
         .await
         .map_err(|e| Fail::Sdk(e.to_string(), 400))?;
     let status = response.status().as_u16();
-    let body: Value = response.json().await.unwrap_or(Value::Null);
+    let bytes = response.bytes().await.unwrap_or_default();
+    let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     if !(200..300).contains(&status) {
         let message = format_graph_error(body.get("error"))
             .unwrap_or_else(|| "WhatsApp API call failed".to_owned());

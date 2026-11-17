@@ -317,14 +317,15 @@ async fn whatsapp_update(
     let request = http()
         .post(url)
         .bearer_auth(text(auth, "/tokens/accessToken"))
-        .json(&body);
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body.to_string());
     match graph(request, "WhatsApp API call failed").await {
         Ok(answer) => {
             tracing::info!(
                 action,
                 target_role,
                 has_metadata = metadata.is_some(),
-                request_id = answer.get("request_id").and_then(Value::as_str),
+                request_id = ?answer.get("request_id"),
                 "Whatsapp thread_control applied"
             );
         }
@@ -402,7 +403,8 @@ async fn messenger_update(
     let request = http()
         .post(url)
         .bearer_auth(text(auth, "/tokens/accessToken"))
-        .json(&body);
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body.to_string());
     let outcome = match graph(request, "Messenger API call failed").await {
         Ok(answer) if answer.get("success") == Some(&Value::Bool(false)) => Err(ChannelFailure {
             message: "Messenger rejected the thread control request".into(),
@@ -463,11 +465,21 @@ pub async fn get_thread_owner(
         return Ok(None);
     };
     let psid = messenger_psid(contact_inbox)?;
-    let url = format!("{base_url}/{}/me/thread_owner", version(&auth));
+    let url = reqwest::Url::parse_with_params(
+        &format!("{base_url}/{}/me/thread_owner", version(&auth)),
+        &[("recipient", psid)],
+    )
+    .map_err(|e| {
+        ThreadControlError::Channel(ChannelFailure {
+            message: e.to_string(),
+            code: None,
+            take_refused: false,
+            permanent: false,
+        })
+    })?;
     let request = http()
         .get(url)
-        .bearer_auth(text(&auth, "/tokens/accessToken"))
-        .query(&[("recipient", psid)]);
+        .bearer_auth(text(&auth, "/tokens/accessToken"));
     let answer = graph(request, "Messenger API call failed")
         .await
         .map_err(ThreadControlError::Channel)?;
