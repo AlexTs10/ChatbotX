@@ -459,9 +459,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             // filters off without the permission.
             request.member_scope = super::member_scope::conversation_scope();
             request.hide_email_and_phone = !super::member_scope::can_view_email_and_phone();
-            if request.member_scope.as_ref().is_some_and(|s| {
-                s.chat_scope == chatbotx_business::member_scope::ChatScope::None
-            }) {
+            if request
+                .member_scope
+                .as_ref()
+                .is_some_and(|s| s.chat_scope == chatbotx_business::member_scope::ChatScope::None)
+            {
                 return Err(business_error(
                     BusinessError::not_found("Conversation not found"),
                     LISTING,

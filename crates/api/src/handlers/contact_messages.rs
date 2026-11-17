@@ -154,10 +154,15 @@ async fn send(
     )
     .await?;
     let sender = super::member_scope::sender_for_caller();
-    let outgoing =
-        message::create_outgoing(&state.db, &found.conversation, &contact_inbox, input, sender)
-            .await
-            .map_err(|e| business_error(e, errors))?;
+    let outgoing = message::create_outgoing(
+        &state.db,
+        &found.conversation,
+        &contact_inbox,
+        input,
+        sender,
+    )
+    .await
+    .map_err(|e| business_error(e, errors))?;
     deliver(state, &found.conversation, outgoing).await;
     Ok(no_content())
 }

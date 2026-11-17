@@ -34,6 +34,26 @@ pub struct LiveAuthDeps {
     pub mcp_resource_url: String,
     /// `isCloud()` (`CHATBOTX_DEPLOYMENT=cloud`).
     pub is_cloud: bool,
+    /// `getMobileApiAudience()`; `None` = mobile access tokens are off on `/v1`.
+    pub mobile_audience: Option<String>,
+}
+
+/// `INBOX_SCOPES` of `deriveMemberScopes`.
+const INBOX_SCOPES: [&str; 5] = ["contacts", "inbox", "automation", "broadcasts", "media"];
+
+fn invalid_mobile_token_error() -> OrpcError {
+    OrpcError::new(
+        "INVALID_CHATBOT_TOKEN",
+        Some(401),
+        Some("Invalid or missing access token"),
+    )
+}
+
+/// `isValidWorkspaceId`: 1-20 digits within the i64 range.
+fn valid_workspace_id(value: &str) -> Option<i64> {
+    (!value.is_empty() && value.len() <= 20 && value.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| value.parse::<i64>().ok())
+        .flatten()
 }
 
 impl WorkspaceQuota for LiveAuthDeps {
@@ -106,9 +126,12 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
     }
 
     fn mobile_api_audience(&self) -> Option<String> {
-        None
+        self.mobile_audience.clone()
     }
 
+    /// `resolveMobileWorkspacePrincipal`: verify the JWT, load the user,
+    /// refuse a pending password change and every route outside the member
+    /// allowlist, then the membership of `x-workspace-id`.
     async fn resolve_mobile_principal(
         &self,
         bearer_token: &str,
@@ -116,8 +139,155 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
         method: Option<&str>,
         path: Option<&str>,
     ) -> Result<MobileWorkspacePrincipal, OrpcError> {
-        let _ = (bearer_token, requested_workspace_id, method, path);
-        Err(invalid_token_error())
+        let Some(audience) = self.mobile_audience.as_deref() else {
+            return Err(invalid_token_error());
+        };
+        let verifier = crate::session::DbJwtVerifier {
+            db: &self.db,
+            now_ms: self.clock.now_ms(),
+        };
+        let subject = match crate::session::verify_mobile_access_token(
+            &verifier,
+            &self.auth_base_url,
+            audience,
+            bearer_token,
+        )
+        .await
+        {
+            Ok(subject) => subject,
+            Err(error) => {
+                if let crate::session::TokenVerifyError::Rethrown(error) = &error {
+                    tracing::error!(error = ?error, "mobile access token verification failed");
+                }
+                return Err(OrpcError::new(
+                    "SERVICE_UNAVAILABLE",
+                    None,
+                    Some("Token verification is temporarily unavailable"),
+                ));
+            }
+        };
+        let Some(subject) = subject else {
+            return Err(invalid_mobile_token_error());
+        };
+        let Ok(user_id) = subject.user_id.parse::<i64>() else {
+            return Err(invalid_mobile_token_error());
+        };
+        let db_error = |error: DbError| {
+            tracing::error!(%error, "mobile principal lookup failed");
+            OrpcError::new("INTERNAL_SERVER_ERROR", Some(500), None)
+        };
+        let user: Option<bool> = self
+            .db
+            .read(move |conn| {
+                use chatbotx_db::rusqlite::OptionalExtension as _;
+                conn.query_row(
+                    r#"SELECT "mustChangePassword" FROM "User" WHERE "id" = ?1"#,
+                    [user_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| DbError::other(e.to_string()))
+            })
+            .await
+            .map_err(db_error)?;
+        let Some(must_change_password) = user else {
+            return Err(invalid_mobile_token_error());
+        };
+        if must_change_password {
+            return Err(OrpcError::new(
+                "FORBIDDEN",
+                None,
+                Some("Password change required"),
+            ));
+        }
+        if !super::is_mobile_member_route(method, path) {
+            return Err(OrpcError::new(
+                "FORBIDDEN",
+                None,
+                Some("This operation is not available to mobile sessions"),
+            ));
+        }
+        let Some(workspace_id) = requested_workspace_id.and_then(valid_workspace_id) else {
+            return Err(OrpcError::new(
+                "WORKSPACE_SELECTION_REQUIRED",
+                Some(400),
+                Some("A numeric x-workspace-id header is required for this request"),
+            ));
+        };
+        let membership = self
+            .db
+            .read(move |conn| {
+                use chatbotx_db::repo::models::WorkspaceMember;
+                let error = |e: chatbotx_db::repo::Error| DbError::other(e.to_string());
+                let member = find_one::<WorkspaceMember>(
+                    conn,
+                    r#"WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+                    &[&workspace_id, &user_id],
+                )
+                .map_err(error)?;
+                let Some(member) = member else {
+                    return Ok(None);
+                };
+                let workspace = find_one::<Workspace>(conn, r#"WHERE "id" = ?1"#, &[&workspace_id])
+                    .map_err(error)?;
+                Ok(workspace.map(|w| (member, w)))
+            })
+            .await
+            .map_err(db_error)?;
+        let Some((member, workspace)) = membership else {
+            return Err(OrpcError::new(
+                "FORBIDDEN",
+                None,
+                Some("Account has no access to this workspace"),
+            ));
+        };
+        let permissions = member.permissions.0.clone();
+        let conversation = chatbotx_business::member_scope::resolve_conversation_scope(
+            &self.db,
+            workspace_id,
+            user_id,
+            &permissions,
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error.message(), "mobile member scope lookup failed");
+            OrpcError::new("INTERNAL_SERVER_ERROR", Some(500), None)
+        })?;
+        let scopes = if chatbotx_business::workspace_member::has_contacts_access(&permissions) {
+            INBOX_SCOPES.map(String::from).to_vec()
+        } else {
+            Vec::new()
+        };
+        let device_id = subject.device_id;
+        // `mobileCredentialId({ user, deviceId, workspace })`.
+        let credential_id = format!(
+            "mobile:{workspace_id}:{user_id}:{}",
+            device_id.as_deref().unwrap_or("-")
+        );
+        Ok(MobileWorkspacePrincipal {
+            workspace: AuthWorkspace {
+                id: workspace.id.to_string(),
+                name: workspace.name,
+                owner_id: workspace.owner_id.to_string(),
+                scheduled_deletion_at: workspace.scheduled_deletion_at,
+            },
+            api_token: RequestApiToken {
+                id: credential_id.clone(),
+                workspace_id: workspace_id.to_string(),
+                permission: "full".into(),
+                scopes: Some(scopes),
+                is_default: false,
+            },
+            user_id: user_id.to_string(),
+            member_id: Some(member.id.to_string()),
+            device_id,
+            credential_id,
+            member: Arc::new(super::MobileMember {
+                user_id,
+                permissions,
+                conversation,
+            }),
+        })
     }
 
     async fn verify_mcp_access_token(
