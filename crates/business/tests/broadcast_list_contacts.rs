@@ -11,7 +11,7 @@ use chatbotx_db::rusqlite::params;
 use common::{OTHER_WS, WS, setup, two_workspaces};
 
 #[tokio::test]
-async fn list_contacts_page() {
+async fn lists_recipients_by_event_type() {
     let db = two_workspaces().await;
     setup(&db, |tx| {
         tx.execute(
