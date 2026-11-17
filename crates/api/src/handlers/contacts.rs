@@ -318,7 +318,10 @@ pub fn public_contact_json(
             .as_ref()
             .map_or(Value::Null, conversation_json),
     );
-    Value::Object(out)
+    let mut out = Value::Object(out);
+    // `maskContactForCaller`.
+    super::member_scope::mask_contact(&mut out);
+    out
 }
 
 // ---- input ----------------------------------------------------------------
@@ -544,9 +547,13 @@ pub(super) async fn resolve(
     call: &Call<'_>,
     errors: ErrorMap,
 ) -> Result<i64, crate::orpc::OrpcError> {
-    resolve_id_by_identifier(&state.db, call.workspace_id, &identifier(call))
+    let contact_id = resolve_id_by_identifier(&state.db, call.workspace_id, &identifier(call))
         .await
-        .map_err(|e| business_error(e, errors))
+        .map_err(|e| business_error(e, errors))?;
+    // `contactIdFor`: a mobile member must be allowed to see the contact.
+    super::member_scope::assert_contact_access(&state.db, call.workspace_id, contact_id, errors)
+        .await?;
+    Ok(contact_id)
 }
 
 async fn get(state: &ApiState, call: Call<'_>) -> Reply {
@@ -1021,16 +1028,25 @@ async fn list(state: &ApiState, call: Call<'_>, from_body: bool) -> Reply {
     });
     let with_count = with_count(&mut input);
     input.finish()?;
-    let options = ListOptions {
-        scope: ListScope::Unscoped,
-        projection: Projection::Full,
-        include,
-        with_count,
-    };
     let errors = if from_body {
         super::CREATING
     } else {
         super::LISTING
+    };
+    // `contactScopeForCaller`: a mobile member's contact permission scope.
+    let scope = match super::member_scope::contact_scope(errors)? {
+        None => ListScope::Unscoped,
+        Some(s) => ListScope::Member(chatbotx_business::contact::list::ContactListScope {
+            restrict_to_assigned_user_id: s.restrict_to_assigned_user_id,
+            restrict_to_team_ids: s.restrict_to_team_ids,
+            can_view_email_and_phone: s.can_view_email_and_phone,
+        }),
+    };
+    let options = ListOptions {
+        scope,
+        projection: Projection::Full,
+        include,
+        with_count,
     };
     let result = list_contacts(&state.db, &list_input, &options, now_ms())
         .await
