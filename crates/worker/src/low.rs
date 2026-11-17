@@ -5,9 +5,10 @@
 //! and TikTok, through the channel trait and the chat / integration queues
 //! as the original.
 //!
-//! ponytail: not ported (specs/Q.D10.md "Left"): AI moderation (the comment
-//! runs as "clear") and AI-agent replies (recorded as failed), the deferred
-//! TikTok private reply, live-comment pacing, the leaderboard award, post
+//! AI moderation and AI-agent replies run on the AI queue (`comment_ai`).
+//!
+//! ponytail: not ported (specs/Q.D10.md "Left"): the deferred TikTok private
+//! reply, live-comment pacing, the leaderboard award, post
 //! tracking, commenter avatars, comment attachments and user-tag tracking.
 //! The other low actions (`contactMarkAsRead`, `messageStatus`, echoes,
 //! avatars, coexist downloads) fail unrecoverable until their channels exist.
@@ -295,6 +296,8 @@ async fn receive_comment(
     }
     if let Some(id) = only {
         automation["onlyAutomationId"] = json!(id.to_string());
+        // `isMissedCommentReplay`: carried into the AI moderation job.
+        automation["replay"] = data["replay"].clone();
         return process_comment_automation(deps, upstream, &automation).await;
     }
     // ponytail: no live-comment pacing delay and no completed-job retention
@@ -387,6 +390,19 @@ struct Comment {
 }
 
 impl Comment {
+    /// The comment fields of a `processCommentAutomation` payload.
+    fn of(data: &Value) -> Comment {
+        Comment {
+            id: str_of(data, "commentId").unwrap_or("").to_owned(),
+            post_id: str_of(data, "postId").unwrap_or("").to_owned(),
+            parent_id: str_of(data, "parentId").map(str::to_owned),
+            message: str_of(data, "message").map(str::to_owned),
+            created_time: data["createdTime"].as_i64().unwrap_or(0),
+            is_live: data["isLive"] == true,
+            tags: data["tags"].clone(),
+        }
+    }
+
     fn created_ms(&self) -> i64 {
         self.created_time * 1000
     }
@@ -866,15 +882,7 @@ async fn process_comment_automation(
         );
         return Ok(());
     };
-    let comment = Comment {
-        id: str_of(data, "commentId").unwrap_or("").to_owned(),
-        post_id: str_of(data, "postId").unwrap_or("").to_owned(),
-        parent_id: str_of(data, "parentId").map(str::to_owned),
-        message: str_of(data, "message").map(str::to_owned),
-        created_time: data["createdTime"].as_i64().unwrap_or(0),
-        is_live: data["isLive"] == true,
-        tags: data["tags"].clone(),
-    };
+    let comment = Comment::of(data);
     let only = id_of(&data["onlyAutomationId"]);
     let (tz, automations) = load_automations(deps, ws, inbox.inbox_id, &channel_type, only).await?;
     if only.is_some() && automations.is_empty() {
@@ -908,6 +916,7 @@ async fn process_comment_automation(
         comment,
         comment_message,
         attachments: None,
+        data: data.clone(),
     };
     for mut automation in automations {
         automation.limit_live(&run.channel_type);
@@ -963,6 +972,8 @@ struct Run<'a, U> {
     comment: Comment,
     comment_message: Option<Message>,
     attachments: Option<Attachments>,
+    /// The `processCommentAutomation` payload.
+    data: Value,
 }
 
 impl<U: Upstream> Run<'_, U> {
@@ -1004,11 +1015,16 @@ impl<U: Upstream> Run<'_, U> {
         if !match_post(&a.post, &self.comment.post_id, self.comment.is_live) {
             return Ok(Some("postNotMatched"));
         }
-        if a.hide_comments["aiModeration"]["enabled"] == true {
-            tracing::warn!(
+        // Before the reply filters: a comment the AI moderates is never
+        // answered; the AI job records the miss or re-runs this automation.
+        if self.moderate_with_ai(a).await {
+            tracing::info!(
                 automation_id = a.id,
-                "AI comment moderation is not ported; the comment runs as clear"
+                comment_id = self.comment.id,
+                reason = "waiting for AI moderation",
+                "Comment automation skipped"
             );
+            return Ok(None);
         }
         if a.option("ignoreCommentReplies").unwrap_or(true) && self.is_reply() {
             return Ok(Some("commentIsReply"));
@@ -1065,6 +1081,9 @@ impl<U: Upstream> Run<'_, U> {
         if let Some((reply_type, outcome)) = public.clone() {
             self.record_event(a.id, "public", reply_type, outcome)
                 .await?;
+            if reply_type == "AIAgent" {
+                self.dispatch_ai_reply(a, "public", delay).await;
+            }
         }
 
         let mut private = None;
@@ -1114,6 +1133,9 @@ impl<U: Upstream> Run<'_, U> {
         if let Some((reply_type, outcome)) = private.clone() {
             self.record_event(a.id, "private", reply_type, outcome)
                 .await?;
+            if reply_type == "AIAgent" {
+                self.dispatch_ai_reply(a, "private", delay).await;
+            }
         }
 
         let public_ok = public.as_ref().is_some_and(|(_, o)| o.is_ok());
@@ -1235,17 +1257,16 @@ impl<U: Upstream> Run<'_, U> {
             .map_err(db_fail)
     }
 
-    /// The `changeChannelMessageState` / `deleteChannelMessage` data.
+    /// The `changeChannelMessageState` data.
     fn state_job(&self, message: &Message, extra: Value) -> Value {
-        let mut data = json!({
-            "conversation": { "id": self.conversation.id.to_string(), "workspaceId": self.ws.to_string() },
-            "contactInbox": { "id": self.contact_inbox.id.to_string() },
-            "message": { "id": message.id.to_string(), "createdAt": message.created_at },
-        });
-        if let (Some(data), Some(extra)) = (data.as_object_mut(), extra.as_object()) {
-            data.extend(extra.clone());
-        }
-        json!({ "type": crate::chat::CHANGE_CHANNEL_MESSAGE_STATE, "data": data })
+        state_job(
+            crate::chat::CHANGE_CHANNEL_MESSAGE_STATE,
+            self.ws,
+            self.conversation.id,
+            self.contact_inbox.id,
+            (message.id, message.created_at),
+            extra,
+        )
     }
 
     async fn chat_job(&self, job: Value, options: JobOptions) -> Result<(), JobError> {
@@ -1300,77 +1321,33 @@ impl<U: Upstream> Run<'_, U> {
         keyword: Option<String>,
         show_after: &str,
     ) -> Result<(), JobError> {
-        let (ws, contact_id, ciid) = (
-            self.ws,
-            self.contact_inbox.contact_id,
-            self.contact_inbox.id,
-        );
-        let (post_id, comment_id, text, occurred) = (
-            self.comment.post_id.clone(),
-            self.comment.id.clone(),
-            self.comment.message.clone(),
-            self.comment.created_ms(),
-        );
-        let pending: bool = self
-            .deps
-            .db
-            .write(move |tx| {
-                let inserted = tx.execute(
-                    r#"INSERT INTO "CommentModerationLog" ("id", "workspaceId", "automationId", "contactId",
-                           "contactInboxId", "postId", "commentId", "commentText", "source", "rule",
-                           "matchedKeyword", "action", "occurredAt")
-                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'rule', ?9, ?10, 'hide', ?11)
-                       ON CONFLICT DO NOTHING"#,
-                    params![new_id(), ws, automation_id, contact_id, ciid, post_id, comment_id, text, rule, keyword, occurred],
-                )?;
-                if inserted > 0 {
-                    tx.execute(
-                        r#"UPDATE "CommentAutomation" SET "moderatedCount" = "moderatedCount" + 1 WHERE "id" = ?1"#,
-                        [automation_id],
-                    )?;
-                    return Ok(true);
-                }
-                Ok(tx
-                    .query_row(
-                        r#"SELECT "status" FROM "CommentModerationLog" WHERE "automationId" = ?1 AND "commentId" = ?2"#,
-                        params![automation_id, comment_id],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .optional()?
-                    .is_none_or(|status| status == "pending"))
-            })
-            .await
-            .map_err(db_fail)?;
-        if !pending {
-            return Ok(());
-        }
-        let moderation = json!({
-            "automationId": automation_id.to_string(),
-            "commentId": self.comment.id,
-        });
-        self.chat_job(
-            self.state_job(message, json!({ "hidden": true, "moderation": moderation })),
-            JobOptions {
-                job_id: Some(format!(
-                    "moderate-comment-{automation_id}-{}",
-                    self.comment.id
-                )),
-                ..JobOptions::default()
-            },
+        let entry = comment_ai::ModerationEntry {
+            source: "rule",
+            rule: Some(rule),
+            keyword,
+            action: "hide".into(),
+            ..Default::default()
+        };
+        comment_ai::record_and_enqueue_moderation(
+            self.deps,
+            &self.target(message),
+            automation_id,
+            entry,
+            show_after,
         )
-        .await?;
-        if show_after != "none" {
-            self.chat_job(
-                self.state_job(message, json!({ "hidden": false })),
-                JobOptions {
-                    delay_ms: Some(unhide_delay_ms(show_after)),
-                    job_id: Some(format!("unhide-comment-{}", self.comment.id)),
-                    ..JobOptions::default()
-                },
-            )
-            .await?;
+        .await
+        .map(|_| ())
+    }
+
+    fn target<'s>(&'s self, message: &Message) -> comment_ai::Target<'s> {
+        comment_ai::Target {
+            ws: self.ws,
+            conversation_id: self.conversation.id,
+            contact_inbox: &self.contact_inbox,
+            comment: &self.comment,
+            message_id: message.id,
+            message_created_at: message.created_at,
         }
-        Ok(())
     }
 
     /// `executePublicReply`: `(reply type, outcome)`, `None` = nothing sent.
@@ -1393,27 +1370,13 @@ impl<U: Upstream> Run<'_, U> {
                 for (index, raw) in texts.iter().enumerate() {
                     let text =
                         render(self.deps, &self.conversation, &self.contact_inbox, raw).await;
-                    // `postPublicCommentReply`: the row, then the chat send.
-                    let mut row = self.store_reply(&text, a.id, "public", None).await?;
-                    row["parentCreatedAt"] = self
-                        .comment_message
-                        .as_ref()
-                        .map_or(Value::Null, |m| json!(m.created_at));
-                    let job = json!({
-                        "type": crate::chat::SEND_CHANNEL_MESSAGE,
-                        "data": {
-                            "conversation": { "id": self.conversation.id.to_string(), "workspaceId": self.ws.to_string() },
-                            "contactInbox": { "id": self.contact_inbox.id.to_string() },
-                            "message": row,
-                        },
-                    });
-                    let options = JobOptions {
-                        delay_ms: Some(delay + index as u64 * PUBLIC_REPLY_SPACING_MS),
-                        attempts,
-                        ..JobOptions::default()
-                    };
-                    if let Err(err) = self.chat_job(job, options).await {
-                        return Ok(Some(("text", Err((err.to_string(), None)))));
+                    let delay = delay + index as u64 * PUBLIC_REPLY_SPACING_MS;
+                    if let Err(err) = self
+                        .reply_to()
+                        .post_public(a.id, &text, delay, attempts)
+                        .await?
+                    {
+                        return Ok(Some(("text", Err((err, None)))));
                     }
                     sent.push(text);
                 }
@@ -1427,7 +1390,8 @@ impl<U: Upstream> Run<'_, U> {
                 ))),
                 None => Ok(None),
             },
-            Some("AIAgent") if will_send(reply) => Ok(Some(ai_not_ported())),
+            // `processCommentAIReply` lands the text on the event row.
+            Some("AIAgent") if will_send(reply) => Ok(Some(("AIAgent", Ok(None)))),
             _ => Ok(None),
         }
     }
@@ -1443,21 +1407,13 @@ impl<U: Upstream> Run<'_, U> {
             Some("text") => {
                 let raw = reply["value"].as_str().unwrap_or("");
                 let text = render(self.deps, &self.conversation, &self.contact_inbox, raw).await;
-                let send = SendMessage {
-                    contact: OutgoingContact::new(&self.contact_inbox, &self.conversation),
-                    message: json!({
-                        "type": "comment",
-                        "text": text,
-                        "contentAttributes": {
-                            "replyToCommentId": self.comment.id,
-                            "postId": self.comment.post_id,
-                            "isPrivateReply": true,
-                        },
-                    }),
-                    quick_replies: None,
-                    metadata: None,
-                    send_from: None,
-                };
+                let send = private_text(
+                    &self.contact_inbox,
+                    &self.conversation,
+                    &self.comment.id,
+                    &self.comment.post_id,
+                    &text,
+                );
                 match self.channel.send_private_reply(&self.ctx, send).await {
                     Ok(result) => {
                         // `recordInlinePrivateReply` (never fails the run).
@@ -1490,7 +1446,7 @@ impl<U: Upstream> Run<'_, U> {
                     self.send_flow(a.id, flow_id, "private", delay, None).await,
                 ))
             }
-            _ => Ok(ai_not_ported()),
+            _ => Ok(("AIAgent", Ok(None))),
         }
     }
 
@@ -1546,38 +1502,20 @@ impl<U: Upstream> Run<'_, U> {
         channel: &str,
         source_id: Option<String>,
     ) -> Result<Value, JobError> {
-        let public = channel == "public";
-        store_message(
-            self.deps,
-            &self.contact_inbox,
-            &self.conversation,
-            CreateMessageInput {
-                id: Some(new_id()),
-                contact_inbox_id: self.contact_inbox.id,
-                conversation_id: self.conversation.id,
-                workspace_id: self.ws,
-                content_attributes: Some(json!({
-                    "replyToCommentId": self.comment.id,
-                    "commentAutomation": { "automationId": automation_id.to_string(), "replyChannel": channel },
-                })),
-                content_type: "text".into(),
-                message_type: "outgoing".into(),
-                sender_type: "bot".into(),
-                sender_id: None,
-                source_id,
-                parent_id: self
-                    .comment_message
-                    .as_ref()
-                    .filter(|_| public)
-                    .map(|m| m.id.to_string()),
-                text: Some(text.to_owned()),
-                r#type: Some(if public { "comment" } else { "message" }.into()),
-                created_at: Some(now_ms()),
-                updated_at: None,
-            },
-        )
-        .await
-        .map(|(row, ..)| row)
+        self.reply_to()
+            .store_reply(text, automation_id, channel, source_id)
+            .await
+    }
+
+    fn reply_to(&self) -> comment_ai::ReplyTo<'_> {
+        comment_ai::ReplyTo {
+            deps: self.deps,
+            ws: self.ws,
+            conversation: &self.conversation,
+            contact_inbox: &self.contact_inbox,
+            comment_id: &self.comment.id,
+            parent: self.comment_message.as_ref().map(|m| (m.id, m.created_at)),
+        }
     }
 
     /// `recordReplyEvent` / `recordReplyFailure` / `recordBlockedPrivateReply`
@@ -1648,49 +1586,61 @@ impl<U: Upstream> Run<'_, U> {
 
     /// `recordMisses` (one row).
     async fn record_miss(&self, automation_id: i64, reason: &'static str) -> Result<(), JobError> {
-        let (ws, contact_id, ciid) = (
+        comment_ai::record_miss(
+            self.deps,
             self.ws,
-            self.contact_inbox.contact_id,
-            self.contact_inbox.id,
-        );
-        let (post_id, cid, text, occurred) = (
-            self.comment.post_id.clone(),
-            self.comment.id.clone(),
-            self.comment.message.clone(),
-            self.comment.created_ms(),
-        );
-        self.deps
-            .db
-            .write(move |tx| {
-                let inserted = tx.execute(
-                    r#"INSERT INTO "CommentAutomationMiss" ("id", "workspaceId", "automationId", "contactId",
-                           "contactInboxId", "postId", "commentId", "commentText", "reason", "occurredAt")
-                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT DO NOTHING"#,
-                    params![new_id(), ws, automation_id, contact_id, ciid, post_id, cid, text, reason, occurred],
-                )?;
-                if inserted > 0 {
-                    tx.execute(
-                        r#"UPDATE "CommentAutomation" SET "missedCount" = "missedCount" + 1 WHERE "id" = ?1"#,
-                        [automation_id],
-                    )?;
-                }
-                Ok(())
-            })
-            .await
-            .map_err(db_fail)
+            automation_id,
+            &self.contact_inbox,
+            &self.comment,
+            reason,
+        )
+        .await
     }
 }
 
-/// ponytail: `commentAIReply` (the AI agent queue) is not ported; the reply
-/// is recorded as failed so the analytics show it.
-fn ai_not_ported() -> (&'static str, Outcome) {
-    (
-        "AIAgent",
-        Err((
-            "AI agent comment replies are not available yet".to_owned(),
-            None,
-        )),
-    )
+/// A comment-anchored private text reply.
+fn private_text(
+    contact_inbox: &ContactInbox,
+    conversation: &Conversation,
+    comment_id: &str,
+    post_id: &str,
+    text: &str,
+) -> SendMessage {
+    SendMessage {
+        contact: OutgoingContact::new(contact_inbox, conversation),
+        message: json!({
+            "type": "comment",
+            "text": text,
+            "contentAttributes": {
+                "replyToCommentId": comment_id,
+                "postId": post_id,
+                "isPrivateReply": true,
+            },
+        }),
+        quick_replies: None,
+        metadata: None,
+        send_from: None,
+    }
+}
+
+/// The `changeChannelMessageState` / `deleteChannelMessage` job.
+fn state_job(
+    kind: &str,
+    ws: i64,
+    conversation_id: i64,
+    contact_inbox_id: i64,
+    (message_id, created_at): (i64, i64),
+    extra: Value,
+) -> Value {
+    let mut data = json!({
+        "conversation": { "id": conversation_id.to_string(), "workspaceId": ws.to_string() },
+        "contactInbox": { "id": contact_inbox_id.to_string() },
+        "message": { "id": message_id.to_string(), "createdAt": created_at },
+    });
+    if let (Some(data), Some(extra)) = (data.as_object_mut(), extra.as_object()) {
+        data.extend(extra.clone());
+    }
+    json!({ "type": kind, "data": data })
 }
 
 /// The failure detail and HTTP code of a channel send.
@@ -1754,6 +1704,11 @@ async fn render(
         }
     }
 }
+
+#[path = "comment_ai.rs"]
+mod comment_ai;
+pub(crate) use comment_ai::story_reply_text;
+pub use comment_ai::{COMMENT_AI_REPLY, COMMENT_MODERATION, comment_ai_reply, comment_moderation};
 
 #[cfg(test)]
 #[path = "low_tests.rs"]

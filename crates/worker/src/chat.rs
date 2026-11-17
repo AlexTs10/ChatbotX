@@ -582,14 +582,21 @@ fn channel_fail(error: SendFailure) -> JobError {
     fail(error.message().to_owned())
 }
 
-/// `deleteMessageFromChannel` (no comment moderation log yet: Q.D10).
+/// `deleteMessageFromChannel`; an AI moderation delete settles its log row.
 pub async fn delete_message_from_channel(deps: &Deps, data: &Value) -> Result<(), JobError> {
+    let outcome = delete_comment(deps, data).await;
+    settle_moderation(deps, data, &outcome).await;
+    outcome.map(|_| ())
+}
+
+/// The delete; `Ok(false)` = skipped (no such comment).
+async fn delete_comment(deps: &Deps, data: &Value) -> Result<bool, JobError> {
     let Some((conversation, contact_inbox)) = load_pair(deps, data).await? else {
-        return Ok(());
+        return Ok(false);
     };
     let Some(found) = comment_of(deps, &conversation, data, "deleteMessageFromChannel").await?
     else {
-        return Ok(());
+        return Ok(false);
     };
     let (channel, ctx) = deps
         .channels
@@ -604,7 +611,8 @@ pub async fn delete_message_from_channel(deps: &Deps, data: &Value) -> Result<()
     channel
         .delete_comment(&ctx, found.message.source_id.unwrap_or_default())
         .await
-        .map_err(channel_fail)
+        .map_err(channel_fail)?;
+    Ok(true)
 }
 
 /// `editMessageFromChannel`.
