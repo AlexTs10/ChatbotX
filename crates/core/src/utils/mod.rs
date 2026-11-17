@@ -3,6 +3,7 @@
 pub mod broadcast;
 pub mod cache_keys;
 pub mod channel;
+pub mod channel_safe_image;
 pub mod concurrency;
 pub mod connection;
 pub mod contact_filter_value_format;
@@ -24,7 +25,6 @@ pub mod graph_error;
 pub mod graph_pagination;
 pub mod has_link;
 pub mod id;
-pub mod channel_safe_image;
 pub mod image_optimize;
 pub mod image_optimize_settings;
 pub mod inbound_webhook_channel;
