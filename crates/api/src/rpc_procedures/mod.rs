@@ -20,6 +20,7 @@ mod pipelines;
 mod products;
 mod templates;
 mod tools;
+mod whatsapp;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -118,6 +119,9 @@ pub async fn procedure(
     if let Some(outcome) = flows::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = whatsapp::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
         return Some(outcome.map(|output| output.json));
     }
@@ -180,7 +184,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || products::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
-                || integrations::ACTIONS.contains(&n) =>
+                || integrations::ACTIONS.contains(&n)
+                || whatsapp::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -212,6 +217,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = tools::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = whatsapp::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

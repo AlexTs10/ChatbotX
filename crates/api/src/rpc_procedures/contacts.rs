@@ -228,7 +228,11 @@ async fn count_contacts(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError
 
 /// The contact ids of `ids` the member may touch (`accessScope`): all for an
 /// unrestricted member, else the ones whose conversation is assigned to them.
-pub(super) async fn scoped_ids(ctx: &Ctx<'_>, member: Member, ids: Vec<i64>) -> Result<Vec<i64>, OrpcError> {
+pub(super) async fn scoped_ids(
+    ctx: &Ctx<'_>,
+    member: Member,
+    ids: Vec<i64>,
+) -> Result<Vec<i64>, OrpcError> {
     let Some(user_id) = member.restrict_to_assigned_user_id else {
         return Ok(ids);
     };
