@@ -9,6 +9,7 @@
 //! route ([`public`]) after the member checks, so both stay one code path.
 
 mod analytics;
+mod appointments;
 mod contacts;
 mod conversations;
 mod flows;
@@ -139,6 +140,9 @@ pub async fn procedure(
     if let Some(outcome) = tools::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = appointments::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = templates::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -180,6 +184,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || products::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
+                || appointments::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
@@ -212,6 +217,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = tools::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = appointments::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

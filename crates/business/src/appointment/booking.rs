@@ -171,7 +171,8 @@ pub async fn list_contact_appointments(
         if let Some(user_id) = restricted_to {
             let visible: Option<Contact> = find_one(
                 conn,
-                "\"id\" = ?1 AND \"workspaceId\" = ?2 AND \"assignedUserId\" = ?3",
+                "\"id\" = ?1 AND \"workspaceId\" = ?2 AND EXISTS (SELECT 1 FROM \"Conversation\" v \
+                 WHERE v.\"contactId\" = \"Contact\".\"id\" AND v.\"assignedUserId\" = ?3)",
                 &[&contact_id, &workspace_id, &user_id],
             )?;
             if visible.is_none() {
