@@ -400,6 +400,28 @@ pub(crate) fn page(data: impl IntoIterator<Item = Value>, page_count: i64) -> Va
     json!({ "data": data.into_iter().collect::<Vec<_>>(), "pageCount": page_count })
 }
 
+/// `conversationService.findDMByContact`: the contact's conversation
+/// without a source (not a comment thread), oldest first.
+pub(crate) async fn dm_conversation_id(
+    ctx: &Ctx<'_>,
+    contact_id: i64,
+) -> Result<Option<i64>, OrpcError> {
+    use chatbotx_db::rusqlite::OptionalExtension;
+    let ws = ctx.workspace_id;
+    chatbotx_business::tx::read(&ctx.api.db, move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT "id" FROM "Conversation" WHERE "workspaceId" = ?1 AND "contactId" = ?2 AND "sourceId" IS NULL ORDER BY "id" LIMIT 1"#,
+                [ws, contact_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(chatbotx_db::repo::Error::from)?)
+    })
+    .await
+    .map_err(fail)
+}
+
 // ---- public route bridge --------------------------------------------------
 
 /// Runs the public `/v1` route `route_id` for the member (`params`, a query

@@ -579,7 +579,7 @@ fn minigame_type(input: &mut Input) -> Option<String> {
 }
 
 /// `createMinigameRequest`.
-fn minigame_data(input: &mut Input) -> Option<MinigameData> {
+pub(crate) fn minigame_data(input: &mut Input) -> Option<MinigameData> {
     let kind = minigame_type(input);
     let get = |input: &Input, name: &str| input.get(name).cloned();
     let general = general_settings(input, get(input, "generalSettings").as_ref());

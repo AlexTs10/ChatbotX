@@ -16,7 +16,7 @@ pub const ROUTES: &[&str] = &[
     "qrCodes.delete",
 ];
 
-const DUPLICATE_NAME: &str = "QR Code name already exists";
+pub(crate) const DUPLICATE_NAME: &str = "QR Code name already exists";
 /// `QR_CODE_SIZE.MIN` / `.MAX`.
 const SIZE: Num = Num::int(64.0, 1024.0);
 
@@ -144,7 +144,7 @@ pub fn public_paging(input: &mut Input) -> (i64, i64) {
     (page.unwrap_or(1), per_page.unwrap_or(50))
 }
 
-fn size(input: &mut Input) -> Option<i64> {
+pub(crate) fn size(input: &mut Input) -> Option<i64> {
     let value = input.get("size").cloned()?;
     input
         .coerce_number_at(&super::input::key("size"), Some(&value), SIZE, true)

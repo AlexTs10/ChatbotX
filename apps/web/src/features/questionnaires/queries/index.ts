@@ -2,3 +2,4 @@
 // runs in the Rust server (P4 spec §5.1).
 export * from "./list-questionnaires.query"
 export * from "./get-questionnaire.query"
+export * from "./submissions.query"

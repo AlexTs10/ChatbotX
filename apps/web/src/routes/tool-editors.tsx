@@ -15,18 +15,40 @@ import { ORPCError } from "@orpc/client"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { useParams } from "@tanstack/react-router"
 import { useTranslations } from "next-intl"
-import type { ReactNode } from "react"
+import { minigameTypes } from "@chatbotx.io/database/partials"
+import { useSearchParams } from "next/navigation"
+import { type ReactNode, Suspense, useMemo } from "react"
+import { ReflinkAnalyticsClient } from "@/app/space/[workspaceId]/reflinks/[reflinkId]/analytics/reflink-analytics-client"
+import { MinigameTab } from "@/app/space/[workspaceId]/minigames/[id]/tab"
 import { AppBreadcrumb } from "@/components/app-breadcrumb"
+import { MinigameHistoryTable } from "@/features/minigames/components/minigame-history-table"
+import { buildMinigamePlayUrl } from "@/features/minigames/lib/play-url"
+import { MinigameForm } from "@/features/minigames/minigame-form"
+import { findMinigame, listMinigameHistory } from "@/features/minigames/queries"
+import { listMinigameHistorySearchParamsCache } from "@/features/minigames/schema/query"
+import type { MinigameResource } from "@/features/minigames/schema/resource"
 import { PipelineBoard } from "@/features/pipelines/components/board/pipeline-board"
 import { PollAnalytics } from "@/features/polls/components/poll-analytics"
 import { PollForm } from "@/features/polls/components/poll-form"
 import type { PollResource } from "@/features/polls/schema/resource"
+import { CreateQrCodeForm } from "@/features/qr-codes/create-qr-code-form"
+import { findQrCode } from "@/features/qr-codes/queries"
+import { UpdateQrCodeForm } from "@/features/qr-codes/update-qr-code-form"
 import { EditQuestionnaireForm } from "@/features/questionnaires/components/edit-questionnaire-form"
+import { QuestionnaireApplicantsTable } from "@/features/questionnaires/components/questionnaire-applicants-table"
+import { QuestionnaireDashboardSummary } from "@/features/questionnaires/components/questionnaire-dashboard-summary"
 import { getQuestionnaire } from "@/features/questionnaires/queries/get-questionnaire.query"
+import {
+  getQuestionnaireDashboardSummary,
+  listQuestionnaireSubmissions,
+} from "@/features/questionnaires/queries/submissions.query"
+import { listQuestionnaireSubmissionsSearchParamsCache } from "@/features/questionnaires/schema/query"
 import { LockedIdsProvider } from "@/features/templates/components/lock-context"
 import { LockedEditorGuard } from "@/features/templates/components/locked-editor-guard"
 import { client } from "@/lib/orpc/orpc"
-import { NotAvailablePage, NotFoundPage } from "@/routes/root"
+import { serverQuery } from "@/lib/server-action"
+import { Redirect } from "@/shims/redirect"
+import { NotFoundPage } from "@/routes/root"
 
 function useIds() {
   return useParams({ strict: false }) as {
@@ -90,17 +112,71 @@ export function EditQuestionnairePage() {
 
 export function QuestionnaireApplicantsPage() {
   const t = useTranslations()
+  const { workspaceId, id = "" } = useIds()
+  const questionnaire = useSuspenseQuery({
+    queryKey: ["spa", "getQuestionnaire", workspaceId, id],
+    queryFn: () => getQuestionnaire({ workspaceId, id }),
+  }).data
+  const tablePromises = useSearchPromise(
+    listQuestionnaireSubmissionsSearchParamsCache,
+    (search) =>
+      listQuestionnaireSubmissions({
+        ...search,
+        workspaceId,
+        questionnaireId: id,
+      }),
+  )
+  const summaryPromise = useMemo(
+    () => getQuestionnaireDashboardSummary({ workspaceId, questionnaireId: id }),
+    [workspaceId, id],
+  )
   return (
-    <ToolPage
-      section={t("questionnaires.title")}
-      sectionPath="questionnaires"
-      title={t("questionnaires.title")}
-    >
-      <NotAvailablePage
-        detail="The applicant list is not available yet in this version (questionnaire submissions are not in the Rust server pages yet)."
-        title={t("questionnaires.title")}
+    <div className="flex flex-col gap-4">
+      <AppBreadcrumb
+        items={[
+          { label: t("tools.title"), href: `/space/${workspaceId}/tools` },
+          {
+            label: t("questionnaires.title"),
+            href: `/space/${workspaceId}/questionnaires`,
+          },
+          {
+            label: questionnaire.name,
+            href: `/space/${workspaceId}/questionnaires/${id}/edit`,
+          },
+          { label: t("questionnaires.applicants"), href: "" },
+        ]}
       />
-    </ToolPage>
+      <Suspense fallback={<div>{t("actions.loading")}</div>}>
+        <QuestionnaireDashboardSummary summary={summaryPromise} />
+      </Suspense>
+      <Suspense fallback={<div>{t("actions.loading")}</div>}>
+        <QuestionnaireApplicantsTable
+          promises={tablePromises}
+          questionnaireId={id}
+          workspaceId={workspaceId}
+        />
+      </Suspense>
+    </div>
+  )
+}
+
+/**
+ * The list promise of a page, made once per search string (the table
+ * suspends below, so the page keeps its memoized promise).
+ */
+function useSearchPromise<S, T>(
+  cache: { all: () => S; parse: (input: Record<string, string>) => unknown },
+  load: (search: S) => Promise<T>,
+) {
+  const searchParams = useSearchParams()
+  const key = searchParams.toString()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the search string is the key
+  return useMemo(
+    () =>
+      Promise.all([
+        load(cache.parse(Object.fromEntries(searchParams)) as S),
+      ]) as Promise<[T]>,
+    [key],
   )
 }
 
@@ -156,55 +232,174 @@ export function PollAnalyticsPage() {
   )
 }
 
-/** A tools page whose builder actions do not run in the Rust server yet. */
-function notAvailable(sectionKey: string, sectionPath: string, what: string) {
-  return function NotAvailableToolPage() {
-    const t = useTranslations()
-    return (
-      <ToolPage
-        section={t(sectionKey)}
-        sectionPath={sectionPath}
-        title={t(sectionKey)}
-      >
-        <NotAvailablePage
-          detail={`${what} is not available yet in this version.`}
-          title={t(sectionKey)}
-        />
-      </ToolPage>
-    )
-  }
+function ToolFormPage(props: {
+  section: string
+  sectionPath: string
+  title: string
+  children: ReactNode
+}) {
+  const t = useTranslations()
+  const { workspaceId } = useIds()
+  return (
+    <div className="flex flex-col gap-4">
+      <AppBreadcrumb
+        items={[
+          { label: t("tools.title"), href: `/space/${workspaceId}/tools` },
+          {
+            label: t(props.section),
+            href: `/space/${workspaceId}/${props.sectionPath}`,
+          },
+          { label: props.title, href: "" },
+        ]}
+      />
+      {props.children}
+    </div>
+  )
 }
 
-export const CreateQrCodePage = notAvailable(
-  "qrCodes.title",
-  "qr-codes",
-  "Creating a QR code",
-)
-export const EditQrCodePage = notAvailable(
-  "qrCodes.title",
-  "qr-codes",
-  "Editing a QR code",
-)
-export const CreateMinigamePage = notAvailable(
-  "minigames.title",
-  "minigames",
-  "Creating a minigame",
-)
-export const EditMinigamePage = notAvailable(
-  "minigames.title",
-  "minigames",
-  "Editing a minigame",
-)
-export const MinigameHistoryPage = notAvailable(
-  "minigames.title",
-  "minigames",
-  "The minigame play history",
-)
-export const ReflinkAnalyticsPage = notAvailable(
-  "reflinks.title",
-  "reflinks",
-  "Reflink analytics",
-)
+export function CreateQrCodePage() {
+  const t = useTranslations()
+  return (
+    <ToolFormPage
+      section="qrCodes.title"
+      sectionPath="qr-codes"
+      title={t("actions.create")}
+    >
+      <CreateQrCodeForm workspaceId={useIds().workspaceId} />
+    </ToolFormPage>
+  )
+}
+
+export function EditQrCodePage() {
+  const t = useTranslations()
+  const { workspaceId, id = "" } = useIds()
+  const qrCode = useSuspenseQuery({
+    queryKey: ["spa", "findQrCode", workspaceId, id],
+    queryFn: () => findQrCode({ workspaceId, id }),
+  }).data
+  if (!qrCode) {
+    return <NotFoundPage />
+  }
+  return (
+    <ToolFormPage
+      section="qrCodes.title"
+      sectionPath="qr-codes"
+      title={t("actions.edit")}
+    >
+      <LockedEditorGuard
+        resourceId={id}
+        resourceKind="reflink"
+        workspaceId={workspaceId}
+      >
+        <UpdateQrCodeForm qrCode={qrCode} workspaceId={workspaceId} />
+      </LockedEditorGuard>
+    </ToolFormPage>
+  )
+}
+
+export function CreateMinigamePage() {
+  const t = useTranslations()
+  const { workspaceId } = useIds()
+  const type = minigameTypes.safeParse(useSearchParams().get("type"))
+  if (!type.success) {
+    return <Redirect href={`/space/${workspaceId}/minigames`} />
+  }
+  return (
+    <ToolFormPage
+      section="minigames.title"
+      sectionPath="minigames"
+      title={t("actions.create")}
+    >
+      <MinigameForm mode="create" type={type.data} workspaceId={workspaceId} />
+    </ToolFormPage>
+  )
+}
+
+/** `minigames/[id]/layout.tsx`: the breadcrumb and the edit / history tabs. */
+function MinigameFrame(props: {
+  children: (minigame: MinigameResource) => ReactNode
+}) {
+  const t = useTranslations()
+  const { workspaceId, id = "" } = useIds()
+  const minigame = useSuspenseQuery({
+    queryKey: ["spa", "findMinigame", workspaceId, id],
+    queryFn: () => findMinigame({ workspaceId, id }),
+  }).data
+  if (!minigame) {
+    return <NotFoundPage />
+  }
+  return (
+    <ToolFormPage
+      section="minigames.title"
+      sectionPath="minigames"
+      title={minigame.name}
+    >
+      <MinigameTab minigameId={id} />
+      {props.children(minigame)}
+    </ToolFormPage>
+  )
+}
+
+export function EditMinigamePage() {
+  const { workspaceId } = useIds()
+  return (
+    <MinigameFrame>
+      {(minigame) => (
+        <MinigameForm
+          minigame={minigame}
+          mode="edit"
+          publicUrl={buildMinigamePlayUrl(minigame.id)}
+          workspaceId={workspaceId}
+        />
+      )}
+    </MinigameFrame>
+  )
+}
+
+export function MinigameHistoryPage() {
+  const t = useTranslations()
+  const { workspaceId, id = "" } = useIds()
+  const tablePromises = useSearchPromise(
+    listMinigameHistorySearchParamsCache,
+    (search) => listMinigameHistory({ ...search, workspaceId, minigameId: id }),
+  )
+  return (
+    <MinigameFrame>
+      {() => (
+        <Suspense fallback={<div>{t("actions.loading")}</div>}>
+          <MinigameHistoryTable
+            minigameId={id}
+            promises={tablePromises}
+            workspaceId={workspaceId}
+          />
+        </Suspense>
+      )}
+    </MinigameFrame>
+  )
+}
+
+export function ReflinkAnalyticsPage() {
+  const { workspaceId, reflinkId = "" } = useIds()
+  const reflink = useSuspenseQuery({
+    queryKey: ["spa", "findReflink", workspaceId, reflinkId],
+    queryFn: () =>
+      serverQuery<{ name: string } | null>("findReflink", workspaceId, [
+        { workspaceId, id: reflinkId },
+      ]),
+  }).data
+  if (!reflink) {
+    return <NotFoundPage />
+  }
+  return (
+    <div className="container mx-auto flex flex-col gap-6 py-6">
+      <ReflinkAnalyticsClient
+        linkId={reflinkId}
+        linkName={reflink.name}
+        workspaceId={workspaceId}
+      />
+    </div>
+  )
+}
 
 /** `canViewPipeline`: the pipeline query answers 404 when it is hidden. */
 export function PipelineBoardPage() {

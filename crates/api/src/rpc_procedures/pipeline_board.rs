@@ -26,7 +26,6 @@ use chatbotx_db::repo::pipeline_item_filter::{
     PipelineValueFilter,
 };
 use chatbotx_db::repo::utils::SortDir;
-use chatbotx_db::rusqlite::OptionalExtension;
 use serde_json::{Map, Value, json};
 
 use super::pipelines::member_scope;
@@ -436,20 +435,8 @@ async fn get_item(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
         .await
         .map_err(fail)?;
     let contact_id = detail.view.item.contact_id;
-    // `conversationService.findDMByContactIds`: the contact's conversation
-    // without a source (not a comment thread).
-    let conversation_id = chatbotx_business::tx::read(&ctx.api.db, move |conn| {
-        Ok(conn
-            .query_row(
-                r#"SELECT "id" FROM "Conversation" WHERE "workspaceId" = ?1 AND "contactId" = ?2 AND "sourceId" IS NULL ORDER BY "id" LIMIT 1"#,
-                [ws, contact_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(chatbotx_db::repo::Error::from)?)
-    })
-    .await
-    .map_err(fail)?;
+    // `conversationService.findDMByContactIds`.
+    let conversation_id = super::dm_conversation_id(ctx, contact_id).await?;
     let mut out = view_json(&detail.view);
     out["attachments"] = detail
         .attachments
