@@ -141,6 +141,10 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             .into_iter()
             .flatten()
         {
+            if change.get("field").and_then(Value::as_str) == Some("messaging_handovers") {
+                jobs.extend(handover_job(change.get("value"), pinned));
+                continue;
+            }
             if change.get("field").and_then(Value::as_str) != Some("messages") {
                 continue;
             }
@@ -287,8 +291,43 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
         }
     }
     // ponytail: coexist history, automatic events, calls, identity changes,
-    // account updates and thread-control routing are not ported yet.
+    // account updates and the `standby` routing field are not ported yet.
     jobs
+}
+
+/// `splitHandoverChange` + `enqueueConversationRoutingPayloads`: one
+/// `threadControlEvent` job per `messaging_handovers` value, keyed by its body hash.
+///
+/// ponytail: the hash is of serde_json's key order (not `JSON.stringify`'s), so a job
+/// id differs from the TS one; it is still stable across Meta redeliveries.
+fn handover_job(value: Option<&Value>, pinned: Option<&str>) -> Option<WebhookJob> {
+    let value = value.filter(|v| v.is_object())?;
+    let Some(phone_id) = value
+        .pointer("/recipient/phone_number_id")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+    else {
+        tracing::warn!("Whatsapp messaging_handovers dropped: recipient.phone_number_id missing");
+        return None;
+    };
+    if pinned.is_some_and(|pinned| pinned != phone_id) {
+        tracing::warn!(
+            pinned,
+            received = phone_id,
+            "Whatsapp conversationRouting item dropped: phone_number_id does not match the route-loaded integration"
+        );
+        return None;
+    }
+    let hash = chatbotx_core::utils::crypto::sha256_hex(&value.to_string());
+    Some(WebhookJob {
+        name: "threadControlEvent",
+        data: json!({ "type": "threadControlEvent", "data": {
+            "integrationType": "whatsapp",
+            "integrationIdentifier": phone_id,
+            "payload": { "kind": "handover", "body": value },
+        }}),
+        job_id: format!("wa-tc-{}-{hash}", safe_id_segment(phone_id)),
+    })
 }
 
 /// Queues the jobs of one verified delivery (`REDELIVERABLE_JOB_OPTIONS`).

@@ -178,6 +178,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::inbound::MESSAGE_STATUS => {
             crate::inbound::message_status(&deps, &job.data["data"]).await?
         }
+        crate::thread_control::EVENT_JOB => {
+            crate::thread_control::receive_event(&deps, &job.data["data"]).await?
+        }
         chatbotx_business::thread_control::RELEASE_JOB => {
             crate::thread_control::release_owned_thread(&deps, &job.data["data"]).await?
         }
