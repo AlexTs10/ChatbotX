@@ -1,5 +1,6 @@
 //! The provider calls of the heavy steps (the AI SDK `generateImage` /
-//! `generateSpeech` wire formats, and `packages/ai/src/server/sam.ts`).
+//! `generateSpeech` / `transcribe` wire formats, `packages/ai/src/server/sam.ts`
+//! and `muse-transcribe.ts`).
 //! Keys come from the workspace's integration row through
 //! `ai::model::native_model`, as the other AI steps.
 
@@ -185,8 +186,9 @@ pub fn openai_generation_body(model: &Model, req: &ImageRequest<'_>) -> Value {
     body
 }
 
-/// A `multipart/form-data` body (`boundary`, bytes).
-fn multipart(fields: &[(&str, String)], file: (&str, &str, &[u8])) -> (String, Vec<u8>) {
+/// A `multipart/form-data` body (`boundary`, bytes); a file part is
+/// `(name, filename, content type, bytes)`.
+fn multipart(fields: &[(&str, String)], files: &[(&str, &str, &str, &[u8])]) -> (String, Vec<u8>) {
     let boundary = format!("----chatbotx{}", chatbotx_db::repo::new_id());
     let mut out = Vec::new();
     for (name, value) in fields {
@@ -197,16 +199,17 @@ fn multipart(fields: &[(&str, String)], file: (&str, &str, &[u8])) -> (String, V
             .as_bytes(),
         );
     }
-    let (name, content_type, bytes) = file;
-    let ext = content_type.rsplit('/').next().unwrap_or("png");
-    out.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"image.{ext}\"\r\nContent-Type: {content_type}\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    out.extend_from_slice(bytes);
-    out.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    for (name, filename, content_type, bytes) in files {
+        out.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        out.extend_from_slice(bytes);
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     (boundary, out)
 }
 
@@ -231,7 +234,10 @@ async fn openai_image(model: &Model, req: &ImageRequest<'_>) -> Result<ImageAnsw
                     )
                 })
                 .collect();
-            let (boundary, bytes) = multipart(&fields, ("image", &image_media_type(input), input));
+            let content_type = image_media_type(input);
+            let filename = format!("image.{}", content_type.rsplit('/').next().unwrap_or("png"));
+            let (boundary, bytes) =
+                multipart(&fields, &[("image", &filename, &content_type, input)]);
             CLIENT
                 .post(format!("{base}/images/edits"))
                 .header("authorization", bearer(model))
@@ -379,6 +385,340 @@ pub async fn generate_speech(
     Ok(Generated {
         bytes: bytes.to_vec(),
         media_type: "audio/mpeg".into(),
+    })
+}
+
+/// `transcribe({ model: openai.transcription(model), audio })`: the
+/// transcript text. `media_type` names the upload's format.
+pub async fn transcribe_openai(
+    model: &Model,
+    audio: &[u8],
+    media_type: &str,
+) -> Result<String, HeavyError> {
+    let filename = format!("audio.{}", audio_extension(media_type));
+    let fields = [
+        ("model", model.model_id.clone()),
+        ("response_format", "json".to_owned()),
+    ];
+    let (boundary, bytes) = multipart(&fields, &[("file", &filename, media_type, audio)]);
+    let request = CLIENT
+        .post(format!(
+            "{}/audio/transcriptions",
+            model.base_url.trim_end_matches('/')
+        ))
+        .header("authorization", bearer(model))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(bytes);
+    let (body, _) = send(request, "openai transcription").await?;
+    json_of(&body)?["text"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| HeavyError::transient("Invalid transcription response: no text"))
+}
+
+/// The upload file extension of a supported audio MIME type.
+fn audio_extension(media_type: &str) -> &'static str {
+    match media_type {
+        "audio/flac" => "flac",
+        "audio/m4a" | "audio/x-m4a" => "m4a",
+        "audio/mp4" => "mp4",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "audio/webm" => "webm",
+        "audio/ogg" => "ogg",
+        _ => "mp3",
+    }
+}
+
+/// `MUSE_TRANSCRIBE_MAX_SECONDS`.
+pub const MUSE_TRANSCRIBE_MAX_SECONDS: f64 = 600.0;
+/// `MUSE_TRANSCRIBE_MAX_REQUEST_BYTES`.
+pub const MUSE_TRANSCRIBE_MAX_REQUEST_BYTES: u64 = 32 * 1024 * 1024;
+/// `MUSE_TRANSCRIBE_MULTIPART_OVERHEAD_BYTES`.
+pub const MUSE_TRANSCRIBE_MULTIPART_OVERHEAD_BYTES: u64 = 64 * 1024;
+const WAV_MAX_CHUNKS: usize = 64;
+const WAV_UNKNOWN_SIZE: u32 = 0xffff_ffff;
+
+/// `MuseWavFormatError`: `(reason, message)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WavFormatError(pub &'static str, pub String);
+
+/// `MuseWavInfo`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WavInfo {
+    pub sample_rate: u32,
+    pub data_bytes: u64,
+    pub duration_seconds: f64,
+}
+
+fn le16(b: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes([b[at], b[at + 1]])
+}
+
+fn le32(b: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
+}
+
+/// `inspectMuseWav`: the RIFF header and chunk table only (at most 64
+/// chunks). Muse takes WAV PCM 16-bit mono 16 / 24 kHz, at most 10 min.
+pub fn inspect_muse_wav(bytes: &[u8]) -> Result<WavInfo, WavFormatError> {
+    let err = |reason, message: String| Err(WavFormatError(reason, message));
+    let length = bytes.len();
+    if length < 4 || &bytes[0..4] != b"RIFF" {
+        return err("notWav", "File is not a RIFF/WAV file".into());
+    }
+    if length < 12 {
+        return err("malformed", "WAV header is truncated".into());
+    }
+    if &bytes[8..12] != b"WAVE" {
+        return err("notWav", "RIFF file is not WAVE audio".into());
+    }
+    let riff_size = le32(bytes, 4);
+    let streaming = riff_size == WAV_UNKNOWN_SIZE || riff_size == 0;
+    let container_end = if streaming {
+        length as u64
+    } else {
+        8 + u64::from(riff_size)
+    };
+    if container_end > length as u64 {
+        return err(
+            "malformed",
+            format!("WAV declares {container_end} bytes but the file has {length}"),
+        );
+    }
+    let mut fmt: Option<(u16, u16, u32, u16)> = None;
+    let mut data_bytes: Option<u64> = None;
+    let mut offset: u64 = 12;
+    let mut chunks = 0;
+    while offset + 8 <= container_end && !(fmt.is_some() && data_bytes.is_some()) {
+        chunks += 1;
+        if chunks > WAV_MAX_CHUNKS {
+            return err(
+                "malformed",
+                format!("WAV has more than {WAV_MAX_CHUNKS} chunks"),
+            );
+        }
+        let at = offset as usize;
+        let id = String::from_utf8_lossy(&bytes[at..at + 4]).into_owned();
+        let size = le32(bytes, at + 4);
+        let body = offset + 8;
+        if id == "data" && size == WAV_UNKNOWN_SIZE {
+            data_bytes = Some(container_end - body);
+            break;
+        }
+        let padded_end = body + u64::from(size) + u64::from(size % 2);
+        if padded_end > container_end {
+            return err(
+                "malformed",
+                format!("WAV chunk \"{id}\" declares {size} bytes past the end of the file"),
+            );
+        }
+        if id == "fmt " {
+            if size < 16 {
+                return err("malformed", "WAV fmt chunk is too short".into());
+            }
+            let b = body as usize;
+            fmt = Some((
+                le16(bytes, b),
+                le16(bytes, b + 2),
+                le32(bytes, b + 4),
+                le16(bytes, b + 14),
+            ));
+        } else if id == "data" {
+            data_bytes = Some(u64::from(size));
+        }
+        offset = padded_end;
+    }
+    let Some((format, channels, sample_rate, bits)) = fmt else {
+        return err("malformed", "WAV has no fmt chunk".into());
+    };
+    if format != 1 {
+        return err(
+            "notPcm",
+            format!("WAV audio format is {format}; Muse requires PCM (1)"),
+        );
+    }
+    if channels != 1 {
+        return err(
+            "notMono",
+            format!("WAV has {channels} channels; Muse requires mono"),
+        );
+    }
+    if bits != 16 {
+        return err(
+            "not16Bit",
+            format!("WAV is {bits}-bit; Muse requires 16-bit"),
+        );
+    }
+    if !matches!(sample_rate, 16_000 | 24_000) {
+        return err(
+            "unsupportedSampleRate",
+            format!("WAV sample rate is {sample_rate} Hz; Muse requires 16000 or 24000 Hz"),
+        );
+    }
+    let data_bytes = match data_bytes {
+        Some(n) if n > 0 => n,
+        _ => return err("noAudioData", "WAV has no audio data".into()),
+    };
+    let duration_seconds = data_bytes as f64 / (f64::from(sample_rate) * 2.0);
+    if duration_seconds > MUSE_TRANSCRIBE_MAX_SECONDS {
+        return err(
+            "tooLong",
+            format!(
+                "WAV is {} s long; Muse allows at most {MUSE_TRANSCRIBE_MAX_SECONDS} s",
+                duration_seconds.ceil()
+            ),
+        );
+    }
+    Ok(WavInfo {
+        sample_rate,
+        data_bytes,
+        duration_seconds,
+    })
+}
+
+/// `describeMuseErrorBody`.
+pub fn describe_muse_error_body(body: &str) -> Option<String> {
+    let parsed: Option<Value> = serde_json::from_str(body).ok();
+    let detail = parsed.as_ref().and_then(|v| {
+        let detail = match v.get("error") {
+            Some(error) if error.is_object() => error,
+            _ => v,
+        };
+        detail.is_object().then_some(detail)
+    });
+    let Some(detail) = detail else {
+        let trimmed = body.trim();
+        return (!trimmed.is_empty()).then(|| trimmed.chars().take(300).collect());
+    };
+    let text = |key: &str| {
+        detail
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(message) = text("message") {
+        parts.push(message.to_owned());
+    }
+    if let Some(kind) = text("type") {
+        parts.push(format!("type={kind}"));
+    }
+    match detail.get("code") {
+        Some(Value::String(code)) => parts.push(format!("code={code}")),
+        Some(Value::Number(code)) => parts.push(format!("code={code}")),
+        _ => {}
+    }
+    if let Some(param) = text("param") {
+        parts.push(format!("param={param}"));
+    }
+    (!parts.is_empty()).then(|| parts.join(", ").chars().take(300).collect())
+}
+
+/// `isRetryableMuseStatus`.
+pub fn is_retryable_muse_status(status: u16) -> bool {
+    !matches!(status, 400 | 401 | 403 | 406 | 413)
+        && (status == 408 || status == 429 || status >= 500)
+}
+
+/// `TranscribeWithMuseResult`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MuseTranscript {
+    pub text: String,
+    pub session_id: String,
+    pub audio_duration_ms: Option<f64>,
+}
+
+/// `transcribeWithMuse` (`POST /v1/asr/transcribe`): one attempt, the job
+/// owns the retries.
+pub async fn transcribe_with_muse(
+    api_key: &str,
+    audio: &[u8],
+    model: &str,
+    language_bias: &[Value],
+    keywords: &[Value],
+    session_id: &str,
+    timeout: Duration,
+) -> Result<MuseTranscript, HeavyError> {
+    let request_bytes = audio.len() as u64 + MUSE_TRANSCRIBE_MULTIPART_OVERHEAD_BYTES;
+    if request_bytes > MUSE_TRANSCRIBE_MAX_REQUEST_BYTES {
+        return Err(HeavyError::expected(format!(
+            "Audio is {} bytes; Muse requests must stay under {MUSE_TRANSCRIBE_MAX_REQUEST_BYTES} bytes",
+            audio.len()
+        )));
+    }
+    let mut body = json!({ "model": model, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK" });
+    if !language_bias.is_empty() {
+        body["languageBias"] = json!(language_bias);
+    }
+    if !keywords.is_empty() {
+        body["keywords"] = json!(keywords);
+    }
+    let request_json = body.to_string();
+    let (boundary, bytes) = multipart(
+        &[],
+        &[
+            (
+                "request",
+                "blob",
+                "application/json",
+                request_json.as_bytes(),
+            ),
+            ("audio", "audio.wav", "audio/wav", audio),
+        ],
+    );
+    let mut url = url::Url::parse(&format!("{MUSE_BASE_URL}/asr/transcribe"))
+        .map_err(|e| HeavyError::transient(e.to_string()))?;
+    url.query_pairs_mut().append_pair("sessionId", session_id);
+    let response = CLIENT
+        .post(url)
+        .header("accept", "application/json")
+        .header("authorization", format!("Bearer {api_key}"))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .timeout(timeout)
+        .body(bytes)
+        .send()
+        .await
+        .map_err(|_| HeavyError::transient("Muse transcription request failed"))?;
+    let status = response.status().as_u16();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|_| HeavyError::transient("Muse transcription request failed"))?;
+    if !(200..300).contains(&status) {
+        let detail = describe_muse_error_body(&String::from_utf8_lossy(&body));
+        let message = format!(
+            "Muse transcription failed with status {status}{}",
+            detail.map(|d| format!(": {d}")).unwrap_or_default()
+        );
+        return Err(HeavyError {
+            message,
+            retryable: is_retryable_muse_status(status),
+            status: Some(status),
+        });
+    }
+    let invalid = || HeavyError::expected("Muse transcription response is invalid");
+    let parsed: Value = serde_json::from_slice(&body).map_err(|_| invalid())?;
+    let text = parsed
+        .get("transcript")
+        .and_then(Value::as_str)
+        .ok_or_else(invalid)?;
+    Ok(MuseTranscript {
+        text: text.to_owned(),
+        session_id: parsed
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap_or(session_id)
+            .to_owned(),
+        audio_duration_ms: parsed
+            .get("audioDurationMs")
+            .and_then(Value::as_f64)
+            .filter(|ms| *ms >= 0.0),
     })
 }
 
@@ -861,6 +1201,75 @@ mod tests {
         let err = read_output_text(&failed).unwrap_err();
         assert!(err.retryable && err.message.contains("busy"));
         assert!(!read_output_text("").unwrap_err().retryable);
+    }
+
+    fn wav(format: u16, channels: u16, rate: u32, bits: u16, data: u32) -> Vec<u8> {
+        let mut b = b"RIFF".to_vec();
+        b.extend_from_slice(&(36 + data).to_le_bytes());
+        b.extend_from_slice(b"WAVEfmt ");
+        b.extend_from_slice(&16u32.to_le_bytes());
+        b.extend_from_slice(&format.to_le_bytes());
+        b.extend_from_slice(&channels.to_le_bytes());
+        b.extend_from_slice(&rate.to_le_bytes());
+        b.extend_from_slice(&(rate * 2).to_le_bytes());
+        b.extend_from_slice(&2u16.to_le_bytes());
+        b.extend_from_slice(&bits.to_le_bytes());
+        b.extend_from_slice(b"data");
+        b.extend_from_slice(&data.to_le_bytes());
+        b.extend(std::iter::repeat_n(0u8, data as usize));
+        b
+    }
+
+    #[test]
+    fn muse_wav_check_follows_the_original() {
+        let ok = inspect_muse_wav(&wav(1, 1, 16_000, 16, 32_000)).unwrap();
+        assert_eq!((ok.sample_rate, ok.data_bytes), (16_000, 32_000));
+        assert!((ok.duration_seconds - 1.0).abs() < 1e-9);
+        let reason = |b: Vec<u8>| inspect_muse_wav(&b).unwrap_err().0;
+        assert_eq!(reason(b"OggS....".to_vec()), "notWav");
+        assert_eq!(reason(wav(3, 1, 16_000, 16, 4)), "notPcm");
+        assert_eq!(reason(wav(1, 2, 16_000, 16, 4)), "notMono");
+        assert_eq!(reason(wav(1, 1, 16_000, 24, 4)), "not16Bit");
+        assert_eq!(reason(wav(1, 1, 44_100, 16, 4)), "unsupportedSampleRate");
+        assert_eq!(reason(wav(1, 1, 16_000, 16, 0)), "noAudioData");
+        let mut truncated = wav(1, 1, 16_000, 16, 8);
+        truncated.truncate(30);
+        assert_eq!(reason(truncated), "malformed");
+        // A streaming header (unknown sizes) reads the rest of the file.
+        let mut streaming = wav(1, 1, 24_000, 16, 48_000);
+        streaming[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        streaming[40..44].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(inspect_muse_wav(&streaming).unwrap().data_bytes, 48_000);
+        // 601 s at 16 kHz is too long.
+        let mut long = wav(1, 1, 16_000, 16, 0);
+        long[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        long[40..44].copy_from_slice(&u32::MAX.to_le_bytes());
+        long.extend(std::iter::repeat_n(0u8, 601 * 32_000));
+        assert_eq!(reason(long), "tooLong");
+    }
+
+    #[test]
+    fn muse_errors_follow_the_original() {
+        assert_eq!(
+            describe_muse_error_body(
+                r#"{"error":{"message":"bad audio","type":"invalid","code":400}}"#
+            )
+            .as_deref(),
+            Some("bad audio, type=invalid, code=400")
+        );
+        assert_eq!(
+            describe_muse_error_body(r#"{"message":"slow down"}"#).as_deref(),
+            Some("slow down")
+        );
+        assert_eq!(
+            describe_muse_error_body("  gateway  ").as_deref(),
+            Some("gateway")
+        );
+        assert_eq!(describe_muse_error_body(""), None);
+        assert!(is_retryable_muse_status(429) && is_retryable_muse_status(503));
+        assert!(!is_retryable_muse_status(413) && !is_retryable_muse_status(404));
+        assert_eq!(audio_extension("audio/x-m4a"), "m4a");
+        assert_eq!(audio_extension("audio/mpga"), "mp3");
     }
 
     #[test]
