@@ -240,9 +240,14 @@ impl Upstream for HttpUpstream {
             builder = builder.header(name, value);
         }
         if let Some(body) = request.body {
-            builder = builder
-                .header("content-type", "application/json")
-                .body(body);
+            if !request
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+            {
+                builder = builder.header("content-type", "application/json");
+            }
+            builder = builder.body(body);
         }
         let response = builder.send().await.map_err(|e| e.to_string())?;
         let status = response.status().as_u16();

@@ -168,6 +168,33 @@ async fn handle(
         &credential,
     )
     .await;
+    // A non-multi-account grant has one selectable target: an API / MCP
+    // session (no `actorUserId`) connects it now; a builder session's picker
+    // page does it from its "Continue" button.
+    let completed = match completed {
+        Ok(done)
+            if done.status == "awaiting_selection"
+                && done.actor_user_id.is_none()
+                && oauth::adapter(&done.provider).is_some_and(|a| !a.multi_account) =>
+        {
+            let only = done.targets.get(0).filter(|t| t["selectable"] == true);
+            match only.and_then(|t| t["id"].as_str()) {
+                Some(id) => oauth::connect_targets(
+                    &state.db,
+                    encryption,
+                    &HttpUpstream,
+                    done.id,
+                    done.workspace_id,
+                    &[id.to_string()],
+                    None,
+                )
+                .await
+                .map(|r| r.session),
+                None => Ok(done),
+            }
+        }
+        other => other,
+    };
     match completed {
         Ok(_) => redirect(&return_to),
         Err(error) => match connect_error_code(&error) {
