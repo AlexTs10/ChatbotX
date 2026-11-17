@@ -1941,4 +1941,25 @@ async fn saved_reply_sla_and_rest_actions_are_wired() {
         error["data"]["validationErrors"]["url"]["_errors"][0].is_string(),
         "{error}"
     );
+
+    // The flow-editor reads of the domains whose CRUD waits.
+    for (path, expected) in [
+        ("decisionProfilesAPI/listActiveForFlow", json!([])),
+        (
+            "leaderboardsAPI/listLeaderboardOptionsAPI",
+            json!({ "data": [] }),
+        ),
+    ] {
+        let (status, out, _) =
+            post(&router, path, "admintoken", json!({ "workspaceId": ws() })).await;
+        assert_eq!((status, out), (StatusCode::OK, expected), "{path}");
+    }
+    let (status, _, _) = post(
+        &router,
+        "dynamicImagesAPI/getDynamicImageAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "id": "1" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

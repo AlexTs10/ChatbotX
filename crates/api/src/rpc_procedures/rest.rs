@@ -12,6 +12,8 @@ use crate::handlers::input::{Str, key};
 use crate::handlers::working_hours::{self as wh, audited};
 use crate::handlers::{response_sla, saved_replies, webhooks};
 use crate::orpc::OrpcError;
+
+mod flow_reads;
 use chatbotx_business::working_hours as wh_service;
 
 pub(super) const ACTIONS: &[&str] = &[
@@ -62,6 +64,28 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
                     json!({ "data": data, "pageCount": page_count })
                 })
                 .map_err(fail)
+        }
+        "decisionProfilesAPI.listActiveForFlow" => {
+            if !ctx.has("flows") {
+                return Some(Err(OrpcError::new(
+                    "FORBIDDEN",
+                    Some(403),
+                    Some("Forbidden"),
+                )));
+            }
+            flow_reads::decision_profiles_for_flow(api, ws)
+                .await
+                .map_err(fail)
+        }
+        "dynamicImagesAPI.getDynamicImageAPI" => {
+            let id = input["id"]
+                .as_str()
+                .and_then(|t| t.parse::<i64>().ok())
+                .unwrap_or(-1);
+            flow_reads::dynamic_image(api, ws, id).await.map_err(fail)
+        }
+        "leaderboardsAPI.listLeaderboardOptionsAPI" => {
+            flow_reads::leaderboard_options(api, ws).await.map_err(fail)
         }
         "workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI" => {
             wh::options(api, ws).await.map_err(fail)
