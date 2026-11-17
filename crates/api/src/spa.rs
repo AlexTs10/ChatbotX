@@ -255,6 +255,7 @@ async fn page(
             Ok(session) => channels_create_page(&state, session.user_id, &input).await,
             Err(response) => *response,
         },
+        "invitation" => invitation_page(&state, &headers, &input).await,
         "workspace" | "contactsAccess" | "folder" | "flow" | "aiAgents" | "settingsChannels" => {
             let session = match require_session(&state, &headers).await {
                 Ok(session) => session,
@@ -263,6 +264,38 @@ async fn page(
             workspace_page(&state, &name, session.user_id, input).await
         }
         _ => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
+    }
+}
+
+/// `app/(no-sidebar)/invitations/[code]/page.tsx`: `findInvitation` (null
+/// for a rejected code) and whether a user is signed in. No session needed.
+async fn invitation_page(state: &AuthState, headers: &HeaderMap, input: &Value) -> Response {
+    let signed_in = match find_rpc_session(state, headers).await {
+        Ok(session) => session.is_some(),
+        Err(err) => return internal(err),
+    };
+    let code = input
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    match chatbotx_business::invitation::details(&state.db, code).await {
+        Ok(found) => ok(json!({
+            "invitation": found.map(|i| json!({
+                "code": i.code,
+                "expiresAt": iso8601::format_millis(u64::try_from(i.expires_at).unwrap_or_default()),
+                "workspace": {
+                    "name": i.workspace_name,
+                    "logo": i.workspace_logo,
+                    "scheduledDeletionAt": i
+                        .scheduled_deletion_at
+                        .map(|at| iso8601::format_millis(u64::try_from(at).unwrap_or_default())),
+                },
+                "inviter": { "name": i.inviter_name, "image": i.inviter_image },
+            })),
+            "isAuthenticated": signed_in,
+        })),
+        Err(err) => internal(err),
     }
 }
 

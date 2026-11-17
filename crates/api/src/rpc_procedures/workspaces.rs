@@ -16,6 +16,25 @@ use super::{Ctx, In, Outcome, action_fail, arg, invalid, public};
 use crate::orpc::OrpcError;
 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
+    if name == "acceptInvitationAction" {
+        // `features/invitations/actions/accept-invitation.ts`
+        // (`authActionClient`, input `{ code }`).
+        return Some(
+            async {
+                let code = In(arg(args, 0)).opt_str("code")?.ok_or_else(invalid)?;
+                chatbotx_business::invitation::accept(
+                    &ctx.api.db,
+                    ctx.api.edition,
+                    code,
+                    ctx.user_id,
+                )
+                .await
+                .map_err(action_fail)?;
+                Ok(Value::Null)
+            }
+            .await,
+        );
+    }
     if !matches!(name, "createWebchatAction" | "createApiAction") {
         return None;
     }

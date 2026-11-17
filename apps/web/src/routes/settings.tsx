@@ -41,6 +41,8 @@ import { ChannelsAccordionShell } from "@/app/space/[workspaceId]/(settings)/set
 import { IntegrationsAccordionShell } from "@/app/space/[workspaceId]/(settings)/settings/integrations/integrations-accordion-shell"
 import { SettingsTab } from "@/app/space/[workspaceId]/(settings)/settings/tab"
 import { isCommunity } from "@/env"
+import { ListInboxTeams } from "@/enterprise/features/inbox-teams/list-inbox-teams"
+import { listInboxTeams } from "@/enterprise/features/inbox-teams/queries"
 import { ApiManage } from "@/features/integration-api/api-manage"
 import { listIntegrationApis } from "@/features/integration-api/queries"
 import { ClaudeConnect } from "@/features/integration-claude/claude-connect"
@@ -65,12 +67,14 @@ import { WebchatTable } from "@/features/integration-webchat/webchat-table"
 import { listWorkspaceMembers } from "@/features/workspace-members/queries"
 import { getWorkspaceMembersSearchParamsCache } from "@/features/workspace-members/schema/query"
 import { WorkspaceMembersTable } from "@/features/workspace-members/workspace-members-table"
+import { ManageWorkspaceTokens } from "@/features/workspaces/manage-workspace-tokens"
+import { listWorkspaceTokens } from "@/features/workspaces/queries/workspace-tokens.query"
 import { UpdateWorkspaceForm } from "@/features/workspaces/update-workspace-form"
 import { hasWorkspacePermission } from "@/lib/auth/permission-routes"
 import { useQueryPromise } from "@/lib/query/use-query-promise"
 import { loadPage } from "@/lib/server-action"
 import { workspaceSettingsGeneralPath } from "@/lib/workspace/settings-paths"
-import { NotFoundPage } from "@/routes/root"
+import { NotAvailablePage, NotFoundPage } from "@/routes/root"
 import { useWorkspacePage } from "@/routes/workspace"
 import { Redirect } from "@/shims/redirect"
 
@@ -118,6 +122,37 @@ export function SettingsGeneralPage() {
     />
   )
 }
+
+// `settings/inbox-teams/page.tsx`: the teams list; working hours, holidays
+// and the response SLA have no Rust domain yet.
+export function SettingsInboxTeamsPage() {
+  const workspaceId = useWorkspaceId()
+  const promises = useQueryPromise(["inboxTeams", workspaceId], () =>
+    Promise.all([
+      listInboxTeams({ workspaceId }),
+      listWorkspaceMembers({
+        workspaceId,
+        ...getWorkspaceMembersSearchParamsCache.parse({}),
+      }),
+    ] as const),
+  )
+  return (
+    <div className="flex flex-col gap-6">
+      <Suspense>
+        <ListInboxTeams promises={promises} workspaceId={workspaceId} />
+      </Suspense>
+      <NotAvailablePage
+        detail="Working hours, holidays and the response SLA are not available yet in this version."
+        title="Working hours"
+      />
+    </div>
+  )
+}
+
+// `settings/user-persistent-menus`: no Rust domain yet.
+export const SettingsUserPersistentMenusPage = () => (
+  <NotAvailablePage title="Persistent menus" />
+)
 
 export function SettingsAdminsPage() {
   const t = useTranslations()
@@ -308,10 +343,21 @@ export function SettingsIntegrationPage() {
       return <OpenRouterIntegration />
     case "openai-compatible":
       return <OpenaiCompatibleIntegration />
+    case "workspace-token":
+      return <WorkspaceTokens />
     default:
       // ponytail: the other integrations wait for their domain units.
       return null
   }
+}
+
+function WorkspaceTokens() {
+  const workspaceId = useWorkspaceId()
+  const { data: tokens } = useSuspenseQuery({
+    queryKey: ["spa", "listWorkspaceTokens", workspaceId],
+    queryFn: () => listWorkspaceTokens(workspaceId),
+  })
+  return <ManageWorkspaceTokens tokens={tokens} workspaceId={workspaceId} />
 }
 
 function OpenAIIntegration() {

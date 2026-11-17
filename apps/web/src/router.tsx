@@ -86,6 +86,16 @@ const authPages = [
   }),
 ]
 
+// `/invitations/$code` is public too (lib/public-routes.ts).
+const invitationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "invitations/$code",
+  component: lazyRouteComponent(
+    () => import("@/routes/invitations"),
+    "InvitationsPage",
+  ),
+})
+
 // Everything else needs a session (proxy.ts) and a current password
 // (`enforcePasswordCurrent` in every protected layout).
 const protectedRoute = createRoute({
@@ -248,6 +258,20 @@ const productFormPages = (
 )
 
 // The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
+const logs = () => import("@/routes/logs")
+const logPages = (
+  [
+    ["error-logs", "ErrorLogsPage"],
+    ["audit-logs", "AuditLogsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(logs, page),
+  }),
+)
+
 const toolPages = (
   [
     ["polls", "PollsPage"],
@@ -355,6 +379,12 @@ const settingsRoutes = settingsRoute.addChildren([
   settingsPage(() => settingsRoute, "/", "SettingsIndexPage"),
   settingsPage(() => settingsRoute, "general", "SettingsGeneralPage"),
   settingsPage(() => settingsRoute, "admins", "SettingsAdminsPage"),
+  settingsPage(() => settingsRoute, "inbox-teams", "SettingsInboxTeamsPage"),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus",
+    "SettingsUserPersistentMenusPage",
+  ),
   settingsChannelsRoute.addChildren([
     createRoute({
       getParentRoute: () => settingsChannelsRoute,
@@ -402,6 +432,7 @@ const createChannelRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
+  invitationRoute,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
@@ -414,6 +445,7 @@ const routeTree = rootRoute.addChildren([
       ecommerceRoute.addChildren(ecommercePages),
       productFormsRoute.addChildren(productFormPages),
       ...toolPages,
+      ...logPages,
       ...toolEditorPages,
       pipelinesRoutes,
       aiRoute.addChildren(aiPages),
