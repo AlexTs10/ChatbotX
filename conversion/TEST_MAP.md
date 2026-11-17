@@ -315,7 +315,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/delete-contact-action.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/delete-me-data-action.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/delete-message-action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
-| `apps/builder/__tests__/delete-mini-apps-whatsapp-flows.test.ts` | C | tbd | todo | Mini-apps; builder server code |
+| `apps/builder/__tests__/delete-mini-apps-whatsapp-flows.test.ts` | C | tbd | todo | Mini-apps; builder server code; no WhatsApp Flows Graph port; deletion reports `failed` (Q.D1m) |
 | `apps/builder/__tests__/delete-sequence-step.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/delete-sequence.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/delete-tag-action.test.ts` | C | tbd | todo | Tags and labels; builder server code |
@@ -567,12 +567,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/meta-capi-event-dialog.test.tsx` | B | - | todo | Meta Conversions API (CAPI); builder jsdom |
 | `apps/builder/__tests__/meta-capi-oauth-callback.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
 | `apps/builder/__tests__/meta-catalog-operations.test.ts` | C | tbd | todo | Meta Catalog; builder server code |
-| `apps/builder/__tests__/mini-app-contact-variables.test.ts` | C | tbd | todo | Mini-apps; builder server code |
+| `apps/builder/__tests__/mini-app-contact-variables.test.ts` | C | tbd | todo | Mini-apps; builder server code; escape cases in `crates/core/tests/mini_app_display_text.rs`; the resolve / WhatsApp publish cases left (Q.D1m) |
 | `apps/builder/__tests__/mini-app-editor-store.test.ts` | B | - | todo | Mini-apps; builder jsdom |
 | `apps/builder/__tests__/mini-app-flow-response-labels.test.ts` | C | tbd | todo | Mini-apps; builder server code |
 | `apps/builder/__tests__/mini-app-simple-markdown.test.tsx` | B | - | todo | Mini-apps; builder jsdom |
-| `apps/builder/__tests__/mini-app-upload-route.test.ts` | C | tbd | todo | Mini-apps; builder server code |
-| `apps/builder/__tests__/mini-apps-public-api.test.ts` | C | tbd | todo | Mini-apps; builder server code |
+| `apps/builder/__tests__/mini-app-upload-route.test.ts` | C | tbd | todo | Mini-apps; builder server code; covered by parity `50-mini-apps` (server crate route; Q.D1m) |
+| `apps/builder/__tests__/mini-apps-public-api.test.ts` | C | `crates/api/tests/mini_apps_public_api.rs` | ported | Mini-apps; Q.D1m; the WhatsApp draft/publish test left (no WhatsApp Flows Graph port) |
 | `apps/builder/__tests__/minigame-name-conflict-action.test.ts` | C | tbd | todo | Minigames; builder server code |
 | `apps/builder/__tests__/minigame-play-url.test.ts` | B | - | todo | Minigames; builder jsdom |
 | `apps/builder/__tests__/minigame-player-settings-reset-policy.test.ts` | B | - | todo | Minigames; builder node-env, client logic |
@@ -775,7 +775,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/submit-availability-range-action.test.ts` | C | tbd | todo | Appointments and booking; builder server code |
 | `apps/builder/__tests__/submit-booking-action.test.ts` | C | tbd | todo | Appointments and booking; builder server code |
 | `apps/builder/__tests__/submit-date-time-action.test.ts` | C | tbd | todo | Appointments and booking; builder server code |
-| `apps/builder/__tests__/submit-mini-app-action.test.ts` | C | tbd | todo | Mini-apps; builder server code |
+| `apps/builder/__tests__/submit-mini-app-action.test.ts` | C | tbd | todo | Mini-apps; builder server code; covered by parity `50-mini-apps` (server crate route; Q.D1m) |
 | `apps/builder/__tests__/support-access-actions.test.ts` | C | tbd | todo | Workspace support access; builder server code |
 | `apps/builder/__tests__/support-access-safe-action.test.ts` | C | tbd | todo | Workspace support access; builder server code |
 | `apps/builder/__tests__/support-chat-script.test.tsx` | B | - | todo | Workspace support access; builder node-env, client logic |
@@ -1393,7 +1393,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/meta-catalog-import.test.ts` | C | tbd | todo | Meta Catalog |
 | `apps/worker/__tests__/meta-catalog-reconciler.test.ts` | C | tbd | todo | Meta Catalog |
 | `apps/worker/__tests__/meta-catalog-sync.test.ts` | C | tbd | todo | Meta Catalog |
-| `apps/worker/__tests__/mini-app-buttons.test.ts` | C | tbd | todo | Mini-apps |
+| `apps/worker/__tests__/mini-app-buttons.test.ts` | C | `crates/worker/src/mini_app_buttons.rs` (unit) | ported | Mini-apps; Q.D1m; the Messenger template button case left (template send step not ported) |
 | `apps/worker/__tests__/moosend-handler.test.ts` | C | tbd | todo | Moosend integration |
 | `apps/worker/__tests__/moosend-rate-limit.test.ts` | C | tbd | todo | Moosend integration |
 | `apps/worker/__tests__/moosend-step-registration.test.ts` | C | tbd | todo | Moosend integration |
@@ -2337,9 +2337,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/meta-conversions-connection.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `packages/business/__tests__/meta-conversions-service.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `packages/business/__tests__/meta-sibling-integration.service.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
-| `packages/business/__tests__/mini-app-definition.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/business/__tests__/mini-app-duplicate.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/business/__tests__/mini-app-submission-custom-fields.test.ts` | C | tbd | todo | Mini-apps |
+| `packages/business/__tests__/mini-app-definition.test.ts` | C | `crates/business/tests/mini_app_definition.rs` | ported | Mini-apps; Q.D1m |
+| `packages/business/__tests__/mini-app-duplicate.test.ts` | C | `crates/business/tests/mini_app_service.rs` | ported | Mini-apps; Q.D1m; parallel-insert retries in `copy_name.rs` |
+| `packages/business/__tests__/mini-app-submission-custom-fields.test.ts` | C | `crates/business/tests/mini_app_service.rs` | ported | Mini-apps; Q.D1m |
 | `packages/business/__tests__/mini-app-upload-service.test.ts` | C | tbd | todo | Mini-apps |
 | `packages/business/__tests__/minigame-contact-service-scoping.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/minigame-leaderboard-award.test.ts` | C | tbd | todo | Minigames |
@@ -2955,15 +2955,15 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/mail/__tests__/smoke.test.ts` | C | tbd | todo | Transactional mail (system emails) |
 | `packages/mini-app/__tests__/__snapshots__/components.test.ts.snap` | C | tbd | todo | Mini-apps |
 | `packages/mini-app/__tests__/components.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/mini-app/__tests__/custom-fields.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/mini-app/__tests__/display-text.test.ts` | C | tbd | todo | Mini-apps |
+| `packages/mini-app/__tests__/custom-fields.test.ts` | C | `crates/core/tests/mini_app_runtime.rs` | ported | Mini-apps; Q.D1m |
+| `packages/mini-app/__tests__/display-text.test.ts` | C | `crates/core/tests/mini_app_display_text.rs` | ported | Mini-apps; Q.D1m; server parts only (map, escape); the client renderer parts stay in the web |
 | `packages/mini-app/__tests__/expression.test.ts` | C | tbd | todo | Mini-apps |
 | `packages/mini-app/__tests__/runtime.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/mini-app/__tests__/serialize.test.ts` | C | tbd | todo | Mini-apps |
+| `packages/mini-app/__tests__/serialize.test.ts` | C | `crates/core/tests/mini_app_serialize.rs` | ported | Mini-apps; Q.D1m |
 | `packages/mini-app/__tests__/tree.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/mini-app/__tests__/uploads.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/mini-app/__tests__/validate-issue-codes.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/mini-app/__tests__/validate.test.ts` | C | tbd | todo | Mini-apps |
+| `packages/mini-app/__tests__/uploads.test.ts` | C | `crates/core/tests/mini_app_runtime.rs` | ported | Mini-apps; Q.D1m |
+| `packages/mini-app/__tests__/validate-issue-codes.test.ts` | C | `crates/core/tests/mini_app_validate_issue_codes.rs` | ported | Mini-apps; Q.D1m |
+| `packages/mini-app/__tests__/validate.test.ts` | C | `crates/core/tests/mini_app_validate.rs` | ported | Mini-apps; Q.D1m; partial: the "files in the response message" cases left |
 | `packages/payments/__tests__/minor-units.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/payments/__tests__/paypal.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/payments/__tests__/stripe.test.ts` | C | tbd | todo | Licensing, billing and quotas |
