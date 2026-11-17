@@ -461,6 +461,10 @@ impl Channels {
                 "messenger",
                 Arc::new(crate::channels::messenger::Messenger::new()),
             )
+            .with(
+                "instagram",
+                Arc::new(crate::channels::instagram::Instagram::new()),
+            )
     }
 
     pub fn with(mut self, channel: &str, implementation: Arc<dyn Channel>) -> Channels {

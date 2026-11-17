@@ -19,7 +19,7 @@ use super::messenger_webhook::{self, Outcome};
 use super::whatsapp_webhook::{WebhookJob, WebhookReply};
 
 /// The Meta channels this route serves.
-pub const TYPES: [&str; 1] = ["messenger"];
+pub const TYPES: [&str; 2] = ["messenger", "instagram"];
 
 pub struct MetaWebhook {
     pub db: Arc<Db>,
@@ -97,13 +97,18 @@ impl MetaWebhook {
                 return json_error(400, &e);
             }
         };
-        let outcome = messenger_webhook::handle_request(
+        let jobs_of = match kind {
+            "instagram" => super::instagram::webhook_jobs,
+            _ => messenger_webhook::webhook_jobs,
+        };
+        let outcome = messenger_webhook::handle_request_with(
             req.is_get,
             req.query,
             req.signature,
             req.body,
             credential.text("verifyToken"),
             credential.text("clientSecret").unwrap_or(""),
+            jobs_of,
         );
         let jobs = match outcome {
             Ok(Outcome::Challenge(challenge)) => return text(challenge),

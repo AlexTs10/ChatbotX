@@ -4,6 +4,7 @@
 
 pub mod api;
 pub mod graph;
+pub mod instagram;
 pub mod messenger;
 pub mod messenger_webhook;
 pub mod meta;

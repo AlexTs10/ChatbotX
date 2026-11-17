@@ -83,6 +83,28 @@ pub fn handle_request(
     verify_token: Option<&str>,
     client_secret: &str,
 ) -> Result<Outcome, String> {
+    handle_request_with(
+        is_get,
+        query,
+        signature,
+        body,
+        verify_token,
+        client_secret,
+        webhook_jobs,
+    )
+}
+
+/// The `webhookHandler` shape the Meta channels share (handshake, body,
+/// signature, then the channel's own job extraction).
+pub fn handle_request_with(
+    is_get: bool,
+    query: Option<&str>,
+    signature: Option<&str>,
+    body: &[u8],
+    verify_token: Option<&str>,
+    client_secret: &str,
+    jobs_of: fn(&str) -> Result<Vec<WebhookJob>, String>,
+) -> Result<Outcome, String> {
     if is_get {
         return handshake(query, verify_token)
             .map(Outcome::Challenge)
@@ -102,7 +124,7 @@ pub fn handle_request(
     if !verify_signature(&body, signature, client_secret) {
         return fail("Invalid webhook signature");
     }
-    webhook_jobs(&body)
+    jobs_of(&body)
         .map(Outcome::Jobs)
         .map_err(|e| event_error(&e))
 }
