@@ -38,6 +38,7 @@ pub mod inbox_teams;
 pub mod input;
 pub mod integrations_ai;
 pub mod keywords;
+pub mod magic_links;
 pub mod media_library;
 pub mod messages;
 pub mod messenger_menus;
@@ -663,6 +664,8 @@ async fn route(
         response_sla::handle(state, route_id, call).await
     } else if webhooks::ROUTES.contains(&route_id) {
         webhooks::handle(state, route_id, call).await
+    } else if magic_links::ROUTES.contains(&route_id) {
+        magic_links::handle(state, route_id, call).await
     } else if spreadsheets::ROUTES.contains(&route_id) {
         spreadsheets::handle(state, route_id, call).await
     } else if working_hours::ROUTES.contains(&route_id) {

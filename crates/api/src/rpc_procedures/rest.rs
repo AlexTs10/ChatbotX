@@ -40,6 +40,9 @@ pub(super) const ACTIONS: &[&str] = &[
     "createSpreadsheetAction",
     "updateSpreadsheetAction",
     "deleteSpreadsheetAction",
+    "createMagicLinkAction",
+    "updateMagicLinkAction",
+    "deleteMagicLinksAction",
 ];
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
@@ -350,6 +353,34 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
         "deleteSpreadsheetAction" => {
             let ids = In(arg(args, 1)).ids("ids")?;
             chatbotx_business::spreadsheet::delete_many(&api.db, ws, ids)
+                .await
+                .map(|()| Value::Null)
+                .map_err(action_fail)
+        }
+        "createMagicLinkAction" | "updateMagicLinkAction" => {
+            let update = name == "updateMagicLinkAction";
+            let id = if update { Some(bound(args, 1)?) } else { None };
+            let mut input = input_at(args, if update { 2 } else { 1 });
+            let (link_name, url) = crate::handlers::magic_links::request(&mut input, update);
+            checked(input)?;
+            let db = &api.db;
+            let outcome = match id {
+                Some(id) => chatbotx_business::magic_link::update(db, ws, id, link_name, url).await,
+                None => {
+                    chatbotx_business::magic_link::create(
+                        db,
+                        ws,
+                        link_name.unwrap_or_default(),
+                        url.unwrap_or_default(),
+                    )
+                    .await
+                }
+            };
+            outcome.map(|_| Value::Null).map_err(action_fail)
+        }
+        "deleteMagicLinksAction" => {
+            let ids = In(arg(args, 1)).ids("ids")?;
+            chatbotx_business::magic_link::delete_many(&api.db, ws, ids)
                 .await
                 .map(|()| Value::Null)
                 .map_err(action_fail)
