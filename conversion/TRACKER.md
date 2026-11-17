@@ -83,6 +83,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | Q.I4 | 3 | Google (Sheets, Calendar, Ads), OpenAI, payments + Shopify/WooCommerce webhooks (P1.23) | todo | Q.W1 | C + A | | |
 | Q.A1 | 3 | Auth rest from P3.5f: MCP OAuth server (authorize, token, consent, client registration, `.well-known`), mobile-token member filters on the `/v1` routes, then mobile tokens on (security: do not turn them on before the filters), rate limits | todo | P3.5f | C + A | | |
 | Q.D1i | 3 | Product imports (6 routes, parity `21-product-imports`; needs the D2 import code) — rest of the media unit, branch `feat/conversion-media` | todo | P3.6-D2 | C + A | | |
+| Q.D2c | 3 | Connections rest (from branch `feat/conversion-conn`): email-marketing API-key connects, `connectSessions.*` + OAuth callback (p1-05 `05`), `channels.*` send/typing/markRead/deliveryStatus (`06`), `commentAutomations.*` (`07`), `contactScans.*` (`08`), `connection/state.ts` tests | todo | P3.6-D2 | C + A | | |
 | Q.F2+ | 4 | Frontend feature batches (cut by the web agent in `specs/P4-web.md` after the scaffold) | todo | feat/conversion-web scaffold | B | | |
 | Q.P5 | 5 | Cutover: one-command build + run, RSS measurement ≤ 200 MB, full parity run, docs | todo | all | A | | |
 
