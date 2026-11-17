@@ -8,6 +8,7 @@
 //! returns the same JSON as a ported public `/v1` route, the handler runs that
 //! route ([`public`]) after the member checks, so both stay one code path.
 
+mod analytics;
 mod contacts;
 mod conversations;
 mod flows;
@@ -105,6 +106,9 @@ pub async fn procedure(
     let ctx = ctx(api, context);
     let ctx = &ctx;
     if let Some(outcome) = contacts::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = analytics::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     if let Some(outcome) = flows::procedure(ctx, path, input).await {

@@ -922,3 +922,55 @@ async fn pipelines_and_questionnaires_round_trip() {
     let (_, list) = act(&router, "admintoken", "listQuestionnaires", json!([{}])).await;
     assert_eq!(list["data"], json!([]));
 }
+
+#[tokio::test]
+async fn dashboard_analytics_procedures_run_the_public_routes() {
+    let (router, _) = router().await;
+    let range = json!({
+        "workspaceId": ws(),
+        "from": "2027-01-01T00:00:00.000Z",
+        "to": "2027-01-31T23:59:59.999Z",
+        "timezone": "UTC",
+    });
+    let (status, json, _) = post(
+        &router,
+        "analyticsRoutes/contactsCountAnalyticsAPI",
+        "admintoken",
+        range.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    // `InboxContactStat` totals: the seed has no inbox.
+    assert_eq!(json["data"]["count"], 0);
+    let (status, json, _) = post(
+        &router,
+        "analyticsRoutes/contactCountsPerDayAnalyticsAPI",
+        "assignedtoken",
+        range.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert!(json["data"].as_array().unwrap().len() >= 28);
+    let mut by_dimension = range.clone();
+    by_dimension["dimension"] = json!("channel");
+    by_dimension["inboxIds"] = json!(["9"]);
+    let (status, json, _) = post(
+        &router,
+        "analyticsRoutes/contactsByDimensionAnalyticsAPI",
+        "admintoken",
+        by_dimension,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"], json!([]));
+    let mut bad = range;
+    bad["granularity"] = json!("week");
+    let (status, _, _) = post(
+        &router,
+        "analyticsRoutes/botMessagesByResultAnalyticsAPI",
+        "admintoken",
+        bad,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
