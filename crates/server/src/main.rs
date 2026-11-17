@@ -245,9 +245,9 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             sessions.settings.base_url.trim_end_matches('/')
         ),
         mcp_resource_url: chatbotx_api::session::mcp_resource_url(&sessions),
-        // Q.A1 §3: mobile access tokens stay off on `/v1` until `/v1/me*` and
-        // the member-scope tests are in (see specs/Q.A1.md).
-        mobile_audience: None,
+        // Q.A1 §3: mobile access tokens on `/v1` (member allowlist + member
+        // scope in every allowlisted handler, specs/Q.A1.md §3).
+        mobile_audience: Some(chatbotx_api::session::mobile_api_audience(&sessions)),
     });
     // `assertLicenseAtStartup`: enterprise / cloud need a valid or lapsed license.
     let edition_now = chatbotx_business::keys::Edition::from_env();

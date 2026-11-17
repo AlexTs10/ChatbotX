@@ -62,21 +62,45 @@ ported: synthetic support membership, mocked-logger assertions),
 `crates/api/tests/rpc_workspace.rs` (port of
 `apps/builder/__tests__/mcp-oauth-revoke-action.test.ts`).
 
-## 3. Mobile member filters (not done)
+## 3. Mobile member filters, then mobile tokens on
 
-The original allows a mobile (member) principal only on the 45 routes of
-`apps/builder/src/lib/mobile-auth/member-route-allowlist.ts`; every other
-`/v1` route is 403 before any read. Each allowed handler applies
-`lib/public-api/member-scope.ts` (conversation chat scope, contact
-permission scope + team restriction, email / phone masking, sender
-attribution, flow start check). No Rust `/v1` handler reads
-`WorkspaceTokenContext.mobile` yet, so `LiveAuthDeps::mobile_api_audience`
-stays `None` (mobile JWTs on `/v1` are refused as invalid tokens). Turning
-them on needs: the allowlist gate in `resolve_mobile_principal`, member
-scoping in each of the 45 handlers, `/v1/me*`, and the ports of
-`mobile-member-allowlist`, `mobile-contacts-member-scope`,
-`mobile-conversations-member-scope`, `mobile-jwt-middleware`,
-`mobile-user-auth-middleware`, `mobile-me-api`.
+| TypeScript | Rust |
+|---|---|
+| `member-route-allowlist.ts` (`MOBILE_MEMBER_ROUTES`, 44) | `auth::mobile_member` (`MOBILE_MEMBER_ROUTES`, `is_mobile_member_route{,_id}`) |
+| `resolve-mobile-principal.ts`, `resolve-mobile-workspace-principal.ts` | `LiveAuthDeps::{authenticate_mobile_bearer, resolve_mobile_principal}` |
+| `middlewares/mobile-user-auth.ts` | `auth::authenticate_mobile_user` (`RouteAuth::MobileUser*`) |
+| `conversation/member-scope.ts`, `contact/permission-scope.ts`, `flowService.assertEnabledInInbox` | `chatbotx_business::member_scope` |
+| `lib/public-api/member-scope.ts` | `handlers::member_scope` (task-local `handlers::mobile_member()`) |
+| `features/me/api/public.ts` + `device-tokens.ts` | `handlers::me` |
+
+Fail closed twice: `resolve_mobile_principal` refuses a route outside the
+allowlist (403 before the membership read, as the original), and
+`dispatch_as` refuses a mobile principal on any other route id. The member
+(user id, stored permissions, resolved conversation scope) rides on
+`Principal.mobile`; every helper is a no-op without it (tokens, MCP, `/rpc`).
+
+Where the scope applies (one place each, every caller routes through it):
+`conversation_list::ListInput.member_scope` (list SQL, `none` = 404),
+`conversations::conversation_json` (masking), the `find_or_fail` of each
+conversation action, `messages::conversation` (every `messages.*` route),
+`contacts::resolve` (`contactIdFor`: every `contacts.*/{identifier}` route
+and sub-resource), `contacts::public_contact_json` (masking),
+`contacts.list` (`ListScope::Member`), `contact_messages::send` and
+`messages.create` (`assertMemberMayStartFlow`, sender attribution),
+`flows.list` (`enableInInbox` without `flows`). `workspaceMembers.list`,
+`inboxTeams.list`, `sequences.list`, `tags.list`, `customFields.list`,
+`savedReplies.list`, `mediaLibrary.*`: workspace-level in the original too.
+`realtime.getConnectToken` is not ported (501 for every caller).
+
+Not ported (ponytail, attribution only, no data exposure): the `userId` /
+`assignedBy` actor of the archive / follow / read / bot / assign actions.
+Order: a member's out-of-scope conversation is 404 before body validation.
+
+Mobile tokens are on: `crates/server` sets `LiveAuthDeps.mobile_audience`
+(`<builder origin>/api`). Tests: `crates/api/tests/mobile_member_scope.rs`
+(handler scope over a real DB + a signed JWT end to end through the
+`/api/v1` router: allowlist, workspace header, membership, password change,
+audience, `/v1/me*`), unit tests of `auth::mobile_member`.
 
 ## 4. Rate limits
 
@@ -93,6 +117,18 @@ lower-cased email, 429 + `Retry-After`; unknown grant 400). Always on
 `apps/builder/__tests__/mobile-password-grant-rate-limit.test.ts`) and the
 unit tests of the module.
 
+## 5. Invitation start and user persistent menus
+
+`GET /api/invitations/{code}/start` (`session::invitation_start`): per-IP
+rate limit (`invitation-start-rate-limit`, 20 / 10 s, 100 for `unknown`),
+302 to `/auth/sign-up?callbackURL=/invitations/<code>` with the
+`chatbotx_invitation` cookie (HttpOnly, SameSite=lax, 10 min, `Secure` when
+`BETTER_AUTH_URL` is https), else 302 to `/auth/sign-in?error=invalid_invitation`.
+Test: `crates/api/tests/session_invitation_start.rs`. The public
+`/v1/user-persistent-menus` routes were already ported
+(`handlers::messenger_menus`, Q.I1b slice 5).
+
 ## State
 
 - 2026-11-17: §1 done (8f1c7fdae); §2 and §4 done; §3 open (mobile tokens stay off).
+- 2026-11-17: §3 done (member filters, `/v1/me*`, mobile tokens on); §5 done.

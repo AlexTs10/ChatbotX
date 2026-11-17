@@ -2,8 +2,8 @@
 //! (`WorkspaceApiToken`, `Workspace`), the in-memory rate counters of `crates/kv`.
 //!
 //! The quota services are the business port (P3.6+); until then the owner is
-//! never blocked. MCP OAuth tokens are verified (Q.A1); mobile access tokens
-//! are refused as invalid tokens until their member filters are in place.
+//! never blocked. MCP OAuth tokens and mobile access tokens are verified (Q.A1;
+//! mobile members only on the allowlisted, member-scoped routes).
 
 use std::sync::Arc;
 
