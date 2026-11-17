@@ -1,7 +1,8 @@
 //! `features/ads/api/public.ts`: `ads.*` (scope `ads`).
 
-use chatbotx_business::ads::referral;
 use chatbotx_business::ads::rules::{self, CHANNELS, EVENT_TYPES};
+use chatbotx_business::ads::{funnel, referral};
+use chatbotx_db::repo::ads_conversion_event::{DateRangeInput, ExportSegmentInput};
 use serde_json::{Value, json};
 
 use super::input::{Input, Num, Path, Seg, Str, child, key};
@@ -21,7 +22,100 @@ pub const ROUTES: &[&str] = &[
     "ads.toggleRuleStatus",
     "ads.referralStats",
     "ads.listReferralAds",
+    "ads.getFunnel",
+    "ads.getFunnelTimeseries",
+    "ads.getCapiDelivery",
+    "ads.listConversionExportRows",
+    "ads.getConversion",
 ];
+
+const MAX_RANGE_DAYS: f64 = 366.0;
+const MS_PER_DAY: f64 = 86_400_000.0;
+
+/// An optional `zodBigintAsString` key.
+fn opt_id(input: &mut Input, name: &str) -> Option<i64> {
+    let value = input.get(name).cloned()?;
+    input.id_at(&key(name), Some(&value), true)
+}
+
+fn date_at(input: &mut Input, name: &str) -> Option<i64> {
+    let value = input.get(name).cloned();
+    let parsed = value.as_ref().and_then(super::broadcasts::coerce_date);
+    if parsed.is_none() {
+        let received = if value.is_none() {
+            "undefined"
+        } else {
+            "Invalid Date"
+        };
+        input.issue(
+            &key(name),
+            "invalid_type",
+            &format!("Invalid input: expected date, received {received}"),
+        );
+    }
+    parsed
+}
+
+/// `ctwaFunnelPublicShape` / `adsConversionExportPublicShape` common keys
+/// with the `withPublicDateRange` and channel refinements (run only when the
+/// keys themselves passed, as zod).
+fn range_input(input: &mut Input, ws: i64) -> DateRangeInput {
+    let since = date_at(input, "since");
+    let until = date_at(input, "until");
+    let integration_whatsapp_id = opt_id(input, "integrationWhatsappId");
+    let channel = enum_field(input, "channel", CHANNELS, false);
+    let integration_messenger_id = opt_id(input, "integrationMessengerId");
+    let integration_instagram_id = opt_id(input, "integrationInstagramId");
+    let all_channels = input.opt_coerced_bool("allChannels").unwrap_or(false);
+    let timezone = input.opt_string("timezone", Str::default());
+    let range = DateRangeInput {
+        workspace_id: ws,
+        since: since.unwrap_or_default(),
+        until: until.unwrap_or_default(),
+        integration_whatsapp_id,
+        channel,
+        integration_messenger_id,
+        integration_instagram_id,
+        all_channels,
+        timezone,
+    };
+    if input.failed() {
+        return range;
+    }
+    if range.since > range.until {
+        input.issue(
+            &key("until"),
+            "custom",
+            "since must be before or equal to until",
+        );
+    }
+    if (range.until - range.since) as f64 / MS_PER_DAY + 1.0 > MAX_RANGE_DAYS {
+        input.issue(&key("until"), "custom", "Range cannot exceed 366 days");
+    }
+    let ids = [
+        range.integration_whatsapp_id,
+        range.integration_messenger_id,
+        range.integration_instagram_id,
+    ]
+    .iter()
+    .filter(|id| id.is_some())
+    .count();
+    if range.all_channels && (range.channel.is_some() || ids > 0) {
+        input.issue(
+            &key("allChannels"),
+            "custom",
+            "allChannels cannot be combined with channel or an integration id",
+        );
+    }
+    if ids > 1 {
+        input.issue(
+            &key("integrationWhatsappId"),
+            "custom",
+            "Only one of integrationWhatsappId, integrationMessengerId, integrationInstagramId may be provided",
+        );
+    }
+    range
+}
 
 /// `possibleErrorsOnReporting`.
 const REPORTING: super::ErrorMap = &[("businessError", 400), ("reportTimeout", 503)];
@@ -265,6 +359,64 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .await
                 .map(|data| json(200, json!({ "data": data })))
                 .map_err(|e| business_error(e, LISTING))
+        }
+        "ads.getFunnel" | "ads.getFunnelTimeseries" | "ads.getCapiDelivery" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let range = range_input(&mut input, ws);
+            input.finish()?;
+            let body = match route_id {
+                "ads.getFunnel" => funnel::funnel(db, range).await,
+                "ads.getFunnelTimeseries" => funnel::funnel_timeseries(db, range)
+                    .await
+                    .map(|data| json!({ "data": data })),
+                _ => funnel::capi_delivery(db, range).await,
+            };
+            body.map(|b| json(200, b))
+                .map_err(|e| business_error(e, LISTING))
+        }
+        "ads.listConversionExportRows" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let segment = enum_field(
+                &mut input,
+                "segment",
+                &["conversations", "leads", "purchases"],
+                true,
+            );
+            let ad_id = input.nullish_string("adId", NON_EMPTY).flatten();
+            let after_id = opt_id(&mut input, "afterId");
+            let limit = input.opt_coerce_int(
+                "limit",
+                Num {
+                    min: Some(1.0),
+                    ..Num::int(1.0, 1000.0)
+                },
+            );
+            let mut range = range_input(&mut input, ws);
+            input.finish()?;
+            // ponytail: `timezone` is not part of the export shape.
+            range.timezone = None;
+            funnel::export_rows(
+                db,
+                ExportSegmentInput {
+                    range,
+                    segment: segment.unwrap_or_default(),
+                    ad_id,
+                    after_id,
+                    limit: limit.unwrap_or(500),
+                },
+            )
+            .await
+            .map(|b| json(200, b))
+            .map_err(|e| business_error(e, LISTING))
+        }
+        "ads.getConversion" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id = input.id("id");
+            input.finish()?;
+            funnel::find_event(db, ws, id.unwrap_or_default())
+                .await
+                .map(|b| json(200, b))
+                .map_err(|e| business_error(e, FINDING))
         }
         _ => Err(crate::routes::not_ported_error()),
     }

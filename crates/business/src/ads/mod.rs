@@ -2,3 +2,4 @@
 
 pub mod referral;
 pub mod rules;
+pub mod funnel;
