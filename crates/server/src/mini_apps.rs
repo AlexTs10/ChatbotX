@@ -431,6 +431,7 @@ async fn save_screen_inner(
             trim: false,
             min: Some(1),
             max: Some(64),
+            pattern: None,
         },
     );
     chatbotx_api::rpc_ai::finish_action(input)?;
