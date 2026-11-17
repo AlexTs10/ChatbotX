@@ -17,17 +17,17 @@ Branch `feat/conversion-d9` (from `conversion` at `e2d16a491`). Sources:
 | 5 | Worker | `crates/worker/src/appointment.rs`: `sendAppointmentReminder`, `syncExternalCalendarEvent` (default queue), `scanAppointmentReminders` cron; `steps/appointment.rs`: the `appointmentScheduling` step (5 modes); the appointment cancel postback in `inbound.rs`; the appointment `{{variables}}` sources in `variables.rs` | done |
 | 6 | Google OAuth connect (`connectGoogleCalendarAction`, callback), `updateGoogleCalendarIdAction` | - | left |
 | 7 | Booking webview pages (`/booking/{slug,picker,range-picker,schedule,cancel}` + their 3 submit actions) | business functions done (`complete_webview_booking`, `cancel_by_token`, `schedule_detail`); pages / public actions not ported (no public page in the SPA yet) | left |
-| 8 | Working hours CRUD (`workingHours.*` 10 routes, 7 actions, service) | the read side (`steps/working_hours.rs`) existed | left |
+| 8 | Working hours | `crates/business/src/working_hours.rs` (schedules, intervals, members, date overrides, holidays; validation of the partial schemas), `handlers/working_hours.rs` (10 `workingHours.*` routes), `rpc_procedures/working_hours.rs` (options procedure, 7 actions); the read side (`steps/working_hours.rs`) existed | done (no cache layer) |
 | 9 | Web SPA appointment screens (calendar list / edit, appointments list) | the SPA has no route for them yet; the inbox / contact / flow-editor parts call the ported procedures and actions | left |
 
 ## 2. Tests
 
-`crates/api/tests/appointments_public_api.rs` (11 tests, adapted from the
+`crates/api/tests/appointments_public_api.rs` (11 tests) and `working_hours_public_api.rs` (5 tests), adapted from the
 public-route tests: real database instead of mocked services), unit tests in
 `crates/business/src/appointment/*.rs` (window bounds, slot slicing, interval
 merge, reminder send-at with DST) and `crates/worker/src/appointment.rs`
 (attendee parsing, event id). The other TEST_MAP rows (webview, OAuth,
-working hours, jsdom) stay `todo` with their slices.
+jsdom, working-hours UI) stay `todo` with their slices.
 
 ## 3. Decisions (also in `DECISIONS.md`)
 
@@ -52,4 +52,4 @@ working hours, jsdom) stay `todo` with their slices.
 ## 4. Parity suites to run
 
 p1-04 `appointmentCalendars`, `appointmentExternalCalendars`,
-`appointmentReminders`, `appointments`.
+`appointmentReminders`, `appointments`, `workingHours`.
