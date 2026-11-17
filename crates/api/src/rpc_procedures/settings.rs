@@ -57,7 +57,7 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
                         "tokenPrefix": t.token_prefix,
                         "isDefault": t.is_default,
                         "createdAt": date(t.created_at),
-                        "scopes": t.scopes,
+                        "scopes": t.scopes.as_ref().map(|s| s.0.clone()),
                     })
                 })
                 .collect())

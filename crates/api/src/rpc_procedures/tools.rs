@@ -217,17 +217,16 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
         "deleteReflinksAction" => done(reflink::delete_many(db, ws, ids()?).await),
         "deleteQrCodesAction" => done(qr_code::delete_many(db, ws, ids()?).await),
         "deleteMinigamesAction" => done(minigame::delete_many(db, ws, ids()?).await),
-        "findQrCode" | "findReflink" => {
-            let id = In(search).id("id")?;
-            let row = if name == "findQrCode" {
-                qr_code::find(db, ws, id).await
-            } else {
-                reflink::find(db, ws, id).await
-            };
-            Ok(row
-                .map_err(action_fail)?
-                .map_or(Value::Null, |row| row.to_json()))
-        }
+        "findQrCode" => Ok(qr_code::find(db, ws, In(search).id("id")?)
+            .await
+            .map_err(action_fail)?
+            .map_or(Value::Null, |row| row.to_json())),
+        // `findReflink`: `undefined` (here `null`) for "no such reflink".
+        "findReflink" => match reflink::find_or_fail(db, ws, In(search).id("id")?).await {
+            Ok(row) => Ok(row.to_json()),
+            Err(error) if error.code() == Some("notFound") => Ok(Value::Null),
+            Err(error) => Err(action_fail(error)),
+        },
         "createQrCodeAction" | "updateQrCodeAction" => qr_code_write(ctx, name, args).await,
         "findMinigame" => match minigame::find(db, ws, In(search).id("id")?).await {
             Ok(row) => Ok(row.to_json()),
