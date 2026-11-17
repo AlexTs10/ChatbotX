@@ -1104,3 +1104,93 @@ async fn questionnaire_editor_loads_through_the_public_route() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
     assert!(out["data"]["validationErrors"].is_object(), "{out}");
 }
+
+#[tokio::test]
+async fn comment_automation_screens_run_the_public_routes() {
+    let (router, _) = router().await;
+    let options = json!({
+        "replyToNewContactsOnly": false, "replyOncePerUserPerPost": true,
+        "likeUserComment": false, "replyToUsersWhoCommentedOnOtherPosts": true,
+        "ignoreCommentReplies": true, "trackUserTags": false,
+    });
+    let hide = json!({
+        "all": false, "hasPhoneNumber": true, "hasImage": false, "hasVideo": false,
+        "hasLink": true, "hasKeywords": true, "keywords": ["spam"], "showCommentsAfter": "none",
+    });
+    let body = json!({
+        "name": "Price replies",
+        "post": { "type": "postIds", "value": ["111_222"] },
+        "privateReply": { "type": "text", "value": "Check your inbox" },
+        "publicReply": { "type": "text", "value": "Thanks!" },
+        "includeKeywords": { "type": "contain", "value": ["price"] },
+        "excludeKeywords": [],
+        "options": options,
+        "hideComments": hide,
+        "replyAfter": { "type": "seconds", "value": 30 },
+    });
+    let (status, created) = act(
+        &router,
+        "admintoken",
+        "createFbCommentAction",
+        json!([ws(), body]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+
+    // Schema issues come back as next-safe-action `validationErrors`.
+    let (status, error) = act(
+        &router,
+        "admintoken",
+        "createFbCommentAction",
+        json!([ws(), { "name": "" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(error["data"]["validationErrors"].is_object(), "{error}");
+
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "updateFbCommentAction",
+        json!([ws(), id, { "name": "Renamed" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, list) = act(
+        &router,
+        "admintoken",
+        "listFbComments",
+        json!([{ "workspaceId": ws(), "page": 1, "perPage": 10, "name": "renamed" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["data"][0]["id"], id);
+    let (status, row) = act(&router, "admintoken", "getFbComment", json!([{ "id": id }])).await;
+    assert_eq!(status, StatusCode::OK, "{row}");
+    assert_eq!(row["name"], "Renamed");
+    // Not an Instagram automation.
+    let (status, _) = act(&router, "admintoken", "getIgComment", json!([{ "id": id }])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, accounts, _) = post(
+        &router,
+        "commentAutomationsAPI/automationAccountsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "type": "messenger" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accounts}");
+    assert_eq!(accounts, json!({ "accounts": [] }));
+
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "bulkDeleteFbCommentsAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = act(&router, "admintoken", "getFbComment", json!([{ "id": id }])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

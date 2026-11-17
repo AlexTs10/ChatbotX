@@ -41,7 +41,7 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
 
 /// The input as a GET query (arrays as repeated keys, as the oRPC OpenAPI
 /// query of the original); `workspaceId` is the `/rpc` workspace.
-fn query(input: &Value) -> String {
+pub(super) fn query(input: &Value) -> String {
     let mut pairs = url::form_urlencoded::Serializer::new(String::new());
     let Some(object) = input.as_object() else {
         return String::new();

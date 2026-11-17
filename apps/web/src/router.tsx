@@ -26,6 +26,7 @@ const dashboard = () => import("@/routes/dashboard")
 const ecommerce = () => import("@/routes/ecommerce")
 const tools = () => import("@/routes/tools")
 const toolEditors = () => import("@/routes/tool-editors")
+const comments = () => import("@/routes/comments")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -247,6 +248,55 @@ const productFormPages = (
   }),
 )
 
+// Comment / story automations: `(has-folder)/<x>/layout.tsx` is a pathless
+// folder layout around the list; the create / edit / analytics pages sit
+// outside it.
+const commentListRoutes = (
+  [
+    ["fb-comments", "FbCommentsLayout", "FbCommentsPage"],
+    ["ig-comments", "IgCommentsLayout", "IgCommentsPage"],
+    ["ig-stories", "IgStoriesLayout", "IgStoriesPage"],
+  ] as const
+).map(([path, layout, page]) => {
+  const folder = createRoute({
+    getParentRoute: () => workspaceRoute,
+    id: `${path}-folder`,
+    component: lazyRouteComponent(comments, layout),
+  })
+  return folder.addChildren([
+    createRoute({
+      getParentRoute: () => folder,
+      path,
+      component: lazyRouteComponent(comments, page),
+    }),
+  ])
+})
+const commentPages = (
+  [
+    ["fb-comments/create", "CreateFbCommentPage"],
+    ["fb-comments/$id", "EditFbCommentPage"],
+    ["fb-comments/$id/analytics", "FbCommentAnalyticsPage"],
+    ["ig-comments/create", "CreateIgCommentPage"],
+    ["ig-comments/$id", "EditIgCommentPage"],
+    ["ig-comments/$id/analytics", "IgCommentAnalyticsPage"],
+    ["ig-stories/create", "CreateIgStoryPage"],
+    ["ig-stories/$id", "EditIgStoryPage"],
+    ["threads-comments", "ThreadsCommentsPage"],
+    ["threads-comments/create", "CreateThreadsCommentPage"],
+    ["threads-comments/$id", "EditThreadsCommentPage"],
+    ["tiktok-comments", "TiktokCommentsPage"],
+    ["tiktok-comments/create", "CreateTiktokCommentPage"],
+    ["tiktok-comments/$id", "EditTiktokCommentPage"],
+    ["tiktok-comments/$id/analytics", "TiktokCommentAnalyticsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(comments, page),
+  }),
+)
+
 // The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
 const toolPages = (
   [
@@ -415,6 +465,8 @@ const routeTree = rootRoute.addChildren([
       productFormsRoute.addChildren(productFormPages),
       ...toolPages,
       ...toolEditorPages,
+      ...commentListRoutes,
+      ...commentPages,
       pipelinesRoutes,
       aiRoute.addChildren(aiPages),
       settingsRoutes,
