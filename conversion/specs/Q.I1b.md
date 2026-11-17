@@ -53,6 +53,10 @@ quoted before parsing. Jobs: `incomingMessage` (+ postback `action`),
 `processMarketingMessageWebhook`; each `messaging[]` event as a single-event
 payload.
 
+## Parity
+
+- p1-11 `41-messages-messenger`: 4/5 on the Rust stack (2026-11-17, after dd4749b47; was 0/5). The left case (two `mediaFileIds` on a comment reply -> 422 `imagesNotSupportedOnChannel`) needs the media-library outgoing path (`mediaFileIds`, now 501 `notPorted` in `contact_messages.rs`), owned by the messages unit.
+
 ## Left
 
 - Conversation routing (`threadControlEvent`: handover, requests, app roles,
