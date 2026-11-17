@@ -299,7 +299,7 @@ pub(crate) fn fail(error: BusinessError) -> OrpcError {
 /// A business error of an action: a `validation` exception with a field is
 /// the next-safe-action `validationErrors` (`returnValidationErrors`), any
 /// other error the `serverError` message.
-pub(crate) fn action_fail(error: BusinessError) -> OrpcError {
+pub fn action_fail(error: BusinessError) -> OrpcError {
     if let BusinessError::Exception {
         code,
         field: Some(field),

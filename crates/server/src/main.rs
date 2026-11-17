@@ -2,6 +2,7 @@
 
 mod config;
 mod meta_webhook;
+mod mini_apps;
 mod web;
 mod webchat;
 mod whatsapp;
@@ -294,6 +295,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
     app = app.merge(chatbotx_api::files::router(Arc::clone(&shared.files)));
+    app = app.merge(mini_apps::router(Arc::clone(&api), worker_deps.clone()));
     app = app.merge(webchat::router(
         Arc::clone(&api),
         worker_deps,

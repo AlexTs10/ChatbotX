@@ -223,7 +223,7 @@ fn action_input(args: &[Value], index: usize) -> Input {
     }
 }
 
-fn finish_action(input: Input) -> Result<(), OrpcError> {
+pub fn finish_action(input: Input) -> Result<(), OrpcError> {
     input.finish().map_err(|error| {
         let issues = error
             .data
