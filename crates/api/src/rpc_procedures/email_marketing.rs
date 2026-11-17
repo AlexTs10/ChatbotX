@@ -217,7 +217,13 @@ async fn run(
 }
 
 /// `features/integration-smtp/actions/*`.
-pub(super) const ACTIONS: &[&str] = &["createSmtpAction", "updateSmtpAction", "deleteSmtpAction"];
+/// and `disconnectGoogleSheetsAction` (Q.I4).
+pub(super) const ACTIONS: &[&str] = &[
+    "createSmtpAction",
+    "updateSmtpAction",
+    "deleteSmtpAction",
+    "disconnectGoogleSheetsAction",
+];
 
 /// `zodBigintAsString` bind argument.
 fn bind_id(args: &[Value], index: usize) -> Result<i64, OrpcError> {
@@ -300,6 +306,18 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> super::
                         "name": row.name,
                         "fromAddress": row.from_address,
                     }))
+                }
+                "disconnectGoogleSheetsAction" => {
+                    chatbotx_business::google_sheets::disconnect(db, em::safe_http(), ws)
+                        .await
+                        .map_err(fail)?;
+                    audit(
+                        ctx,
+                        "disconnect",
+                        "disconnected the Google Sheets integration".into(),
+                    )
+                    .await;
+                    Ok(Value::Null)
                 }
                 _ => {
                     let id = bind_id(args, 1)?;
