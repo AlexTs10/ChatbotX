@@ -9,9 +9,7 @@ use std::time::Duration;
 use chatbotx_business::{BusinessError, tx};
 use chatbotx_core::flow_config::steps::describe_wa_template_parameters;
 use chatbotx_core::utils::graph_error::format_graph_error;
-use chatbotx_core::utils::graph_pagination::{
-    DEFAULT_GRAPH_PAGE_LIMIT, GraphPage, GraphPaginationError, fetch_all_next_pages,
-};
+use chatbotx_core::utils::graph_pagination::{DEFAULT_GRAPH_PAGE_LIMIT, GraphPage};
 use chatbotx_db::repo::models::{IntegrationWhatsapp, WhatsappMessageTemplate};
 use chatbotx_db::repo::{find_many, iso, new_id, now_ms};
 use chatbotx_db::rusqlite::params;
@@ -173,20 +171,37 @@ async fn list_meta_templates(graph_url: &str, auth: &Value) -> Result<Vec<Value>
         text("/metadata/wabaId")
     );
     let token = text("/tokens/accessToken").to_owned();
-    fetch_all_next_pages(
-        &first,
-        |url| get_page(url, token.clone()),
-        Some(MAX_PAGES),
-        None,
-    )
-    .await
-    .map_err(|e| match e {
-        GraphPaginationError::Get(fail) => fail,
-        GraphPaginationError::MaxPagesReached { pages_fetched } => Fail::Sdk(
-            format!("Graph pagination exceeded {pages_fetched} pages"),
+    // `fetchAllNextPages` (same-origin, unvisited `paging.next`, at most 70 pages).
+    // ponytail: inline loop: the core helper's `&mut dyn FnMut` callback is not
+    // `Send`, so its future cannot run in an axum handler.
+    let origin = |u: &str| {
+        url::Url::parse(u)
+            .ok()
+            .map(|u| u.origin().ascii_serialization())
+    };
+    let first_origin = origin(&first);
+    let mut results = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut next = Some(first);
+    for _ in 0..MAX_PAGES {
+        let Some(url) = next.take() else {
+            return Ok(results);
+        };
+        visited.insert(url.clone());
+        let page = get_page(url, token.clone()).await?;
+        results.extend(page.data);
+        next = page
+            .next
+            .filter(|n| !n.is_empty() && !visited.contains(n))
+            .filter(|n| first_origin.is_some() && origin(n) == first_origin);
+    }
+    match next {
+        Some(_) => Err(Fail::Sdk(
+            format!("Graph pagination exceeded {MAX_PAGES} pages"),
             400,
-        ),
-    })
+        )),
+        None => Ok(results),
+    }
 }
 
 /// `syncFromMeta`: full sync (rows Meta no longer has are deleted).

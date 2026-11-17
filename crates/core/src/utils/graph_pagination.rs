@@ -52,7 +52,7 @@ pub async fn fetch_all_next_pages<T, E, G, Fut>(
     first_url: &str,
     mut get: G,
     max_pages: Option<usize>,
-    mut on_max_pages_reached: Option<&mut (dyn FnMut(usize) + Send)>,
+    mut on_max_pages_reached: Option<&mut dyn FnMut(usize)>,
 ) -> Result<Vec<T>, GraphPaginationError<E>>
 where
     G: FnMut(String) -> Fut,
