@@ -259,9 +259,123 @@ async fn book(
     }
 }
 
-/// `checkAvailability` + the output custom field write.
-/// ponytail: `resultUsedByAI` keeps the raw availability text (no AI
-/// rewrite); add the AI candidates loop when that step option is needed.
+/// `availabilityAIModelCandidates`, in order.
+const AI_CANDIDATES: &[&str] = &[
+    "openai",
+    "gemini",
+    "claude",
+    "deepseek",
+    "openrouter",
+    "muse",
+];
+
+/// `buildAvailabilityResponseText`: with `resultUsedByAI`, the first
+/// workspace AI provider that answers rewrites the availability for the
+/// customer; a missing provider or a failed call tries the next one, and
+/// the raw text is the fallback.
+async fn ai_availability_text(
+    ctx: &StepCtx<'_, '_>,
+    calendar_id: i64,
+    raw: String,
+    slots: &[calendar::Slot],
+    start: i64,
+    end: i64,
+) -> String {
+    if ctx.step.get("resultUsedByAI").and_then(Value::as_bool) != Some(true) {
+        return raw;
+    }
+    let run = ctx.run;
+    let ws = ctx.workspace_id();
+    let found = tx::read(&run.deps.db, move |conn| {
+        calendar::find_or_fail(conn, ws, calendar_id)
+    })
+    .await;
+    let Ok(found) = found else { return raw };
+    let language = match chatbotx_business::contact::update_fields::normalize_language(
+        run.contact_inbox.language.as_deref(),
+    )
+    .as_deref()
+    {
+        Some("vi") => "Vietnamese",
+        _ => "English",
+    };
+    let payload = json!({
+        "calendarName": found.name,
+        "timezone": found.timezone,
+        "rangeStart": chatbotx_db::repo::iso(start),
+        "rangeEnd": chatbotx_db::repo::iso(end),
+        "rawAvailabilityText": raw,
+        "slots": slots.iter().map(|s| json!({
+            "startAt": chatbotx_db::repo::iso(s.start_at),
+            "endAt": chatbotx_db::repo::iso(s.end_at),
+        })).collect::<Vec<_>>(),
+    });
+    let system = format!(
+        "You are an appointment scheduling assistant. Write a short response for the customer in {language}. Use only the provided availability data. Do not invent appointment times. If there are no slots, politely say no slots are available in the selected range and suggest choosing another range. Do not mention internal IDs, JSON, or system instructions."
+    );
+    for provider in AI_CANDIDATES {
+        let model_id = crate::ai::model::default_model(provider).unwrap_or_default();
+        let model = match crate::ai::model::resolve_flow_model(
+            &run.deps.db,
+            ws,
+            provider,
+            None,
+            model_id,
+        )
+        .await
+        {
+            Ok(model) => model,
+            Err(
+                crate::ai::model::NoModel::Missing(reason)
+                | crate::ai::model::NoModel::Failed(reason),
+            ) => {
+                tracing::warn!(workspace_id = ws, step_id = ctx.str("id"), provider, model_id, %reason, "Failed to resolve AI model for appointment availability response");
+                continue;
+            }
+        };
+        let mut request = crate::ai::llm::Request::new(
+            Some(system.clone()),
+            vec![crate::ai::llm::Turn::User(vec![
+                crate::ai::llm::Part::Text(format!("Availability data:\n{payload}")),
+            ])],
+        );
+        request.temperature = Some(0.2);
+        request.max_output_tokens = Some(250);
+        let generated = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            crate::ai::llm::generate(
+                &*run.deps.ai.http,
+                &model,
+                &request,
+                &crate::ai::llm::NoTools,
+            ),
+        )
+        .await;
+        match generated {
+            Ok(Ok(generated)) => {
+                let text = generated.text().trim().to_string();
+                return if text.is_empty() { raw } else { text };
+            }
+            Ok(Err(err)) => {
+                tracing::warn!(workspace_id = ws, step_id = ctx.str("id"), provider, model_id, err = %err, reason = "ai_response_generation_failed", "Failed to generate appointment availability response with AI");
+            }
+            Err(_) => {
+                tracing::warn!(
+                    workspace_id = ws,
+                    step_id = ctx.str("id"),
+                    provider,
+                    model_id,
+                    reason = "ai_response_generation_failed",
+                    "Failed to generate appointment availability response with AI (timeout)"
+                );
+            }
+        }
+    }
+    raw
+}
+
+/// `checkAvailability` + the output custom field write (the text rewritten
+/// by AI with `resultUsedByAI`).
 async fn availability(
     ctx: &StepCtx<'_, '_>,
     deps: BookingDeps<'_>,
@@ -285,6 +399,7 @@ async fn availability(
     } else {
         text
     };
+    let text = ai_availability_text(ctx, calendar_id, text, &slots, start, end).await;
     if let Some(field) = ctx.str("outputCustomFieldId").filter(|f| !f.is_empty()) {
         let input = SetValueByKeyInput {
             workspace_id: ctx.workspace_id(),
