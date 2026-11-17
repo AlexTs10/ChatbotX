@@ -4,8 +4,8 @@
 //! ponytail: no token cache (the intake reads one indexed row per delivery)
 //! and no config lock: a settings change reads, checks and writes in one
 //! SQLite write job, which is already serial.
-//! ponytail: `update` (config save), `previewMapping` and the worker
-//! processing are not ported yet (see `conversion/specs/Q.D13.md`).
+//! ponytail: `previewMapping` and the worker processing are not ported
+//! yet (see `conversion/specs/Q.D13.md`).
 
 use chatbotx_core::utils::channel::ChannelType;
 use chatbotx_core::utils::inbound_webhook_channel::{
@@ -165,18 +165,20 @@ fn inbox_resolution_issue(
 }
 
 /// `assertConfigValid`: the first issue of `validateInboundWebhookConfig`.
-fn assert_config_valid(c: &Connection, workspace_id: i64, row: &InboundWebhook) -> Result<()> {
+fn assert_config_valid(
+    c: &Connection,
+    workspace_id: i64,
+    resolution: Option<&Json>,
+    identifiers: &Json,
+    field_mappings: &Json,
+) -> Result<()> {
     let empty = |v: &Json| v.as_array().is_none_or(Vec::is_empty);
-    let resolution = row
-        .inbox_resolution
-        .as_ref()
-        .map(|j| &j.0)
-        .filter(|v| !v.is_null());
+    let resolution = resolution.filter(|v| !v.is_null());
     let issue = if resolution.is_none() {
         Some(("inboxResolution", "inboxRequired"))
-    } else if empty(&row.identifiers.0) {
+    } else if empty(identifiers) {
         Some(("identifiers", "identifierRequired"))
-    } else if empty(&row.field_mappings.0) {
+    } else if empty(field_mappings) {
         Some(("fieldMappings", "fieldMappingRequired"))
     } else {
         resolution
@@ -194,6 +196,97 @@ fn assert_config_valid(c: &Connection, workspace_id: i64, row: &InboundWebhook) 
     }
 }
 
+/// The saved config (`inboundWebhookConfigRequest`, parsed and canonical).
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub inbox_resolution: Option<Json>,
+    pub identifiers: Json,
+    pub field_mappings: Json,
+    pub actions: Json,
+    pub sample_json: Option<Json>,
+}
+
+/// `assertReferencesExist`: mapped custom fields and the actions' flows,
+/// tags and fields must belong to the workspace.
+fn assert_references_exist(c: &Connection, workspace_id: i64, config: &Config) -> Result<()> {
+    let unknown_target = || {
+        BusinessError::validation(
+            "fieldMappings",
+            "validation.inboundWebhook.unknownFieldTarget",
+        )
+    };
+    let mut ids: Vec<i64> = Vec::new();
+    for mapping in config.field_mappings.as_array().into_iter().flatten() {
+        let target = mapping
+            .get("target")
+            .and_then(Json::as_str)
+            .unwrap_or_default();
+        if target == "gender" || crate::questionnaire::is_rich_system_contact_field(target) {
+            continue;
+        }
+        if target.is_empty() || !target.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(unknown_target());
+        }
+        ids.push(target.parse().map_err(|_| unknown_target())?);
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    if !ids.is_empty() {
+        let found: i64 = c
+            .query_row(
+                r#"SELECT count(*) FROM "CustomField" WHERE "workspaceId" = ?1
+                   AND "id" IN (SELECT value FROM json_each(?2))"#,
+                chatbotx_db::rusqlite::params![workspace_id, chatbotx_db::repo::id_list(&ids)],
+                |r| r.get(0),
+            )
+            .map_err(chatbotx_db::repo::Error::from)?;
+        if usize::try_from(found).ok() != Some(ids.len()) {
+            return Err(unknown_target());
+        }
+    }
+    let actions = config.actions.as_array().cloned().unwrap_or_default();
+    if !crate::automation_action::find_invalid_action_references(
+        c,
+        workspace_id,
+        &actions,
+        None,
+        false,
+    )?
+    .is_empty()
+    {
+        return Err(BusinessError::validation(
+            "actions",
+            "validation.inboundWebhook.actionReferenceNotFound",
+        ));
+    }
+    Ok(())
+}
+
+/// `update`: 404 first, then the config checks, then the row is replaced.
+pub async fn update(db: &Db, workspace_id: i64, id: i64, config: Config) -> Result<InboundWebhook> {
+    tx::write(db, move |c| {
+        find_in(c, workspace_id, id)?;
+        assert_config_valid(
+            c,
+            workspace_id,
+            config.inbox_resolution.as_ref(),
+            &config.identifiers,
+            &config.field_mappings,
+        )?;
+        assert_references_exist(c, workspace_id, &config)?;
+        let opt = |v: &Option<Json>| v.as_ref().map_or(Value::Null, json_value);
+        let set: Patch = vec![
+            ("inboxResolution", opt(&config.inbox_resolution)),
+            ("identifiers", json_value(&config.identifiers)),
+            ("fieldMappings", json_value(&config.field_mappings)),
+            ("actions", json_value(&config.actions)),
+            ("sampleJson", opt(&config.sample_json)),
+        ];
+        repo_iw::update_inbound_webhook(c, id, workspace_id, &set)?.ok_or_else(not_found)
+    })
+    .await
+}
+
 /// `updateSettings`: `{}` returns the row unchanged; activating an inactive
 /// webhook checks its stored config first.
 pub async fn update_settings(
@@ -209,7 +302,13 @@ pub async fn update_settings(
             return Ok(existing);
         }
         if active == Some(true) && !existing.active {
-            assert_config_valid(c, workspace_id, &existing)?;
+            assert_config_valid(
+                c,
+                workspace_id,
+                existing.inbox_resolution.as_ref().map(|j| &j.0),
+                &existing.identifiers.0,
+                &existing.field_mappings.0,
+            )?;
         }
         let mut set: Patch = Vec::new();
         if let Some(name) = name {

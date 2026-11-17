@@ -1,15 +1,17 @@
 //! `features/inbound-webhooks/api/public.ts` (`inboundWebhooksPublicRouter`,
 //! `inboundWebhookChannelsPublicRouter`; scope `integrations`).
 //!
-//! ponytail: `inboundWebhooks.update` and `previewMapping` are not ported
-//! (they answer the not-ported error); see `conversion/specs/Q.D13.md`.
+//! ponytail: `previewMapping` is not ported (it answers the not-ported
+//! error); see `conversion/specs/Q.D13.md`.
 
 use chatbotx_business::inbound_webhook as service;
+use chatbotx_core::flow_config::z::{self, Schema};
 use chatbotx_core::utils::channel::ChannelType;
 use chatbotx_core::utils::inbound_webhook_channel::{
-    ChannelUserIdKind, InboxIdentifierKind, inbound_webhook_channel_spec,
+    ChannelUserIdKind, ContactIdentityKind, InboxIdentifierKind, inbound_webhook_channel_spec,
     payload_resolvable_channels,
 };
+use chatbotx_core::utils::json_path::{format_json_path, is_jsonb_storable, parse_json_path};
 use chatbotx_db::repo::inbound_webhook::{InboundWebhookListRow, InboundWebhookRequestListRow};
 use chatbotx_db::repo::iso;
 use chatbotx_db::repo::models::{InboundWebhook, InboundWebhookRequest};
@@ -29,6 +31,7 @@ pub const ROUTES: &[&str] = &[
     "inboundWebhooks.list",
     "inboundWebhooks.create",
     "inboundWebhooks.get",
+    "inboundWebhooks.update",
     "inboundWebhooks.updateSettings",
     "inboundWebhooks.regenerateToken",
     "inboundWebhooks.listRequests",
@@ -211,6 +214,149 @@ pub fn channels() -> Value {
     )
 }
 
+const MAX_JSON_PATH_LENGTH: usize = 500;
+const MAX_SAMPLE_JSON_BYTES: usize = 64 * 1024;
+
+/// `inboundWebhookJsonPathSchema`: stored in the canonical `$` form.
+fn json_path() -> Schema {
+    z::string()
+        .trim()
+        .min(1)
+        .max(MAX_JSON_PATH_LENGTH)
+        .transform(
+            |value, ctx| match parse_json_path(value.as_str().unwrap_or_default()) {
+                Some(segments) if !segments.is_empty() => {
+                    Value::String(format_json_path(&segments))
+                }
+                _ => {
+                    ctx.message("Unsupported JSON path");
+                    Value::Null
+                }
+            },
+        )
+        .pipe(z::string().max(MAX_JSON_PATH_LENGTH))
+}
+
+/// `inboundWebhookConfigRequest`.
+fn config_schema() -> Schema {
+    let channels: Vec<&str> = ChannelType::ALL.iter().map(|c| c.as_str()).collect();
+    let inbox_kinds: Vec<&str> = InboxIdentifierKind::ALL
+        .iter()
+        .map(|k| k.as_str())
+        .collect();
+    let identity_kinds: Vec<&str> = ContactIdentityKind::ALL
+        .iter()
+        .map(|k| k.as_str())
+        .collect();
+    let bigint = || z::string().regex(r"^\d+$", "");
+    let inbox_resolution = z::discriminated_union(
+        "mode",
+        vec![
+            z::object(vec![
+                ("mode", z::literal(json!("inbox"))),
+                ("inboxId", bigint()),
+            ]),
+            z::object(vec![
+                ("mode", z::literal(json!("payload"))),
+                ("channel", z::enum_(&channels)),
+                ("identifierKind", z::enum_(&inbox_kinds)),
+                ("jsonPath", json_path()),
+            ]),
+        ],
+    );
+    let identifiers = z::array(z::object(vec![
+        ("kind", z::enum_(&identity_kinds)),
+        ("jsonPath", json_path()),
+    ]))
+    .max(4)
+    .refine(
+        |v| {
+            let kinds: Vec<&Value> = v
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|i| &i["kind"])
+                .collect();
+            kinds
+                .iter()
+                .enumerate()
+                .all(|(i, k)| !kinds[..i].contains(k))
+        },
+        Some("Each identity kind can be configured once"),
+        None,
+    );
+    let field_mappings = z::array(z::object(vec![
+        ("jsonPath", json_path()),
+        ("target", z::string().trim().min(1).max(255)),
+    ]))
+    .max(50);
+    let all = super::triggers::all_actions();
+    let pick = |name: &str| {
+        all.iter()
+            .find(|schema| schema.field("type").literal_values() == [json!(name)])
+            .cloned()
+            .unwrap_or_else(z::never)
+    };
+    let actions = z::array(z::union(
+        [
+            "startAnotherFlow",
+            "addTag",
+            "removeTag",
+            "setCustomField",
+            "clearCustomField",
+            "transferConversationToHuman",
+        ]
+        .into_iter()
+        .map(pick)
+        .collect(),
+    ))
+    .max(10);
+    let sample_json = z::unknown()
+        .refine(
+            is_jsonb_storable,
+            Some("The sample JSON contains unsupported characters or is nested too deeply"),
+            None,
+        )
+        .abort()
+        .refine(
+            |v| serde_json::to_vec(v).is_ok_and(|b| b.len() <= MAX_SAMPLE_JSON_BYTES),
+            Some("The sample JSON is too large"),
+            None,
+        )
+        .nonoptional();
+    z::object(vec![
+        ("inboxResolution", inbox_resolution.nullable()),
+        ("identifiers", identifiers),
+        ("fieldMappings", field_mappings),
+        ("actions", actions),
+        ("sampleJson", sample_json),
+    ])
+}
+
+/// Parses the config body into `input`'s issues.
+fn parse_config(input: &mut Input) -> Option<service::Config> {
+    let parsed = config_schema().safe_parse(&Value::Object(input.obj.clone()));
+    if !parsed.success {
+        let issues = parsed
+            .issues()
+            .iter()
+            .filter_map(|issue| serde_json::to_value(issue).ok())
+            .collect();
+        input.extend_issues(issues);
+        return None;
+    }
+    let data = parsed.data.unwrap_or_default();
+    let take = |k: &str| data.get(k).cloned().unwrap_or(Value::Null);
+    let opt = |k: &str| Some(take(k)).filter(|v| !v.is_null());
+    Some(service::Config {
+        inbox_resolution: opt("inboxResolution"),
+        identifiers: take("identifiers"),
+        field_mappings: take("fieldMappings"),
+        actions: take("actions"),
+        sample_json: opt("sampleJson"),
+    })
+}
+
 fn id_param(input: &mut Input, name: &str) -> i64 {
     let value = input.get(name).cloned();
     digits_at(input, &key(name), value.as_ref(), true).unwrap_or_default()
@@ -267,6 +413,21 @@ pub async fn handle(
             // The URL is a credential: a read-only token never receives it.
             let endpoint = (!principal.read_only).then(|| url(&row.token));
             Ok(json(200, resource(&row, endpoint)))
+        }
+        "inboundWebhooks.update" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let config = parse_config(&mut input);
+            let id = id_param(&mut input, "id");
+            input.finish()?;
+            // `finish` passed, so the config parsed.
+            let config = config.ok_or_else(|| super::internal_error("inbound webhook config"))?;
+            let row = service::update(db, ws, id, config)
+                .await
+                .map_err(|e| business_error(e, MUTATING))?;
+            state
+                .record_audit("update", &format!("updated inbound webhook (#{id})"))
+                .await;
+            Ok(json(200, resource(&row, Some(url(&row.token)))))
         }
         "inboundWebhooks.updateSettings" => {
             let mut input = Input::from_body(call.params, call.body);

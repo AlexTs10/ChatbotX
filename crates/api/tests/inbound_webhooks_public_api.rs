@@ -1,6 +1,6 @@
 //! `inbound-webhooks-public-api.test.ts` + `inbound-webhook-route.test.ts`
-//! (Q.D13), the parts without `update` / `previewMapping` / the worker:
-//! CRUD, settings, token, request log and the `/api/hooks/{token}` intake.
+//! (Q.D13), the parts without `previewMapping` / the worker: CRUD, config
+//! save, settings, token, request log and the `/api/hooks/{token}` intake.
 
 mod handlers_common;
 
@@ -102,24 +102,60 @@ async fn inbound_webhook_crud_settings_and_intake() {
     let (status, _) = deliver(&fx, "iwh_short", "{}", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // A complete config (as `update` would store it), then activate.
-    let ws_id = WS;
-    let hook_id: i64 = id.parse().unwrap();
-    fx.state
-        .db
-        .write(move |tx| {
-            tx.execute(
-                r#"UPDATE "InboundWebhook" SET
-                     "inboxResolution" = '{"mode":"payload","channel":"messenger","identifierKind":"pageId","jsonPath":"$.page"}',
-                     "identifiers" = '[{"kind":"email","jsonPath":"$.email"}]',
-                     "fieldMappings" = '[{"jsonPath":"$.name","target":"firstName"}]'
-                   WHERE "id" = ?1 AND "workspaceId" = ?2"#,
-                [hook_id, ws_id],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
+    // Config save: `sampleJson` is required, paths are stored canonical,
+    // a custom-field target must exist in the workspace.
+    let config = json!({
+        "inboxResolution": { "mode": "payload", "channel": "messenger", "identifierKind": "pageId", "jsonPath": "page" },
+        "identifiers": [{ "kind": "email", "jsonPath": "email" }],
+        "fieldMappings": [{ "jsonPath": "$['name']", "target": "first_name" }],
+        "actions": [],
+    });
+    let (status, out) = call(
+        &fx,
+        "inboundWebhooks.update",
+        WS,
+        &[("id", &id)],
+        None,
+        Some(config.clone()),
+    )
+    .await;
+    assert_eq!(
+        (status, out["code"].clone()),
+        (422, json!("invalidRequestData")),
+        "{out}"
+    );
+    let mut bad = config.clone();
+    bad["sampleJson"] = Value::Null;
+    bad["fieldMappings"][0]["target"] = json!("999");
+    let (status, out) = call(
+        &fx,
+        "inboundWebhooks.update",
+        WS,
+        &[("id", &id)],
+        None,
+        Some(bad),
+    )
+    .await;
+    assert_eq!(
+        (status, out["message"].clone()),
+        (422, json!("validation.inboundWebhook.unknownFieldTarget")),
+        "{out}"
+    );
+    let mut good = config;
+    good["sampleJson"] = Value::Null;
+    let (status, out) = call(
+        &fx,
+        "inboundWebhooks.update",
+        WS,
+        &[("id", &id)],
+        None,
+        Some(good),
+    )
+    .await;
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(out["inboxResolution"]["jsonPath"], "$.page");
+    assert_eq!(out["identifiers"][0]["jsonPath"], "$.email");
+    assert_eq!(out["fieldMappings"][0]["jsonPath"], "$.name");
     let (status, out) = call(
         &fx,
         "inboundWebhooks.updateSettings",
