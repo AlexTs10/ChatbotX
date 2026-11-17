@@ -54,28 +54,50 @@ pub(super) fn idx(path: &[Seg], index: usize) -> Path {
 }
 
 /// A `z.object` at `path`; `None` = absent (issue when `required`) or not an object.
-pub(super) fn object(input: &mut Input, path: &[Seg], value: Option<&Value>, required: bool) -> Option<Map<String, Value>> {
+pub(super) fn object(
+    input: &mut Input,
+    path: &[Seg],
+    value: Option<&Value>,
+    required: bool,
+) -> Option<Map<String, Value>> {
     match value {
         None => {
             if required {
-                input.issue(path, "invalid_type", "Invalid input: expected object, received undefined");
+                input.issue(
+                    path,
+                    "invalid_type",
+                    "Invalid input: expected object, received undefined",
+                );
             }
             None
         }
         Some(Value::Object(map)) => Some(map.clone()),
         Some(other) => {
             let got = super::input::type_name(Some(other));
-            input.issue(path, "invalid_type", &format!("Invalid input: expected object, received {got}"));
+            input.issue(
+                path,
+                "invalid_type",
+                &format!("Invalid input: expected object, received {got}"),
+            );
             None
         }
     }
 }
 
 /// `z.array(z.string())` (`max` items when set).
-pub(super) fn strings(input: &mut Input, path: &[Seg], value: Option<&Value>, max: Option<usize>) -> Option<Value> {
+pub(super) fn strings(
+    input: &mut Input,
+    path: &[Seg],
+    value: Option<&Value>,
+    max: Option<usize>,
+) -> Option<Value> {
     let Some(Value::Array(items)) = value else {
         let got = super::input::type_name(value);
-        input.issue(path, "invalid_type", &format!("Invalid input: expected array, received {got}"));
+        input.issue(
+            path,
+            "invalid_type",
+            &format!("Invalid input: expected array, received {got}"),
+        );
         return None;
     };
     let before = input.issue_count();
@@ -86,19 +108,38 @@ pub(super) fn strings(input: &mut Input, path: &[Seg], value: Option<&Value>, ma
         .map(Value::String)
         .collect();
     if let Some(max) = max.filter(|max| items.len() > *max) {
-        input.issue(path, "too_big", &format!("Too big: expected array to have <={max} items"));
+        input.issue(
+            path,
+            "too_big",
+            &format!("Too big: expected array to have <={max} items"),
+        );
     }
     (input.issue_count() == before).then_some(Value::Array(out))
 }
 
-pub(super) fn enum_field(input: &mut Input, obj: &Map<String, Value>, path: &[Seg], name: &str, options: &[&str], required: bool) -> Option<Value> {
+pub(super) fn enum_field(
+    input: &mut Input,
+    obj: &Map<String, Value>,
+    path: &[Seg],
+    name: &str,
+    options: &[&str],
+    required: bool,
+) -> Option<Value> {
     input
         .enum_at(&child(path, name), obj.get(name), options, required)
         .map(Value::String)
 }
 
-pub(super) fn bool_field(input: &mut Input, obj: &Map<String, Value>, path: &[Seg], name: &str, required: bool) -> Option<Value> {
-    input.bool_at(&child(path, name), obj.get(name), required).map(Value::Bool)
+pub(super) fn bool_field(
+    input: &mut Input,
+    obj: &Map<String, Value>,
+    path: &[Seg],
+    name: &str,
+    required: bool,
+) -> Option<Value> {
+    input
+        .bool_at(&child(path, name), obj.get(name), required)
+        .map(Value::Bool)
 }
 
 /// `commentPostSchema` (`types`) / `igStoryTargetSchema`.
@@ -113,7 +154,14 @@ fn post(input: &mut Input, path: &[Seg], value: Option<&Value>, types: &[&str]) 
 fn reply(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Option<Value> {
     let obj = object(input, path, value, true)?;
     let before = input.issue_count();
-    let kind = enum_field(input, &obj, path, "type", &["AIAgent", "text", "flow", "none"], true);
+    let kind = enum_field(
+        input,
+        &obj,
+        path,
+        "type",
+        &["AIAgent", "text", "flow", "none"],
+        true,
+    );
     let text = match obj.get("value") {
         Some(Value::Null) => Value::Null,
         other => input
@@ -131,7 +179,12 @@ fn reply(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Option<Value
                 for (i, item) in list.iter().enumerate() {
                     let item_path = idx(&at, i);
                     if let Some(entry) = object(input, &item_path, Some(item), true)
-                        && let Some(text) = input.string_at(&child(&item_path, "value"), entry.get("value"), Str::default(), true)
+                        && let Some(text) = input.string_at(
+                            &child(&item_path, "value"),
+                            entry.get("value"),
+                            Str::default(),
+                            true,
+                        )
                     {
                         texts.push(json!({ "value": text }));
                     }
@@ -143,7 +196,11 @@ fn reply(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Option<Value
             }
             other => {
                 let got = super::input::type_name(Some(other));
-                input.issue(&at, "invalid_type", &format!("Invalid input: expected array, received {got}"));
+                input.issue(
+                    &at,
+                    "invalid_type",
+                    &format!("Invalid input: expected array, received {got}"),
+                );
             }
         }
     }
@@ -154,10 +211,22 @@ fn reply(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Option<Value
 fn include_keywords(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Option<Value> {
     let obj = object(input, path, value, true)?;
     let before = input.issue_count();
-    let kind = enum_field(input, &obj, path, "type", &["all", "equal", "contain", "mentions"], true);
+    let kind = enum_field(
+        input,
+        &obj,
+        path,
+        "type",
+        &["all", "equal", "contain", "mentions"],
+        true,
+    );
     let values = strings(input, &child(path, "value"), obj.get("value"), None);
     let mentions = obj.get("mentionCount").and_then(|v| {
-        input.coerce_number_at(&child(path, "mentionCount"), Some(v), Num::int(1.0, 5.0), true)
+        input.coerce_number_at(
+            &child(path, "mentionCount"),
+            Some(v),
+            Num::int(1.0, 5.0),
+            true,
+        )
     });
     if input.issue_count() != before {
         return None;
@@ -216,7 +285,12 @@ pub(super) fn ai_moderation(input: &mut Input, path: &[Seg], value: &Value) -> O
                 .enumerate()
                 .filter_map(|(i, item)| {
                     input
-                        .enum_at(&idx(&child(path, "categories"), i), Some(item), &["hate", "offensive", "harassment", "negative", "spam"], true)
+                        .enum_at(
+                            &idx(&child(path, "categories"), i),
+                            Some(item),
+                            &["hate", "offensive", "harassment", "negative", "spam"],
+                            true,
+                        )
                         .map(Value::String)
                 })
                 .collect();
@@ -224,13 +298,17 @@ pub(super) fn ai_moderation(input: &mut Input, path: &[Seg], value: &Value) -> O
         }
         other => {
             let got = super::input::type_name(other);
-            input.issue(&child(path, "categories"), "invalid_type", &format!("Invalid input: expected array, received {got}"));
+            input.issue(
+                &child(path, "categories"),
+                "invalid_type",
+                &format!("Invalid input: expected array, received {got}"),
+            );
             None
         }
     };
-    let instruction = obj.get("instruction").and_then(|v| {
-        input.string_at(&child(path, "instruction"), Some(v), Str::max(1000), true)
-    });
+    let instruction = obj
+        .get("instruction")
+        .and_then(|v| input.string_at(&child(path, "instruction"), Some(v), Str::max(1000), true));
     let action = enum_field(input, &obj, path, "action", &["hide", "delete"], true);
     if input.issue_count() != before {
         return None;
@@ -241,7 +319,11 @@ pub(super) fn ai_moderation(input: &mut Input, path: &[Seg], value: &Value) -> O
             input.issue(&child(path, "aiAgentId"), "custom", "Choose an AI agent");
         }
         if categories.is_empty() {
-            input.issue(&child(path, "categories"), "custom", "Choose at least one category");
+            input.issue(
+                &child(path, "categories"),
+                "custom",
+                "Choose at least one category",
+            );
         }
         if input.issue_count() != before {
             return None;
@@ -259,7 +341,14 @@ fn hide_comments(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Opti
     let obj = object(input, path, value, true)?;
     let before = input.issue_count();
     let mut out = Map::new();
-    for name in ["all", "hasPhoneNumber", "hasImage", "hasVideo", "hasLink", "hasKeywords"] {
+    for name in [
+        "all",
+        "hasPhoneNumber",
+        "hasImage",
+        "hasVideo",
+        "hasLink",
+        "hasKeywords",
+    ] {
         if let Some(flag) = bool_field(input, &obj, path, name, true) {
             out.insert(name.into(), flag);
         }
@@ -300,7 +389,12 @@ pub(super) const REPLY_AFTER: &[&str] = &[
 fn reply_after(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Option<Value> {
     let obj = object(input, path, value, true)?;
     let kind = enum_field(input, &obj, path, "type", REPLY_AFTER, true);
-    let amount = input.coerce_number_at(&child(path, "value"), obj.get("value"), Num::default(), true);
+    let amount = input.coerce_number_at(
+        &child(path, "value"),
+        obj.get("value"),
+        Num::default(),
+        true,
+    );
     Some(json!({ "type": kind?, "value": super::number(amount?) }))
 }
 
@@ -312,7 +406,11 @@ pub(super) fn nullish_digits(input: &mut Input, name: &str) -> Option<Value> {
         Some(value) => {
             let text = input.string_at(&key(name), Some(&value), Str::default(), true)?;
             if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
-                input.issue(&key(name), "invalid_format", "Invalid string: must match pattern /^\\d+$/");
+                input.issue(
+                    &key(name),
+                    "invalid_format",
+                    "Invalid string: must match pattern /^\\d+$/",
+                );
                 return None;
             }
             Some(Value::String(text))
@@ -363,14 +461,29 @@ fn comment_body(input: &mut Input, required: bool) -> Map<String, Value> {
         }
     }
     const POST_TYPES: &[&str] = &["published", "ads", "reels", "postIds", "all", "live"];
-    field(input, &mut data, "post", required, |i, p, v| post(i, p, v, POST_TYPES));
+    field(input, &mut data, "post", required, |i, p, v| {
+        post(i, p, v, POST_TYPES)
+    });
     field(input, &mut data, "privateReply", required, reply);
     field(input, &mut data, "publicReply", required, reply);
-    field(input, &mut data, "includeKeywords", required, include_keywords);
-    field(input, &mut data, "excludeKeywords", required, |i, p, v| strings(i, p, v, None));
+    field(
+        input,
+        &mut data,
+        "includeKeywords",
+        required,
+        include_keywords,
+    );
+    field(input, &mut data, "excludeKeywords", required, |i, p, v| {
+        strings(i, p, v, None)
+    });
     if let Some(kind) = {
         let value = input.get("excludeKeywordsType").cloned();
-        input.enum_at(&key("excludeKeywordsType"), value.as_ref(), &["equal", "contain"], false)
+        input.enum_at(
+            &key("excludeKeywordsType"),
+            value.as_ref(),
+            &["equal", "contain"],
+            false,
+        )
     } {
         data.insert("excludeKeywordsType".into(), Value::String(kind));
     }
@@ -408,7 +521,9 @@ fn story_body(input: &mut Input, create: bool) -> Map<String, Value> {
             data.insert(name.into(), value);
         }
     }
-    field(input, &mut data, "story", false, |i, p, v| post(i, p, v, &["all", "storyIds"]));
+    field(input, &mut data, "story", false, |i, p, v| {
+        post(i, p, v, &["all", "storyIds"])
+    });
     field(input, &mut data, "reply", create, reply);
     field(input, &mut data, "includeKeywords", false, include_keywords);
     if !create {
@@ -422,7 +537,11 @@ pub(super) fn ids(input: &mut Input) -> Vec<i64> {
     let value = input.get("ids").cloned();
     let Some(Value::Array(items)) = value else {
         let got = super::input::type_name(value.as_ref());
-        input.issue(&key("ids"), "invalid_type", &format!("Invalid input: expected array, received {got}"));
+        input.issue(
+            &key("ids"),
+            "invalid_type",
+            &format!("Invalid input: expected array, received {got}"),
+        );
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -430,7 +549,11 @@ pub(super) fn ids(input: &mut Input) -> Vec<i64> {
         let path = idx(&key("ids"), i);
         if let Some(text) = input.string_at(&path, Some(item), Str::default(), true) {
             if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
-                input.issue(&path, "invalid_format", "Invalid string: must match pattern /^\\d+$/");
+                input.issue(
+                    &path,
+                    "invalid_format",
+                    "Invalid string: must match pattern /^\\d+$/",
+                );
             } else {
                 out.push(text.parse().unwrap_or(-1));
             }
@@ -453,16 +576,34 @@ pub(super) fn list_filter(input: &mut Input, stories: bool) -> ListFilter {
     };
     let folder_id = nullish_digits(input, "folderId").and_then(|v| v.as_str().map(str::to_string));
     let is_active = input.opt_coerced_bool("isActive");
-    let inbox_id = nullish_digits(input, "inboxId")
-        .and_then(|v| v.as_str().map(|t| t.parse().unwrap_or(-1)));
+    let inbox_id =
+        nullish_digits(input, "inboxId").and_then(|v| v.as_str().map(|t| t.parse().unwrap_or(-1)));
     let trigger = if stories {
         let value = input.get("trigger").cloned();
-        input.enum_at(&key("trigger"), value.as_ref(), &["storyReply", "storyMention"], false)
+        input.enum_at(
+            &key("trigger"),
+            value.as_ref(),
+            &["storyReply", "storyMention"],
+            false,
+        )
     } else {
         None
     };
-    let sort = if stories { None } else { sort_query(input, None) };
-    ListFilter { name, folder_id, is_active, inbox_id, trigger, sort, page, per_page }
+    let sort = if stories {
+        None
+    } else {
+        sort_query(input, None)
+    };
+    ListFilter {
+        name,
+        folder_id,
+        is_active,
+        inbox_id,
+        trigger,
+        sort,
+        page,
+        per_page,
+    }
 }
 
 pub(super) fn page(data: Vec<Value>, page_count: i64) -> Reply {
@@ -542,13 +683,28 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let value = input.get("type").cloned();
             let kind = input.enum_at(&key("type"), value.as_ref(), IG_TYPES, true);
             let value = input.get("trigger").cloned();
-            let trigger = input.enum_at(&key("trigger"), value.as_ref(), &["storyReply", "storyMention"], false);
+            let trigger = input.enum_at(
+                &key("trigger"),
+                value.as_ref(),
+                &["storyReply", "storyMention"],
+                false,
+            );
             let data = story_body(&mut input, true);
             input.finish()?;
-            let kind = if kind.as_deref() == Some("instagramFacebook") { "instagramFacebook" } else { "instagram" };
-            let row = crud::create_story(db, ws, kind, trigger.unwrap_or_else(|| "storyReply".into()), data)
-                .await
-                .map_err(|e| business_error(e, CREATING))?;
+            let kind = if kind.as_deref() == Some("instagramFacebook") {
+                "instagramFacebook"
+            } else {
+                "instagram"
+            };
+            let row = crud::create_story(
+                db,
+                ws,
+                kind,
+                trigger.unwrap_or_else(|| "storyReply".into()),
+                data,
+            )
+            .await
+            .map_err(|e| business_error(e, CREATING))?;
             Ok(json(201, row))
         }
         "update" if stories => {
@@ -568,13 +724,20 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                     None => "messenger",
                     Some(Value::String(text)) if text == "messenger" => "messenger",
                     Some(_) => {
-                        input.issue(&key("type"), "invalid_value", "Invalid input: expected \"messenger\"");
+                        input.issue(
+                            &key("type"),
+                            "invalid_value",
+                            "Invalid input: expected \"messenger\"",
+                        );
                         "messenger"
                     }
                 }
             } else {
                 let value = input.get("type").cloned();
-                match input.enum_at(&key("type"), value.as_ref(), IG_TYPES, true).as_deref() {
+                match input
+                    .enum_at(&key("type"), value.as_ref(), IG_TYPES, true)
+                    .as_deref()
+                {
                     Some("instagramFacebook") => "instagramFacebook",
                     _ => "instagram",
                 }
@@ -593,7 +756,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let value = input.get("type").cloned();
             if group == "fbComments" {
                 if value.as_ref().is_some_and(|v| v != "messenger") {
-                    input.issue(&key("type"), "invalid_value", "Invalid input: expected \"messenger\"");
+                    input.issue(
+                        &key("type"),
+                        "invalid_value",
+                        "Invalid input: expected \"messenger\"",
+                    );
                 }
             } else {
                 input.enum_at(&key("type"), value.as_ref(), IG_TYPES, false);

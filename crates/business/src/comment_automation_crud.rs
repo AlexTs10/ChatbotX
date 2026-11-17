@@ -115,7 +115,10 @@ fn select_list(table: Table) -> String {
         .join(", ")
 }
 
-fn row_json(table: Table, row: &chatbotx_db::rusqlite::Row<'_>) -> chatbotx_db::rusqlite::Result<Value> {
+fn row_json(
+    table: Table,
+    row: &chatbotx_db::rusqlite::Row<'_>,
+) -> chatbotx_db::rusqlite::Result<Value> {
     let mut out = Map::new();
     for (index, column) in table.columns.iter().enumerate() {
         let value = match row.get_ref(index)? {
@@ -239,7 +242,10 @@ pub async fn list(
         let filter_sql = clauses.join(" AND ");
         let total: i64 = conn
             .query_row(
-                &format!(r#"SELECT count(*) FROM "{}" WHERE {filter_sql}"#, table.name),
+                &format!(
+                    r#"SELECT count(*) FROM "{}" WHERE {filter_sql}"#,
+                    table.name
+                ),
                 params_from_iter(args.clone()),
                 |r| r.get(0),
             )
@@ -462,7 +468,9 @@ fn sql_value(column: &str, value: &Value) -> Sql {
     match value {
         Value::Null => Sql::Null,
         Value::Bool(flag) => Sql::Integer(i64::from(*flag)),
-        Value::Number(n) => n.as_i64().map_or(Sql::Real(n.as_f64().unwrap_or(0.0)), Sql::Integer),
+        Value::Number(n) => n
+            .as_i64()
+            .map_or(Sql::Real(n.as_f64().unwrap_or(0.0)), Sql::Integer),
         Value::String(text) if ID_COLUMNS.contains(&column) => {
             Sql::Integer(text.parse().unwrap_or(-1))
         }
@@ -501,10 +509,15 @@ fn insert(
     let sql = format!(
         r#"INSERT INTO "{}" ({}) VALUES ({})"#,
         table.name,
-        columns.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", "),
+        columns
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(", "),
         marks.join(", ")
     );
-    conn.execute(&sql, params_from_iter(args)).map_err(repo_err)?;
+    conn.execute(&sql, params_from_iter(args))
+        .map_err(repo_err)?;
     Ok(id)
 }
 
@@ -556,7 +569,8 @@ fn update_row(
         sets.join(", "),
         n - 1
     );
-    conn.execute(&sql, params_from_iter(args)).map_err(repo_err)?;
+    conn.execute(&sql, params_from_iter(args))
+        .map_err(repo_err)?;
     Ok(())
 }
 
@@ -614,7 +628,11 @@ fn supported_moderation(kind: &str, hide: &mut Map<String, Value>) {
 /// `withSupportedHideComments` + `withSupportedImageFilter` +
 /// `withLiveCapabilities` (Instagram), `withNormalizedReplies` (all).
 /// `existing` = the stored row on an update.
-pub fn normalize_comment_write(kind: &str, data: &mut Map<String, Value>, existing: Option<&Value>) {
+pub fn normalize_comment_write(
+    kind: &str,
+    data: &mut Map<String, Value>,
+    existing: Option<&Value>,
+) {
     normalize_replies(data);
     if kind == "messenger" {
         return;
@@ -644,10 +662,18 @@ fn live_capabilities(data: &mut Map<String, Value>, existing: Option<&Value>) {
             .or_else(|| existing.and_then(|e| e.get(key)).cloned())
     };
     let post = from(data, "post");
-    if post.as_ref().and_then(|p| p.get("type")).and_then(Value::as_str) != Some("live") {
+    if post
+        .as_ref()
+        .and_then(|p| p.get("type"))
+        .and_then(Value::as_str)
+        != Some("live")
+    {
         return;
     }
-    data.insert("publicReply".into(), json!({ "type": "none", "value": null }));
+    data.insert(
+        "publicReply".into(),
+        json!({ "type": "none", "value": null }),
+    );
     if let Some(Value::Object(mut options)) = from(data, "options") {
         options.insert("likeUserComment".into(), json!(false));
         options.insert("ignoreCommentReplies".into(), json!(false));
@@ -672,7 +698,10 @@ fn live_capabilities(data: &mut Map<String, Value>, existing: Option<&Value>) {
         }
         data.insert("hideComments".into(), Value::Object(hide));
     }
-    data.insert("replyAfter".into(), json!({ "type": "immediately", "value": 0 }));
+    data.insert(
+        "replyAfter".into(),
+        json!({ "type": "immediately", "value": 0 }),
+    );
 }
 
 /// `buildThreadsOptions` / `buildThreadsHideComments` / the TikTok builders
@@ -682,7 +711,8 @@ fn live_capabilities(data: &mut Map<String, Value>, existing: Option<&Value>) {
 pub fn build_channel_write(kind: &str, data: &mut Map<String, Value>, create: bool) {
     let tiktok = kind == "tiktok";
     if let Some(Value::Object(input)) = data.get("options").cloned() {
-        let flag = |key: &str, default: bool| input.get(key).and_then(Value::as_bool).unwrap_or(default);
+        let flag =
+            |key: &str, default: bool| input.get(key).and_then(Value::as_bool).unwrap_or(default);
         let mut out = json!({
             "replyToNewContactsOnly": flag("replyToNewContactsOnly", false),
             "replyOncePerUserPerPost": flag("replyOncePerUserPerPost", false),
@@ -742,7 +772,8 @@ pub fn build_channel_write(kind: &str, data: &mut Map<String, Value>, create: bo
         data.insert("privateReply".into(), value);
     }
     if create {
-        data.entry("excludeKeywordsType").or_insert_with(|| json!("contain"));
+        data.entry("excludeKeywordsType")
+            .or_insert_with(|| json!("contain"));
         data.entry("replyAfter")
             .or_insert_with(|| json!({ "type": "immediately", "value": 0 }));
     }
@@ -757,7 +788,10 @@ pub fn pin_story_mention(trigger: &str, data: &mut Map<String, Value>) {
         data.insert("story".into(), json!({ "type": "all", "value": [] }));
     }
     if data.contains_key("includeKeywords") {
-        data.insert("includeKeywords".into(), json!({ "type": "all", "value": [] }));
+        data.insert(
+            "includeKeywords".into(),
+            json!({ "type": "all", "value": [] }),
+        );
     }
 }
 
@@ -809,7 +843,8 @@ pub async fn update_comment(
         )?;
         normalize_comment_write(&kind, &mut data, Some(&existing));
         update_row(conn, COMMENTS, workspace_id, id, &data)?;
-        load(conn, COMMENTS, workspace_id, id, types)?.ok_or_else(|| BusinessError::not_found(message))
+        load(conn, COMMENTS, workspace_id, id, types)?
+            .ok_or_else(|| BusinessError::not_found(message))
     })
     .await
 }
@@ -826,7 +861,10 @@ pub async fn create_story(
         assert_account(conn, workspace_id, kind, data.get("inboxId"), None)?;
         let mut row = Map::new();
         row.insert("story".into(), json!({ "type": "all", "value": [] }));
-        row.insert("includeKeywords".into(), json!({ "type": "all", "value": [] }));
+        row.insert(
+            "includeKeywords".into(),
+            json!({ "type": "all", "value": [] }),
+        );
         row.extend(data);
         pin_story_mention(&trigger, &mut row);
         row.insert("trigger".into(), json!(trigger));
@@ -851,7 +889,13 @@ pub async fn update_story(
         let existing = load(conn, STORIES, workspace_id, id, IG_TYPES)?
             .ok_or_else(|| BusinessError::not_found(STORY_NOT_FOUND))?;
         let kind = existing["type"].as_str().unwrap_or("instagram");
-        assert_account(conn, workspace_id, kind, data.get("inboxId"), existing.get("inboxId"))?;
+        assert_account(
+            conn,
+            workspace_id,
+            kind,
+            data.get("inboxId"),
+            existing.get("inboxId"),
+        )?;
         pin_story_mention(existing["trigger"].as_str().unwrap_or_default(), &mut data);
         update_row(conn, STORIES, workspace_id, id, &data)?;
         load(conn, STORIES, workspace_id, id, IG_TYPES)?
@@ -873,7 +917,9 @@ mod tests {
         let mut data = obj(json!({ "publicReply": { "type": "text", "value": "Hi" } }));
         normalize_replies(&mut data);
         assert_eq!(data["publicReply"]["values"], json!([{ "value": "Hi" }]));
-        let mut data = obj(json!({ "publicReply": { "type": "text", "value": "x", "values": [{ "value": "A" }, { "value": "B" }] } }));
+        let mut data = obj(
+            json!({ "publicReply": { "type": "text", "value": "x", "values": [{ "value": "A" }, { "value": "B" }] } }),
+        );
         normalize_replies(&mut data);
         assert_eq!(data["publicReply"]["value"], json!("A"));
     }
@@ -888,13 +934,19 @@ mod tests {
             "replyAfter": { "type": "seconds", "value": 30 }
         }));
         normalize_comment_write("instagram", &mut data, None);
-        assert_eq!(data["publicReply"], json!({ "type": "none", "value": null }));
+        assert_eq!(
+            data["publicReply"],
+            json!({ "type": "none", "value": null })
+        );
         assert_eq!(data["options"]["likeUserComment"], json!(false));
         assert_eq!(data["options"]["onlyCommentsWithImage"], json!(false));
         assert_eq!(data["hideComments"]["all"], json!(false));
         assert_eq!(data["hideComments"]["hasGif"], json!(false));
         assert_eq!(data["hideComments"]["showCommentsAfter"], json!("none"));
-        assert_eq!(data["replyAfter"], json!({ "type": "immediately", "value": 0 }));
+        assert_eq!(
+            data["replyAfter"],
+            json!({ "type": "immediately", "value": 0 })
+        );
     }
 
     #[test]
@@ -902,9 +954,14 @@ mod tests {
         let mut data = obj(json!({ "hideComments": { "hasGif": true } }));
         normalize_comment_write("messenger", &mut data, None);
         assert_eq!(data["hideComments"]["hasGif"], json!(true));
-        let mut data = obj(json!({ "hideComments": { "hasGif": true, "aiModeration": { "action": "delete" } } }));
+        let mut data = obj(
+            json!({ "hideComments": { "hasGif": true, "aiModeration": { "action": "delete" } } }),
+        );
         normalize_comment_write("threads", &mut data, None);
-        assert_eq!(data["hideComments"]["aiModeration"]["action"], json!("hide"));
+        assert_eq!(
+            data["hideComments"]["aiModeration"]["action"],
+            json!("hide")
+        );
         assert_eq!(data["hideComments"]["hasGif"], json!(true));
     }
 
@@ -917,7 +974,10 @@ mod tests {
         build_channel_write("threads", &mut data, true);
         assert_eq!(data["options"]["likeUserComment"], json!(false));
         assert_eq!(data["options"]["replyToNewContactsOnly"], json!(true));
-        assert_eq!(data["privateReply"], json!({ "type": "none", "value": null }));
+        assert_eq!(
+            data["privateReply"],
+            json!({ "type": "none", "value": null })
+        );
         assert_eq!(data["hideComments"]["hasGif"], json!(false));
         assert_eq!(data["excludeKeywordsType"], json!("contain"));
         let mut data = obj(json!({

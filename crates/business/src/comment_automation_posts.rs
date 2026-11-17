@@ -45,14 +45,17 @@ async fn accounts(
             )
             .map_err(|e| BusinessError::Repo(e.into()))?;
         let rows = stmt
-            .query_map(chatbotx_db::rusqlite::params![workspace_id, row_type], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, Option<i64>>(2)?,
-                    r.get::<_, String>(3)?,
-                ))
-            })
+            .query_map(
+                chatbotx_db::rusqlite::params![workspace_id, row_type],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<i64>>(2)?,
+                        r.get::<_, String>(3)?,
+                    ))
+                },
+            )
             .map_err(|e| BusinessError::Repo(e.into()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| BusinessError::Repo(e.into()))?;
@@ -66,7 +69,10 @@ async fn accounts(
                     ig_id,
                     name,
                     inbox_id: inbox,
-                    token: auth["tokens"]["accessToken"].as_str().unwrap_or_default().to_string(),
+                    token: auth["tokens"]["accessToken"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
                     version: auth["metadata"]["version"].as_str().map(str::to_string),
                 }
             })
@@ -99,7 +105,13 @@ pub async fn list_instagram_media<U: Upstream>(
     stories: bool,
 ) -> Result<Value> {
     let facebook = variant == "instagramFacebook";
-    let list = accounts(db, workspace_id, if facebook { "facebook" } else { "instagram" }, inbox_id).await?;
+    let list = accounts(
+        db,
+        workspace_id,
+        if facebook { "facebook" } else { "instagram" },
+        inbox_id,
+    )
+    .await?;
     let pages: Vec<Value> = list
         .iter()
         .map(|a| json!({ "id": a.ig_id, "name": a.name }))
@@ -109,7 +121,10 @@ pub async fn list_instagram_media<U: Upstream>(
         let edge = if stories { "stories" } else { "media" };
         let url = if facebook {
             let version = account.version.as_deref().unwrap_or("v23.0");
-            format!("https://graph.facebook.com/{version}/{}/{edge}", account.ig_id)
+            format!(
+                "https://graph.facebook.com/{version}/{}/{edge}",
+                account.ig_id
+            )
         } else {
             let version = account.version.as_deref().unwrap_or("v22.0");
             format!("https://graph.instagram.com/{version}/me/{edge}")
@@ -146,12 +161,17 @@ pub async fn list_instagram_media<U: Upstream>(
             put("created_time", item.get("timestamp").cloned());
             put("permalink_url", item.get("permalink").cloned());
             if !stories {
-                put("media_product_type", item.get("media_product_type").cloned());
+                put(
+                    "media_product_type",
+                    item.get("media_product_type").cloned(),
+                );
             }
             out.insert("accountId".into(), json!(account.ig_id));
             out.insert(
                 "inboxId".into(),
-                account.inbox_id.map_or(Value::Null, |id| json!(id.to_string())),
+                account
+                    .inbox_id
+                    .map_or(Value::Null, |id| json!(id.to_string())),
             );
             items.push(Value::Object(out));
         }
@@ -185,7 +205,10 @@ pub async fn ensure_live_subscription<U: Upstream>(
         let reply = upstream
             .send(UpstreamRequest {
                 method: "POST",
-                url: format!("https://graph.instagram.com/{version}/{}/subscribed_apps", account.ig_id),
+                url: format!(
+                    "https://graph.instagram.com/{version}/{}/subscribed_apps",
+                    account.ig_id
+                ),
                 headers: vec![
                     ("Authorization".into(), format!("Bearer {}", account.token)),
                     ("Content-Type".into(), "application/json".into()),
@@ -207,10 +230,20 @@ mod tests {
 
     #[test]
     fn video_media_shows_its_thumbnail_but_a_video_story_its_url() {
-        let video = json!({ "media_type": "VIDEO", "media_url": "v.mp4", "thumbnail_url": "t.jpg" });
+        let video =
+            json!({ "media_type": "VIDEO", "media_url": "v.mp4", "thumbnail_url": "t.jpg" });
         assert_eq!(picture(&video, false), Some(json!("t.jpg")));
         assert_eq!(picture(&video, true), Some(json!("v.mp4")));
-        assert_eq!(picture(&json!({ "media_type": "VIDEO", "media_url": "v.mp4" }), false), None);
-        assert_eq!(picture(&json!({ "thumbnail_url": "t.jpg" }), false), Some(json!("t.jpg")));
+        assert_eq!(
+            picture(
+                &json!({ "media_type": "VIDEO", "media_url": "v.mp4" }),
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            picture(&json!({ "thumbnail_url": "t.jpg" }), false),
+            Some(json!("t.jpg"))
+        );
     }
 }
