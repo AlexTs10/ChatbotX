@@ -95,8 +95,14 @@ fn contact_variable() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\{\{[^{}\n]+\}\}").expect("regex"))
 }
 
-fn has_contact_variable(text: &str) -> bool {
+/// `hasContactVariable`.
+pub fn has_contact_variable(text: &str) -> bool {
     contact_variable().is_match(text)
+}
+
+/// `text.replace(CONTACT_VARIABLE_PATTERN, "")`.
+pub fn strip_contact_variables(text: &str) -> String {
+    contact_variable().replace_all(text, "").into_owned()
 }
 
 fn collapse_contact_variables(text: &str) -> String {
@@ -118,21 +124,24 @@ fn display_text_props(kind: &str) -> &'static [&'static str] {
     }
 }
 
-fn map_strings(holder: Option<&mut Value>, keys: &[&str], f: &mut dyn FnMut(&mut String)) {
+fn map_strings(holder: Option<&mut Value>, keys: &[&str], f: &mut dyn FnMut(&mut String, bool)) {
     if let Some(Value::Object(holder)) = holder {
         for key in keys {
             if let Some(Value::String(text)) = holder.get_mut(*key) {
-                f(text);
+                f(text, false);
             }
         }
     }
 }
 
-/// The display texts of a node's props (`nodeDisplayTextSlots`), mutably.
-fn for_each_display_text(kind: &str, props: &mut Map<String, Value>, f: &mut dyn FnMut(&mut String)) {
+/// The display texts of a node's props (`nodeDisplayTextSlots`), mutably;
+/// `f` also gets whether the text is markdown (`isMarkdownText`).
+fn for_each_display_text(kind: &str, props: &mut Map<String, Value>, f: &mut dyn FnMut(&mut String, bool)) {
+    let markdown =
+        kind == "RichText" || (kind == "TextBody" && props.get("markdown") == Some(&Value::Bool(true)));
     for key in display_text_props(kind) {
         if let Some(Value::String(text)) = props.get_mut(*key) {
-            f(text);
+            f(text, markdown && *key == "text");
         }
     }
     if let Some(Value::Array(options)) = props.get_mut("data-source") {
@@ -149,12 +158,12 @@ fn for_each_display_text(kind: &str, props: &mut Map<String, Value>, f: &mut dyn
             map_strings(item.get_mut("main-content"), CONTENT, f);
             map_strings(item.get_mut("end"), CONTENT, f);
             if let Some(Value::String(badge)) = item.get_mut("badge") {
-                f(badge);
+                f(badge, false);
             }
             if let Some(Value::Array(tags)) = item.get_mut("tags") {
                 for tag in tags {
                     if let Value::String(tag) = tag {
-                        f(tag);
+                        f(tag, false);
                     }
                 }
             }
@@ -165,8 +174,43 @@ fn for_each_display_text(kind: &str, props: &mut Map<String, Value>, f: &mut dyn
 fn node_has_contact_variables(node: &Node) -> bool {
     let mut props = node.props.clone();
     let mut found = false;
-    for_each_display_text(&node.kind, &mut props, &mut |text| found |= has_contact_variable(text));
+    for_each_display_text(&node.kind, &mut props, &mut |text, _| found |= has_contact_variable(text));
     found
+}
+
+/// `mapDisplayText` in place: `f` gets every screen title and display text
+/// and whether it is markdown.
+pub fn map_display_text(definition: &mut Definition, f: &mut dyn FnMut(&mut String, bool)) {
+    for screen in &mut definition.screens {
+        f(&mut screen.title, false);
+        super::walk_mut(&mut screen.children, &mut |node| for_each_display_text(&node.kind, &mut node.props, f));
+    }
+}
+
+const WORD_JOINER: &str = "\u{2060}";
+
+/// `escapeContactValue`: a value put into `text` always shows as itself, never
+/// as a `${...}` reference, a `{{variable}}`, markdown, or the end of a quoted
+/// string inside a nested expression.
+pub fn escape_contact_value(value: &str, text: &str, markdown: bool) -> String {
+    let mut escaped = value.replace("${", &format!("${WORD_JOINER}{{")).replace("{{", &format!("{{{WORD_JOINER}{{"));
+    let escape = |s: &str, specials: &str| {
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            if specials.contains(c) {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out
+    };
+    if markdown {
+        escaped = escape(&escaped, "\\*_~[]()#-.`");
+    }
+    if super::expression::is_nested_expression(text) {
+        escaped = escape(&escaped, "\\'\"");
+    }
+    escaped
 }
 
 // ----------------------------------------------------------- screens
@@ -353,7 +397,7 @@ fn check_node_props(node: &Node, ctx: &ScreenContext) -> Vec<Report> {
     let Some(definition) = component(&node.kind) else { return out };
     // Schema, with each `{{variable}}` counted as one character.
     let mut measured = node.props.clone();
-    for_each_display_text(&node.kind, &mut measured, &mut |text| *text = collapse_contact_variables(text));
+    for_each_display_text(&node.kind, &mut measured, &mut |text, _| *text = collapse_contact_variables(text));
     measured.remove(ACTION_KEY);
     let parsed = definition.props.safe_parse(&Value::Object(clean_object(&measured)));
     for issue in parsed.issues() {

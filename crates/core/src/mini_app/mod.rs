@@ -18,7 +18,10 @@ pub mod validate;
 pub use catalog::{Component, component, needs_name};
 pub use runtime::*;
 pub use serialize::{ImportError, from_flow_json, to_flow_json, to_nested_expression};
-pub use validate::{LocatedIssue, ValidationIssue, ValidationResult, locate_issues, validate};
+pub use validate::{
+    LocatedIssue, ValidationIssue, ValidationResult, escape_contact_value, has_contact_variable, locate_issues,
+    map_display_text, strip_contact_variables, validate,
+};
 
 /// `MINI_APP_FLOW_JSON_VERSION`.
 pub const FLOW_JSON_VERSION: &str = "7.3";
