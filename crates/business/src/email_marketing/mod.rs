@@ -7,7 +7,14 @@
 //! read the satellite auth with [`load_auth`] and call the provider through
 //! an [`Http`] (production: [`SafeHttp`], SSRF-checked on every hop).
 
+pub mod active_campaign;
+pub mod drip;
+pub mod get_response;
+pub mod klaviyo;
 pub mod mailchimp;
+pub mod mailer_lite;
+pub mod moosend;
+pub mod sendgrid;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -182,6 +189,49 @@ pub(crate) async fn call(http: &dyn Http, request: Request) -> Outcome<Reply> {
     http.send(request).await.map_err(ProviderError::new)
 }
 
+/// Sends `request` and parses the JSON answer; a non-2xx answer is an
+/// error with `message(payload, status)`.
+pub(crate) async fn json_call(
+    http: &dyn Http,
+    request: Request,
+    message: impl FnOnce(Option<&Value>, u16) -> String,
+) -> Outcome<Option<Value>> {
+    let reply = call(http, request).await?;
+    let payload = reply.payload();
+    if !reply.ok() {
+        return Err(ProviderError::http(
+            message(payload.as_ref(), reply.status),
+            reply.status,
+            &reply,
+        ));
+    }
+    Ok(payload)
+}
+
+/// `payload[key]` as an array (`.default([])`); not an object = invalid.
+pub(crate) fn items(payload: Option<Value>, key: &str, provider: &str) -> Outcome<Vec<Value>> {
+    match payload {
+        Some(Value::Object(mut map)) => match map.remove(key) {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(items)) => Ok(items),
+            Some(_) => Err(invalid_response(provider)),
+        },
+        _ => Err(invalid_response(provider)),
+    }
+}
+
+/// `payload.<path>` as a string.
+pub(crate) fn text_at<'a>(payload: Option<&'a Value>, path: &[&str]) -> Option<&'a str> {
+    let mut value = payload?;
+    for key in path {
+        value = match key.parse::<usize>() {
+            Ok(index) => value.get(index)?,
+            Err(_) => value.get(*key)?,
+        };
+    }
+    value.as_str().filter(|s| !s.is_empty())
+}
+
 /// The process-wide [`SafeHttp`].
 pub fn safe_http() -> &'static SafeHttp {
     static HTTP: OnceLock<SafeHttp> = OnceLock::new();
@@ -210,6 +260,20 @@ impl ProviderError {
         }
     }
 
+    /// A step's own `{ status: "error" }` return (no provider error log).
+    pub fn local(message: impl Into<String>) -> ProviderError {
+        ProviderError {
+            kind: Some(LOCAL),
+            ..ProviderError::new(message)
+        }
+    }
+
+    /// `false` for [`ProviderError::local`]: the TS step returned without
+    /// `logStepProviderError`.
+    pub fn logged(&self) -> bool {
+        self.kind != Some(LOCAL)
+    }
+
     pub fn http(message: impl Into<String>, status: u16, reply: &Reply) -> ProviderError {
         ProviderError {
             status: Some(status),
@@ -232,6 +296,8 @@ impl From<BusinessError> for ProviderError {
 }
 
 pub type Outcome<T> = Result<T, ProviderError>;
+
+const LOCAL: &str = "local";
 
 /// A zod parse failure of a provider answer.
 pub(crate) fn invalid_response(provider: &str) -> ProviderError {
