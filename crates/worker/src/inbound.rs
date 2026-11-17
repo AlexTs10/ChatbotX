@@ -1076,7 +1076,7 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
         .read(move |conn| {
             Ok(conn
                 .query_row(
-                    r#"SELECT m."id", m."createdAt", m."conversationId", m."contactInboxId"
+                    r#"SELECT m."id", m."createdAt", m."conversationId", m."contactInboxId", m."contentAttributes"
                        FROM "Message" m WHERE m."workspaceId" = ?1 AND m."sourceId" = ?2
                        ORDER BY m."createdAt" DESC LIMIT 1"#,
                     params![workspace_id, source_id],
@@ -1086,6 +1086,7 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
                             r.get::<_, i64>(1)?,
                             r.get::<_, i64>(2)?,
                             r.get::<_, i64>(3)?,
+                            r.get::<_, Option<String>>(4)?,
                         ))
                     },
                 )
@@ -1093,12 +1094,58 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
         })
         .await
         .map_err(db_fail)?;
-    let Some((message_id, created_at, conversation_id, contact_inbox_id)) = found else {
+    let Some((message_id, created_at, conversation_id, contact_inbox_id, attributes)) = found
+    else {
         return Ok(());
     };
     let Some(conversation) = crate::load_conversation(&deps.db, conversation_id).await? else {
         return Ok(());
     };
+    // `message:delivered` / `message:failed` with the send's metadata (the
+    // broadcast-ops listener). ponytail: `message:seen` and
+    // `message:received` feed analytics only (Q.D13).
+    if matches!(status.status.as_str(), "delivered" | "failed")
+        && let Some(contact_inbox) =
+            crate::load_contact_inbox(&deps.db, contact_inbox_id, conversation.contact_id).await?
+    {
+        let attributes: Value = attributes
+            .and_then(|a| serde_json::from_str(&a).ok())
+            .unwrap_or(Value::Null);
+        let metadata = attributes
+            .get("metadata")
+            .filter(|m| m.is_object())
+            .cloned()
+            .unwrap_or_else(|| json!({ "type": "updateStatus" }));
+        let mut action = json!({ "messageId": message_id.to_string() });
+        for key in ["flowId", "flowVersionId"] {
+            if let Some(value) = attributes.get(key).filter(|v| v.is_string()) {
+                action[key] = value.clone();
+            }
+        }
+        let at = status.timestamp.unwrap_or_else(now_ms);
+        let ctx = crate::events::MessageContext::of(&conversation, &contact_inbox);
+        let mut extra = json!({ "nodeId": attributes.get("nodeId").cloned().unwrap_or(json!("")) });
+        let event_type = if status.status == "delivered" {
+            extra["providerOccurredAt"] = json!(chatbotx_db::repo::iso(at));
+            "message:delivered"
+        } else {
+            extra["errorData"] = status
+                .error
+                .as_ref()
+                .map_or(json!({}), |e| json!({ "message": e }));
+            extra["willRetry"] = json!(false);
+            "message:failed"
+        };
+        crate::events::emit_message_event(
+            deps.events.as_ref(),
+            event_type,
+            &ctx,
+            action,
+            Some(&metadata),
+            extra,
+        )
+        .await;
+    }
     match status.status.as_str() {
         "failed" => {
             crate::chat::persist_send_error(
@@ -1112,8 +1159,8 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
             .await;
         }
         "delivered" | "read" => {
-            // ponytail: message delivery / read state, the "Last Delivered"
-            // system field and the analytics events are Q.W2.
+            // ponytail: the message delivery / read state and `markReadByContact`
+            // are not ported; the "Last Delivered" field is.
             let at = status.timestamp.unwrap_or_else(now_ms);
             let contact_id = conversation.contact_id;
             let result = deps
