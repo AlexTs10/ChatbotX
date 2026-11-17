@@ -96,8 +96,9 @@ pub struct ApiState {
     pub files: Option<Arc<chatbotx_files::Uploader>>,
     /// `NEXT_PUBLIC_EDITION` (read once at start; tests set it).
     pub edition: chatbotx_business::keys::Edition,
-    /// `encryptUtils` (`ENCRYPTION_KEY*`, read once at start); `None` = the
-    /// keys are unset (credential writes fail).
+    /// `encryptUtils` (`ENCRYPTION_KEY*`, read once at start: credential
+    /// writes, connect-session auth, platform credentials); `None` = the keys
+    /// are unset (credential writes fail, an OAuth connect is not configured).
     pub encryption: Option<Arc<chatbotx_core::encryption::Encryption>>,
     /// `LICENSE_KEY` (read once at start; tests set it).
     pub license_token: Option<String>,
@@ -106,9 +107,6 @@ pub struct ApiState {
     /// The query embedding client (`aiFiles.search`); the provider APIs by
     /// default.
     pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
-    /// `encryptUtils` (connect-session auth, platform credentials); `None` =
-    /// no valid `ENCRYPTION_KEY` (an OAuth connect is then not configured).
-    pub encryption: Option<Arc<chatbotx_core::encryption::Encryption>>,
 }
 
 impl ApiState {
@@ -130,7 +128,6 @@ impl ApiState {
             license_token: std::env::var("LICENSE_KEY").ok(),
             license_keys: chatbotx_business::license::LICENSE_PUBLIC_KEYS,
             embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
-            encryption: None,
         }
     }
 
