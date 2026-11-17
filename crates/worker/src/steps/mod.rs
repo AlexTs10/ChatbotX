@@ -4,6 +4,7 @@
 //! for the TypeScript `void` handlers.
 
 pub(crate) mod ai_step;
+mod appointment;
 mod condition;
 mod contact;
 mod conversation;
@@ -157,6 +158,9 @@ pub(crate) async fn run(
     if let Some(action) = crate::heavy::action_of(step_type) {
         return crate::heavy::run_step(&ctx, action).await;
     }
+    if let Some(status) = appointment::run(&ctx, step_type).await? {
+        return Ok(status);
+    }
     match step_type {
         "condition" => condition::handle(&ctx).await,
         "pipeline" => pipeline::handle(&ctx).await,
@@ -172,7 +176,7 @@ pub(crate) async fn run(
         }
         other => {
             // ponytail: steps of unported domains (AI, ads, email/CRM,
-            // spreadsheets, appointments, ecommerce, ...) are implicit
+            // spreadsheets, ecommerce, ...) are implicit
             // successes until their units; see specs/Q.W3.md.
             tracing::warn!(
                 step_type = other,

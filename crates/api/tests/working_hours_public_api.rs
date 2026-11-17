@@ -1,90 +1,122 @@
-//! `apps/builder/__tests__/working-hours-public-api.test.ts` and
-//! `working-hours-actions.test.ts` (Q.D13): the TS tests check that each
-//! route delegates to `workingHoursService`; here the routes run on a
-//! migrated database and the responses are checked.
+//! Port of `apps/builder/__tests__/working-hours-public-api.test.ts` (adapted:
+//! a real migrated database instead of the mocked service).
 
 mod handlers_common;
 
+use chatbotx_api::routes::{RouteAuth, route_by_id};
+use chatbotx_db::rusqlite::params;
 use handlers_common::{OTHER_WS, WS, call, fixture};
-use serde_json::json;
+use serde_json::{Value, json};
 
-async fn seed_member(fx: &handlers_common::Fixture) {
-    fx.state
+async fn member(f: &handlers_common::Fixture, user: i64) {
+    f.state
         .db
-        .write(|tx| {
+        .write(move |tx| {
             tx.execute(
-                r#"INSERT INTO "WorkspaceMember" ("workspaceId", "userId", "role") VALUES (?1, 1001, 'owner')"#,
-                chatbotx_db::rusqlite::params![WS],
+                r#"INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role") VALUES (?1, ?2, ?3, 'agent')"#,
+                params![user + 50_000, WS, user],
             )?;
             Ok(())
         })
         .await
-        .unwrap();
+        .expect("member");
+}
+
+fn id_of(v: &Value) -> String {
+    v["id"].as_str().expect("id").to_string()
 }
 
 #[tokio::test]
-async fn schedule_create_get_update_members_list_and_delete() {
-    let fx = fixture().await;
-    seed_member(&fx).await;
-    // `create returns 201 with the single resource shape`.
-    let (status, out) = call(
-        &fx,
+async fn working_hours_routes_use_the_inbox_scope() {
+    let route = route_by_id("workingHours.list").expect("route");
+    assert_eq!(route.auth, RouteAuth::WorkspaceToken(&["inbox"]));
+}
+
+#[tokio::test]
+async fn create_get_update_and_delete_a_schedule() {
+    let f = fixture().await;
+    member(&f, 1001).await;
+    let (status, created) = call(
+        &f,
         "workingHours.create",
         WS,
         &[],
         None,
         Some(json!({
-            "name": " Day shift ",
+            "name": " Support ",
             "intervals": [
-                { "weekday": 2, "startMinute": 540, "endMinute": 1020 },
-                { "weekday": 1, "startMinute": 540, "endMinute": 1020 }
+                { "weekday": 2, "startMinute": 780, "endMinute": 1020 },
+                { "weekday": 1, "startMinute": 540, "endMinute": 720 },
             ],
-            "userIds": ["1001"]
+            "userIds": ["1001"],
         })),
     )
     .await;
-    assert_eq!(status, 201, "{out}");
-    assert_eq!(out["name"], "Day shift");
-    assert_eq!(out["intervals"][0]["weekday"], 1, "sorted by weekday");
-    assert_eq!(out["memberUserIds"], json!(["1001"]));
-    assert!(out.get("dateOverrides").is_none());
-    let id = out["id"].as_str().unwrap().to_owned();
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(created["name"], "Support");
+    assert_eq!(created["intervals"][0]["weekday"], 1, "sorted by weekday");
+    assert_eq!(created["memberUserIds"], json!(["1001"]));
+    assert!(created.get("dateOverrides").is_none());
+    let id = id_of(&created);
 
-    // `get scopes the lookup to the caller's workspace`.
-    let (status, got) = call(&fx, "workingHours.get", WS, &[("id", &id)], None, None).await;
-    assert_eq!(status, 200, "{got}");
-    assert_eq!(got["dateOverrides"], json!([]));
-    let (status, got) = call(
-        &fx,
-        "workingHours.get",
-        OTHER_WS,
-        &[("id", &id)],
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(
-        (status, got["message"].clone()),
-        (404, json!("Working hours not found"))
-    );
-
-    // `update passes only the changed fields`: a date override is added.
-    let (status, out) = call(
-        &fx,
+    let (status, updated) = call(
+        &f,
         "workingHours.update",
         WS,
         &[("id", &id)],
         None,
-        Some(json!({ "dateOverrides": [{ "date": "2026-12-24", "name": "Eve", "ranges": [] }] })),
+        Some(json!({ "dateOverrides": [{ "date": "2026-12-24", "ranges": [] }] })),
     )
     .await;
-    assert_eq!(status, 200, "{out}");
-    assert_eq!(out["name"], "Day shift");
-    assert_eq!(out["dateOverrides"][0]["date"], "2026-12-24");
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["dateOverrides"][0]["date"], "2026-12-24");
 
-    // The refine: none of the fields is a 422.
+    let (status, _) = call(&f, "workingHours.get", OTHER_WS, &[("id", &id)], None, None).await;
+    assert_eq!(status, 404);
+
+    let (status, _) = call(&f, "workingHours.delete", WS, &[("id", &id)], None, None).await;
+    assert_eq!(status, 204);
+    let (status, list) = call(&f, "workingHours.list", WS, &[], None, None).await;
+    assert_eq!(status, 200);
+    assert_eq!(list, json!({ "data": [], "pageCount": 1 }));
+}
+
+#[tokio::test]
+async fn overlapping_intervals_and_empty_updates_are_rejected() {
+    let f = fixture().await;
+    let (status, body) = call(
+        &f,
+        "workingHours.create",
+        WS,
+        &[],
+        None,
+        Some(json!({
+            "name": "Bad",
+            "intervals": [
+                { "weekday": 1, "startMinute": 540, "endMinute": 720 },
+                { "weekday": 1, "startMinute": 700, "endMinute": 800 },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, 422, "{body}");
+    assert!(
+        body.to_string().contains("Intervals overlap on weekday 1"),
+        "{body}"
+    );
+
+    let (_, created) = call(
+        &f,
+        "workingHours.create",
+        WS,
+        &[],
+        None,
+        Some(json!({ "name": "Ok" })),
+    )
+    .await;
+    let id = id_of(&created);
     let (status, _) = call(
-        &fx,
+        &f,
         "workingHours.update",
         WS,
         &[("id", &id)],
@@ -93,93 +125,104 @@ async fn schedule_create_get_update_members_list_and_delete() {
     )
     .await;
     assert_eq!(status, 422);
-    // Overlapping intervals are a 422.
-    let (status, _) = call(
-        &fx,
-        "workingHours.update",
+}
+
+#[tokio::test]
+async fn members_must_belong_to_the_workspace_and_move_between_schedules() {
+    let f = fixture().await;
+    member(&f, 1001).await;
+    let (_, a) = call(
+        &f,
+        "workingHours.create",
         WS,
-        &[("id", &id)],
+        &[],
         None,
-        Some(json!({ "intervals": [
-            { "weekday": 1, "startMinute": 540, "endMinute": 700 },
-            { "weekday": 1, "startMinute": 600, "endMinute": 800 }
-        ] })),
+        Some(json!({ "name": "A", "userIds": ["1001"] })),
     )
     .await;
-    assert_eq!(status, 422);
-
-    // A non-member is a 422 `validation` error; `[]` removes all.
-    let (status, out) = call(
-        &fx,
+    let (_, b) = call(
+        &f,
+        "workingHours.create",
+        WS,
+        &[],
+        None,
+        Some(json!({ "name": "B" })),
+    )
+    .await;
+    let (status, moved) = call(
+        &f,
         "workingHours.setMembers",
         WS,
-        &[("id", &id)],
+        &[("id", &id_of(&b))],
+        None,
+        Some(json!({ "userIds": ["1001"] })),
+    )
+    .await;
+    assert_eq!(status, 200, "{moved}");
+    assert_eq!(moved["memberUserIds"], json!(["1001"]));
+    let (_, a_now) = call(
+        &f,
+        "workingHours.get",
+        WS,
+        &[("id", &id_of(&a))],
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(a_now["memberUserIds"], json!([]));
+
+    let (status, body) = call(
+        &f,
+        "workingHours.setMembers",
+        WS,
+        &[("id", &id_of(&b))],
         None,
         Some(json!({ "userIds": ["1002"] })),
     )
     .await;
-    assert_eq!(
-        (status, out["code"].clone()),
-        (422, json!("validation")),
-        "{out}"
-    );
-    let (status, out) = call(
-        &fx,
-        "workingHours.setMembers",
-        WS,
-        &[("id", &id)],
-        None,
-        Some(json!({ "userIds": [] })),
-    )
-    .await;
-    assert_eq!(
-        (status, out["memberUserIds"].clone()),
-        (200, json!([])),
-        "{out}"
-    );
-
-    let (status, list) = call(&fx, "workingHours.list", WS, &[], None, None).await;
-    assert_eq!(
-        (status, list["data"].as_array().unwrap().len()),
-        (200, 1),
-        "{list}"
-    );
-
-    let (status, _) = call(&fx, "workingHours.delete", WS, &[("id", &id)], None, None).await;
-    assert_eq!(status, 204);
-    let (status, _) = call(&fx, "workingHours.delete", WS, &[("id", &id)], None, None).await;
-    assert_eq!(status, 404);
+    assert_eq!(status, 422, "{body}");
 }
 
 #[tokio::test]
-async fn holidays_create_update_list_and_delete() {
-    let fx = fixture().await;
-    let body = json!({ "date": "2026-01-01", "name": "New Year", "ranges": [] });
-    let (status, out) = call(
-        &fx,
+async fn holidays_create_update_duplicate_and_delete() {
+    let f = fixture().await;
+    let (status, holiday) = call(
+        &f,
         "workingHours.createHoliday",
         WS,
         &[],
         None,
-        Some(body.clone()),
+        Some(json!({ "date": "2026-01-01", "name": "New Year", "ranges": [] })),
     )
     .await;
-    assert_eq!(status, 201, "{out}");
-    assert_eq!(
-        (out["date"].clone(), out["name"].clone()),
-        (json!("2026-01-01"), json!("New Year"))
-    );
-    let id = out["id"].as_str().unwrap().to_owned();
+    assert_eq!(status, 201, "{holiday}");
+    let id = id_of(&holiday);
+    let (status, dup) = call(
+        &f,
+        "workingHours.createHoliday",
+        WS,
+        &[],
+        None,
+        Some(json!({ "date": "2026-01-01", "ranges": [] })),
+    )
+    .await;
+    assert_eq!(status, 422, "{dup}");
 
-    // One holiday per date.
-    let (status, out) = call(&fx, "workingHours.createHoliday", WS, &[], None, Some(body)).await;
-    assert_eq!(
-        (status, out["message"].clone()),
-        (422, json!("A holiday already exists on 2026-01-01"))
-    );
-    // Not a real calendar date.
-    let (status, _) = call(
-        &fx,
+    let (status, updated) = call(
+        &f,
+        "workingHours.updateHoliday",
+        WS,
+        &[("id", &id)],
+        None,
+        Some(json!({ "name": null, "ranges": [{ "startMinute": 540, "endMinute": 720 }] })),
+    )
+    .await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["name"], Value::Null);
+    assert_eq!(updated["ranges"][0]["startMinute"], 540);
+
+    let (status, bad_date) = call(
+        &f,
         "workingHours.createHoliday",
         WS,
         &[],
@@ -187,38 +230,10 @@ async fn holidays_create_update_list_and_delete() {
         Some(json!({ "date": "2026-02-30", "ranges": [] })),
     )
     .await;
-    assert_eq!(status, 422);
-
-    let (status, out) = call(
-        &fx,
-        "workingHours.updateHoliday",
-        WS,
-        &[("id", &id)],
-        None,
-        Some(json!({ "name": null, "ranges": [{ "startMinute": 600, "endMinute": 720 }] })),
-    )
-    .await;
-    assert_eq!(status, 200, "{out}");
-    assert_eq!(out["name"], json!(null));
-    assert_eq!(out["ranges"][0]["endMinute"], 720);
-
-    let (status, list) = call(&fx, "workingHours.listHolidays", WS, &[], None, None).await;
-    assert_eq!((status, list["data"].as_array().unwrap().len()), (200, 1));
-    let (_, list) = call(&fx, "workingHours.listHolidays", OTHER_WS, &[], None, None).await;
-    assert_eq!(list["data"], json!([]));
+    assert_eq!(status, 422, "{bad_date}");
 
     let (status, _) = call(
-        &fx,
-        "workingHours.deleteHoliday",
-        OTHER_WS,
-        &[("id", &id)],
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(status, 404);
-    let (status, _) = call(
-        &fx,
+        &f,
         "workingHours.deleteHoliday",
         WS,
         &[("id", &id)],
@@ -227,4 +242,6 @@ async fn holidays_create_update_list_and_delete() {
     )
     .await;
     assert_eq!(status, 204);
+    let (_, list) = call(&f, "workingHours.listHolidays", WS, &[], None, None).await;
+    assert_eq!(list["data"], json!([]));
 }

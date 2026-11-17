@@ -10,6 +10,7 @@ pub mod ai_function;
 pub mod ai_handover;
 pub mod ai_mcp_server;
 pub mod analytics;
+pub mod appointment;
 pub mod audit;
 pub mod automated_response;
 pub mod automation_action;

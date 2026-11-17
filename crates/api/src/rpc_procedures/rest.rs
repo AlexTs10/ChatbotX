@@ -9,12 +9,10 @@ use serde_json::{Map, Value, json};
 use super::{Ctx, In, Outcome, action_fail, arg, fail, schema_errors};
 use crate::handlers::input::Input;
 use crate::handlers::input::{Str, key};
-use crate::handlers::working_hours::{self as wh, audited};
 use crate::handlers::{response_sla, saved_replies, webhooks};
 use crate::orpc::OrpcError;
 
 mod flow_reads;
-use chatbotx_business::working_hours as wh_service;
 
 pub(super) const ACTIONS: &[&str] = &[
     "listSavedRepliesAction",
@@ -26,13 +24,6 @@ pub(super) const ACTIONS: &[&str] = &[
     "deleteWebhooksAction",
     "updateWebhookAction",
     "updateWebhookSettingsAction",
-    "createWorkingHoursAction",
-    "updateWorkingHoursAction",
-    "deleteWorkingHoursAction",
-    "replaceWorkingHoursMembersAction",
-    "createHolidayAction",
-    "updateHolidayAction",
-    "deleteHolidayAction",
     "createSpreadsheetAction",
     "updateSpreadsheetAction",
     "deleteSpreadsheetAction",
@@ -86,9 +77,6 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
         }
         "leaderboardsAPI.listLeaderboardOptionsAPI" => {
             flow_reads::leaderboard_options(api, ws).await.map_err(fail)
-        }
-        "workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI" => {
-            wh::options(api, ws).await.map_err(fail)
         }
         _ => return None,
     })
@@ -246,68 +234,6 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             let (name, active) = webhooks::settings(&mut input);
             checked(input)?;
             webhooks::update_settings(api, ws, id, name, active)
-                .await
-                .map(|()| Value::Null)
-                .map_err(action_fail)
-        }
-        "createWorkingHoursAction" => {
-            let mut input = input_at(args, 1);
-            let (name, intervals, users) = wh::create_request(&mut input);
-            checked(input)?;
-            let outcome = wh_service::create(&api.db, ws, name, intervals, users).await;
-            audited(api, "create", outcome).await.map_err(action_fail)
-        }
-        "updateWorkingHoursAction" => {
-            let id = bound(args, 1)?;
-            let mut input = input_at(args, 2);
-            let data = wh::update_request(&mut input);
-            checked(input)?;
-            let outcome = wh_service::update(&api.db, ws, id, data).await;
-            audited(api, "update", outcome).await.map_err(action_fail)
-        }
-        "deleteWorkingHoursAction" => {
-            let id = bound(args, 1)?;
-            let outcome = wh_service::delete(&api.db, ws, id).await.map(|d| ((), d));
-            audited(api, "delete", outcome)
-                .await
-                .map(|()| Value::Null)
-                .map_err(action_fail)
-        }
-        "replaceWorkingHoursMembersAction" => {
-            let id = bound(args, 1)?;
-            let mut input = input_at(args, 2);
-            let users = wh::members_request(&mut input);
-            checked(input)?;
-            let outcome = wh_service::replace_members(&api.db, ws, id, users).await;
-            audited(api, "update", outcome).await.map_err(action_fail)
-        }
-        "createHolidayAction" => {
-            let mut input = input_at(args, 1);
-            let data = wh::create_holiday_request(&mut input);
-            checked(input)?;
-            let outcome = wh_service::add_holiday(&api.db, ws, data).await;
-            audited(api, "create", outcome)
-                .await
-                .map(|row| wh_service::holiday_json(&row))
-                .map_err(action_fail)
-        }
-        "updateHolidayAction" => {
-            let id = bound(args, 1)?;
-            let mut input = input_at(args, 2);
-            let (name, ranges) = wh::update_holiday_request(&mut input);
-            checked(input)?;
-            let outcome = wh_service::update_holiday(&api.db, ws, id, name, ranges).await;
-            audited(api, "update", outcome)
-                .await
-                .map(|row| wh_service::holiday_json(&row))
-                .map_err(action_fail)
-        }
-        "deleteHolidayAction" => {
-            let id = bound(args, 1)?;
-            let outcome = wh_service::delete_holiday(&api.db, ws, id)
-                .await
-                .map(|d| ((), d));
-            audited(api, "delete", outcome)
                 .await
                 .map(|()| Value::Null)
                 .map_err(action_fail)
