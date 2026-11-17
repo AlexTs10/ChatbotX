@@ -7,6 +7,7 @@ pub mod chunk;
 pub mod extract;
 pub mod llm;
 pub mod model;
+mod office;
 pub mod text;
 pub mod toolset;
 
