@@ -14,14 +14,14 @@ adsCampaignAPI.publishMessagingAd	1		missing
 adsCampaignAPI.retryMessagingAd	1		missing
 adsCampaignAPI.uploadAdVideo	1		missing
 aiAgentsAPI.key	1	web	missing
-aiAgentsAPI.listAIAgentsAPI	1	web	missing
-aiFilesAPI.getAIFileAuthenticatedAPI	2		missing
-aiFilesAPI.listAIFilesAuthenticatedAPI	1	web	missing
-aiFunctionsAPI.listAIFunctionsAuthenticatedAPI	1	web	missing
-aiHandoverAPIs.getApplyToAllStatus	2		missing
-aiHandoverAPIs.listBulkHistory	2		missing
-aiMcpServerAPIs.listAIMcpServersAuthenticatedAPI	1	web	missing
-aiMcpServerAPIs.validateAIMcpServerAuthenticatedAPI	1		missing
+aiAgentsAPI.listAIAgentsAPI	1	web	rust
+aiFilesAPI.getAIFileAuthenticatedAPI	2	web	rust
+aiFilesAPI.listAIFilesAuthenticatedAPI	1	web	rust
+aiFunctionsAPI.listAIFunctionsAuthenticatedAPI	1	web	rust
+aiHandoverAPIs.getApplyToAllStatus	2		rust
+aiHandoverAPIs.listBulkHistory	2		rust
+aiMcpServerAPIs.listAIMcpServersAuthenticatedAPI	1	web	rust
+aiMcpServerAPIs.validateAIMcpServerAuthenticatedAPI	1	web	rust
 appointmentCalendarsAPI.getContactAvailabilityAPI	2	web	missing
 appointmentCalendarsAPI.listAppointmentCalendarsForFlowAPI	2	web	missing
 appointmentsAPI.key	1	web	missing
@@ -144,17 +144,17 @@ pipelinesAPI.privateListItemActivityAPI	2	web	missing
 pipelinesAPI.privateListItemCommentsAPI	2	web	missing
 pipelinesAPI.privateListPipelineMembersAPI	1		missing
 pipelinesAPI.privateListPipelineOptionsAPI	2	web	rust
-pipelinesAPI.privateListPipelinesAPI	3	web	missing
+pipelinesAPI.privateListPipelinesAPI	3	web	rust
 pipelinesAPI.privateListStagePageAPI	1		missing
 placesNearMeAPI.listPlaceCategoryOptionsAPI	2	web	rust
 platformCredentialsAPI.getGiphyApiKeyAPI	1	web	missing
-pollsAPI.bulkDeletePollsAPI	1		missing
-pollsAPI.createPollAPI	1		missing
-pollsAPI.getPollAnalyticsAPI	1		missing
-pollsAPI.getPollLinksAPI	1		missing
-pollsAPI.key	1		missing
-pollsAPI.updatePollAPI	1		missing
-productsAPI.listProductFormOptionsAPI	4	web	missing
+pollsAPI.bulkDeletePollsAPI	1	web	rust
+pollsAPI.createPollAPI	1		rust
+pollsAPI.getPollAnalyticsAPI	1		rust
+pollsAPI.getPollLinksAPI	1	web	rust
+pollsAPI.key	1	web	missing
+pollsAPI.updatePollAPI	1		rust
+productsAPI.listProductFormOptionsAPI	4	web	rust
 productsAPI.listProductsAuthorizedAPI	2		missing
 productsAPI.listSendableProductsAuthorizedAPI	2	web	rust
 questionnairesAPI.listQuestionnairesForFlowAPI	1	web	rust

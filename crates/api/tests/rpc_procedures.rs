@@ -453,7 +453,7 @@ async fn an_unported_procedure_passes_auth_and_answers_not_ported() {
     let (status, body) = call(
         &fixture,
         "GET",
-        "/rpc/pollsAPI/listPollsAPI",
+        "/rpc/leaderboardsAPI/listLeaderboardOptionsAPI",
         Some("membertoken"),
         json!({ "workspaceId": WORKSPACE_ID.to_string() }),
     )
