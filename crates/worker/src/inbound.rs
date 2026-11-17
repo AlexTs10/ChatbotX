@@ -1380,7 +1380,7 @@ mod tests {
             quick_reply_action: quick.map(str::to_owned),
             message: Some(IncomingMessage {
                 text: Some(text.to_owned()),
-                ..IncomingMessage::default()
+                ..IncomingMessage::incoming(None)
             }),
             ..Received::default()
         };
