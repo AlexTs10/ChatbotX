@@ -333,7 +333,7 @@ pub fn verify_upload(
     let Some(mime) = sniff_mime_type(head, declared) else {
         return Err("type_not_allowed");
     };
-    let allowed = rules.allowed_mime_types.iter().any(|t| *t == mime)
+    let allowed = rules.allowed_mime_types.contains(&mime)
         || (mime == "image/heic" && rules.allowed_mime_types.iter().any(|t| t == "image/heif"));
     if blocked.is_match(&mime) || !allowed {
         return Err("type_not_allowed");

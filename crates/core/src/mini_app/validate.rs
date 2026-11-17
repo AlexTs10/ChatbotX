@@ -531,10 +531,8 @@ fn check_node_props(node: &Node, ctx: &ScreenContext) -> Vec<Report> {
                 );
             }
         }
-        "NavigationList" => {
-            if count_with_text(node.props.get(LIST_ITEMS_KEY), "badge") > 1 {
-                out.push(report("navigation_badge_multiple").prop(LIST_ITEMS_KEY));
-            }
+        "NavigationList" if count_with_text(node.props.get(LIST_ITEMS_KEY), "badge") > 1 => {
+            out.push(report("navigation_badge_multiple").prop(LIST_ITEMS_KEY));
         }
         _ => {}
     }

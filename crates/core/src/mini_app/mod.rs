@@ -255,9 +255,7 @@ pub fn screen_actions(screen: &Screen) -> Vec<Action> {
 
 /// `isTerminalScreen`.
 pub fn is_terminal_screen(screen: &Screen) -> bool {
-    screen_actions(screen)
-        .iter()
-        .any(|a| *a == Action::Complete)
+    screen_actions(screen).contains(&Action::Complete)
 }
 
 /// `nodeName`.
