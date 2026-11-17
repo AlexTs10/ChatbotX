@@ -9,6 +9,7 @@ pub mod ai_handover;
 pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
+pub mod broadcasts;
 pub mod capabilities;
 pub mod channel_integrations;
 pub mod channel_settings;
@@ -31,6 +32,7 @@ pub mod contacts_bulk;
 pub mod conversations;
 pub mod custom_fields;
 pub mod ecommerce_settings;
+pub mod email_topics;
 pub mod error_logs;
 pub mod flows;
 pub mod folders;
@@ -62,6 +64,7 @@ pub mod sequences;
 pub mod spreadsheets;
 pub mod tags;
 pub mod templates;
+pub mod triggers;
 pub mod webchats;
 pub mod webhooks;
 pub mod working_hours;
@@ -572,8 +575,14 @@ async fn route(
         analytics::handle(state, route_id, call).await
     } else if contact_sequences::ROUTES.contains(&route_id) {
         contact_sequences::handle(state, route_id, call).await
+    } else if email_topics::ROUTES.contains(&route_id) {
+        email_topics::handle(state, route_id, call).await
+    } else if triggers::ROUTES.contains(&route_id) {
+        triggers::handle(state, route_id, call).await
     } else if sequences::ROUTES.contains(&route_id) {
         sequences::handle(state, route_id, call).await
+    } else if broadcasts::ROUTES.contains(&route_id) {
+        broadcasts::handle(state, route_id, call).await
     } else if bot_fields::ROUTES.contains(&route_id) {
         bot_fields::handle(state, route_id, call).await
     } else if contact_custom_fields::ROUTES.contains(&route_id) {

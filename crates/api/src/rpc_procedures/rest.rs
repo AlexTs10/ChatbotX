@@ -1,15 +1,12 @@
-//! The Q.D13 rest domains: saved replies, response SLA, persistent menus
-//! (actions), webhooks, spreadsheets, dynamic images, decisions, magic links,
-//! leaderboards (`features/<domain>/api/{private,authorized}.ts` and
+//! The Q.D13 rest domains: saved replies, response SLA, webhooks, working
+//! hours, spreadsheets, magic links (persistent menus: `user_persistent_menus`) (`features/<domain>/api/{private,authorized}.ts` and
 //! `features/<domain>/actions/*`). Request checks are the public handlers'
 //! ones; a schema failure is the action's `validationErrors`.
 
 use chatbotx_business::saved_reply::{self, Update};
-use chatbotx_business::tx;
-use chatbotx_db::repo::small_repos;
 use serde_json::{Map, Value, json};
 
-use super::{Ctx, In, Outcome, action_fail, arg, fail, public, schema_errors};
+use super::{Ctx, In, Outcome, action_fail, arg, fail, schema_errors};
 use crate::handlers::input::Input;
 use crate::handlers::input::{Str, key};
 use crate::handlers::working_hours::{self as wh, audited};
@@ -23,9 +20,6 @@ pub(super) const ACTIONS: &[&str] = &[
     "editSavedReplyAction",
     "deleteSavedReplyAction",
     "updateResponseSlaAction",
-    "createUserPersistentMenuAction",
-    "updateUserPersistentMenuAction",
-    "deleteUserPersistentMenuAction",
     "createWebhookAction",
     "deleteWebhooksAction",
     "updateWebhookAction",
@@ -156,43 +150,6 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             response_sla::upsert(api, ws, data)
                 .await
                 .map_err(action_fail)
-        }
-        "createUserPersistentMenuAction" => public(
-            ctx,
-            "userPersistentMenus.create",
-            &[],
-            None,
-            Some(arg(args, 1)),
-        )
-        .await
-        .map(|_| Value::Null)
-        .map_err(schema_errors),
-        "updateUserPersistentMenuAction" => {
-            let id = bound(args, 1)?.to_string();
-            public(
-                ctx,
-                "userPersistentMenus.update",
-                &[("id", id)],
-                None,
-                Some(arg(args, 2)),
-            )
-            .await
-            .map(|_| Value::Null)
-            .map_err(schema_errors)
-        }
-        "deleteUserPersistentMenuAction" => {
-            let ids = In(arg(args, 1)).ids("ids")?;
-            tx::write(&api.db, move |c| {
-                let deleted = small_repos::delete_user_persistent_menus(c, ws, &ids)?;
-                if ids.len() == 1 && deleted.is_empty() {
-                    return Err(chatbotx_business::BusinessError::not_found(
-                        "User persistent menu not found",
-                    ));
-                }
-                Ok(Value::Null)
-            })
-            .await
-            .map_err(action_fail)
         }
         "createWebhookAction" => {
             let mut input = input_at(args, 1);

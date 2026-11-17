@@ -37,6 +37,11 @@ impl SqliteDispatchSchedule {
         Ok(SqliteDispatchSchedule { db, observer })
     }
 
+    /// The schedule on an already migrated `db` (the server migrates at boot).
+    pub fn new(db: Arc<Db>, observer: Option<Arc<dyn TxObserver>>) -> SqliteDispatchSchedule {
+        SqliteDispatchSchedule { db, observer }
+    }
+
     /// One write transaction, reported to the observer.
     async fn write<R, F>(&self, f: F) -> Result<R, ScheduleError>
     where
@@ -118,6 +123,29 @@ impl SqliteDispatchSchedule {
         })
         .await
     }
+}
+
+/// `addToSchedule` inside the caller's write transaction (the API's
+/// enrollments and step changes, Q.D5): the entry commits with the dispatch
+/// row. Call [`wake_producer`] after the commit.
+pub fn schedule_in(
+    conn: &Connection,
+    bucket: u32,
+    dispatch_id: &str,
+    at_ms: i64,
+) -> Result<(), ScheduleError> {
+    let id = dispatch_number(dispatch_id)?;
+    conn.execute(
+        UPSERT,
+        params![kind_str(ScheduleKind::Schedule), id, bucket, at_ms],
+    )
+    .map_err(store)?;
+    Ok(())
+}
+
+/// Wakes the producer of this process after [`schedule_in`] committed.
+pub fn wake_producer() {
+    signal().notify_one();
 }
 
 const UPSERT: &str = "INSERT INTO sequence_schedule (kind, dispatch_id, bucket, at_ms) VALUES (?1, ?2, ?3, ?4) \
