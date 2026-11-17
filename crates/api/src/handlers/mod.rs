@@ -34,6 +34,7 @@ pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod email_topics;
 pub mod error_logs;
+pub mod external_webhooks;
 pub mod flows;
 pub mod folders;
 pub mod inbox_teams;
@@ -673,6 +674,8 @@ async fn route(
         response_sla::handle(state, route_id, call).await
     } else if webhooks::ROUTES.contains(&route_id) {
         webhooks::handle(state, route_id, call).await
+    } else if external_webhooks::ROUTES.contains(&route_id) {
+        external_webhooks::handle(state, route_id, call).await
     } else if magic_links::ROUTES.contains(&route_id) {
         magic_links::handle(state, route_id, call).await
     } else if spreadsheets::ROUTES.contains(&route_id) {
