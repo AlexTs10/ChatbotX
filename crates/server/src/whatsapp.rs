@@ -57,6 +57,10 @@ pub fn router(db: Arc<Db>, jobs: Arc<dyn Enqueuer>, is_cloud: bool, app_url: &st
             get(handle_tiktok).post(handle_tiktok),
         )
         .route(
+            "/integrations/tiktok/webhook/c/{credential_id}",
+            get(handle_tiktok_scoped).post(handle_tiktok_scoped),
+        )
+        .route(
             "/integrations/zalo/webhook",
             get(handle_zalo).post(handle_zalo),
         )
@@ -117,6 +121,42 @@ async fn handle_tiktok(
         chatbotx_worker::channels::tiktok::webhook(
             &state.db,
             state.jobs.as_ref(),
+            None,
+            signature,
+            &String::from_utf8_lossy(&body),
+        )
+        .await,
+    )
+}
+
+/// `/integrations/tiktok/webhook/c/{credentialId}`: cloud only, a user-scoped
+/// `tiktok` credential whose owner owns the account's workspace.
+async fn handle_tiktok_scoped(
+    State(state): State<WebhookState>,
+    Path(credential_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    use chatbotx_worker::channels::tiktok;
+    let owner = if state.is_cloud {
+        tiktok::credential_owner(&state.db, &credential_id).await
+    } else {
+        None
+    };
+    let Some(owner) = owner else {
+        return reply(chatbotx_worker::channels::whatsapp_webhook::json_reply(
+            404,
+            tiktok::NOT_CONFIGURED,
+        ));
+    };
+    let signature = headers
+        .get(tiktok::SIGNATURE_HEADER)
+        .and_then(|v| v.to_str().ok());
+    reply(
+        tiktok::webhook(
+            &state.db,
+            state.jobs.as_ref(),
+            Some(owner),
             signature,
             &String::from_utf8_lossy(&body),
         )

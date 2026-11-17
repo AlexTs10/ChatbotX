@@ -594,3 +594,64 @@ fn maps_descriptions_and_statuses_to_categories() {
         (Category::PayloadInvalid, Some("tiktokError"))
     );
 }
+
+// ---- credential-scoped route (`handleTiktokWebhook(req, credentialId)`) ----
+
+struct NoJobs;
+
+impl Enqueuer for NoJobs {
+    fn add(
+        &self,
+        _: QueueName,
+        _: &str,
+        _: Value,
+        _: JobOptions,
+    ) -> chatbotx_jobs::BoxFuture<'_, Result<chatbotx_jobs::AddResult, chatbotx_jobs::JobsError>>
+    {
+        Box::pin(async { Err(chatbotx_jobs::JobsError::Unavailable("test".into())) })
+    }
+
+    fn add_bulk(
+        &self,
+        _: QueueName,
+        _: Vec<chatbotx_jobs::NewJob>,
+    ) -> chatbotx_jobs::BoxFuture<'_, Result<Vec<chatbotx_jobs::AddResult>, chatbotx_jobs::JobsError>>
+    {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+/// Port of: apps/builder/src/app/integrations/[...integration]/webhook.ts `handleTiktokWebhook` credential-scoped branch: a user credential whose owner owns the account's workspace passes; another owner's, a platform row or an unknown id is `Integration is not configured` (404).
+#[tokio::test]
+async fn the_credential_scoped_route_checks_the_owner() {
+    let dir = std::env::temp_dir().join(format!(
+        "chatbotx-worker-tiktok-{}",
+        chatbotx_core::utils::id::create_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = Arc::new(Db::open(dir.join("t.db")).unwrap());
+    db.migrate().await.unwrap();
+    db.write(|tx| {
+        for sql in [
+            r#"INSERT INTO "User" ("id", "email") VALUES (1, 'a@example.test'), (2, 'b@example.test')"#,
+            r#"INSERT INTO "Workspace" ("id", "name", "ownerId") VALUES (10, 'WS', 1)"#,
+            r#"INSERT INTO "Inbox" ("id", "workspaceId", "name", "channel", "sourceId") VALUES (4, 10, 'TT', 'tiktok', 'open-1')"#,
+            r#"INSERT INTO "IntegrationTiktok" ("id", "auth", "openId", "name", "workspaceId", "inboxId") VALUES (5, '{"clientSecret":"s"}', 'open-1', 'TT', 10, 4)"#,
+            r#"INSERT INTO "PlatformCredential" ("id", "userId", "type", "publicConfig", "value") VALUES (21, 1, 'tiktok', '{}', '{}'), (22, 2, 'tiktok', '{}', '{}'), (23, NULL, 'tiktok', '{}', '{}')"#,
+        ] {
+            tx.execute(sql, [])?;
+        }
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(credential_owner(&db, "21").await, Some(1));
+    assert_eq!(credential_owner(&db, "23").await, None);
+    assert_eq!(credential_owner(&db, "x").await, None);
+    let removed = json!({ "event": "authorization.removed", "user_openid": "open-1" }).to_string();
+    let other = webhook(&db, &NoJobs, credential_owner(&db, "22").await, None, &removed).await;
+    assert_eq!((other.status, other.body.contains(NOT_CONFIGURED)), (404, true));
+    let own = webhook(&db, &NoJobs, Some(1), None, &removed).await;
+    assert_eq!(own.status, 200);
+    let _ = std::fs::remove_dir_all(dir);
+}

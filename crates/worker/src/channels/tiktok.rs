@@ -1072,12 +1072,14 @@ pub fn handle_request(
     Ok(route_event(config_open_id, &event))
 }
 
-/// `handleTiktokWebhook` (`/integrations/tiktok/webhook`).
-// ponytail: the credential-scoped route (`/integrations/tiktok/webhook/{credentialId}`,
-// cloud resellers) is not ported.
+/// `handleTiktokWebhook` (`/integrations/tiktok/webhook` and, with
+/// `credential_owner`, the cloud credential-scoped
+/// `/integrations/tiktok/webhook/c/{credentialId}`: the account's workspace
+/// must belong to the credential's owner).
 pub async fn webhook(
     db: &Arc<Db>,
     jobs: &dyn Enqueuer,
+    credential_owner: Option<i64>,
     signature: Option<&str>,
     body: &str,
 ) -> WebhookReply {
@@ -1113,6 +1115,29 @@ pub async fn webhook(
         Ok(None) => return json_reply(404, "TikTok account not found"),
         Err(e) => return json_reply(400, &e.to_string()),
     };
+    if let Some(credential_owner) = credential_owner {
+        let owner = db
+            .read(move |conn| {
+                Ok(conn
+                    .query_row(
+                        r#"SELECT "ownerId" FROM "Workspace" WHERE "id" = ?1"#,
+                        params![workspace_id],
+                        |r| r.get::<_, Option<i64>>(0),
+                    )
+                    .optional()?
+                    .flatten())
+            })
+            .await;
+        if owner.ok().flatten() != Some(credential_owner) {
+            tracing::warn!(
+                credential_owner,
+                open_id,
+                workspace_id,
+                "Ignoring credential-scoped TikTok webhook for another owner's inbox"
+            );
+            return json_reply(404, NOT_CONFIGURED);
+        }
+    }
     // As in the original, the revocation is recorded before the signature
     // check (it carries no state the sender could abuse beyond a reconnect).
     if parsed["event"] == "authorization.removed" {
@@ -1167,6 +1192,31 @@ pub async fn webhook(
             json_reply(400, &message)
         }
     }
+}
+
+/// `notConfigured()`.
+pub const NOT_CONFIGURED: &str = "Integration is not configured";
+
+/// The owner of a user-scoped `tiktok` credential that does not defer to
+/// the platform one (`findDecryptedForWebhook`); `None` = not configured.
+// ponytail: the row is not decrypted (only its owner is read); the
+// signature is checked with the account's own `clientSecret`, as the original.
+pub async fn credential_owner(db: &Arc<Db>, credential_id: &str) -> Option<i64> {
+    let id: i64 = credential_id.parse().ok()?;
+    db.read(move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT "userId" FROM "PlatformCredential"
+                   WHERE "id" = ?1 AND "type" = 'tiktok' AND "userId" IS NOT NULL
+                     AND "usePlatformCredential" = 0 LIMIT 1"#,
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 fn ok() -> WebhookReply {
