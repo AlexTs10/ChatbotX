@@ -66,6 +66,7 @@ pub mod media_library;
 pub mod message;
 pub mod message_actions;
 pub mod messenger_menu;
+pub mod facebook_lead_ads;
 pub mod meta_capi;
 pub mod meta_catalog;
 pub mod minigame;

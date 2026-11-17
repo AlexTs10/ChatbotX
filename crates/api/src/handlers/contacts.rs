@@ -881,7 +881,7 @@ fn array_of<T>(
 }
 
 /// `sort` preprocess: an array of `{id, desc}` (or its JSON text), else none.
-fn sort_items(value: Option<&Value>) -> Option<Vec<SortItem>> {
+pub(crate) fn sort_items(value: Option<&Value>) -> Option<Vec<SortItem>> {
     let parsed = match value? {
         Value::String(text) => serde_json::from_str::<Value>(text).ok()?,
         other => other.clone(),

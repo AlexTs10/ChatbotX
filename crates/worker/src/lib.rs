@@ -23,6 +23,7 @@ pub mod inbound;
 pub mod inbound_events;
 pub mod inbox_labels;
 pub mod integration;
+pub mod lead_ads;
 pub mod low;
 pub mod meta_catalog;
 pub mod notification;
