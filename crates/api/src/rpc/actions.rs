@@ -282,6 +282,36 @@ async fn run(
     }
 }
 
+/// The action behind the P4 SPA stub `/rpc/actions/<export>`
+/// (`apps/web/src/lib/server-action.ts`): `updateWorkspaceBasicAction` →
+/// `("workspaceActions", "updateWorkspaceBasic")`. `None` = not an action here.
+pub fn spa_target(export: &str) -> Option<(&'static str, &str)> {
+    let name = export.strip_suffix("Action").unwrap_or(export);
+    ACTION_KEYS
+        .iter()
+        .find(|key| gate_of(key, name).is_some())
+        .map(|key| (*key, name))
+}
+
+/// The SPA stub input `{ args: [...bindArgs, input?] }` as this module's
+/// input `{ workspaceId, id?, ...input }`: the string bind args are the
+/// workspace id and the second id; they win over same-named input keys.
+pub fn spa_input(input: &Value) -> Value {
+    let mut out = Map::new();
+    let mut binds = Vec::new();
+    for arg in input.get("args").and_then(Value::as_array).into_iter().flatten() {
+        match arg {
+            Value::String(_) => binds.push(arg.clone()),
+            Value::Object(fields) => out.extend(fields.clone()),
+            _ => {}
+        }
+    }
+    for (name, value) in ["workspaceId", "id"].into_iter().zip(binds) {
+        out.insert(name.to_string(), value);
+    }
+    Value::Object(out)
+}
+
 /// Serves `/rpc/<key>/<name>` when `key` is an action key; `None` otherwise.
 pub async fn handle(
     state: &RpcState,

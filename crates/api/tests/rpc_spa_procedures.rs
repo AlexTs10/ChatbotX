@@ -974,3 +974,46 @@ async fn dashboard_analytics_procedures_run_the_public_routes() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn spa_stub_path_runs_the_workspace_actions_with_their_gates() {
+    let (router, db) = router().await;
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateWorkspaceBasicAction",
+        json!([ws(), { "name": "Renamed" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let name: String = db
+        .read(|conn| {
+            Ok(conn.query_row(
+                r#"SELECT "name" FROM "Workspace" WHERE "id" = ?1"#,
+                [WS],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(name, "Renamed");
+    // An agent is no workspace super admin.
+    let (status, out) = act(
+        &router,
+        "assignedtoken",
+        "scheduleWorkspaceDeletionAction",
+        json!([ws()]),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK, "{out}");
+    // A bad input is the next-safe-action validation error.
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateWorkspaceBasicAction",
+        json!([ws(), { "name": "" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    assert!(out["data"]["validationErrors"]["name"].is_object(), "{out}");
+}
