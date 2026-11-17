@@ -50,6 +50,17 @@ they decide on.
 - Parity fixtures: `parity/stacks/rust/ext/p1-05.ts` (place id 10),
   `p1-10.ts` (place id 13).
 
+## Parity (Rust stack, Dell, 2026-11-17)
+
+p1-05 `00`, `05`–`08` + p1-10 `00`, `30`, `31`: 452 / 454 pass. The 2 failures
+need workers that are not ported (Q.W2): `07` "queues unhandled recent
+comments; the worker posts the public reply" (low-queue
+`replayMissedComment`) and `08` "schedules a run (202); the worker walks the
+conversations" (contact-scan worker; the API part passes: the run stays
+`init`). p1-02 `ai-files`: the setup (AI key connect) now passes; the 7 tests
+that wait for chunks / embeddings time out (heavy worker, Q.W2), the other
+tests pass.
+
 ## Not done
 
 - `connection/state-service.ts` as one DB service (the Rust writes keep their

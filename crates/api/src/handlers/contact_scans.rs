@@ -4,8 +4,8 @@
 use chatbotx_business::contact_scan as service;
 use serde_json::Value;
 
-use super::input::{Input, Str, key};
-use super::qr_codes::public_paging;
+use super::input::{Input, key};
+use super::qr_codes::{public_paging, sort_query};
 use super::{ApiState, Call, ErrorMap, LISTING, Reply, business_error, json};
 
 /// The routes of this module.
@@ -85,8 +85,8 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .has("integrationId")
                 .then(|| input.digits_id("integrationId"))
                 .flatten();
-            // ponytail: `sort` is accepted and ignored (newest first, the default).
-            let _ = input.string("sort", Str::default());
+            // ponytail: `sort` is validated and ignored (newest first, the default).
+            let _ = sort_query(&mut input, None);
             input.finish()?;
             service::list(db, ws, integration_id, page, per_page)
                 .await

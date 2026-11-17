@@ -3,6 +3,7 @@
 //! (Q.I1a: the API channel inbound), `typing` / `markRead` /
 //! `deliveryStatus` (Q.D2c: queued for the worker's API `Channel`).
 
+use axum::response::IntoResponse as _;
 use chatbotx_business::BusinessError;
 use chatbotx_jobs::queues::integration::{
     IntegrationJob, IntegrationJobAction, enqueue_integration_job,
@@ -159,7 +160,7 @@ fn parse_incoming_api_message(body: &[u8]) -> Result<Value, crate::orpc::OrpcErr
                     input.enum_at(
                         &child(&path, "fileType"),
                         item.get("fileType"),
-                        &["image", "video", "audio", "gif", "file"],
+                        &["image", "audio", "video", "file"],
                         true,
                     );
                     input.string_at(&child(&path, "mimeType"), item.get("mimeType"), any, true);
@@ -211,7 +212,9 @@ fn parse_incoming_api_message(body: &[u8]) -> Result<Value, crate::orpc::OrpcErr
 /// `channels.sendMessage`: queue the inbound message on the integration
 /// queue (`incomingMessage`), `202 { accepted, messageSourceId }`.
 async fn send_message(state: &ApiState, call: ChannelCall, body: &[u8]) -> Reply {
-    assert_not_rate_limited(state, call)?;
+    if let Some(limited) = rate_limited(state, call) {
+        return Ok(limited);
+    }
     let payload = parse_incoming_api_message(body)?;
     let source_id = payload["message"]["sourceId"].clone();
     let jobs = state
@@ -274,14 +277,18 @@ async fn signal(state: &ApiState, route_id: &str, call: ChannelCall, body: &[u8]
             let value = input.get("typing").cloned();
             input.bool_at(&key("typing"), value.as_ref(), true);
             input.finish()?;
-            assert_not_rate_limited(state, call)?;
+            if let Some(limited) = rate_limited(state, call) {
+                return Ok(limited);
+            }
             tracing::debug!(inbox_id = call.inbox_id, source_id = ?source_id, "Received contact typing notification");
             None
         }
         "channels.markRead" => {
             let source_id = contact_source_id(&mut input);
             input.finish()?;
-            assert_not_rate_limited(state, call)?;
+            if let Some(limited) = rate_limited(state, call) {
+                return Ok(limited);
+            }
             let source_id = source_id.unwrap_or_default();
             Some(IntegrationJob {
                 action: IntegrationJobAction::ContactMarkAsRead,
@@ -311,7 +318,9 @@ async fn signal(state: &ApiState, route_id: &str, call: ChannelCall, body: &[u8]
             let timestamp = input.string("timestamp", Str::default());
             let error = input.get("error").cloned();
             input.finish()?;
-            assert_not_rate_limited(state, call)?;
+            if let Some(limited) = rate_limited(state, call) {
+                return Ok(limited);
+            }
             let mut payload = Map::new();
             payload.insert("messageId".into(), json!(message_id));
             payload.insert("status".into(), json!(status));
@@ -341,24 +350,26 @@ async fn signal(state: &ApiState, route_id: &str, call: ChannelCall, body: &[u8]
     Ok(super::no_content())
 }
 
-/// `assertNotRateLimited` (120 requests per inbox per 10 s).
-fn assert_not_rate_limited(
-    state: &ApiState,
-    call: ChannelCall,
-) -> Result<(), crate::orpc::OrpcError> {
-    if let Some(kv) = &state.kv {
-        let inbox = call.inbox_id.to_string();
-        chatbotx_kv::rate_limit::assert_api_not_rate_limited(
-            chatbotx_kv::rate_limit::ApiRateLimitInput {
-                scope: "channel-api-rate-limit",
-                key: &inbox,
-                store: &kv.mem,
-                now_ms: chatbotx_db::repo::now_ms(),
-                limit: None,
-            },
-            None,
-        )
-        .map_err(|e| crate::auth::rate_limited_to_orpc(&e))?;
-    }
-    Ok(())
+/// `assertNotRateLimited` (120 requests per inbox per 10 s): the 429 with
+/// `Retry-After`, `None` = allowed.
+fn rate_limited(state: &ApiState, call: ChannelCall) -> Option<axum::response::Response> {
+    let kv = state.kv.as_ref()?;
+    let inbox = call.inbox_id.to_string();
+    let limited = chatbotx_kv::rate_limit::assert_api_not_rate_limited(
+        chatbotx_kv::rate_limit::ApiRateLimitInput {
+            scope: "channel-api-rate-limit",
+            key: &inbox,
+            store: &kv.mem,
+            now_ms: chatbotx_db::repo::now_ms(),
+            limit: None,
+        },
+        None,
+    )
+    .err()?;
+    let mut response = crate::auth::rate_limited_to_orpc(&limited).into_response();
+    response.headers_mut().insert(
+        axum::http::header::RETRY_AFTER,
+        axum::http::HeaderValue::from(limited.retry_after),
+    );
+    Some(response)
 }
