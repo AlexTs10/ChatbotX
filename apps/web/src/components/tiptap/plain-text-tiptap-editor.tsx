@@ -1,0 +1,370 @@
+"use client"
+
+import Emoji, {
+  EmojiSuggestionPluginKey,
+  gitHubEmojis,
+} from "@tiptap/extension-emoji"
+import Mention from "@tiptap/extension-mention"
+import Placeholder from "@tiptap/extension-placeholder"
+import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model"
+import { EditorContent, Extension, useEditor } from "@tiptap/react"
+import StarterKit from "@tiptap/starter-kit"
+import emojiSuggestion from "./extensions/emoij/suggestion"
+import {
+  plainTextToParagraphHtmlWithVariableMentions,
+  renderVariableMentionHTML,
+  renderVariableMentionText,
+  toVariableMentionAttrs,
+} from "./extensions/variable-injection/mention"
+import variableInjectionSuggestion from "./extensions/variable-injection/suggestion"
+import "./tiptap-editor.css"
+import type { ChannelType } from "@chatbotx.io/database/partials"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@chatbotx.io/ui/components/ui/popover"
+import { cn } from "@chatbotx.io/ui/lib/utils"
+import EmojiPicker, { type EmojiClickData } from "emoji-picker-react"
+import { CodeXml, Smile } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { htmlToPlainTextWithBlocks } from "./html-to-plain-text"
+import { usePromptVariableOptions } from "./use-prompt-variable-options"
+import { useReadOnlyWhenLocked } from "./use-read-only-when-locked"
+
+// Swallows Enter / Shift+Enter so a single-line value never gets a line
+// break. Priority sits below Mention (101) so Enter still picks a variable
+// from the open suggestion list, and above the core keymap (100) that would
+// otherwise split the paragraph. The emoji suggestion shares priority 100, so
+// Enter is let through while its list is open.
+const NoLineBreaks = Extension.create({
+  name: "noLineBreaks",
+  priority: 100.5,
+  addKeyboardShortcuts() {
+    const swallow = () =>
+      !EmojiSuggestionPluginKey.getState(this.editor.state)?.active
+    return {
+      Enter: swallow,
+      "Shift-Enter": swallow,
+      "Mod-Enter": swallow,
+    }
+  },
+})
+
+/** Joins pasted lines with a space so a single-line field never holds "\n". */
+export const toSingleLine = (text: string): string =>
+  text.replace(/\s*\r?\n\s*/g, " ")
+
+// Keeps only plain paragraphs, so typed Markdown (`**bold**`, `# title`,
+// `- item`, backticks) is saved exactly as typed instead of being turned
+// into marks or blocks that `getText()` then drops.
+export const plainTextStarterKit = StarterKit.configure({
+  blockquote: false,
+  bold: false,
+  bulletList: false,
+  code: false,
+  codeBlock: false,
+  heading: false,
+  horizontalRule: false,
+  italic: false,
+  link: false,
+  listItem: false,
+  listKeymap: false,
+  orderedList: false,
+  strike: false,
+  underline: false,
+})
+
+type PlainTextTiptapEditorProps = {
+  botFieldsOnly?: boolean
+  initValue?: string
+  placeholder?: string
+  showEmojiPicker?: boolean
+  channels?: ChannelType[]
+  includeCouponVariables?: boolean
+  includePipelineVariables?: boolean
+  includeRawCustomFieldVariables?: boolean
+  includeBotFieldVariables?: boolean
+  onChange?: (content: string) => void
+  className?: string
+  /** Single-line height with the variable picker rendered inside on the right. */
+  inline?: boolean
+  /** Ignore Enter so the value stays on one line. */
+  disableLineBreaks?: boolean
+  /** Turn off Markdown shortcuts and formatting so the text is saved verbatim. */
+  plainText?: boolean
+  /** Extra attributes (e.g. ARIA) set on tiptap's `contenteditable` element. */
+  editorAttributes?: Record<string, string>
+  /** Render the variable picker next to the editor instead of portaling it to `<body>`. */
+  inlineVariablePicker?: boolean
+  /** Focus the editor, caret at the end, as soon as it mounts. */
+  autoFocus?: boolean
+}
+
+export const PlainTextTiptapEditor = ({
+  botFieldsOnly = false,
+  initValue,
+  onChange,
+  className,
+  channels,
+  includeCouponVariables = false,
+  includePipelineVariables = false,
+  includeRawCustomFieldVariables = false,
+  includeBotFieldVariables = false,
+  placeholder = "Type a message...",
+  showEmojiPicker = true,
+  inline = false,
+  disableLineBreaks = false,
+  plainText = false,
+  editorAttributes,
+  inlineVariablePicker = false,
+  autoFocus = false,
+}: PlainTextTiptapEditorProps) => {
+  const [isOpenEmoji, setIsOpenEmoji] = useState(false)
+  const [isEditorFocused, setIsEditorFocused] = useState(false)
+  const [isOpenCustomField, setIsOpenCustomField] = useState(false)
+  const promptVariableOptions = usePromptVariableOptions({
+    botFieldsOnly,
+    channels,
+    includeCouponVariables,
+    includePipelineVariables,
+    includeRawCustomFieldVariables,
+    includeBotFieldVariables,
+  })
+  const promptVariableOptionsRef = useRef(promptVariableOptions)
+
+  useEffect(() => {
+    promptVariableOptionsRef.current = promptVariableOptions
+  }, [promptVariableOptions])
+
+  const plainTextToParagraphHtml = useCallback(
+    (value: string) =>
+      plainTextToParagraphHtmlWithVariableMentions(
+        value,
+        promptVariableOptionsRef.current,
+      ),
+    [],
+  )
+
+  const tiptapEditor = useEditor({
+    autofocus: autoFocus ? "end" : false,
+    extensions: [
+      plainText ? plainTextStarterKit : StarterKit,
+      Mention.configure({
+        renderHTML: renderVariableMentionHTML,
+        renderText: renderVariableMentionText,
+        suggestion: variableInjectionSuggestion({
+          listOfPromptVariables: () => promptVariableOptionsRef.current,
+        }),
+      }),
+      ...(disableLineBreaks ? [NoLineBreaks] : []),
+      Emoji.configure({
+        emojis: gitHubEmojis,
+        enableEmoticons: true,
+        suggestion: emojiSuggestion,
+      }),
+      Placeholder.configure({
+        placeholder,
+      }),
+    ],
+    parseOptions: {
+      preserveWhitespace: "full",
+    },
+    editorProps: {
+      attributes: {
+        class: cn(
+          inline
+            ? "tiptap-plain-text tiptap-plain-text-inline"
+            : "tiptap-plain-text",
+          className,
+        ),
+        ...editorAttributes,
+      },
+      handlePaste(view, event) {
+        const clipboardHtml = event.clipboardData?.getData("text/html")
+        const clipboardText = event.clipboardData?.getData("text/plain")
+        const pasted = clipboardHtml
+          ? htmlToPlainTextWithBlocks(clipboardHtml)
+          : (clipboardText ?? "")
+        const text = disableLineBreaks ? toSingleLine(pasted) : pasted
+
+        if (!text) {
+          return false
+        }
+
+        const element = document.createElement("div")
+        element.innerHTML = plainTextToParagraphHtml(text)
+
+        const slice = ProseMirrorDOMParser.fromSchema(
+          view.state.schema,
+        ).parseSlice(element)
+        const transaction = view.state.tr
+          .replaceSelection(slice)
+          .scrollIntoView()
+
+        view.dispatch(transaction)
+
+        return true
+      },
+      transformPastedText(text) {
+        return text.replace(/\xA0/g, " ")
+      },
+      transformPastedHTML(html) {
+        return plainTextToParagraphHtml(htmlToPlainTextWithBlocks(html))
+      },
+    },
+    immediatelyRender: false,
+    onUpdate: ({ editor }) => {
+      const text = editor.getText({ blockSeparator: "\n" })
+      onChange?.(text)
+    },
+    onFocus: () => {
+      setIsEditorFocused(true)
+    },
+    onBlur: () => {
+      setIsEditorFocused(false)
+    },
+  })
+
+  const onEmojiClick = (emojiObject: EmojiClickData) => {
+    setEditorValue(emojiObject.emoji)
+  }
+
+  const setEditorValue = (value: string) => {
+    if (tiptapEditor) {
+      tiptapEditor.commands.insertContent(value)
+      tiptapEditor.commands.focus()
+    }
+  }
+
+  useReadOnlyWhenLocked(tiptapEditor)
+
+  useEffect(() => {
+    if (tiptapEditor && initValue !== undefined) {
+      // Empty content must clear to a single blank line — feeding "<p><br></p>"
+      // injects a hard break that renders as a spurious second line.
+      // Loading content is not an edit — emitting it would mark the form
+      // dirty and, in an undo stack, wipe the redo history.
+      tiptapEditor.commands.setContent(
+        initValue ? plainTextToParagraphHtml(initValue) : "",
+        { emitUpdate: false },
+      )
+    }
+  }, [tiptapEditor, initValue, plainTextToParagraphHtml])
+
+  // Variable options load lazily (custom/bot fields, coupons), so the initial
+  // hydration above may have escaped known tokens as plain text. Once options
+  // arrive, upgrade them to labeled mention chips — but only while the
+  // document still equals `initValue` and the editor is not focused, so a
+  // user's in-progress edit is never clobbered.
+  useEffect(() => {
+    if (!(tiptapEditor && initValue) || tiptapEditor.isFocused) {
+      return
+    }
+    if (tiptapEditor.getText({ blockSeparator: "\n" }) !== initValue) {
+      return
+    }
+    tiptapEditor.commands.setContent(
+      plainTextToParagraphHtmlWithVariableMentions(
+        initValue,
+        promptVariableOptions,
+      ),
+      { emitUpdate: false },
+    )
+  }, [tiptapEditor, initValue, promptVariableOptions])
+
+  // Inline (filter value) keeps the picker inside the box on the right and always
+  // visible; the default hangs it below the editor and reveals it on focus.
+  // An inline picker is not portaled, so it lives in this bar's stacking
+  // context: the bar is raised while open or the next field's bar paints over it.
+  const iconBarClassName = cn(
+    "absolute z-10 flex cursor-pointer items-center",
+    inline
+      ? "end-1 top-1/2 -translate-y-1/2"
+      : cn(
+          "end-0 bottom-0 translate-y-full rounded-b-sm bg-gray-500 hover:bg-gray-600",
+          isEditorFocused ? "opacity-100" : "opacity-0",
+        ),
+    isOpenCustomField && inlineVariablePicker && "z-30",
+  )
+  const iconWrapperClassName = inline ? "p-1" : "p-2"
+  const iconClassName = inline
+    ? "text-muted-foreground hover:text-foreground"
+    : "text-white"
+
+  return (
+    <div className="relative">
+      <EditorContent editor={tiptapEditor} />
+
+      <div className={iconBarClassName}>
+        {showEmojiPicker && (
+          <Popover onOpenChange={setIsOpenEmoji} open={isOpenEmoji}>
+            <PopoverTrigger
+              nativeButton={false}
+              onClick={() => setIsEditorFocused(true)}
+              render={
+                <div className={iconWrapperClassName}>
+                  <Smile className={iconClassName} size={inline ? 16 : 14} />
+                </div>
+              }
+            />
+            <PopoverContent className="w-auto p-0">
+              <EmojiPicker onEmojiClick={onEmojiClick} />
+            </PopoverContent>
+          </Popover>
+        )}
+
+        <Popover onOpenChange={setIsOpenCustomField} open={isOpenCustomField}>
+          <PopoverTrigger
+            nativeButton={false}
+            onClick={() => setIsEditorFocused(true)}
+            render={
+              <div className={iconWrapperClassName}>
+                <CodeXml className={iconClassName} size={inline ? 16 : 14} />
+              </div>
+            }
+          />
+          <PopoverContent className="w-auto p-0" portal={!inlineVariablePicker}>
+            {promptVariableOptions.length > 0 && (
+              <div className="max-h-60 w-50 overflow-y-auto">
+                {promptVariableOptions.map((field, index) => {
+                  const showGroup =
+                    Boolean(field.group) &&
+                    promptVariableOptions[index - 1]?.group !== field.group
+
+                  return (
+                    <div key={field.value}>
+                      {showGroup ? (
+                        <div className="px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs">
+                          {field.group}
+                        </div>
+                      ) : null}
+                      <Button
+                        className="w-full cursor-pointer justify-start rounded-none p-2"
+                        onClick={() => {
+                          tiptapEditor
+                            ?.chain()
+                            .insertContent({
+                              type: "mention",
+                              attrs: toVariableMentionAttrs(field),
+                            })
+                            .focus()
+                            .run()
+                          setIsOpenCustomField(false)
+                        }}
+                        variant="ghost"
+                      >
+                        {field.label}
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
+      </div>
+    </div>
+  )
+}

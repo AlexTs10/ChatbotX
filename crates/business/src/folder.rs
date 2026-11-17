@@ -201,3 +201,87 @@ pub async fn bulk_delete(db: &Db, workspace_id: i64, ids: &[i64]) -> Result<()> 
     })
     .await
 }
+
+/// The table and `AutomatedResponse.type` of a folder type (`resolveResourceModel`).
+fn resource_table(folder_type: &str) -> Result<(&'static str, Option<&'static str>)> {
+    Ok(match folder_type {
+        "tag" => ("Tag", None),
+        "flow" => ("Flow", None),
+        "customField" => ("CustomField", None),
+        "automatedResponse" => ("AutomatedResponse", Some("inbound")),
+        "outboundAutomatedResponse" => ("AutomatedResponse", Some("outbound")),
+        "sequence" => ("Sequence", None),
+        "trigger" => ("Trigger", None),
+        "webhook" => ("Webhook", None),
+        "emailTopic" => ("EmailTopic", None),
+        "fbComment" | "igComment" => ("CommentAutomation", None),
+        "igStory" => ("IgStoryAutomation", None),
+        _ => {
+            return Err(BusinessError::exception(
+                "Invalid folder type",
+                "systemError",
+                400,
+            ));
+        }
+    })
+}
+
+/// `changeFolder`: moves the workspace's resources of `folder_type` into
+/// `new_folder_id` (`""` / `"0"` = the root). No resource matched = 400
+/// "Resource not found"; a target folder must exist (404).
+pub async fn change_folder(
+    db: &Db,
+    workspace_id: i64,
+    folder_type: &str,
+    model_ids: &[i64],
+    new_folder_id: &str,
+) -> Result<()> {
+    let (table, automated_type) = resource_table(folder_type)?;
+    let folder_type = folder_type.to_string();
+    let model_ids = model_ids.to_vec();
+    let target = match new_folder_id {
+        "" | ROOT_FOLDER_ID => None,
+        text => Some(text.parse::<i64>().unwrap_or(-1)),
+    };
+    tx::write(db, move |tx| {
+        let marks = vec!["?"; model_ids.len().max(1)].join(", ");
+        let mut scope = format!(r#""workspaceId" = ? AND "id" IN ({marks})"#);
+        if automated_type.is_some() {
+            scope.push_str(r#" AND "type" = ?"#);
+        }
+        let mut binds: Vec<chatbotx_db::rusqlite::types::Value> = vec![workspace_id.into()];
+        binds.extend(model_ids.iter().map(|id| (*id).into()));
+        if model_ids.is_empty() {
+            binds.push(chatbotx_db::rusqlite::types::Value::Null);
+        }
+        if let Some(kind) = automated_type {
+            binds.push(kind.to_string().into());
+        }
+        let found: i64 = tx
+            .query_row(
+                &format!(r#"SELECT count(*) FROM "{table}" WHERE {scope}"#),
+                chatbotx_db::rusqlite::params_from_iter(binds.iter()),
+                |row| row.get(0),
+            )
+            .map_err(repo::Error::from)?;
+        if found == 0 {
+            return Err(BusinessError::exception(
+                "Resource not found",
+                "systemError",
+                400,
+            ));
+        }
+        if let Some(target) = target {
+            find_in(tx, workspace_id, target, Some(&folder_type))?.ok_or_else(folder_not_found)?;
+        }
+        let mut update = vec![chatbotx_db::rusqlite::types::Value::from(target)];
+        update.extend(binds);
+        tx.execute(
+            &format!(r#"UPDATE "{table}" SET "folderId" = ? WHERE {scope}"#),
+            chatbotx_db::rusqlite::params_from_iter(update.iter()),
+        )
+        .map_err(repo::Error::from)?;
+        Ok(())
+    })
+    .await
+}

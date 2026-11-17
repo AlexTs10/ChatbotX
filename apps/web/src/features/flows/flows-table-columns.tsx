@@ -1,0 +1,300 @@
+"use client"
+
+import { DataTableColumnHeader } from "@chatbotx.io/ui/components/data-table/data-table-column-header"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import { Checkbox } from "@chatbotx.io/ui/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@chatbotx.io/ui/components/ui/dropdown-menu"
+import { Switch } from "@chatbotx.io/ui/components/ui/switch"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@chatbotx.io/ui/components/ui/tooltip"
+import { formatDate } from "@chatbotx.io/ui/lib/format"
+import type { DataTableRowAction } from "@chatbotx.io/ui/types/data-table"
+import type { ColumnDef, Row } from "@tanstack/react-table"
+import {
+  CopyPlus,
+  DownloadIcon,
+  EllipsisVerticalIcon,
+  FolderUpIcon,
+  TextIcon,
+  Trash,
+} from "lucide-react"
+import Link from "next/link"
+import type { useTranslations } from "next-intl"
+import { useAction } from "next-safe-action/hooks"
+import type { Dispatch, SetStateAction } from "react"
+import { LockBadge } from "@/features/templates/components/lock-badge"
+import {
+  useIsLocked,
+  useIsUndeletable,
+} from "@/features/templates/components/lock-context"
+import { updateFlowAction } from "./actions/update-flow-action"
+import { downloadFlowExport } from "./lib/download-flow-export"
+import type { FlowResource } from "./schema/resource"
+
+type GetColumnsProps = {
+  t: ReturnType<typeof useTranslations>
+  setRowAction: Dispatch<
+    SetStateAction<DataTableRowAction<FlowResource> | null>
+  >
+  invalidateFlows: () => void
+  locale: string
+}
+
+export function getFlowColumns({
+  t,
+  setRowAction,
+  locale,
+  invalidateFlows,
+}: GetColumnsProps): ColumnDef<FlowResource>[] {
+  return [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          aria-label={t("actions.selectAll")}
+          checked={table.getIsAllPageRowsSelected()}
+          className="translate-y-0.5"
+          indeterminate={table.getIsSomePageRowsSelected()}
+          onCheckedChange={(value) =>
+            table.toggleAllPageRowsSelected(Boolean(value))
+          }
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          aria-label={t("actions.selectRow")}
+          checked={row.getIsSelected()}
+          className="translate-y-0.5"
+          onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+        />
+      ),
+      size: 50,
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
+      id: "name",
+      accessorKey: "name",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t("fields.name.label")} />
+      ),
+      cell: ({ row }) => (
+        <div className="flex max-w-75 items-center">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Link
+                  className="min-w-0 max-w-75 truncate"
+                  href={`/space/${row.original.workspaceId}/flows/${row.original.id}`}
+                >
+                  {row.original.name}
+                </Link>
+              }
+            />
+            <TooltipContent>
+              <p>{row.original.name}</p>
+            </TooltipContent>
+          </Tooltip>
+          <LockBadge resourceId={row.original.id} />
+        </div>
+      ),
+      meta: {
+        label: t("fields.name.label"),
+        placeholder: t("fields.name.placeholder"),
+        variant: "text",
+      },
+      enableColumnFilter: true,
+      size: 300,
+      enableSorting: true,
+      enableHiding: false,
+    },
+    {
+      accessorKey: "status",
+      header: ({ column }) => (
+        <DataTableColumnHeader
+          column={column}
+          title={t("fields.status.label")}
+        />
+      ),
+      cell: ({ row }) => {
+        const { execute, isPending } = useAction(
+          updateFlowAction.bind(
+            null,
+            row.original.workspaceId,
+            row.original.id,
+          ),
+          {
+            onSuccess: () => {
+              row.original.active = !row.original.active
+              invalidateFlows()
+            },
+          },
+        )
+        return (
+          <Switch
+            checked={row.original.active}
+            disabled={isPending}
+            onCheckedChange={(value) => {
+              execute({ active: value })
+            }}
+          />
+        )
+      },
+      meta: {
+        label: t("fields.status.label"),
+      },
+      size: 50,
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
+      accessorKey: "inbox",
+      header: ({ column }) => (
+        <DataTableColumnHeader
+          column={column}
+          title={t("fields.inbox.label")}
+        />
+      ),
+      cell: ({ row }) => {
+        const { execute, isPending } = useAction(
+          updateFlowAction.bind(
+            null,
+            row.original.workspaceId,
+            row.original.id,
+          ),
+          {
+            onSuccess: () => {
+              row.original.enableInInbox = !row.original.enableInInbox
+              invalidateFlows()
+            },
+          },
+        )
+
+        return (
+          <Switch
+            checked={row.original.enableInInbox}
+            disabled={isPending}
+            onCheckedChange={(value) => {
+              execute({ enableInInbox: value })
+            }}
+          />
+        )
+      },
+      meta: {
+        label: t("fields.inbox.label"),
+      },
+      size: 50,
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
+      accessorKey: "createdAt",
+      header: ({ column }) => (
+        <DataTableColumnHeader
+          column={column}
+          title={t("fields.modified.label")}
+        />
+      ),
+      cell: ({ row }) => (
+        <div>{formatDate(row.original.updatedAt, { locale })}</div>
+      ),
+      size: 50,
+      enableSorting: true,
+      meta: {
+        label: t("fields.modified.label"),
+      },
+      enableHiding: false,
+    },
+    {
+      id: "actions",
+      header: t("actions.actions"),
+      cell: ({ row }) => (
+        <FlowRowActions row={row} setRowAction={setRowAction} t={t} />
+      ),
+      size: 50,
+      enableSorting: false,
+      enableHiding: false,
+    },
+  ]
+}
+
+/**
+ * A copy installed from a View-only template can not be renamed, duplicated or
+ * exported (the server refuses all three), so those entries are disabled.
+ * Delete is disabled when the template does not allow deleting the copy; move
+ * always stays available.
+ */
+function FlowRowActions({
+  row,
+  setRowAction,
+  t,
+}: {
+  row: Row<FlowResource>
+  setRowAction: GetColumnsProps["setRowAction"]
+  t: GetColumnsProps["t"]
+}) {
+  const locked = useIsLocked(row.original.id)
+  const undeletable = useIsUndeletable(row.original.id)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            aria-label="Open menu"
+            className="flex size-8 p-0 data-[state=open]:bg-muted"
+            variant="ghost"
+          >
+            <EllipsisVerticalIcon aria-hidden="true" className="size-4" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-40">
+        <DropdownMenuItem
+          disabled={locked}
+          onClick={() => setRowAction({ row, variant: "rename" })}
+        >
+          <TextIcon />
+          {t("actions.rename")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => setRowAction({ row, variant: "move" })}
+        >
+          <FolderUpIcon />
+          {t("actions.move")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={locked}
+          onClick={() => setRowAction({ row, variant: "duplicate" })}
+        >
+          <CopyPlus />
+          {t("actions.duplicate")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={locked}
+          onClick={() => {
+            downloadFlowExport(row.original, t)
+          }}
+        >
+          <DownloadIcon />
+          {t("actions.export")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={undeletable}
+          onClick={() => setRowAction({ row, variant: "delete" })}
+          variant="destructive"
+        >
+          <Trash />
+          {t("actions.delete")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}

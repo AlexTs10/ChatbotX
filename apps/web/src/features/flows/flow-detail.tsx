@@ -1,0 +1,73 @@
+"use client"
+
+import { ReactFlowProvider } from "@xyflow/react"
+import { AppointmentCalendarStoreProvider } from "@/features/appointment-calendars/provider/appointment-calendar-store-context"
+import { PlatformCredentialsStoreProvider } from "@/features/platform-credentials/provider/platform-credentials-store-context"
+import { QuestionnaireStoreProvider } from "@/features/questionnaires/provider/questionnaire-store-context"
+import { AIToolsStoreProvider } from "../ai-tools/provider/ai-tools-store-context"
+
+import { EmailTopicStoreProvider } from "../email-topics/provider/email-topic-store-context"
+import type { FlowVersionResource } from "../flow-versions/schema/resource"
+import type { IntegrationOpenaiCompatibleResource } from "../integration-openai-compatible/schema/resource"
+
+import { ReactFlowFrame } from "./react-flow/frame"
+import { FlowTemplateStoreProvider } from "./react-flow/stores/flow-template-store-provider"
+import { StepStoreProvider } from "./react-flow/stores/step-store-provider"
+import { WhatsappFlowStoreProvider } from "./react-flow/stores/whatsapp-flow-store-provider"
+import type { FlowWithVersionsResource } from "./schema/resource"
+
+type FlowDetailProps = {
+  flow: FlowWithVersionsResource
+  flowVersion: FlowVersionResource
+  openaiCompatibleIntegrations: IntegrationOpenaiCompatibleResource[]
+  canRevertToPublished: boolean
+  hasPublishedVersion: boolean
+  workspaceTargetCountry: string | null
+  isTemplateLocked: boolean
+}
+
+export function FlowDetail({
+  flow,
+  flowVersion,
+  openaiCompatibleIntegrations,
+  canRevertToPublished,
+  hasPublishedVersion,
+  workspaceTargetCountry,
+  isTemplateLocked,
+}: FlowDetailProps) {
+  return (
+    <ReactFlowProvider>
+      <StepStoreProvider
+        initialState={{
+          activeFlowId: flow.id,
+          workspaceTargetCountry,
+        }}
+      >
+        <FlowTemplateStoreProvider
+          openaiCompatibleIntegrations={openaiCompatibleIntegrations}
+          workspaceId={flow.workspaceId}
+        >
+          <WhatsappFlowStoreProvider workspaceId={flow.workspaceId}>
+            <QuestionnaireStoreProvider workspaceId={flow.workspaceId}>
+              <AppointmentCalendarStoreProvider workspaceId={flow.workspaceId}>
+                <EmailTopicStoreProvider workspaceId={flow.workspaceId}>
+                  <AIToolsStoreProvider workspaceId={flow.workspaceId}>
+                    <PlatformCredentialsStoreProvider>
+                      <ReactFlowFrame
+                        canRevertToPublished={canRevertToPublished}
+                        flow={flow}
+                        flowVersion={flowVersion}
+                        hasPublishedVersion={hasPublishedVersion}
+                        isTemplateLocked={isTemplateLocked}
+                      />
+                    </PlatformCredentialsStoreProvider>
+                  </AIToolsStoreProvider>
+                </EmailTopicStoreProvider>
+              </AppointmentCalendarStoreProvider>
+            </QuestionnaireStoreProvider>
+          </WhatsappFlowStoreProvider>
+        </FlowTemplateStoreProvider>
+      </StepStoreProvider>
+    </ReactFlowProvider>
+  )
+}

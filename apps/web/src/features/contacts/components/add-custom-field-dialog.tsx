@@ -1,0 +1,256 @@
+"use client"
+
+import type { CustomFieldType } from "@chatbotx.io/database/partials"
+import { FieldOperationType } from "@chatbotx.io/flow-config"
+import { SelectField } from "@chatbotx.io/ui/components/form/select-field"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@chatbotx.io/ui/components/ui/dialog"
+import { Form } from "@chatbotx.io/ui/components/ui/form"
+import { Label } from "@chatbotx.io/ui/components/ui/label"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useHookFormAction } from "@next-safe-action/adapter-react-hook-form/hooks"
+import { Loader2Icon } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { type ReactElement, useMemo, useState } from "react"
+import { useFormContext, useWatch } from "react-hook-form"
+import { toast } from "sonner"
+import { CustomFieldValueInput } from "@/features/custom-fields/components/custom-field-value-input"
+import { FieldOperationOperand } from "@/features/custom-fields/components/field-operation-operand"
+import {
+  CustomFieldOperationSelect,
+  CustomFieldSelect,
+} from "@/features/custom-fields/custom-field-select"
+import { findFieldByReference } from "@/features/custom-fields/lib/find-field-by-reference"
+import { useFieldOperationReset } from "@/features/custom-fields/lib/use-field-operation-reset"
+import {
+  useBotFields,
+  useCustomFields,
+} from "@/features/custom-fields/provider/custom-field-hook"
+import { useWorkspaceId } from "@/hooks/routing"
+import { getBrowserTimezone } from "../../contact-filter/lib/timezone"
+import { addContactCustomFieldAction } from "../actions/add-contact-custom-field.action"
+import { addContactCustomFieldRequest } from "../schema/contact-custom-field"
+
+type AddContactCustomFieldDialogProps = {
+  trigger: ReactElement
+  ids: string[]
+  onSuccess?: () => void
+}
+
+export default function AddContactCustomFieldDialog({
+  trigger,
+  ids,
+  onSuccess,
+}: AddContactCustomFieldDialogProps) {
+  const t = useTranslations()
+  const [open, setOpen] = useState(false)
+  const [clientTimezone] = useState(getBrowserTimezone)
+  const workspaceId = useWorkspaceId()
+
+  const { form, handleSubmitWithAction } = useHookFormAction(
+    addContactCustomFieldAction.bind(null, workspaceId),
+    zodResolver(addContactCustomFieldRequest),
+    {
+      actionProps: {
+        onSuccess: () => {
+          toast.success(
+            t("messages.updatedSuccess", {
+              feature: t("fields.contact.label"),
+            }),
+          )
+          form.reset()
+          setOpen(false)
+          onSuccess?.()
+        },
+        onError: ({ error }) => {
+          if (error.serverError) {
+            toast.error(error.serverError)
+          }
+        },
+      },
+      formProps: {
+        mode: "onChange",
+        defaultValues: {
+          ids,
+          customFieldId: "",
+          operation: FieldOperationType.set,
+          value: "",
+          clientTimezone,
+        },
+      },
+      errorMapProps: {},
+    },
+  )
+
+  const handleOpenChange = (isOpen: boolean) => {
+    setOpen(isOpen)
+    if (!isOpen) {
+      form.reset()
+    }
+  }
+
+  return (
+    <Dialog onOpenChange={handleOpenChange} open={open}>
+      <DialogTrigger render={trigger} />
+
+      <DialogContent className="max-h-screen max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{t("actions.setCustomField")}</DialogTitle>
+          <DialogDescription />
+        </DialogHeader>
+
+        <Form {...form}>
+          <form
+            className="flex flex-col gap-6"
+            onSubmit={handleSubmitWithAction}
+          >
+            <SetCustomField />
+
+            <DialogFooter>
+              <DialogClose
+                render={<Button variant="ghost">{t("actions.cancel")}</Button>}
+              />
+
+              <Button
+                disabled={
+                  !form.formState.isValid || form.formState.isSubmitting
+                }
+                type="submit"
+              >
+                {form.formState.isSubmitting && (
+                  <Loader2Icon className="animate-spin" />
+                )}
+                {t("actions.confirm")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * A boolean operand is picked from True/False, not ticked. A blank selection
+ * stays "unset" (the runtime keeps a blank boolean blank).
+ */
+const BooleanValueSelect = ({ name }: { name: string }) => {
+  const t = useTranslations()
+  const options = useMemo(
+    () => [
+      { value: "true", label: t("fields.boolean.true") },
+      { value: "false", label: t("fields.boolean.false") },
+    ],
+    [t],
+  )
+
+  return (
+    <SelectField
+      label={t("fields.value.label")}
+      name={name}
+      options={options}
+      placeholder={t("fields.boolean.placeholder")}
+    />
+  )
+}
+
+export const SetCustomField = ({
+  parentName,
+  includeBotFields = false,
+}: {
+  parentName?: string
+  /**
+   * Also offers Account Fields (bot fields) in the picker. Defaults to false:
+   * this component is shared with the contact bulk-edit dialog
+   * (`AddContactCustomFieldDialog`), which must stay contact-pure. Only the
+   * trigger `setCustomField` action editor opts in.
+   */
+  includeBotFields?: boolean
+}) => {
+  const form = useFormContext()
+  const t = useTranslations()
+  const workspaceId = useWorkspaceId()
+  const customFields = useCustomFields(workspaceId).data ?? []
+  const botFields =
+    useBotFields(workspaceId, { enabled: includeBotFields }).data ?? []
+
+  const getFieldName = (field: string) => {
+    if (!parentName) {
+      return field
+    }
+    return `${parentName}.${field}`
+  }
+
+  const watchCustomFieldId = useWatch({
+    control: form.control,
+    name: getFieldName("customFieldId"),
+  })
+
+  const watchOperation = useWatch({
+    control: form.control,
+    name: getFieldName("operation"),
+  }) as FieldOperationType | undefined
+
+  const selectedCustomFieldType = useMemo(
+    () =>
+      findFieldByReference(watchCustomFieldId, { customFields, botFields })
+        ?.type ?? null,
+    [watchCustomFieldId, customFields, botFields],
+  )
+
+  const { onOperationChange } = useFieldOperationReset({
+    operationName: getFieldName("operation"),
+    valueName: getFieldName("value"),
+    fieldType: selectedCustomFieldType,
+  })
+
+  return (
+    <>
+      <CustomFieldSelect
+        includeBotFields={includeBotFields}
+        name={getFieldName("customFieldId")}
+        onValueChange={() => {
+          form.resetField(getFieldName("value"))
+        }}
+        required
+      />
+
+      <CustomFieldOperationSelect
+        name={getFieldName("operation")}
+        onValueChange={onOperationChange}
+        required
+        type={selectedCustomFieldType as CustomFieldType | null}
+      />
+
+      <FieldOperationOperand
+        name={getFieldName("value")}
+        operation={watchOperation ?? FieldOperationType.set}
+        renderTyped={() => {
+          if (selectedCustomFieldType === "boolean") {
+            return <BooleanValueSelect name={getFieldName("value")} />
+          }
+          return selectedCustomFieldType ? (
+            <div className="flex flex-col gap-2">
+              <Label>{t("fields.value.label")}</Label>
+              <CustomFieldValueInput
+                name={getFieldName("value")}
+                required={selectedCustomFieldType !== "number"}
+                type={selectedCustomFieldType}
+              />
+            </div>
+          ) : null
+        }}
+        variables={includeBotFields}
+      />
+    </>
+  )
+}

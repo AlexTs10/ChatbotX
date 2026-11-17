@@ -60,7 +60,7 @@ fn poll_base(poll: &Poll, now: i64) -> serde_json::Map<String, Value> {
 }
 
 /// `toPollResource`.
-fn poll_json(poll: &PollWithVoteCounts) -> Value {
+pub(crate) fn poll_json(poll: &PollWithVoteCounts) -> Value {
     let mut out = poll_base(&poll.poll, now_ms());
     out.insert(
         "candidates".into(),

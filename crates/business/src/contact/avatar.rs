@@ -52,7 +52,7 @@ impl TenantUrls {
 /// The process media-token signer: `ENCRYPTION_KEY` (+ id / previous key),
 /// or a random per-process key when it is not set (the token then only
 /// verifies in this process).
-fn signer() -> &'static Encryption {
+pub(crate) fn signer() -> &'static Encryption {
     static SIGNER: OnceLock<Encryption> = OnceLock::new();
     SIGNER.get_or_init(|| {
         let keys = Keys::from_env(&ProcessEnv).unwrap_or_else(|error| {
@@ -75,9 +75,13 @@ fn finalize(key: &str, urls: &TenantUrls) -> Option<String> {
     public_storage_url(key, &urls.storage_url).ok()
 }
 
-fn finalize_avatar_or_placeholder(avatar: &str, urls: &TenantUrls) -> Option<String> {
+fn finalize_avatar_or_placeholder(
+    avatar: &str,
+    urls: &TenantUrls,
+    finalize: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
     if has_real_avatar(Some(avatar)) {
-        finalize(avatar, urls)
+        finalize(avatar)
     } else {
         Some(default_avatar_url(urls))
     }
@@ -95,7 +99,7 @@ fn select_inbox(inboxes: &[AvatarInbox]) -> Option<&AvatarInbox> {
     hydration.first().copied().or_else(|| inboxes.first())
 }
 
-/// `resolveContactAvatarUrl` at `now_ms`.
+/// `resolveContactAvatarUrl` at `now_ms` (stored keys become public storage URLs).
 pub fn resolve_contact_avatar_url(
     workspace_id: i64,
     avatar: Option<&str>,
@@ -103,13 +107,33 @@ pub fn resolve_contact_avatar_url(
     urls: &TenantUrls,
     now_ms: i64,
 ) -> Option<String> {
+    resolve_contact_avatar_url_with(
+        workspace_id,
+        avatar,
+        contact_inboxes,
+        urls,
+        now_ms,
+        &|key| finalize(key, urls),
+    )
+}
+
+/// `resolveContactAvatarUrl(input, finalize)`: `finalize` maps a stored key
+/// (`(key) => key` keeps it raw, as the conversation queries do).
+pub fn resolve_contact_avatar_url_with(
+    workspace_id: i64,
+    avatar: Option<&str>,
+    contact_inboxes: &[AvatarInbox],
+    urls: &TenantUrls,
+    now_ms: i64,
+    finalize: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
     let Some(inbox) = select_inbox(contact_inboxes) else {
-        return finalize_avatar_or_placeholder(avatar.filter(|a| !a.is_empty())?, urls);
+        return finalize_avatar_or_placeholder(avatar.filter(|a| !a.is_empty())?, urls, finalize);
     };
     // `resolveAvatarUrl`.
     if let Some(avatar) = avatar.filter(|a| !a.is_empty()) {
         match parse_no_avatar_sentinel(avatar) {
-            None => return finalize(avatar, urls),
+            None => return finalize(avatar),
             Some(failed_at) if is_no_avatar_sentinel_fresh(failed_at, now_ms) => {
                 return Some(default_avatar_url(urls));
             }

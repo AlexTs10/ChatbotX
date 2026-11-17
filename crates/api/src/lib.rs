@@ -12,7 +12,9 @@ pub mod reflink_widget;
 pub mod routes;
 pub mod rpc;
 pub mod rpc_ai;
+pub mod rpc_procedures;
 pub mod session;
+pub mod spa;
 
 use axum::Router;
 use axum::http::header;
