@@ -610,7 +610,7 @@ fn random_below(n: u64) -> u64 {
 }
 
 /// `isWithinSchedule` (`HH:mm` in the workspace time zone).
-fn within_schedule(start: Option<&str>, end: Option<&str>, tz: &str) -> bool {
+pub(crate) fn within_schedule(start: Option<&str>, end: Option<&str>, tz: &str) -> bool {
     let (Some(start), Some(end)) = (
         start.filter(|s| !s.is_empty()),
         end.filter(|s| !s.is_empty()),
