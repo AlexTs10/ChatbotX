@@ -26,6 +26,7 @@ use crate::orpc::OrpcError;
 
 /// The ported actions.
 pub const ACTIONS: &[&str] = &[
+    "peekImportHeadersAction",
     "addContactTagAction",
     "removeContactTagAction",
     "addContactSequenceAction",
@@ -383,6 +384,30 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
     Some(
         async {
             match name {
+                // Any member (`workspaceActionClient`), no import-type check
+                // (the session UI leaves it out).
+                // ponytail: the error copy is the business English message,
+                // not the builder's `fields.import.*` translation.
+                "peekImportHeadersAction" => {
+                    let file_id = input.id("fileId")?;
+                    let files = ctx.api.files.as_deref().ok_or_else(|| {
+                        OrpcError::new(
+                            "INTERNAL_SERVER_ERROR",
+                            Some(500),
+                            Some("file storage is not configured"),
+                        )
+                    })?;
+                    return chatbotx_business::import::peek_import_headers(
+                        db,
+                        files,
+                        ctx.workspace_id,
+                        file_id,
+                        None,
+                    )
+                    .await
+                    .map(|headers| json!(headers))
+                    .map_err(action_fail);
+                }
                 "createContactAction" => {
                     let created =
                         public(ctx, "contacts.create", &[], None, Some(arg(args, 1))).await?;
