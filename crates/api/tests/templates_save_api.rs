@@ -226,7 +226,7 @@ async fn create_refuses_another_workspaces_ids_and_read_only_tokens() {
         Some(body(json!({ "nope": { "mode": "all" } }))),
     )
     .await;
-    assert_eq!(status, 400, "{out}");
+    assert_eq!(status, 422, "{out}");
 }
 
 #[tokio::test]
