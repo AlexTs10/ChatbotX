@@ -134,7 +134,7 @@ async fn publish_targets(ctx: &Ctx<'_>) -> Result<Value, OrpcError> {
         );
         let mut stmt = conn.prepare(&sql).map_err(chatbotx_db::repo::Error::from)?;
         let rows = stmt
-            .query_map([ws], |r| IntegrationWhatsapp::from_row(r))
+            .query_map([ws], IntegrationWhatsapp::from_row)
             .and_then(Iterator::collect::<Result<Vec<_>, _>>)
             .map_err(chatbotx_db::repo::Error::from)?;
         Ok(rows)
