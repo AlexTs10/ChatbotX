@@ -290,6 +290,9 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         .merge(chatbotx_api::session::auth_router(sessions))
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
         .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)))
+        .merge(chatbotx_api::inbound_webhook_intake::router(Arc::clone(
+            &api,
+        )))
         .merge(chatbotx_api::magic_link_redirect::router(
             chatbotx_api::magic_link_redirect::RedirectState {
                 api: Arc::clone(&api),

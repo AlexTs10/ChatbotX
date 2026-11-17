@@ -47,6 +47,7 @@ pub mod flow;
 pub mod flow_version;
 pub mod folder;
 pub mod import;
+pub mod inbound_webhook;
 pub mod inbox;
 pub mod inbox_team;
 pub mod integration;

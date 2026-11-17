@@ -37,6 +37,7 @@ pub mod error_logs;
 pub mod external_webhooks;
 pub mod flows;
 pub mod folders;
+pub mod inbound_webhooks;
 pub mod inbox_teams;
 pub mod input;
 pub mod integrations_ai;
@@ -674,6 +675,8 @@ async fn route(
         response_sla::handle(state, route_id, call).await
     } else if webhooks::ROUTES.contains(&route_id) {
         webhooks::handle(state, route_id, call).await
+    } else if inbound_webhooks::ROUTES.contains(&route_id) {
+        inbound_webhooks::handle(state, route_id, call, principal).await
     } else if external_webhooks::ROUTES.contains(&route_id) {
         external_webhooks::handle(state, route_id, call).await
     } else if magic_links::ROUTES.contains(&route_id) {

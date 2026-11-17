@@ -6,6 +6,7 @@ pub mod errors;
 pub mod files;
 pub mod handlers;
 pub mod idempotency;
+pub mod inbound_webhook_intake;
 pub mod iso8601;
 pub mod jobs_admin;
 pub mod magic_link_redirect;
