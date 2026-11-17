@@ -109,7 +109,18 @@ macro_rules! table_row {
                 ::serde_json::Value::Object(object)
             }
         }
+
+        impl $crate::repo::RowJson for $name {
+            fn row_json(&self) -> ::serde_json::Value {
+                self.to_json()
+            }
+        }
     };
+}
+
+/// [`table_row!`]'s `to_json` behind a trait, for code generic over rows.
+pub trait RowJson {
+    fn row_json(&self) -> serde_json::Value;
 }
 
 /// One column value as the builder's JSON (`/rpc`, P4): ids (`id`, `*Id`) as

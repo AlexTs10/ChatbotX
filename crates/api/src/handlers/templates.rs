@@ -5,14 +5,15 @@
 //! "not ported" 404 (specs/Q.D4.md).
 
 use chatbotx_business::template::permissions::Actor;
+use chatbotx_business::template::collect::CATEGORIES;
 use chatbotx_business::template::{
-    RESOURCE_KINDS, installations, list_locked_resource_ids, service,
+    RESOURCE_KINDS, installations, list_locked_resource_ids, save as template_save, service,
 };
 use serde_json::{Value, json};
 
-use super::input::{Input, Num, Str, key};
+use super::input::{Input, Num, Seg, Str, key};
 use super::{
-    ApiState, Call, FINDING, LISTING, MUTATING, Principal, Reply, business_error, date, id, json,
+    ApiState, CREATING, Call, FINDING, LISTING, MUTATING, Principal, Reply, business_error, date, id, json,
     no_content, opt_date,
 };
 use crate::orpc::OrpcError;
@@ -20,6 +21,10 @@ use crate::orpc::OrpcError;
 /// The routes of this module.
 pub const ROUTES: &[&str] = &[
     "templates.list",
+    "templates.create",
+    "templates.update",
+    "templates.listSelectableResources",
+    "templates.previewDependencies",
     "templates.get",
     "templates.delete",
     "templates.listLockedResources",
@@ -57,6 +62,10 @@ pub async fn handle(
     match route_id {
         "templates.list" => list(state, call).await,
         "templates.get" => get(state, call).await,
+        "templates.create" => save(state, call, &actor, false).await,
+        "templates.update" => save(state, call, &actor, true).await,
+        "templates.listSelectableResources" => selectable(state, call, &actor).await,
+        "templates.previewDependencies" => preview_dependencies(state, call, &actor).await,
         "templates.delete" => delete(state, call, &actor).await,
         "templates.listLockedResources" => locked_resources(state, call).await,
         "templates.getLink" => get_link(state, call, &actor).await,
@@ -384,5 +393,213 @@ async fn get_sync(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, FINDING))?;
+    Ok(json(200, out))
+}
+
+/// `templateSelectionSchema`: `{ [category]: {mode:"all", lockAll?} | {mode:"ids", ids, lockedIds?} }`.
+fn selection_at(input: &mut Input, name: &str) -> Value {
+    let path = key(name);
+    let Some(value) = input.get(name).cloned() else {
+        input.issue(&path, "invalid_type", "Invalid input: expected record, received undefined");
+        return json!({});
+    };
+    let Value::Object(map) = value else {
+        input.issue(&path, "invalid_type", "Invalid input: expected record, received string");
+        return json!({});
+    };
+    let mut out = serde_json::Map::new();
+    for (category, chosen) in map {
+        let mut at = path.clone();
+        at.push(Seg::Key(category.clone()));
+        if !CATEGORIES.contains(&category.as_str()) {
+            input.issue(&at, "invalid_key", "Invalid key in record");
+            continue;
+        }
+        let strings = |v: &Value| -> Option<Vec<Value>> {
+            v.as_array()
+                .filter(|items| items.iter().all(Value::is_string))
+                .cloned()
+        };
+        let normalized = match chosen["mode"].as_str() {
+            Some("all") if chosen.get("lockAll").is_none_or(Value::is_boolean) => {
+                let mut c = json!({ "mode": "all" });
+                if let Some(lock) = chosen.get("lockAll") {
+                    c["lockAll"] = lock.clone();
+                }
+                Some(c)
+            }
+            Some("ids") => match (
+                strings(&chosen["ids"]),
+                chosen.get("lockedIds").map(strings),
+            ) {
+                (Some(ids), None) => Some(json!({ "mode": "ids", "ids": ids })),
+                (Some(ids), Some(Some(locked))) => {
+                    Some(json!({ "mode": "ids", "ids": ids, "lockedIds": locked }))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        match normalized {
+            Some(c) => {
+                out.insert(category, c);
+            }
+            None => input.issue(&at, "invalid_union", "Invalid input"),
+        }
+    }
+    Value::Object(out)
+}
+
+/// `templatePermissionsSchema` (defaults: edit on, delete off).
+fn permissions_at(input: &mut Input, name: &str) -> Value {
+    let path = key(name);
+    let value = input.get(name).cloned();
+    let Some(Value::Object(map)) = value else {
+        input.issue(&path, "invalid_type", "Invalid input: expected object, received undefined");
+        return json!({});
+    };
+    let mut flag = |field: &str, default: bool| -> bool {
+        let mut at = path.clone();
+        at.push(Seg::Key(field.to_string()));
+        input
+            .bool_at(&at, map.get(field), false)
+            .unwrap_or(default)
+    };
+    let allow_edit = flag("allowEdit", true);
+    let allow_delete = flag("allowDelete", false);
+    json!({ "allowEdit": allow_edit, "allowDelete": allow_delete })
+}
+
+/// `optionalText(max)`: `""` = null, else trimmed, at most `max`.
+fn optional_text(input: &mut Input, name: &str, max: usize, check: Option<fn(&str) -> bool>) -> Option<String> {
+    match input.get(name) {
+        None | Some(Value::Null) => None,
+        Some(Value::String(t)) if t.is_empty() => None,
+        _ => input.opt_string(
+            name,
+            Str {
+                trim: true,
+                min: None,
+                max: Some(max),
+                pattern: check,
+            },
+        ),
+    }
+}
+
+fn is_youtube_id(text: &str) -> bool {
+    text.len() == 11
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+fn is_http_url(text: &str) -> bool {
+    url::Url::parse(text).is_ok_and(|u| matches!(u.scheme(), "http" | "https"))
+}
+
+/// `templates.create` / `templates.update`.
+async fn save(state: &ApiState, call: Call<'_>, actor: &Actor, update: bool) -> Reply {
+    let mut input = Input::from_body(call.params, call.body);
+    let template_id = if update { input.digits_id("id") } else { None };
+    let name = input.string("name", Str::trimmed(1, 255));
+    let description = optional_text(&mut input, "description", 2000, None);
+    let image_url = optional_text(&mut input, "imageUrl", 500, None);
+    let publisher_name = optional_text(&mut input, "publisherName", 255, None);
+    let youtube_video_id = optional_text(&mut input, "youtubeVideoId", 11, Some(is_youtube_id));
+    let test_link = match input.get("testLink") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(t)) if t.is_empty() => None,
+        Some(Value::String(t)) if is_http_url(t) => Some(t.clone()),
+        Some(_) => {
+            input.issue(&key("testLink"), "invalid_union", "Invalid input");
+            None
+        }
+    };
+    let selection = selection_at(&mut input, "selection");
+    let default_permissions = permissions_at(&mut input, "defaultPermissions");
+    let create_install_folder = input.bool("createInstallFolder");
+    let default_auto_update = input.bool("defaultAutoUpdate");
+    input.finish()?;
+    let saved = template_save::save_template(
+        &state.db,
+        template_save::SaveInput {
+            workspace_id: call.workspace_id,
+            created_by: None,
+            name: name.unwrap_or_default(),
+            description,
+            image_url,
+            publisher_name,
+            youtube_video_id,
+            test_link,
+            selection,
+            default_permissions,
+            create_install_folder: create_install_folder.unwrap_or_default(),
+            default_auto_update: default_auto_update.unwrap_or_default(),
+            existing_template_id: template_id,
+        },
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, if update { MUTATING } else { CREATING }))?;
+    if saved.version_advanced {
+        fan_out(state, &saved.template).await;
+    }
+    let template = service::get_detail(&state.db, call.workspace_id, saved.template.id)
+        .await
+        .map_err(|e| business_error(e, FINDING))?;
+    let mut out = base_json(&template);
+    out["selection"] = template.selection.clone();
+    Ok(json(200, out))
+}
+
+/// `requestAutoUpdateFanOut`: best effort; the sweep catches up a miss.
+pub(crate) async fn fan_out(state: &ApiState, template: &chatbotx_db::repo::models::Template) {
+    let Some(jobs) = state.jobs.as_ref() else {
+        return;
+    };
+    if let Err(error) = template_save::enqueue_fan_out(
+        jobs.as_ref(),
+        template.id,
+        template.workspace_id,
+        template.version,
+        None,
+        template_save::PRIORITY_BACKGROUND,
+    )
+    .await
+    {
+        tracing::warn!(template_id = template.id, error = %error.message(), "Could not enqueue the template auto-update fan-out; the sweep will");
+    }
+}
+
+async fn selectable(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let mut input = Input::from_query(call.params, call.query);
+    let category_value = input.get("category").cloned();
+    let category = input.enum_at(&key("category"), category_value.as_ref(), CATEGORIES, true);
+    let keyword = input.opt_string("keyword", Str { trim: true, min: None, max: Some(255), pattern: None });
+    let cursor = input.opt_string("cursor", Str::default());
+    let limit = input.opt_coerce_int("limit", Num::int(1.0, 200.0));
+    input.finish()?;
+    let out = template_save::list_selectable_resources(
+        &state.db,
+        call.workspace_id,
+        category.unwrap_or_default(),
+        keyword,
+        cursor,
+        limit,
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, LISTING))?;
+    Ok(json(200, out))
+}
+
+async fn preview_dependencies(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let mut input = Input::from_body(call.params, call.body);
+    let selection = selection_at(&mut input, "selection");
+    input.finish()?;
+    let out = template_save::preview_selection_dependencies(&state.db, call.workspace_id, selection, actor)
+        .await
+        .map_err(|e| business_error(e, LISTING))?;
     Ok(json(200, out))
 }
