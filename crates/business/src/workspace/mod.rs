@@ -9,6 +9,7 @@
 pub mod codes;
 pub mod deletion_schedule;
 pub mod lifecycle;
+pub mod purge;
 
 use chatbotx_db::repo::models::Workspace;
 use chatbotx_db::repo::platform_admin::ROOT_TENANT_ID;
@@ -341,7 +342,7 @@ fn clip(value: Option<&String>, max: usize) -> Option<String> {
     value.map(|v| v.chars().take(max).collect())
 }
 
-fn workspace_key(id: i64) -> ResourceKey {
+pub(super) fn workspace_key(id: i64) -> ResourceKey {
     ResourceKey {
         workspace_id: id,
         resource_type: "workspace".into(),
@@ -351,7 +352,7 @@ fn workspace_key(id: i64) -> ResourceKey {
 
 /// `resourceDeletionLogService.recordRequest` / `recordHistoricalRequest`
 /// of a workspace.
-fn record_log(
+pub(super) fn record_log(
     conn: &Connection,
     id: i64,
     name: &str,
