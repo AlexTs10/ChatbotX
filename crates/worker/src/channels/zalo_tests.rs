@@ -2,9 +2,11 @@
 //! `quick-replies-attachment`, `send-multiple-images`, `outgoing-message-ids`,
 //! `outgoing-text-with-images`, `incoming-gif-message` (parse half),
 //! `webhook-routing` and `follow-event`. The API mocks become a local HTTP
-//! stub. `connection-oauth`, `refresh-access-token`, `get-user-profile`,
-//! `tag`, `google-click-partner-samples` and `incoming-image-compression`
-//! are n-a here (OAuth, tags, profile and the image store are other units).
+//! stub. `tag`, `get-user-profile` and `incoming-image-compression` are at
+//! the end. `connection-oauth` is
+//! `crates/business/tests/connection_oauth_channels.rs`;
+//! `refresh-access-token` (token refresh cron) and
+//! `google-click-partner-samples` (core `google_click` tests) are n-a here.
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{Arc, Mutex};
 
@@ -14,8 +16,8 @@ use super::*;
 
 // ---- a tiny HTTP stub ------------------------------------------------------
 
-/// Every request the stub saw: `(path, body)`.
-type Seen = Arc<Mutex<Vec<(String, String)>>>;
+/// Every request the stub saw: `(path, body, access_token header)`.
+type Seen = Arc<Mutex<Vec<(String, String, String)>>>;
 
 /// Serves `reply(path, call index)` -> `(status, content-type, body)` on a
 /// local port; the base URL ends with `/`.
@@ -34,6 +36,7 @@ fn stub(
             reader.read_line(&mut line).unwrap();
             let path = line.split(' ').nth(1).unwrap_or("").to_owned();
             let mut length = 0;
+            let mut token = String::new();
             loop {
                 let mut header = String::new();
                 reader.read_line(&mut header).unwrap();
@@ -43,12 +46,19 @@ fn stub(
                 if let Some(v) = header.to_lowercase().strip_prefix("content-length:") {
                     length = v.trim().parse().unwrap_or(0);
                 }
+                if let Some((name, v)) = header.split_once(':')
+                    && name.eq_ignore_ascii_case("access_token")
+                {
+                    token = v.trim().to_owned();
+                }
             }
             let mut body = vec![0; length];
             reader.read_exact(&mut body).unwrap();
-            log.lock()
-                .unwrap()
-                .push((path.clone(), String::from_utf8_lossy(&body).into_owned()));
+            log.lock().unwrap().push((
+                path.clone(),
+                String::from_utf8_lossy(&body).into_owned(),
+                token,
+            ));
             let (status, content_type, out) = reply(&path, index);
             let head = format!(
                 "HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -69,8 +79,8 @@ fn sent_messages(seen: &Seen) -> Vec<Value> {
     seen.lock()
         .unwrap()
         .iter()
-        .filter(|(path, _)| path.ends_with(SEND_MESSAGE))
-        .map(|(_, body)| serde_json::from_str::<Value>(body).unwrap()["message"].clone())
+        .filter(|(path, _, _)| path.ends_with(SEND_MESSAGE))
+        .map(|(_, body, _)| serde_json::from_str::<Value>(body).unwrap()["message"].clone())
         .collect()
 }
 
@@ -312,7 +322,7 @@ fn uploads_and_sends_one_single_image_template_per_url() {
         .lock()
         .unwrap()
         .iter()
-        .filter(|(p, _)| p.ends_with("upload/image"))
+        .filter(|(p, _, _)| p.ends_with("upload/image"))
         .count();
     assert_eq!(uploads, 2);
     let template = json!({ "attachment": { "type": "template", "payload": {
@@ -751,4 +761,333 @@ fn the_verifier_page_carries_the_escaped_verifier() {
             .contains("&quot;&gt;&lt;script&gt;")
     );
     assert_eq!(verifier_page("").status, 400);
+}
+
+// ---- tag.test.ts ----------------------------------------------------------
+
+const TOKEN: &str = "ZALO_TOKEN";
+
+fn envelope(path: &str) -> (u16, &'static str, Vec<u8>) {
+    match path {
+        p if p.ends_with("gettagsofoa") => {
+            ok_json(json!({ "error": 0, "message": "Success", "data": ["vip", "gold", "silver"] }))
+        }
+        _ => ok_json(json!({ "error": 0, "message": "Success", "data": {} })),
+    }
+}
+
+/// Port of: integrations/zalo/__tests__/tag.test.ts "tagFollower > sends POST to correct URL with json body {user_id, tag_name}" (+ "carries access_token header from context", removeFollowerFromTag and removeTag)
+#[test]
+fn tag_writes_post_the_documented_bodies_with_the_token() {
+    let (base, seen) = stub(|path, _| envelope(path));
+    let zalo = Zalo::with_base_url(base);
+    run(async {
+        assert_eq!(
+            zalo.tag_follower(TOKEN, "U123", "vip").await.unwrap(),
+            json!({ "success": true })
+        );
+        assert_eq!(
+            zalo.remove_follower_from_tag(TOKEN, "U456", "bronze")
+                .await
+                .unwrap(),
+            json!({ "success": true })
+        );
+        assert_eq!(
+            zalo.remove_tag(TOKEN, "deprecated-tag").await.unwrap(),
+            json!({ "success": true })
+        );
+    });
+    let seen = seen.lock().unwrap().clone();
+    let bodies: Vec<(String, Value, String)> = seen
+        .into_iter()
+        .map(|(p, b, t)| (p, serde_json::from_str(&b).unwrap(), t))
+        .collect();
+    assert_eq!(
+        bodies,
+        vec![
+            (
+                "/v2.0/oa/tag/tagfollower".into(),
+                json!({ "user_id": "U123", "tag_name": "vip" }),
+                TOKEN.into()
+            ),
+            (
+                "/v2.0/oa/tag/rmfollowerfromtag".into(),
+                json!({ "user_id": "U456", "tag_name": "bronze" }),
+                TOKEN.into()
+            ),
+            (
+                "/v2.0/oa/tag/rmtag".into(),
+                json!({ "tag_name": "deprecated-tag" }),
+                TOKEN.into()
+            ),
+        ]
+    );
+}
+
+/// Port of: integrations/zalo/__tests__/tag.test.ts "listOaTags > sends GET to correct URL with access_token header" (+ the `data ?? []` cases)
+#[test]
+fn list_oa_tags_reads_data_or_nothing() {
+    let (base, seen) = stub(|path, index| match index {
+        0 => envelope(path),
+        1 => ok_json(json!({ "error": 0, "message": "Success" })),
+        _ => ok_json(json!({ "error": 0, "message": "Success", "data": null })),
+    });
+    let zalo = Zalo::with_base_url(base);
+    run(async {
+        assert_eq!(
+            zalo.list_oa_tags(TOKEN).await.unwrap(),
+            vec!["vip", "gold", "silver"]
+        );
+        assert!(zalo.list_oa_tags(TOKEN).await.unwrap().is_empty());
+        assert!(zalo.list_oa_tags(TOKEN).await.unwrap().is_empty());
+    });
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[0].0, "/v2.0/oa/tag/gettagsofoa");
+    assert_eq!(seen[0].2, TOKEN);
+}
+
+/// A Zalo API error on a tag write is rejected (`handleZaloError`).
+#[test]
+fn a_tag_error_envelope_is_rejected() {
+    let (base, _) = stub(|_, _| ok_json(json!({ "error": -201, "message": "Tag not found" })));
+    let zalo = Zalo::with_base_url(base);
+    let error = run(zalo.remove_tag(TOKEN, "x")).unwrap_err();
+    assert_eq!(
+        (error.code, error.message.as_str()),
+        (Some(-201), "Tag not found")
+    );
+}
+
+// ---- get-user-profile.test.ts --------------------------------------------
+
+fn profile_stub(data: Value) -> (String, Seen) {
+    stub(move |_, _| {
+        let mut detail = json!({ "user_id": "U123", "display_name": "Ada", "avatar": "" });
+        for (k, v) in data.as_object().unwrap() {
+            detail[k] = v.clone();
+        }
+        ok_json(json!({ "error": 0, "message": "Success", "data": detail }))
+    })
+}
+
+fn profile(data: Value) -> ZaloProfile {
+    let (base, seen) = profile_stub(data);
+    let result =
+        run(Zalo::with_base_url(base).get_user_profile(TOKEN, 1, "U123", true, None)).unwrap();
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[0].2, TOKEN);
+    assert!(
+        seen[0]
+            .0
+            .starts_with("/v3.0/oa/user/detail?data=%7B%22user_id%22%3A%22U123%22%7D"),
+        "{}",
+        seen[0].0
+    );
+    result
+}
+
+/// Port of: integrations/zalo/__tests__/get-user-profile.test.ts "getUserProfile > normalizes user_gender %s"
+#[test]
+fn normalizes_user_gender() {
+    for (gender, expected) in [
+        (json!(1), Some("male")),
+        (json!("1"), Some("male")),
+        (json!(2), Some("female")),
+        (json!("2"), Some("female")),
+        (json!(0), None),
+        (json!(3), None),
+        (Value::Null, None),
+    ] {
+        let p = profile(json!({ "user_gender": gender }));
+        assert_eq!(
+            (p.source_id.as_str(), p.first_name.as_str(), p.gender),
+            ("U123", "Ada", expected)
+        );
+    }
+}
+
+const GCLID: &str = "EAIaIQobChMI7P_9z568iAMV1234567890";
+
+/// Port of: integrations/zalo/__tests__/get-user-profile.test.ts "getUserProfile Google click (dynamic_param) > reads a gclid dynamic_param into the Google referral" (+ gbraid, campaign ids)
+#[test]
+fn reads_the_google_click_of_dynamic_param() {
+    let referral = profile(json!({ "dynamic_param": format!("gclid:{GCLID}") }))
+        .referral
+        .unwrap();
+    assert_eq!(referral.gclid.as_deref(), Some(GCLID));
+    assert_eq!((referral.gbraid, referral.google_campaign_id), (None, None));
+    assert!(referral.google_click_received_at.ends_with('Z'));
+    let referral = profile(json!({ "dynamic_param": "gbraid:0AAAAAD_dummy_token" }))
+        .referral
+        .unwrap();
+    assert_eq!(
+        (referral.gclid, referral.gbraid.as_deref()),
+        (None, Some("0AAAAAD_dummy_token"))
+    );
+    let referral = profile(
+        json!({ "dynamic_param": format!("gclid:{GCLID},campaignid:1,adgroupid:2,adid:3") }),
+    )
+    .referral
+    .unwrap();
+    assert_eq!(
+        (
+            referral.google_campaign_id.as_deref(),
+            referral.google_ad_group_id.as_deref(),
+            referral.google_ad_id.as_deref()
+        ),
+        (Some("1"), Some("2"), Some("3"))
+    );
+}
+
+/// Port of: integrations/zalo/__tests__/get-user-profile.test.ts "returns no referral when dynamic_param is %s"
+#[test]
+fn no_referral_without_a_google_click() {
+    for value in [
+        Value::Null,
+        json!(""),
+        json!("utm_source=newsletter"),
+        json!("gclid:abc"),
+    ] {
+        assert_eq!(profile(json!({ "dynamic_param": value })).referral, None);
+    }
+}
+
+/// Port of: integrations/zalo/__tests__/get-user-profile.test.ts "getUserProfile lookup options > skips the avatar download when includeAvatar is false"
+#[test]
+fn skips_the_avatar_when_not_asked() {
+    let (base, seen) =
+        profile_stub(json!({ "avatar": "https://s120-ava-talk.zadn.vn/avatar.jpg" }));
+    let p = run(Zalo::with_base_url(base).get_user_profile(TOKEN, 1, "U123", false, None)).unwrap();
+    assert_eq!(p.avatar, None);
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}
+
+/// Port of: integrations/zalo/__tests__/get-user-profile.test.ts "getUserProfile lookup options > fails fast once requestTimeoutMs elapses"
+#[test]
+fn fails_fast_once_the_timeout_elapses() {
+    let (base, seen) = stub(|_, _| {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        ok_json(json!({ "error": 0, "message": "Success", "data": {} }))
+    });
+    let result = run(Zalo::with_base_url(base).get_user_profile(
+        TOKEN,
+        1,
+        "U123",
+        true,
+        Some(std::time::Duration::from_millis(30)),
+    ));
+    assert!(result.is_err());
+    std::thread::sleep(std::time::Duration::from_millis(350));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}
+
+/// Port of: integrations/zalo/__tests__/get-user-profile.test.ts "getUserProfile lookup options > keeps the getUserDetail action response unchanged"
+#[test]
+fn get_user_detail_returns_the_raw_data() {
+    let (base, _) = profile_stub(json!({ "user_is_follower": true, "dynamic_param": "gclid:x" }));
+    let detail = run(Zalo::with_base_url(base).get_user_detail(TOKEN, "U123", None)).unwrap();
+    assert_eq!(
+        (
+            &detail["user_id"],
+            &detail["display_name"],
+            &detail["user_is_follower"]
+        ),
+        (&json!("U123"), &json!("Ada"), &json!(true))
+    );
+}
+
+// ---- incoming-image-compression.test.ts ----------------------------------
+// The original asserts the `storeIncomingImage` mock arguments; here the
+// real store writes to a local file store and the stored rows are checked.
+// The download half is not stubbed: the SSRF guard refuses a loopback URL
+// (the 404 → nothing stored case is the one `is_success` branch).
+
+fn local_media() -> (WhatsappMedia, std::path::PathBuf) {
+    let root = std::env::temp_dir().join(format!(
+        "chatbotx-zalo-media-{}",
+        chatbotx_core::utils::id::create_id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let files = chatbotx_files::Uploader::new(&chatbotx_files::FilesConfig {
+        backend: chatbotx_files::Backend::Local { root: root.clone() },
+        signing_secret: None,
+        url_base: "/files".into(),
+    })
+    .unwrap();
+    (
+        WhatsappMedia {
+            files: Arc::new(files),
+            storage_url: "https://cdn.test".into(),
+        },
+        root,
+    )
+}
+
+fn location() -> chatbotx_files::ChannelMediaLocation {
+    chatbotx_files::ChannelMediaLocation {
+        channel: "zalo".into(),
+        workspace_id: "1".into(),
+        integration_id: "9".into(),
+    }
+}
+
+/// Port of: integrations/zalo/__tests__/incoming-image-compression.test.ts "zalo attachment — inline compression > an image that was not encoded is left for the background job" (+ "a file attachment keeps its original bytes")
+#[test]
+fn attachments_are_stored_under_the_channel_media_prefix() {
+    let (media, root) = local_media();
+    let mut image = IncomingAttachment {
+        file_type: "image".into(),
+        is_photo_message: true,
+        ..IncomingAttachment::default()
+    };
+    let mut file = IncomingAttachment {
+        file_type: "file".into(),
+        ..IncomingAttachment::default()
+    };
+    use super::super::whatsapp_media::store_downloaded;
+    run(async {
+        let bytes = bytes::Bytes::from_static(&[1, 2, 3]);
+        store_downloaded(&media, bytes, "image/jpeg", &location(), &mut image)
+            .await
+            .unwrap();
+        let bytes = bytes::Bytes::from_static(b"%PDF-1.4");
+        store_downloaded(&media, bytes, "application/pdf", &location(), &mut file)
+            .await
+            .unwrap();
+    });
+    for (attachment, mime, bytes) in [
+        (&image, "image/jpeg", &b"\x01\x02\x03"[..]),
+        (&file, "application/pdf", &b"%PDF-1.4"[..]),
+    ] {
+        assert!(
+            attachment.origin_path.starts_with("public/zalo/1/9/"),
+            "{}",
+            attachment.origin_path
+        );
+        assert_eq!(attachment.mime_type, mime);
+        assert_eq!(attachment.size, Some(bytes.len() as i64));
+        assert_eq!(
+            std::fs::read(root.join(&attachment.origin_path)).unwrap(),
+            bytes
+        );
+    }
+    assert!(image.is_photo_message);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Port of: integrations/zalo/__tests__/incoming-image-compression.test.ts "zalo avatar — inline compression > stores the avatar through the encoder with the avatar profile"
+#[test]
+fn the_avatar_is_stored_under_the_workspace_prefix() {
+    let (media, root) = local_media();
+    let path = run(store_avatar(
+        &media,
+        1,
+        bytes::Bytes::from_static(&[1, 2, 3]),
+        "image/jpeg",
+    ))
+    .unwrap();
+    let prefix = format!("{}/", chatbotx_files::get_storage_prefix("1"));
+    assert!(path.starts_with(&prefix), "{path}");
+    assert!(root.join(&path).exists());
+    let _ = std::fs::remove_dir_all(root);
 }

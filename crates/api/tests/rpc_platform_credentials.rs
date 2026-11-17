@@ -351,3 +351,93 @@ async fn get_giphy_api_key_reads_the_platform_key() {
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(out["json"], json!({ "apiKey": "gk" }));
 }
+
+// ─── `apps/builder/__tests__/zalo-settings-actions.test.ts` ───
+
+fn zalo(scope: &str) -> Value {
+    json!({
+        "scope": scope,
+        "clientId": "id",
+        "version": "v1",
+        "verifyToken": "verify",
+        "clientSecret": "secret",
+    })
+}
+
+#[tokio::test]
+async fn zalo_upserts_all_fields() {
+    let fx = fixture_as(Edition::Cloud).await;
+    grant_entitlement(&fx, true).await;
+    let (status, out) = action(&fx, KEY, "updateZaloSettings", OWNER_TOKEN, zalo("user")).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        Value::Object(stored(&fx, Some(OWNER), "zalo").await.expect("stored")),
+        json!({ "clientId": "id", "version": "v1", "verifyToken": "verify", "clientSecret": "secret" })
+    );
+}
+
+#[tokio::test]
+async fn zalo_rejects_each_empty_field() {
+    let fx = fixture().await;
+    for field in ["clientId", "version", "verifyToken", "clientSecret"] {
+        let mut input = zalo("user");
+        input[field] = json!("  ");
+        let (status, out) = action(&fx, KEY, "updateZaloSettings", OWNER_TOKEN, input).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{field}: {out}");
+        assert!(
+            out["json"]["data"]["validationErrors"][field].is_object(),
+            "{field}: {out}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn zalo_and_tiktok_delete_user_and_platform_credentials() {
+    let fx = fixture_as(Edition::Cloud).await;
+    make_super_admin(&fx).await;
+    let tiktok = json!({ "clientId": "id", "clientSecret": "secret" });
+    let mut zalo_config = zalo("user");
+    zalo_config.as_object_mut().expect("object").remove("scope");
+    for (kind, name, config) in [
+        ("zalo", "deleteZaloSettings", zalo_config),
+        ("tiktok", "deleteTiktokSettings", tiktok),
+    ] {
+        seed(&fx, Some(OWNER), kind, config.clone()).await;
+        seed(&fx, None, kind, config).await;
+        for scope in ["user", "platform"] {
+            let (status, out) =
+                action(&fx, KEY, name, OWNER_TOKEN, json!({ "scope": scope })).await;
+            assert_eq!(status, StatusCode::OK, "{name} {scope}: {out}");
+        }
+        assert!(stored(&fx, Some(OWNER), kind).await.is_none());
+        assert!(stored(&fx, None, kind).await.is_none());
+    }
+}
+
+// ─── `apps/builder/__tests__/tiktok-settings-actions.test.ts` (input schema;
+// the subscribe-then-save flow is in `crates/business/tests/connection_oauth_channels.rs`) ───
+
+#[tokio::test]
+async fn tiktok_rejects_both_features_off_and_empty_fields() {
+    let fx = fixture().await;
+    let base = json!({ "scope": "user", "clientId": "id", "clientSecret": "secret",
+        "features": { "messaging": false, "comments": false } });
+    let (status, out) = action(&fx, KEY, "updateTiktokSetting", OWNER_TOKEN, base.clone()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    assert!(
+        out["json"]["data"]["validationErrors"]["features"]["messaging"].is_object(),
+        "{out}"
+    );
+    for field in ["clientId", "clientSecret"] {
+        let mut input = base.clone();
+        input["features"] = json!({ "messaging": true, "comments": true });
+        input[field] = json!("");
+        let (status, out) = action(&fx, KEY, "updateTiktokSetting", OWNER_TOKEN, input).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{field}: {out}");
+        assert!(
+            out["json"]["data"]["validationErrors"][field].is_object(),
+            "{field}: {out}"
+        );
+    }
+    assert!(stored(&fx, Some(OWNER), "tiktok").await.is_none());
+}

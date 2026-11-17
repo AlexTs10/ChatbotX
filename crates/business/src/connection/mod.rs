@@ -5,6 +5,7 @@
 pub mod api_key;
 pub mod credentials;
 pub mod oauth;
+pub mod oauth_channels;
 pub mod providers;
 pub mod state;
 
@@ -367,6 +368,40 @@ pub async fn reconnect(_db: &Db, connection: &ConnectionRow) -> Result<Connectio
 /// `Connection` row matched.
 // ponytail: the `channels` quota release of the active→inactive edge is not
 // ported (no quota ledger in Rust yet); a non-active row is left unchanged.
+/// `releaseQuotaEdge` (active → inactive `channel`): one `channels` unit of
+/// the workspace owner and the workspace's `WorkspaceUsage` counter, both
+/// never below 0. Best effort, as the original: a failure is logged and the
+/// status write stands.
+fn release_channel_quota(conn: &Connection, workspace_id: i64) {
+    let result = (|| -> repo::Result<()> {
+        let owner: Option<i64> = conn
+            .query_row(
+                r#"SELECT "ownerId" FROM "Workspace" WHERE "id" = ?1"#,
+                [workspace_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        if let Some(owner) = owner {
+            crate::quota_enforcement::release_by(
+                conn,
+                owner,
+                crate::user_quota::QuotaMetric::Channels,
+                1,
+            )?;
+        }
+        crate::workspace_usage::adjust(
+            conn,
+            workspace_id,
+            crate::workspace_usage::WorkspaceUsageMetric::Channels,
+            -1,
+        )
+    })();
+    if let Err(error) = result {
+        tracing::warn!(%error, workspace_id, "connection disconnect: channel quota release failed");
+    }
+}
+
 pub async fn mark_unhealthy_by_identifier(
     db: &Db,
     provider: &str,
@@ -397,6 +432,9 @@ pub async fn mark_unhealthy_by_identifier(
                     params![current.id, now],
                 )
                 .map_err(repo_err)?;
+                if current.kind == "channel" {
+                    release_channel_quota(tx, workspace_id);
+                }
                 current.inbox_id
             }
             Some(_) => None,

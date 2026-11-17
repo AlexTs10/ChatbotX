@@ -31,7 +31,7 @@ pub struct WebhookReply {
     pub body: String,
 }
 
-pub(crate) fn json_reply(status: u16, message: &str) -> WebhookReply {
+pub fn json_reply(status: u16, message: &str) -> WebhookReply {
     WebhookReply {
         status,
         content_type: "application/json",

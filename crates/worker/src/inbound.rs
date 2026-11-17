@@ -128,28 +128,46 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
     // enrichment, thread-control recording and the leaderboard award are not
     // ported; the plain contact message path is.
     let source = contact_source(received.referral_source.as_deref());
-    let (contact_inbox, conversation, is_new_contact) =
-        detect_contact_and_conversation(deps, &inbox, &received.contact, source).await?;
+    // Orchestrator decision (DECISIONS 2026-11-17): the contact lookup /
+    // creation, the contact updates and the message insert are one write
+    // transaction, so no reader sees a new contact without its message.
+    let (tx_inbox, tx_received) = (inbox.clone(), received.clone());
+    let (contact_inbox, conversation, is_new_contact, saved) = deps
+        .db
+        .write(move |tx| {
+            let (contact_inbox, conversation, is_new_contact) =
+                detect_contact_and_conversation_tx(tx, &tx_inbox, &tx_received.contact, source)?;
+            let mut saved = None;
+            if let Some(incoming) = &tx_received.message {
+                if incoming.message_type != "outgoing" {
+                    if let Some(text) = incoming.text.as_deref() {
+                        update_contact_from_message_tx(
+                            tx,
+                            &contact_inbox,
+                            tx_inbox.workspace_id,
+                            text,
+                        );
+                    }
+                    unblock_if_blocked_tx(tx, contact_inbox.contact_id, tx_inbox.workspace_id);
+                }
+                saved = Some(save_message_tx(
+                    tx,
+                    &tx_inbox,
+                    &contact_inbox,
+                    &conversation,
+                    incoming,
+                    &tx_received,
+                )?);
+            }
+            Ok((contact_inbox, conversation, is_new_contact, saved))
+        })
+        .await
+        .map_err(db_fail)?;
 
     let mut message = None;
     let mut message_id = None;
-    if let Some(incoming) = &received.message {
-        if incoming.message_type != "outgoing" {
-            if let Some(text) = incoming.text.as_deref() {
-                update_contact_from_message(deps, &contact_inbox, inbox.workspace_id, text).await;
-            }
-            unblock_if_blocked(deps, contact_inbox.contact_id, inbox.workspace_id).await;
-        }
-        let (row, is_new) = save_message(
-            deps,
-            &inbox,
-            &contact_inbox,
-            &conversation,
-            incoming,
-            &received,
-            None,
-        )
-        .await?;
+    if let Some((stored, is_new)) = saved {
+        let row = broadcast_saved(deps, &inbox, &conversation, &stored, is_new, None).await;
         if is_new {
             message_id = row["id"].as_str().and_then(|s| s.parse().ok());
             message = Some(row);
@@ -264,9 +282,8 @@ pub(crate) fn find_or_create_conversation(
     find(conn)?.ok_or(chatbotx_db::rusqlite::Error::QueryReturnedNoRows)
 }
 
-/// `detectContactAndConversation`: the existing contact inbox (identity
-/// sync not ported) or a new contact + contact inbox + conversation in one
-/// transaction. Returns `(contactInbox, conversation, isNewContact)`.
+/// [`detect_contact_and_conversation_tx`] in its own write transaction
+/// (for callers outside [`receive_message`]).
 pub(crate) async fn detect_contact_and_conversation(
     deps: &Deps,
     inbox: &InboundInbox,
@@ -276,49 +293,62 @@ pub(crate) async fn detect_contact_and_conversation(
     let inbox = inbox.clone();
     let contact = contact.clone();
     deps.db
-        .write(move |tx| {
-            let source_conversation_id = contact.source_conversation_id.as_deref();
-            if let Some((existing, _matched_by)) = find_existing_contact_inbox(tx, &inbox, &contact)? {
-                // ponytail: `syncExistingContactIdentity` (BSUID / username
-                // learning) is not ported.
-                let conversation = find_or_create_conversation(
-                    tx,
-                    inbox.workspace_id,
-                    existing.contact_id,
-                    source_conversation_id,
-                    contact.channel_conversation_id.as_deref(),
-                )?;
-                return Ok((existing, conversation, false));
-            }
-            // ponytail: the MAC quota gate, `getProfile` lookups and the
-            // locale / timezone inference (`finalizeContactProfile`) are not
-            // ported; the contact row takes the webhook's fields.
-            let contact_id = new_id();
-            let now = now_ms();
-            let phone_number = contact.phone_number.clone().or_else(|| {
-                (inbox.channel == "whatsapp"
-                    && contact.source_user_id.as_deref() != Some(contact.source_id.as_str())
-                    && !contact.source_id.is_empty())
-                .then(|| format!("+{}", contact.source_id.trim_start_matches('+')))
-            });
-            tx.execute(
-                r#"INSERT INTO "Contact" ("id", "createdAt", "updatedAt", "workspaceId", "firstName",
+        .write(move |tx| detect_contact_and_conversation_tx(tx, &inbox, &contact, source))
+        .await
+        .map_err(db_fail)
+}
+
+/// `detectContactAndConversation`: the existing contact inbox (identity
+/// sync not ported) or a new contact + contact inbox + conversation in one
+/// transaction (the caller's). Returns `(contactInbox, conversation, isNewContact)`.
+fn detect_contact_and_conversation_tx(
+    tx: &Connection,
+    inbox: &InboundInbox,
+    contact: &IncomingContact,
+    source: &'static str,
+) -> Result<(ContactInbox, Conversation, bool), chatbotx_db::DbError> {
+    let source_conversation_id = contact.source_conversation_id.as_deref();
+    if let Some((existing, _matched_by)) = find_existing_contact_inbox(tx, inbox, contact)? {
+        // ponytail: `syncExistingContactIdentity` (BSUID / username
+        // learning) is not ported.
+        let conversation = find_or_create_conversation(
+            tx,
+            inbox.workspace_id,
+            existing.contact_id,
+            source_conversation_id,
+            contact.channel_conversation_id.as_deref(),
+        )?;
+        return Ok((existing, conversation, false));
+    }
+    // ponytail: the MAC quota gate, `getProfile` lookups and the
+    // locale / timezone inference (`finalizeContactProfile`) are not
+    // ported; the contact row takes the webhook's fields.
+    let contact_id = new_id();
+    let now = now_ms();
+    let phone_number = contact.phone_number.clone().or_else(|| {
+        (inbox.channel == "whatsapp"
+            && contact.source_user_id.as_deref() != Some(contact.source_id.as_str())
+            && !contact.source_id.is_empty())
+        .then(|| format!("+{}", contact.source_id.trim_start_matches('+')))
+    });
+    tx.execute(
+        r#"INSERT INTO "Contact" ("id", "createdAt", "updatedAt", "workspaceId", "firstName",
                      "lastName", "email", "phoneNumber", "avatar", "locale")
                    VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
-                params![
-                    contact_id,
-                    now,
-                    inbox.workspace_id,
-                    contact.first_name,
-                    contact.last_name,
-                    contact.email,
-                    phone_number,
-                    contact.avatar,
-                    contact.locale,
-                ],
-            )?;
-            let contact_inbox_id = new_id();
-            tx.execute(
+        params![
+            contact_id,
+            now,
+            inbox.workspace_id,
+            contact.first_name,
+            contact.last_name,
+            contact.email,
+            phone_number,
+            contact.avatar,
+            contact.locale,
+        ],
+    )?;
+    let contact_inbox_id = new_id();
+    tx.execute(
                 r#"INSERT INTO "ContactInbox" ("id", "createdAt", "updatedAt", "inboxId", "contactId",
                      "originalContactId", "source", "sourceId", "sourceUserId", "sourceParentUserId",
                      "sourceUsername", "channel", "language")
@@ -337,28 +367,25 @@ pub(crate) async fn detect_contact_and_conversation(
                     source,
                 ],
             )?;
-            let contact_inbox = tx.query_row(
-                &format!(r#"{} WHERE "id" = ?1"#, ContactInbox::select_sql()),
-                params![contact_inbox_id],
-                ContactInbox::from_row,
-            )?;
-            let conversation = find_or_create_conversation(
-                tx,
-                inbox.workspace_id,
-                contact_id,
-                source_conversation_id,
-                contact.channel_conversation_id.as_deref(),
-            )?;
-            Ok((contact_inbox, conversation, true))
-        })
-        .await
-        .map_err(db_fail)
+    let contact_inbox = tx.query_row(
+        &format!(r#"{} WHERE "id" = ?1"#, ContactInbox::select_sql()),
+        params![contact_inbox_id],
+        ContactInbox::from_row,
+    )?;
+    let conversation = find_or_create_conversation(
+        tx,
+        inbox.workspace_id,
+        contact_id,
+        source_conversation_id,
+        contact.channel_conversation_id.as_deref(),
+    )?;
+    Ok((contact_inbox, conversation, true))
 }
 
 /// `updateContactFromMessage`: a phone / email the contact typed overwrites
 /// the contact's columns. Failures are logged.
-async fn update_contact_from_message(
-    deps: &Deps,
+fn update_contact_from_message_tx(
+    tx: &Connection,
     contact_inbox: &ContactInbox,
     workspace_id: i64,
     text: &str,
@@ -369,24 +396,18 @@ async fn update_contact_from_message(
         return;
     }
     let contact_id = contact_inbox.contact_id;
-    let result = deps
-        .db
-        .write(move |tx| {
-            tx.execute(
-                r#"UPDATE "Contact" SET "phoneNumber" = COALESCE(?1, "phoneNumber"),
-                     "email" = COALESCE(?2, "email"), "updatedAt" = ?3
-                   WHERE "id" = ?4 AND "workspaceId" = ?5"#,
-                params![
-                    info.phone_number,
-                    info.email,
-                    now_ms(),
-                    contact_id,
-                    workspace_id
-                ],
-            )?;
-            Ok(())
-        })
-        .await;
+    let result = tx.execute(
+        r#"UPDATE "Contact" SET "phoneNumber" = COALESCE(?1, "phoneNumber"),
+             "email" = COALESCE(?2, "email"), "updatedAt" = ?3
+           WHERE "id" = ?4 AND "workspaceId" = ?5"#,
+        params![
+            info.phone_number,
+            info.email,
+            now_ms(),
+            contact_id,
+            workspace_id
+        ],
+    );
     if let Err(err) = result {
         tracing::warn!(err = %err, contact_id, "Contact update from message text failed");
     }
@@ -394,17 +415,24 @@ async fn update_contact_from_message(
 
 /// `contactService.unblockIfBlocked`.
 pub(crate) async fn unblock_if_blocked(deps: &Deps, contact_id: i64, workspace_id: i64) {
-    let result = deps
+    let _ = deps
         .db
         .write(move |tx| {
-            tx.execute(
-                r#"UPDATE "Contact" SET "blockedAt" = NULL, "updatedAt" = ?1
-                   WHERE "id" = ?2 AND "workspaceId" = ?3 AND "blockedAt" IS NOT NULL"#,
-                params![now_ms(), contact_id, workspace_id],
-            )?;
+            unblock_if_blocked_tx(tx, contact_id, workspace_id);
             Ok(())
         })
-        .await;
+        .await
+        .inspect_err(
+            |err| tracing::warn!(err = %err, contact_id, "Auto-unblock on inbound message failed"),
+        );
+}
+
+fn unblock_if_blocked_tx(tx: &Connection, contact_id: i64, workspace_id: i64) {
+    let result = tx.execute(
+        r#"UPDATE "Contact" SET "blockedAt" = NULL, "updatedAt" = ?1
+           WHERE "id" = ?2 AND "workspaceId" = ?3 AND "blockedAt" IS NOT NULL"#,
+        params![now_ms(), contact_id, workspace_id],
+    );
     if let Err(err) = result {
         tracing::warn!(err = %err, contact_id, "Auto-unblock on inbound message failed");
     }
@@ -427,6 +455,34 @@ pub(crate) async fn save_message(
     received: &Received,
     client_id: Option<&str>,
 ) -> Result<(Value, bool), JobError> {
+    let (i, ci, c, m, r) = (
+        inbox.clone(),
+        contact_inbox.clone(),
+        conversation.clone(),
+        incoming.clone(),
+        received.clone(),
+    );
+    let (stored, is_new) = deps
+        .db
+        .write(move |tx| save_message_tx(tx, &i, &ci, &c, &m, &r))
+        .await
+        .map_err(db_fail)?;
+    Ok((
+        broadcast_saved(deps, inbox, conversation, &stored, is_new, client_id).await,
+        is_new,
+    ))
+}
+
+/// The insert + activity tracking of [`save_message`] on the caller's
+/// transaction.
+fn save_message_tx(
+    tx: &Connection,
+    inbox: &InboundInbox,
+    contact_inbox: &ContactInbox,
+    conversation: &Conversation,
+    incoming: &IncomingMessage,
+    received: &Received,
+) -> Result<(repo_message::MessageWithAttachments, bool), chatbotx_db::DbError> {
     let inbound = incoming.message_type != "outgoing";
     let created_at = now_ms();
     let input = CreateMessageInput {
@@ -477,34 +533,31 @@ pub(crate) async fn save_message(
         .then(|| "location".to_owned())
         .or_else(|| incoming.text.is_some().then(|| "text".to_owned()));
     let referral = received.referral.as_ref().map(Value::to_string);
-    let ci = contact_inbox.clone();
+    let ci = contact_inbox;
     let conversation_id = conversation.id;
     let workspace_id = inbox.workspace_id;
-    let (stored, is_new) = deps
-        .db
-        .write(move |tx| {
-            let (stored, is_new) = if attachments.is_empty() {
-                let r = repo_message::create_or_update(tx, &input).map_err(crate::repo_err)?;
-                (
-                    repo_message::MessageWithAttachments {
-                        message: r.message,
-                        attachment_count: None,
-                        attachments: Vec::new(),
-                    },
-                    r.is_new,
-                )
-            } else {
-                let r = repo_message::create_or_update_with_attachments(tx, &input, &attachments)
-                    .map_err(crate::repo_err)?;
-                (r.result, r.is_new)
-            };
-            if !is_new {
-                return Ok((stored, false));
-            }
-            let at = stored.message.created_at;
-            // `recordInboundActivity`: contact-inbox tracking + the
-            // conversation's activity and waiting window.
-            tx.execute(
+    let (stored, is_new) = if attachments.is_empty() {
+        let r = repo_message::create_or_update(tx, &input).map_err(crate::repo_err)?;
+        (
+            repo_message::MessageWithAttachments {
+                message: r.message,
+                attachment_count: None,
+                attachments: Vec::new(),
+            },
+            r.is_new,
+        )
+    } else {
+        let r = repo_message::create_or_update_with_attachments(tx, &input, &attachments)
+            .map_err(crate::repo_err)?;
+        (r.result, r.is_new)
+    };
+    if !is_new {
+        return Ok((stored, false));
+    }
+    let at = stored.message.created_at;
+    // `recordInboundActivity`: contact-inbox tracking + the
+    // conversation's activity and waiting window.
+    tx.execute(
                 r#"UPDATE "ContactInbox" SET
                      "firstInteractionAt" = CASE WHEN "firstInteractionAt" IS NULL OR "firstInteractionAt" > ?1 THEN ?1 ELSE "firstInteractionAt" END,
                      "lastMessageAt" = ?1,
@@ -528,7 +581,7 @@ pub(crate) async fn save_message(
                     ci.contact_id
                 ],
             )?;
-            tx.execute(
+    tx.execute(
                 r#"UPDATE "Conversation" SET
                      "lastActivityAt" = ?1,
                      "contactRepliedAt" = CASE WHEN ?2 THEN ?1 ELSE "contactRepliedAt" END,
@@ -538,11 +591,19 @@ pub(crate) async fn save_message(
                    WHERE "id" = ?4 AND "workspaceId" = ?5"#,
                 params![at, inbound, now_ms(), conversation_id, workspace_id],
             )?;
-            Ok((stored, true))
-        })
-        .await
-        .map_err(db_fail)?;
-    let row = message_json(&stored);
+    Ok((stored, true))
+}
+
+/// The realtime `messageCreated` event of a new row; returns the row JSON.
+async fn broadcast_saved(
+    deps: &Deps,
+    inbox: &InboundInbox,
+    conversation: &Conversation,
+    stored: &repo_message::MessageWithAttachments,
+    is_new: bool,
+    client_id: Option<&str>,
+) -> Value {
+    let row = message_json(stored);
     if is_new {
         let mut event = row.clone();
         if let Some(client_id) = client_id {
@@ -559,7 +620,7 @@ pub(crate) async fn save_message(
         // ponytail: the incoming notification job, the `message:received`
         // event (flow triggers, Q.W2) and the photo re-encode are not ported.
     }
-    Ok((row, is_new))
+    row
 }
 
 /// `processIncomingMessage`: route a new contact message to its automation.

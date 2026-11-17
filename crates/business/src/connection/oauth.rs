@@ -6,9 +6,10 @@
 //! `connection` adapter (`integrations/messenger/src/integration.ts`,
 //! `apis/auth.ts`, `apis/page.ts`).
 //!
-//! ponytail: one adapter (Messenger, the page picker); another OAuth
-//! provider answers `connectionNotConfigured` until its adapter is ported
-//! (add a match arm in [`adapter`]).
+//! The TikTok and Zalo adapters (single account) are in
+//! [`super::oauth_channels`]. ponytail: another OAuth provider answers
+//! `connectionNotConfigured` until its adapter is ported (add a match arm in
+//! [`adapter`]).
 
 use chatbotx_core::encryption::{EncryptedData, Encryption};
 use chatbotx_db::Db;
@@ -19,6 +20,7 @@ use chatbotx_db::rusqlite::{Connection, OptionalExtension as _, params};
 use serde_json::{Value, json};
 
 use super::credentials::{Upstream, UpstreamRequest};
+use super::oauth_channels;
 use super::{COLUMNS, ConnectionRow, find_or_fail, providers, repo_err, row};
 use crate::connect_session::{self, NewSession, SessionRow};
 use crate::{BusinessError, Result, tx};
@@ -92,6 +94,24 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
             slug: "messenger",
             multi_account: true,
         }),
+        "tiktok" | "zalo" => Some(Adapter {
+            provider: if provider == "tiktok" {
+                "tiktok"
+            } else {
+                "zalo"
+            },
+            credential_type: if provider == "tiktok" {
+                "tiktok"
+            } else {
+                "zalo"
+            },
+            slug: if provider == "tiktok" {
+                "tiktok"
+            } else {
+                "zalo"
+            },
+            multi_account: false,
+        }),
         _ => None,
     }
 }
@@ -114,7 +134,7 @@ pub enum ProviderFailure {
     Unavailable(u16),
 }
 
-async fn call(
+pub(super) async fn call(
     upstream: &impl Upstream,
     request: UpstreamRequest,
 ) -> std::result::Result<Value, ProviderFailure> {
@@ -135,7 +155,7 @@ async fn call(
     }
 }
 
-fn get(url: String) -> UpstreamRequest {
+pub(super) fn get(url: String) -> UpstreamRequest {
     UpstreamRequest {
         method: "GET",
         url,
@@ -144,7 +164,7 @@ fn get(url: String) -> UpstreamRequest {
     }
 }
 
-fn query_url(base: &str, pairs: &[(&str, &str)]) -> String {
+pub(super) fn query_url(base: &str, pairs: &[(&str, &str)]) -> String {
     let mut url =
         url::Url::parse(base).unwrap_or_else(|_| url::Url::parse(GRAPH).expect("graph url"));
     url.query_pairs_mut().extend_pairs(pairs.iter().copied());
@@ -225,7 +245,7 @@ pub async fn resolve_credential(
     }))
 }
 
-fn text<'a>(value: &'a Value, key: &str) -> &'a str {
+pub(super) fn text<'a>(value: &'a Value, key: &str) -> &'a str {
     value[key].as_str().unwrap_or_default()
 }
 
@@ -237,9 +257,12 @@ fn version(credential: &Value) -> String {
         .to_string()
 }
 
-/// `authorizeUrl` (`buildFacebookDialogUrl`, `authType: "rerequest"`).
-fn authorize_url(credential: &OAuthCredential, state: &str) -> String {
+/// `authorizeUrl` (Messenger: `buildFacebookDialogUrl`, `authType: "rerequest"`).
+fn authorize_url(provider: &str, credential: &OAuthCredential, state: &str) -> String {
     let config = &credential.config;
+    if oauth_channels::handles(provider) {
+        return oauth_channels::authorize_url(provider, config, &credential.callback_url, state);
+    }
     query_url(
         &format!("{FACEBOOK}/{}/dialog/oauth", version(config)),
         &[
@@ -254,10 +277,10 @@ fn authorize_url(credential: &OAuthCredential, state: &str) -> String {
 }
 
 /// `oauth2Auth(config, callbackUrl, tokens, metadata)`.
-fn oauth2_auth(
+pub(super) fn oauth2_auth(
     config: &Value,
     callback_url: &str,
-    access_token: &str,
+    tokens: Value,
     metadata: Option<Value>,
 ) -> Value {
     let mut auth = json!({
@@ -265,7 +288,7 @@ fn oauth2_auth(
         "clientId": config["clientId"],
         "clientSecret": config["clientSecret"],
         "redirectUrl": callback_url,
-        "tokens": { "accessToken": access_token },
+        "tokens": tokens,
     });
     for key in ["verifyToken", "version"] {
         if let Some(value) = config[key].as_str().filter(|v| !v.is_empty()) {
@@ -278,13 +301,24 @@ fn oauth2_auth(
     auth
 }
 
-/// `exchangeCode`: the short-lived token, then the long-lived one.
+/// `exchangeCode` (Messenger: the short-lived token, then the long-lived one).
 async fn exchange_code(
     upstream: &impl Upstream,
+    provider: &str,
     credential: &OAuthCredential,
     code: &str,
 ) -> std::result::Result<Value, ProviderFailure> {
     let config = &credential.config;
+    if oauth_channels::handles(provider) {
+        return oauth_channels::exchange_code(
+            upstream,
+            provider,
+            config,
+            &credential.callback_url,
+            code,
+        )
+        .await;
+    }
     let endpoint = format!("{GRAPH}/{}/oauth/access_token", version(config));
     let short = call(
         upstream,
@@ -315,7 +349,7 @@ async fn exchange_code(
     Ok(oauth2_auth(
         config,
         &credential.callback_url,
-        text(&long, "access_token"),
+        json!({ "accessToken": text(&long, "access_token") }),
         None,
     ))
 }
@@ -330,8 +364,15 @@ fn candidate(source_id: &str, display_name: &str, auth: Value) -> Value {
 /// every admin task, each with its own page token.
 async fn list_candidates(
     upstream: &impl Upstream,
+    provider: &str,
     auth: &Value,
 ) -> std::result::Result<Vec<Value>, ProviderFailure> {
+    // A single-account provider's grant is its one `describe` candidate.
+    if oauth_channels::handles(provider) {
+        return Ok(oauth_channels::describe(provider, auth)
+            .map(|(id, name)| vec![candidate(&id, &name, auth.clone())])
+            .unwrap_or_default());
+    }
     if auth["authType"] != "oauth2" {
         return Ok(Vec::new());
     }
@@ -376,7 +417,7 @@ async fn list_candidates(
             let page_auth = oauth2_auth(
                 &config,
                 text(auth, "redirectUrl"),
-                page_token,
+                json!({ "accessToken": page_token }),
                 Some(json!({ "pageId": id, "pageName": name, "version": version })),
             );
             out.push(candidate(id, name, page_auth));
@@ -468,6 +509,7 @@ pub async fn start_session(
             .ok_or_else(|| BusinessError::not_found("Connection not found"))?;
     }
     let credential = credential.clone();
+    let provider = input.provider.clone();
     connect_session::create(
         db,
         NewSession {
@@ -487,7 +529,7 @@ pub async fn start_session(
             origin_host: input.origin_host,
             return_url: input.return_url,
         },
-        move |id, nonce| json!({ "type": "open_url", "url": authorize_url(&credential, &format!("{id}.{nonce}")) }),
+        move |id, nonce| json!({ "type": "open_url", "url": authorize_url(&provider, &credential, &format!("{id}.{nonce}")) }),
     )
     .await
 }
@@ -568,7 +610,7 @@ pub async fn complete_authorization(
         ));
     }
     connect_session::claim_authorization(db, session.id, session.workspace_id).await?;
-    let auth = match exchange_code(upstream, credential, code).await {
+    let auth = match exchange_code(upstream, &session.provider, credential, code).await {
         Ok(auth) => auth,
         Err(ProviderFailure::Unavailable(status)) => {
             tracing::warn!(
@@ -628,7 +670,7 @@ async fn list_and_attach(
     session: &SessionRow,
     auth: &Value,
 ) -> Result<SessionRow> {
-    let candidates = match list_candidates(upstream, auth).await {
+    let candidates = match list_candidates(upstream, &session.provider, auth).await {
         Ok(list) => list,
         Err(ProviderFailure::Unavailable(status)) => return Err(provider_unavailable(status)),
         Err(ProviderFailure::Rejected(_)) => {
@@ -710,7 +752,50 @@ fn persist_messenger(
     now: i64,
 ) -> Result<ConnectionRow> {
     let (page_id, name) = describe(auth)?;
-    let existing = find_by_source(conn, workspace_id, "messenger", &page_id)?;
+    let (existing, inbox_id) =
+        new_channel_inbox(conn, workspace_id, "messenger", &page_id, &name, now)?;
+    conn.execute(
+        r#"INSERT INTO "IntegrationMessenger" ("id", "createdAt", "updatedAt", "auth", "pageId",
+               "name", "conversationStarters", "persistentMenus", "personas", "workspaceId", "inboxId")
+           VALUES (?1, ?2, ?2, ?3, ?4, ?5, '[]', '[]', '[]', ?6, ?7)"#,
+        params![new_id(), now, auth.to_string(), page_id, name, workspace_id, inbox_id],
+    )
+    .map_err(unique_or_repo)?;
+    upsert_channel_connection(
+        conn,
+        workspace_id,
+        "messenger",
+        existing,
+        inbox_id,
+        &page_id,
+        &name,
+        actor_user_id,
+        now,
+    )
+}
+
+/// A unique violation is `connectionAlreadyConnected`.
+pub(super) fn unique_or_repo(error: chatbotx_db::rusqlite::Error) -> BusinessError {
+    if unique_violation(&error) {
+        already_connected()
+    } else {
+        repo_err(error)
+    }
+}
+
+/// The first step of a channel `connectAndPersist`: refuses an active
+/// connection of `(workspace, provider, sourceId)` and creates the new
+/// `Inbox`. Returns the inactive connection to revive (if any) and the
+/// inbox id.
+pub(super) fn new_channel_inbox(
+    conn: &Connection,
+    workspace_id: i64,
+    provider: &str,
+    source_id: &str,
+    name: &str,
+    now: i64,
+) -> Result<(Option<ConnectionRow>, i64)> {
+    let existing = find_by_source(conn, workspace_id, provider, source_id)?;
     if existing
         .as_ref()
         .is_some_and(|row| super::is_active(&row.status))
@@ -721,23 +806,34 @@ fn persist_messenger(
     conn.execute(
         r#"INSERT INTO "Inbox" ("id", "createdAt", "updatedAt", "name", "channel", "sourceId",
                "workspaceId", "status")
-           VALUES (?1, ?2, ?2, ?3, 'messenger', ?4, ?5, 'connected')"#,
-        params![inbox_id, now, name, page_id, workspace_id],
+           VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, 'connected')"#,
+        params![
+            inbox_id,
+            now,
+            name,
+            providers::to_channel_type(provider),
+            source_id,
+            workspace_id
+        ],
     )
-    .map_err(|e| {
-        if unique_violation(&e) {
-            already_connected()
-        } else {
-            repo_err(e)
-        }
-    })?;
-    conn.execute(
-        r#"INSERT INTO "IntegrationMessenger" ("id", "createdAt", "updatedAt", "auth", "pageId",
-               "name", "conversationStarters", "persistentMenus", "personas", "workspaceId", "inboxId")
-           VALUES (?1, ?2, ?2, ?3, ?4, ?5, '[]', '[]', '[]', ?6, ?7)"#,
-        params![new_id(), now, auth.to_string(), page_id, name, workspace_id, inbox_id],
-    )
-    .map_err(|e| if unique_violation(&e) { already_connected() } else { repo_err(e) })?;
+    .map_err(unique_or_repo)?;
+    Ok((existing, inbox_id))
+}
+
+/// The `connected` `Connection` of a channel connect (an inactive row of
+/// the same account is revived onto the new inbox).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn upsert_channel_connection(
+    conn: &Connection,
+    workspace_id: i64,
+    provider: &str,
+    existing: Option<ConnectionRow>,
+    inbox_id: i64,
+    source_id: &str,
+    name: &str,
+    actor_user_id: Option<i64>,
+    now: i64,
+) -> Result<ConnectionRow> {
     let id = match existing {
         Some(existing) => {
             conn.execute(
@@ -756,10 +852,10 @@ fn persist_messenger(
                 r#"INSERT INTO "Connection" ("id", "createdAt", "updatedAt", "workspaceId", "provider",
                        "kind", "channel", "inboxId", "sourceId", "displayName", "status", "createdBy",
                        "connectedAt")
-                   VALUES (?1, ?2, ?2, ?3, 'messenger', 'channel', ?4, ?5, ?6, ?7, 'connected', ?8, ?2)"#,
-                params![id, now, workspace_id, providers::to_channel_type("messenger"), inbox_id, page_id, name, actor_user_id],
+                   VALUES (?1, ?2, ?2, ?3, ?4, 'channel', ?5, ?6, ?7, ?8, 'connected', ?9, ?2)"#,
+                params![id, now, workspace_id, provider, providers::to_channel_type(provider), inbox_id, source_id, name, actor_user_id],
             )
-            .map_err(|e| if unique_violation(&e) { already_connected() } else { repo_err(e) })?;
+            .map_err(unique_or_repo)?;
             id
         }
     };
@@ -774,7 +870,8 @@ async fn subscribe_best_effort(
     auth: &Value,
     connection: ConnectionRow,
 ) -> Result<ConnectionRow> {
-    if subscribe_webhook(upstream, auth).await.is_ok() {
+    // TikTok / Zalo webhooks are set in the developer portal (no `webhook`).
+    if connection.provider != "messenger" || subscribe_webhook(upstream, auth).await.is_ok() {
         return Ok(connection);
     }
     tracing::warn!(
@@ -806,7 +903,7 @@ async fn complete_reconnect(
         connect_session::fail(db, session, "internal_error", None).await;
         return Err(BusinessError::not_found("Connection not found"));
     };
-    let candidates = match list_candidates(upstream, auth).await {
+    let candidates = match list_candidates(upstream, &session.provider, auth).await {
         Ok(list) => list,
         Err(_) => {
             connect_session::fail(db, session, "internal_error", Some(AUTHORIZED)).await;
@@ -830,20 +927,28 @@ async fn complete_reconnect(
         ));
     };
     let page_auth = candidate["auth"].clone();
-    let (page_id, _) = describe(&page_auth)?;
+    let provider = session.provider.clone();
+    let (page_id, _) = if oauth_channels::handles(&provider) {
+        oauth_channels::describe(&provider, &page_auth)?
+    } else {
+        describe(&page_auth)?
+    };
+    let table = oauth_channels::satellite(&provider).map_or("IntegrationMessenger", |(t, _)| t);
     let row = session.clone();
     let saved_auth = page_auth.clone();
     let result = tx::write(db, move |conn| {
         let now = repo::now_ms();
         let updated = conn
             .execute(
-                r#"UPDATE "IntegrationMessenger" SET "auth" = ?3, "tokenRefreshError" = NULL, "updatedAt" = ?4
-                   WHERE "inboxId" = ?1 AND "workspaceId" = ?2"#,
+                &format!(
+                    r#"UPDATE "{table}" SET "auth" = ?3, "tokenRefreshError" = NULL, "updatedAt" = ?4
+                       WHERE "inboxId" = ?1 AND "workspaceId" = ?2"#
+                ),
                 params![connection.inbox_id, connection.workspace_id, saved_auth.to_string(), now],
             )
             .map_err(repo_err)?;
         if updated == 0 {
-            return Err(not_configured("messenger"));
+            return Err(not_configured(&provider));
         }
         conn.execute(
             r#"UPDATE "Connection" SET "sourceId" = ?3, "lastError" = NULL, "status" = 'connected',
@@ -953,8 +1058,14 @@ pub async fn connect_targets(
         }
         let auth = candidate["auth"].clone();
         let saved = auth.clone();
+        let provider = session.provider.clone();
         let persisted = tx::write(db, move |conn| {
-            persist_messenger(conn, workspace_id, &saved, actor_user_id, repo::now_ms())
+            let now = repo::now_ms();
+            if oauth_channels::handles(&provider) {
+                oauth_channels::persist(conn, &provider, workspace_id, &saved, actor_user_id, now)
+            } else {
+                persist_messenger(conn, workspace_id, &saved, actor_user_id, now)
+            }
         })
         .await;
         let outcome = match persisted {
