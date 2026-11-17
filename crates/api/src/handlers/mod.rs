@@ -62,6 +62,7 @@ pub mod tags;
 pub mod templates;
 pub mod webchats;
 pub mod webhooks;
+pub mod working_hours;
 pub mod workspace_members;
 pub mod workspace_settings;
 
@@ -661,6 +662,8 @@ async fn route(
         response_sla::handle(state, route_id, call).await
     } else if webhooks::ROUTES.contains(&route_id) {
         webhooks::handle(state, route_id, call).await
+    } else if working_hours::ROUTES.contains(&route_id) {
+        working_hours::handle(state, route_id, call).await
     } else {
         return None;
     };

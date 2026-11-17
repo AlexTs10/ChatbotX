@@ -88,6 +88,7 @@ pub mod webhook;
 pub mod whatsapp;
 pub mod workspace;
 pub mod workspace_api_token;
+pub mod working_hours;
 pub mod workspace_member;
 pub mod workspace_usage;
 
