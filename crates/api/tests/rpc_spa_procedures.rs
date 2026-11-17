@@ -1193,3 +1193,82 @@ async fn pipeline_board_stages_items_and_member_scope() {
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(out["queued"], false);
 }
+
+#[tokio::test]
+async fn settings_admin_and_invitation_actions_check_the_caller() {
+    const GUEST_ID: i64 = 103;
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "WorkspaceApiToken" ("id", "workspaceId", "name", "permission", "tokenHash", "tokenPrefix")
+               VALUES (901, ?1, 'ci', 'full', 'secret-hash', 'cbx_ab')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "ErrorLog" ("id", "workspaceId", "action", "detail", "contactId")
+               VALUES (902, ?1, 'telegram', 'boom', ?2)"#,
+            params![WS, CONTACT_ID],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "User" ("id", "email", "name", "emailVerified") VALUES (?1, 'guest@spa.test', 'Gus', 1)"#,
+            params![GUEST_ID],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Session" ("id", "token", "userId", "expiresAt") VALUES (?1, 'guesttoken', ?1, ?2)"#,
+            params![GUEST_ID, NOW_MS + 60_000],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Invitation" ("id", "code", "permissions", "expiresAt", "workspaceId", "invitedBy")
+               VALUES (903, 'invite-code', '{"contacts":true}', 4000000000000, ?1, ?2)"#,
+            params![WS, ADMIN_ID],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed");
+
+    // The token DTO never carries the hash.
+    let (status, tokens) = act(&router, "admintoken", "listWorkspaceTokens", json!([{ "workspaceId": ws() }])).await;
+    assert_eq!(status, StatusCode::OK, "{tokens}");
+    assert_eq!(tokens[0]["tokenPrefix"], "cbx_ab");
+    assert!(tokens[0].get("tokenHash").is_none());
+
+    let (status, logs) = act(&router, "admintoken", "listErrorLogs", json!([{ "workspaceId": ws() }])).await;
+    assert_eq!(status, StatusCode::OK, "{logs}");
+    assert_eq!(logs["data"][0]["detail"], "boom");
+    assert_eq!(logs["data"][0]["contact"]["firstName"], "Ada");
+
+    // Audit logs: enterprise + workspace super admin.
+    let (status, _) = act(&router, "assignedtoken", "listAuditLogs", json!([{ "workspaceId": ws() }])).await;
+    assert_ne!(status, StatusCode::OK);
+
+    // Platform admin reads: no `PlatformAdmin` row = 404.
+    let (status, _, _) = post(&router, "actions/listPlatformAdmins", "admintoken", json!({ "args": [1] })).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Invitations: a member cannot accept again; a new user joins as an agent.
+    let accept = |token: &'static str| {
+        let router = router.clone();
+        async move {
+            post(&router, "actions/acceptInvitationAction", token, json!({ "args": [{ "code": "invite-code" }] })).await
+        }
+    };
+    let (status, error, _) = accept("assignedtoken").await;
+    assert_ne!(status, StatusCode::OK);
+    assert_eq!(error["message"], "You are already a member of this workspace");
+    let (status, out, _) = accept("guesttoken").await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let role: String = db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                r#"SELECT "role" FROM "WorkspaceMember" WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+                params![WS, GUEST_ID],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .expect("member");
+    assert_eq!(role, "agent");
+    let (status, error, _) = post(&router, "actions/acceptInvitationAction", "guesttoken", json!({ "args": [{ "code": "nope" }] })).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
+}
