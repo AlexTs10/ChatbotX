@@ -204,10 +204,10 @@ ported yet"`; the UI shows its error or an empty option list. Full lists:
 | sign-in, sign-up, password pages (`/auth/*`) | works | OAuth providers (`pages.authOptions` lists none) |
 | workspace list (`/`) | works; the first workspace is created on first load | `pages.deletedWorkspaces` is empty (deletion records); `updateWorkspaceStatusAction`, `reconcileTenantEntitlementAction` |
 | new workspace (`/channels/create`) | works for webchat and API (`createWebchatAction`, `createApiAction` create the workspace). The API form keeps Create disabled while the optional Callback URL is empty: the builder does the same | the other channels: tenant channel visibility and platform credentials (`platformCredentialService`, `tenantService.resolveVisibleChannels`), Telegram / WhatsApp / Messenger / Instagram / Threads / Zalo / TikTok connect; `clearTemplateInstallIntentAction`, `rememberTemplateInstallIntentAction` |
-| workspace shell (`/space/$id`) | works | quota, support session, token refresh errors and call-capable channel are fixed defaults (`pages.workspace`); `refreshAllChannelTokensAction`; `realtimeAPI.mintWorkspaceConnectTokenAuthenticatedAPI` |
+| workspace shell (`/space/$id`) | works; realtime token 200 and the workspace socket connects when `REALTIME_BROADCAST_SECRET` is set (§7) | quota, support session, token refresh errors and call-capable channel are fixed defaults (`pages.workspace`); `refreshAllChannelTokensAction`; `/space/$id/dashboard` is not routed (404 page) |
 | contacts list (`/space/$id/contacts`) | works: list, count, filters, tag / custom field / bot field / member / inbox / team / sequence options, bulk tag, sequence, custom field, delete, create (needs a connected inbox), export, import header peek, create custom field | filter options `emailTopicsAPI.privateListWorkspaceEmailTopicsAPI`, `workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI` (no Rust domain); the table avatar is not hydrated from the inbox |
 | contact detail (sheet) | works: contact, tags, custom fields (edit, reset), notes (list, create, edit, delete), sequences, block / unblock, bot on / off, ad referrals | `contactsAPIs.countContactInboxesAuthenticatedAPI` (broadcast audience count: no broadcast domain), `couponsAPI.listContactCouponsAPI`, `appointmentsAPI.listContactAppointmentsAPI`, `refreshContactProfileAction` (channel profile fetch) |
-| inbox (`/space/$id/inbox`) | works: conversation list (filters, search, PII rule), conversation, messages, archive / unarchive, assign, read / unread, follow, bot on / off, send (stored and queued; delivery needs the worker core), edit / delete / attributes of a message | `threadControlAction`, `syncThreadOwnerAction` (501 in Rust), `conversationsAPI.getPostDetailsAuthenticatedAPI` (Graph API), calls (`*Voip*`, `getCall*`), saved replies (`savedRepliesAPI.*`, 3 actions), appointments, `couponsAPI.listContactCouponsAPI`, the contact panel pipelines (`pipelinesAPI.privateListContactItemsAPI`, item / comment / attachment actions), `responseSlaAPI.*`, `whatsappMessageTemplateAPIs.*`, `messagesAPI.getWhatsappFlowResponseAuthenticatedAPI`, inbox team CRUD (enterprise) |
+| inbox (`/space/$id/inbox`) | works: conversation list (filters, search, PII rule), conversation, messages, archive / unarchive, assign, read / unread, follow, bot on / off, send (webchat: stored, `sendChannelMessage` job completed, live update over the workspace socket; API channel: needs a public callback URL, the SSRF guard blocks private hosts), edit / delete / attributes of a message | `threadControlAction`, `syncThreadOwnerAction` (501 in Rust), `conversationsAPI.getPostDetailsAuthenticatedAPI` (Graph API), calls (`*Voip*`, `getCall*`), saved replies (`savedRepliesAPI.*`, 3 actions), appointments, `couponsAPI.listContactCouponsAPI`, the contact panel pipelines (`pipelinesAPI.privateListContactItemsAPI`, item / comment / attachment actions), `responseSlaAPI.*`, `whatsappMessageTemplateAPIs.*`, `messagesAPI.getWhatsappFlowResponseAuthenticatedAPI`, inbox team CRUD (enterprise) |
 | flows list + folders (`/space/$id/flows`) | works: list, folders (create, rename, delete, move), create, rename, duplicate, import, delete | `templatesAPI.listLockedIdsAPI` (lock badges) |
 | tags (`/space/$id/tags`) | works: list, folders, create (name error under the field), rename, delete | – |
 | custom fields + bot fields (`/space/$id/custom-fields`) | works: custom field list / update / delete, bot field list / create / update / delete / reset | – |
@@ -216,7 +216,7 @@ ported yet"`; the UI shows its error or an empty option list. Full lists:
 | AI (`/space/$id/ai-agents`, `ai-files`, `ai-files/$id`, `ai-files/test-query`, `ai-functions`, `ai-mcp-servers`) | works: guard (`flows` permission, else 404), "no AI integration" page (`hasAIIntegration`), lists, create / update / delete of agents, files, functions, MCP servers; agent action options (`pages.aiAgents`) | `templatesAPI.listLockedIdsAPI` (lock badges) |
 | settings shell (`/space/$id/settings/*`) | works: guard (super admin, else 404), tabs, `general` (form shown with the workspace data), `admins` (members list) | general / advanced / smart delay / mark-read saves, invite / update / remove member, support access, deletion: workspace / members domain (`feat/conversion-d11`); API tokens, email topics, working hours: no Rust domain |
 | settings channels (`/space/$id/settings/channels/$channel`) | works for `api` (list), `telegram` (list, connect for an existing workspace, disconnect), `webchat` (list, delete); channel policy from `pages.settingsChannels` | `updateApiAction`, `rotateApiTokenAction`, `deleteApiAction` (no Rust business); Telegram webhook registration; the other channels render an empty panel (tenant channel visibility, platform credentials) |
-| settings integrations (`/space/$id/settings/integrations/$slug`) | works for openai, claude, deepseek, gemini, muse, openrouter (connect with key check, update, disconnect) and openai-compatible (connect, update, enable, disconnect) | the other integrations (email / CRM / ads / Google, Shopify, ...) render an empty panel |
+| settings integrations (`/space/$id/settings/integrations/$slug`) | works for openai, claude, deepseek, gemini, muse, openrouter (connect with key check, update, disconnect) and openai-compatible (connect, update, enable, disconnect). A real key needs `ENCRYPTION_KEY` (not checked: no key in the QA) | the other integrations (email / CRM / ads / Google, Shopify, ...) render an empty panel |
 | products / product imports | not routed | e-commerce page (meta catalog, store links, layout): not in this run |
 
 ## 7. Build and run
@@ -279,6 +279,43 @@ sequences page re-created its list promise on each suspend (endless
 `templatesAPI.listLockedIdsAPI`, the realtime token (no `REALTIME_SECRET`).
 Select popups do not open in a hidden tab, so the dialog's own submit was
 checked through the same action call.
+
+Third browser check on the Dell (2026-11-17, release build at `50f0097be`,
+empty `DATA_DIR`). Environment:
+
+```sh
+BETTER_AUTH_SECRET=<32+ chars> BETTER_AUTH_URL=http://dell-5570:3456 \
+NEXT_PUBLIC_BUILDER_URL=http://dell-5570:3456 \
+REALTIME_BROADCAST_SECRET=<32+ chars> PORT=3456 DATA_DIR=<empty dir> \
+./target/release/chatbotx-server
+```
+
+`REALTIME_BROADCAST_SECRET` (not `REALTIME_SECRET`) turns the realtime
+gateway on; without it the server logs a warning at start and the token
+call answers 500. `ENCRYPTION_KEY` is needed to store real AI provider
+keys and flow variables (warning at start without it).
+
+The T3 preview tab was hidden (no screenshots); the QA drove the page with
+clicks and typing through the page's own handlers and read the DOM text,
+the network entries and the QA database. Results: webchat created for the
+existing workspace (`/channels/create?channel=webchat&workspaceId=`) and
+listed in settings; webchat contact; inbox send → `createMessageAction`
+200, the `sendChannelMessage` job completed, `ContactInbox.lastOutboundMessageAt`
+set, realtime token 200 and one workspace socket (gateway metrics:
+upgrade 1, events sent); API channel with a private callback URL → the
+SSRF guard rejects it (the builder shows the same generic message);
+Claude connect with a fake key → "Invalid API key" under the field;
+connected state (row added by hand) → Auto Reply switch saves
+(`updateIntegrationClaudeAction`), Disconnect → `disconnectClaudeAction`
+200 and the page shows Connect again; AI agents: no-integration page, then
+list, Create AI Agent dialog → `createAIAgentAction` 200 and the new row;
+Knowledge, test query, AI Functions, MCP Servers, settings general (form
+with the workspace data), admins (owner listed), channels telegram / api /
+webchat, integrations openai / openai-compatible / gemini: all `/rpc`
+calls 200 (only `getPendingIncomingVoipCallAction` 404). Not checked:
+API callback delivery (needs a public URL), the guest webchat socket
+(no guest token without the webchat widget unit), Telegram connect (needs
+a real bot token), real AI keys, webchat delete.
 
 Development: `CHATBOTX_SERVER_URL=http://localhost:3000 pnpm --filter web dev`
 (Vite on :3123, proxies `/rpc`, `/api`, `/files`, `/realtime` to the Rust
