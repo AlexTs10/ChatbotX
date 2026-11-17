@@ -66,6 +66,7 @@ pub mod env;
 pub mod flow_config;
 pub mod js;
 pub mod logger;
+pub mod mini_app;
 pub mod utils;
 pub mod variables;
 
