@@ -12,6 +12,8 @@ The store secret is decrypted with the original AAD (`shopify:<ws>`,
 `woocommerce:<ws>`). A bad signature is 401, no store 404, a failure 500
 (the store delivers again).
 
+| 2 | Google Sheets client (`listSheetNames`, `listSheetHeaders`, `getSheetValues`, `insertRow`, `updateRow`, `clearRow`, revoke) with the `OAuth2Client` token refresh (5 min margin, once more after a 401); `disconnectGoogleSheetsAction` | `business::google_sheets`, `api::rpc_procedures::email_marketing` | `integrations/google-sheets/src/**`, `features/integration-google-sheets/actions/disconnect.action.ts` |
+
 ## Not in this unit (owner)
 
 - The job side `processShopifyWebhook` / `processWooCommerceWebhook` (re-read
@@ -30,9 +32,8 @@ The store secret is decrypted with the original AAD (`shopify:<ws>`,
 
 - Google Sheets OAuth connect (`googleSheets` adapter for the connect-session
   engine: authorize URL, code exchange, `tokeninfo` identity, the
-  `IntegrationGoogleSheet` + `Integration` rows), disconnect (token revoke)
-  and the Sheets client (`listSheetNames`, `listSheetHeaders`,
-  `getSheetValues`, `insertRow`, `updateRow`, `clearRow`) with token refresh.
+  `IntegrationGoogleSheet` + `Integration` rows; the engine's persist path
+  is channel-shaped today and needs an integration-kind branch).
   The legacy unsigned JSON state is not ported: the connect action must
   start a signed connect session (`business::connect_session`).
 
