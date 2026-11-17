@@ -227,7 +227,7 @@ fn flow_with_versions_json(flow: &FlowWithVersions) -> Map<String, Value> {
 }
 
 /// A query `z.boolean()` (`"true"` / `"false"`).
-fn query_bool(input: &mut Input, name: &str) -> Option<bool> {
+pub(crate) fn query_bool(input: &mut Input, name: &str) -> Option<bool> {
     match input.get(name).cloned() {
         None => None,
         Some(Value::String(text)) if text == "true" => Some(true),

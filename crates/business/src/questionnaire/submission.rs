@@ -338,3 +338,25 @@ pub async fn delete_submission(
     })
     .await
 }
+
+/// `deleteSubmissions` (an empty list does nothing).
+pub async fn delete_submissions(
+    db: &Db,
+    workspace_id: i64,
+    questionnaire_id: i64,
+    submission_ids: Vec<i64>,
+) -> Result<()> {
+    if submission_ids.is_empty() {
+        return Ok(());
+    }
+    let ids = serde_json::to_string(&submission_ids).unwrap_or_default();
+    tx::write(db, move |conn| {
+        conn.execute(
+            r#"DELETE FROM "QuestionnaireSubmission" WHERE "workspaceId" = ?1 AND "questionnaireId" = ?2 AND "id" IN (SELECT value FROM json_each(?3))"#,
+            params![workspace_id, questionnaire_id, ids],
+        )
+        .map_err(db_error)?;
+        Ok(())
+    })
+    .await
+}

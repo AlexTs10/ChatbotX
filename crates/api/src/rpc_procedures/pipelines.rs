@@ -25,7 +25,7 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
         "pipelinesAPI.privateListPipelineOptionsAPI" => options(ctx).await,
         "pipelinesAPI.privateGetPipelineAPI" => get(ctx, input).await,
         "pipelinesAPI.privateListPipelinesAPI" => list(ctx).await,
-        _ => return None,
+        _ => return super::pipeline_board::procedure(ctx, path, input).await,
     })
 }
 
@@ -40,7 +40,7 @@ pub(super) const ACTIONS: &[&str] = &[
 /// user as the actor (`pipelineActionCaller`).
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
     if !ACTIONS.contains(&name) {
-        return None;
+        return super::pipeline_board::action(ctx, name, args).await;
     }
     Some(
         async {
@@ -144,7 +144,7 @@ async fn list(ctx: &Ctx<'_>) -> Result<Value, OrpcError> {
 }
 
 /// `pipelineScopeFromMember` (support sessions do not reach the SPA `/rpc`).
-async fn member_scope(ctx: &Ctx<'_>) -> Result<PipelineAccessScope, OrpcError> {
+pub(super) async fn member_scope(ctx: &Ctx<'_>) -> Result<PipelineAccessScope, OrpcError> {
     let (ws, user) = (ctx.workspace_id, ctx.user_id);
     let member = chatbotx_business::tx::read(&ctx.api.db, move |conn| {
         let rows: Vec<WorkspaceMember> = find_many(

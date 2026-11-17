@@ -87,6 +87,16 @@ const authPages = [
   }),
 ]
 
+// `/invitations/$code` is public too (lib/public-routes.ts).
+const invitationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "invitations/$code",
+  component: lazyRouteComponent(
+    () => import("@/routes/invitations"),
+    "InvitationsPage",
+  ),
+})
+
 // Everything else needs a session (proxy.ts) and a current password
 // (`enforcePasswordCurrent` in every protected layout).
 const protectedRoute = createRoute({
@@ -298,6 +308,20 @@ const commentPages = (
 )
 
 // The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
+const logs = () => import("@/routes/logs")
+const logPages = (
+  [
+    ["error-logs", "ErrorLogsPage"],
+    ["audit-logs", "AuditLogsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(logs, page),
+  }),
+)
+
 const toolPages = (
   [
     ["polls", "PollsPage"],
@@ -405,6 +429,22 @@ const settingsRoutes = settingsRoute.addChildren([
   settingsPage(() => settingsRoute, "/", "SettingsIndexPage"),
   settingsPage(() => settingsRoute, "general", "SettingsGeneralPage"),
   settingsPage(() => settingsRoute, "admins", "SettingsAdminsPage"),
+  settingsPage(() => settingsRoute, "inbox-teams", "SettingsInboxTeamsPage"),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus",
+    "SettingsUserPersistentMenusPage",
+  ),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus/create",
+    "SettingsUserPersistentMenuCreatePage",
+  ),
+  settingsPage(
+    () => settingsRoute,
+    "user-persistent-menus/$menuId",
+    "SettingsUserPersistentMenuEditPage",
+  ),
   settingsChannelsRoute.addChildren([
     createRoute({
       getParentRoute: () => settingsChannelsRoute,
@@ -450,12 +490,45 @@ const createChannelRoute = createRoute({
   ),
 })
 
+// `app/admin/*`: the platform-operator console (platform admin only).
+const admin = () => import("@/routes/admin")
+const adminRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "admin",
+  component: lazyRouteComponent(admin, "AdminLayout"),
+})
+const adminPages = (
+  [
+    ["/", "AdminIndexPage"],
+    ["workspaces", "AdminWorkspacesPage"],
+    ["admins", "AdminAdminsPage"],
+    ["help-items", "AdminHelpItemsPage"],
+    ["platform-credentials", "AdminNotAvailablePage"],
+    ["workspaces/deleted", "AdminNotAvailablePage"],
+    ["platform-channels", "AdminNotAvailablePage"],
+    ["default-template", "AdminNotAvailablePage"],
+    ["audit-logs", "AdminNotAvailablePage"],
+    ["smtp", "AdminNotAvailablePage"],
+    ["branding", "AdminNotAvailablePage"],
+    ["email-templates", "AdminNotAvailablePage"],
+    ["email-templates/$type", "AdminNotAvailablePage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => adminRoute,
+    path,
+    component: lazyRouteComponent(admin, page),
+  }),
+)
+
 const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
+  invitationRoute,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
     createChannelRoute,
+    adminRoute.addChildren(adminPages),
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
@@ -464,6 +537,7 @@ const routeTree = rootRoute.addChildren([
       ecommerceRoute.addChildren(ecommercePages),
       productFormsRoute.addChildren(productFormPages),
       ...toolPages,
+      ...logPages,
       ...toolEditorPages,
       ...commentListRoutes,
       ...commentPages,

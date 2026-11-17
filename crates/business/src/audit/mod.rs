@@ -3,6 +3,8 @@
 //! the original, a tokio task-local here) and `auditService.record`, which
 //! enqueues one `sendAuditLog` job on the `default` queue.
 
+pub mod log_query;
+
 use std::sync::Arc;
 
 use chatbotx_db::Db;

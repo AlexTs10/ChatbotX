@@ -134,7 +134,8 @@ fn id_name(conn: &Connection, table: &str, id: Option<i64>) -> Result<Option<IdN
     })
 }
 
-fn load_relations(
+/// The relations of one row (`with` of the builder queries).
+pub fn load_relations(
     conn: &Connection,
     broadcast: Broadcast,
     with_integrations: bool,

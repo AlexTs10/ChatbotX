@@ -214,7 +214,7 @@ fn image(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Option<Value
 }
 
 /// `z.iso.datetime()`: `YYYY-MM-DDTHH:MM(:SS(.f+)?)?Z`.
-fn is_iso_datetime(text: &str) -> bool {
+pub(crate) fn is_iso_datetime(text: &str) -> bool {
     let Some(body) = text.strip_suffix('Z') else {
         return false;
     };
@@ -579,7 +579,7 @@ fn minigame_type(input: &mut Input) -> Option<String> {
 }
 
 /// `createMinigameRequest`.
-fn minigame_data(input: &mut Input) -> Option<MinigameData> {
+pub(crate) fn minigame_data(input: &mut Input) -> Option<MinigameData> {
     let kind = minigame_type(input);
     let get = |input: &Input, name: &str| input.get(name).cloned();
     let general = general_settings(input, get(input, "generalSettings").as_ref());
