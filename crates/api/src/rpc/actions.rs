@@ -299,7 +299,12 @@ pub fn spa_target(export: &str) -> Option<(&'static str, &str)> {
 pub fn spa_input(input: &Value) -> Value {
     let mut out = Map::new();
     let mut binds = Vec::new();
-    for arg in input.get("args").and_then(Value::as_array).into_iter().flatten() {
+    for arg in input
+        .get("args")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         match arg {
             Value::String(_) => binds.push(arg.clone()),
             Value::Object(fields) => out.extend(fields.clone()),

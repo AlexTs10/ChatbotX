@@ -74,9 +74,18 @@ mod tests {
     #[test]
     fn maps_private_names_to_public_routes() {
         let cases = [
-            ("analyticsRoutes.contactCountsPerDayAnalyticsAPI", Some("analytics.contactCountsPerDay")),
-            ("analyticsRoutes.botMessagesAIProvidersAnalyticsAPI", Some("analytics.botMessagesAiProviders")),
-            ("analyticsRoutes.macActiveContactCountByWorkspaceAPI", Some("analytics.macActiveContactCount")),
+            (
+                "analyticsRoutes.contactCountsPerDayAnalyticsAPI",
+                Some("analytics.contactCountsPerDay"),
+            ),
+            (
+                "analyticsRoutes.botMessagesAIProvidersAnalyticsAPI",
+                Some("analytics.botMessagesAiProviders"),
+            ),
+            (
+                "analyticsRoutes.macActiveContactCountByWorkspaceAPI",
+                Some("analytics.macActiveContactCount"),
+            ),
             ("analyticsRoutes.getBroadcastStatsAnalyticsAPI", None),
             ("analyticsRoutes.refLinkStats", None),
         ];
@@ -88,6 +97,9 @@ mod tests {
     #[test]
     fn query_repeats_array_keys() {
         let input = json!({ "workspaceId": "1", "from": "2026-01-01T00:00:00.000Z", "inboxIds": ["2", "3"] });
-        assert_eq!(query(&input), "from=2026-01-01T00%3A00%3A00.000Z&inboxIds=2&inboxIds=3");
+        assert_eq!(
+            query(&input),
+            "from=2026-01-01T00%3A00%3A00.000Z&inboxIds=2&inboxIds=3"
+        );
     }
 }
