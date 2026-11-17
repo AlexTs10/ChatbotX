@@ -7,13 +7,21 @@ mod handlers_common;
 
 use std::sync::{Arc, Mutex};
 
-use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::routing::{get, post};
 use chatbotx_db::rusqlite::params;
 use handlers_common::{Fixture, OTHER_WS, WS, call, fixture};
 use serde_json::{Value, json};
+
+fn reply(status: u16, value: Value) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::from_u16(status).unwrap(),
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        value.to_string(),
+    )
+        .into_response()
+}
 
 #[derive(Default)]
 struct Graph {
@@ -24,8 +32,9 @@ struct Graph {
 async fn graph_post(
     State(g): State<Arc<Graph>>,
     uri: axum::http::Uri,
-    Json(body): Json<Value>,
-) -> (StatusCode, Json<Value>) {
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     g.calls.lock().unwrap().push((uri.path().to_owned(), body));
     let (status, answer) = g
         .answer
@@ -33,15 +42,18 @@ async fn graph_post(
         .unwrap()
         .clone()
         .unwrap_or((200, json!({ "success": true })));
-    (StatusCode::from_u16(status).unwrap(), Json(answer))
+    reply(status, answer)
 }
 
-async fn graph_get(State(g): State<Arc<Graph>>, uri: axum::http::Uri) -> Json<Value> {
+async fn graph_get(State(g): State<Arc<Graph>>, uri: axum::http::Uri) -> axum::response::Response {
     g.calls
         .lock()
         .unwrap()
         .push((uri.path().to_owned(), Value::Null));
-    Json(json!({ "data": [{ "thread_owner": { "app_id": "partner-app" } }] }))
+    reply(
+        200,
+        json!({ "data": [{ "thread_owner": { "app_id": "partner-app" } }] }),
+    )
 }
 
 async fn start(f: &mut Fixture) -> Arc<Graph> {

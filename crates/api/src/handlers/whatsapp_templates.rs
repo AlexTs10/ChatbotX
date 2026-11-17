@@ -249,7 +249,7 @@ async fn sync_from_meta(
 }
 
 /// `syncWhatsappMessageTemplates` (shared with the `/rpc` sync action).
-pub async fn sync_integration(
+pub(crate) async fn sync_integration(
     db: &chatbotx_db::Db,
     graph_url: &str,
     integration: &IntegrationWhatsapp,

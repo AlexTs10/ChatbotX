@@ -6,7 +6,6 @@ mod handlers_common;
 
 use std::sync::{Arc, Mutex};
 
-use axum::Json;
 use axum::extract::State;
 use axum::routing::get;
 use chatbotx_db::rusqlite::params;
@@ -64,17 +63,36 @@ async fn list_is_scoped_to_the_tokens_workspace_and_drops_the_integration_row() 
     assert_eq!(body, json!([]));
 }
 
-async fn graph(State(paths): State<Arc<Mutex<Vec<String>>>>, uri: axum::http::Uri) -> Json<Value> {
+fn reply(status: u16, value: Value) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::from_u16(status).unwrap(),
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        value.to_string(),
+    )
+        .into_response()
+}
+
+async fn graph(
+    State(paths): State<Arc<Mutex<Vec<String>>>>,
+    uri: axum::http::Uri,
+) -> axum::response::Response {
     paths.lock().unwrap().push(uri.path().to_owned());
     match uri.path() {
-        "/v23.0/waba-1/flows" => Json(json!({ "data": [
+        "/v23.0/waba-1/flows" => reply(
+            200,
+            json!({ "data": [
             { "id": "meta-1", "name": "Survey 2", "status": "PUBLISHED", "categories": ["SURVEY"], "validation_errors": [] },
             { "id": "meta-new", "name": "Fresh", "status": "DRAFT", "categories": [], "validation_errors": [] },
-        ] })),
+        ] }),
+        ),
         // A download URL that is not public is never fetched.
-        _ => Json(json!({ "data": [
+        _ => reply(
+            200,
+            json!({ "data": [
             { "asset_type": "FLOW_JSON", "download_url": "http://127.0.0.1:1/flow.json" },
-        ] })),
+        ] }),
+        ),
     }
 }
 

@@ -7,7 +7,6 @@ mod handlers_common;
 
 use std::sync::{Arc, Mutex};
 
-use axum::Json;
 use axum::extract::State;
 use axum::routing::get;
 use chatbotx_db::rusqlite::params;
@@ -91,15 +90,28 @@ async fn get_lists_the_keys_to_fill_as_parameters() {
     );
 }
 
+fn reply(status: u16, value: Value) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::from_u16(status).unwrap(),
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        value.to_string(),
+    )
+        .into_response()
+}
+
 async fn graph_templates(
     State(paths): State<Arc<Mutex<Vec<String>>>>,
     uri: axum::http::Uri,
-) -> Json<Value> {
+) -> axum::response::Response {
     paths.lock().unwrap().push(uri.path().to_owned());
-    Json(json!({ "data": [
+    reply(
+        200,
+        json!({ "data": [
         { "id": "src-9", "name": "hello2", "language": "en", "category": "MARKETING", "status": "APPROVED", "components": [] },
         { "id": "src-new", "name": "fresh", "language": "de", "category": "UTILITY", "status": "PENDING", "components": [] },
-    ], "paging": {} }))
+    ], "paging": {} }),
+    )
 }
 
 #[tokio::test]
