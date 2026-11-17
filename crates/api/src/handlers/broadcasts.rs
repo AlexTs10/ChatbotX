@@ -398,8 +398,8 @@ fn parse_with(input: &mut Input, schema: Schema) -> Value {
 }
 
 /// `contactFilterRequest.shape.contactFilter` (required).
-fn parse_contact_filter(input: &mut Input, required: bool) -> Option<Value> {
-    let value = match input.get("contactFilter").cloned() {
+pub(crate) fn parse_contact_filter(input: &mut Input, name: &str, required: bool) -> Option<Value> {
+    let value = match input.get(name).cloned() {
         None if !required => return None,
         other => other.unwrap_or(Value::Null),
     };
@@ -409,7 +409,7 @@ fn parse_contact_filter(input: &mut Input, required: bool) -> Option<Value> {
             let issues = issues
                 .into_iter()
                 .map(|mut issue| {
-                    let mut path = vec![json!("contactFilter")];
+                    let mut path = vec![json!(name)];
                     path.extend(issue["path"].as_array().cloned().unwrap_or_default());
                     issue["path"] = Value::Array(path);
                     issue
@@ -425,7 +425,7 @@ fn parse_contact_filter(input: &mut Input, required: bool) -> Option<Value> {
 /// the contact filter; the issues go to `input`.
 fn parse_payload(input: &mut Input) -> Value {
     let mut data = parse_with(input, create_request());
-    let filter = parse_contact_filter(input, true);
+    let filter = parse_contact_filter(input, "contactFilter", true);
     if let (Some(obj), Some(filter)) = (data.as_object_mut(), filter) {
         obj.insert("contactFilter".into(), filter);
     }
@@ -641,7 +641,7 @@ fn preview_input(
     input: &mut Input,
     workspace_id: i64,
 ) -> (AudienceInput, Option<i64>, Option<i64>, Option<CountMode>) {
-    let filter = parse_contact_filter(input, false);
+    let filter = parse_contact_filter(input, "contactFilter", false);
     let data = parse_with(
         input,
         z::object(vec![

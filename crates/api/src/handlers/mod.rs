@@ -30,6 +30,8 @@ pub mod contacts;
 pub mod contacts_bulk;
 pub mod conversations;
 pub mod custom_fields;
+pub mod discount_codes;
+pub mod ecommerce_analytics;
 pub mod ecommerce_settings;
 pub mod email_topics;
 pub mod error_logs;
@@ -63,6 +65,7 @@ pub mod tags;
 pub mod templates;
 pub mod triggers;
 pub mod webchats;
+pub mod webshop;
 pub mod workspace_members;
 pub mod workspace_settings;
 
@@ -596,6 +599,8 @@ async fn route(
         keywords::handle(state, route_id, call).await
     } else if templates::ROUTES.contains(&route_id) {
         templates::handle(state, route_id, call, principal).await
+    } else if webshop::ROUTES.contains(&route_id) {
+        webshop::handle(state, call, principal).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
     } else if contacts_bulk::ROUTES.contains(&route_id) {
@@ -608,6 +613,10 @@ async fn route(
         orders::handle(state, route_id, call).await
     } else if payment_providers::ROUTES.contains(&route_id) {
         payment_providers::handle(state, route_id, call).await
+    } else if ecommerce_analytics::ROUTES.contains(&route_id) {
+        ecommerce_analytics::handle(state, route_id, call).await
+    } else if discount_codes::ROUTES.contains(&route_id) {
+        discount_codes::handle(state, route_id, call).await
     } else if ecommerce_settings::ROUTES.contains(&route_id) {
         ecommerce_settings::handle(state, route_id, call).await
     } else if folders::ROUTES.contains(&route_id) {

@@ -106,7 +106,7 @@ fn major(stored: i64) -> f64 {
 }
 
 /// `resolveTimezone`: an unknown or offset zone is UTC.
-fn resolve_timezone(tz: &str) -> (Tz, String) {
+pub(crate) fn resolve_timezone(tz: &str) -> (Tz, String) {
     if tz.len() > MAX_TIMEZONE_NAME_LENGTH || tz.starts_with('+') || tz.starts_with('-') {
         return (Tz::UTC, "UTC".to_string());
     }

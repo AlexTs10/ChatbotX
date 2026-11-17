@@ -323,10 +323,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/delete-workspace-token-action.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/disconnect-meta-actions.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/disconnect-whatsapp-action.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
-| `apps/builder/__tests__/discount-codes-public-api.test.ts` | C | tbd | todo | Coupons and discount codes; builder server code |
+| `apps/builder/__tests__/discount-codes-public-api.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; builder server code; Q.D8 (mock-based service test, see DECISIONS) |
 | `apps/builder/__tests__/download-flow-export.test.ts` | B | - | todo | Imports and exports (contacts, products, flows); builder jsdom |
 | `apps/builder/__tests__/dynamic-images-public-api.test.ts` | C | tbd | todo | Dynamic images; builder server code |
-| `apps/builder/__tests__/ecommerce-analytics-public-api.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics; builder server code |
+| `apps/builder/__tests__/ecommerce-analytics-public-api.test.ts` | C | parity p1-08 `03` | dropped | Ecommerce: settings, open hours, analytics; builder server code; Q.D8 (mock-based service test, see DECISIONS) |
 | `apps/builder/__tests__/ecommerce-open-hours-public-api.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics; builder server code |
 | `apps/builder/__tests__/ecommerce-public-scope.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics; builder server code |
 | `apps/builder/__tests__/ecommerce-settings-legacy-keys.test.ts` | B | - | todo | Ecommerce: settings, open hours, analytics; builder jsdom |
@@ -2588,9 +2588,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/decision/global-router-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
 | `packages/business/src/decision/profile-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
 | `packages/business/src/decision/transport.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/discount-code/__tests__/discount-code-service.test.ts` | C | tbd | todo | Coupons and discount codes |
-| `packages/business/src/discount-code/__tests__/pricing.test.ts` | C | tbd | todo | Coupons and discount codes |
-| `packages/business/src/ecommerce-analytics/__tests__/ecommerce-analytics-service.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
+| `packages/business/src/discount-code/__tests__/discount-code-service.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; Q.D8 (mock-based service test, see DECISIONS) |
+| `packages/business/src/discount-code/__tests__/pricing.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; Q.D8 (mock-based service test, see DECISIONS) |
+| `packages/business/src/ecommerce-analytics/__tests__/ecommerce-analytics-service.test.ts` | C | parity p1-08 `03` | dropped | Ecommerce: settings, open hours, analytics; Q.D8 (mock-based service test, see DECISIONS) |
 | `packages/business/src/ecommerce-open-hours/__tests__/ecommerce-open-hours-service.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/business/src/ecommerce-open-hours/__tests__/is-open.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts` | C | `crates/business/tests/ecommerce_settings_service.rs` | passing | Ecommerce: settings, open hours, analytics |
@@ -2634,7 +2634,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/vendor/__tests__/vendor-service.test.ts` | C | tbd | todo | Ecommerce: products, categories, vendors |
 | `packages/business/src/webshop/__tests__/cart-lines.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |
 | `packages/business/src/webshop/__tests__/collection.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |
-| `packages/business/src/webshop/__tests__/link.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |
+| `packages/business/src/webshop/__tests__/link.test.ts` | C | crates/api/src/handlers/webshop.rs | ported | Ecommerce: webshop storefront; Q.D8 (unit test) |
 | `packages/business/src/webshop/__tests__/product-search.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |
 | `packages/business/src/webshop/__tests__/shop-categories.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |
 | `packages/business/src/webshop/__tests__/webshop-service.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |

@@ -36,6 +36,7 @@ pub mod copy_name;
 pub mod count_mode;
 pub mod custom_field;
 pub mod discount_code;
+pub mod ecommerce_analytics;
 pub mod ecommerce_open_hours;
 pub mod ecommerce_settings;
 pub mod email_topic;

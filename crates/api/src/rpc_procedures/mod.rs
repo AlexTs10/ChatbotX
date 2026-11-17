@@ -14,6 +14,7 @@ mod automated_responses;
 mod broadcasts;
 mod contacts;
 mod conversations;
+mod ecommerce;
 mod email_topics;
 mod flows;
 mod inboxes;
@@ -203,6 +204,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || lists::ACTIONS.contains(&n)
                 || media_library::ACTIONS.contains(&n)
                 || products::ACTIONS.contains(&n)
+                || ecommerce::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
                 || pipeline_board::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
@@ -241,6 +243,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = products::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = ecommerce::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = pipelines::action(ctx, name, &args).await {
