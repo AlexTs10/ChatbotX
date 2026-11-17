@@ -16,6 +16,8 @@ use super::{
 pub const ROUTES: &[&str] = &[
     "products.getMetaCatalog",
     "products.searchMetaCatalogItems",
+    // `whatsappTemplates.searchCatalogProducts`: the same schemas and service.
+    "whatsappTemplates.searchCatalogProducts",
     "products.disconnectMetaCatalog",
     "products.listMetaCatalogBusinesses",
     "products.createMetaCatalog",
@@ -190,7 +192,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 }),
             ))
         }
-        "products.searchMetaCatalogItems" => {
+        "products.searchMetaCatalogItems" | "whatsappTemplates.searchCatalogProducts" => {
             let mut input = Input::from_query(call.params, call.query);
             let keyword = input.opt_string("keyword", Str::trimmed(0, 200));
             let retailer_id = input.opt_string("retailerId", Str::trimmed(0, 200));

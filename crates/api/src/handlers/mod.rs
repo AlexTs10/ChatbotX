@@ -58,6 +58,7 @@ pub mod sequences;
 pub mod tags;
 pub mod templates;
 pub mod webchats;
+pub mod whatsapp_templates;
 pub mod workspace_members;
 pub mod workspace_settings;
 
@@ -655,6 +656,8 @@ async fn route(
         messenger_menus::handle(state, route_id, call).await
     } else if messenger_templates::ROUTES.contains(&route_id) {
         messenger_templates::handle(state, route_id, call).await
+    } else if whatsapp_templates::ROUTES.contains(&route_id) {
+        whatsapp_templates::handle(state, route_id, call).await
     } else {
         return None;
     };
