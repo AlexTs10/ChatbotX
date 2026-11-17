@@ -528,3 +528,5 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
 - 2026-11-17 Q.D13 (orchestrator-delegated, recommended option): magic link lists without a valid `sort` are ordered by `id` ascending.
 - 2026-11-17 Q.D13 (orchestrator-delegated, recommended option): zod issues from the working-hours partial parsers are reported with code `custom`.
 - 2026-11-17 Q.D13 (orchestrator-delegated, recommended option): the persistent-menu actions belong to Q.F2 (`user_persistent_menus.rs`); Q.D13 does not register them.
+- 2026-11-17 Q.D13 (orchestrator-delegated, recommended option): inbound webhook tokens are read from SQLite on every delivery (no 10 s token cache) and settings / config saves run in one SQLite write job instead of a distributed config lock; the cloud-only `WORKSPACE_BLOCKED` (owner blocked) intake answer is not ported (community edition).
+- 2026-11-17 Q.D13 (orchestrator-delegated, recommended option): dynamic images are not ported in Q.D13: rendering needs a canvas with text and fonts (`@napi-rs/canvas`), and adding a font renderer crate is a separate decision.
