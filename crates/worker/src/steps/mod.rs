@@ -170,6 +170,10 @@ pub(crate) async fn run(
 }
 
 #[cfg(test)]
+mod send_flow_step_tests;
+#[cfg(test)]
+mod send_message_tests;
+#[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;

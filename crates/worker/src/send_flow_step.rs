@@ -7,7 +7,7 @@ use chatbotx_business::product_message::service::prepare_outgoing;
 use chatbotx_core::flow_config::{
     ButtonPayload, CHANNEL_DELIVERABLE_STEP_TYPES, append_code_to_magic_link,
     encode_button_payload, extract_metadata, get_channel_flow_policy, is_native_button_type,
-    sends_as_native_copy_button,
+    is_proactive_outbound_metadata, sends_as_native_copy_button,
 };
 use chatbotx_core::utils::spintax::apply_spintax;
 use chatbotx_db::repo::Model as _;
@@ -227,15 +227,23 @@ async fn store_message(
         .map_err(db_fail)
 }
 
-/// `conversationService.recordOutboundFlowStep` (conversation step and
-/// activity) + the contact inbox tracking.
-async fn record_outbound_flow_step(
+/// `conversationService.recordOutboundFlowStep` (`flow_step` = the step
+/// ids) / `recordOutboundMessageActivity` (`None`): the contact inbox
+/// tracking, the conversation activity and, when `close_window`, the bot
+/// close of the DM waiting window (`humanReplyWindowSet({ close, actor:
+/// "bot" })`: a DM only, the bot enabled, a window opened at or before `at`;
+/// the stale-event marker `awaitingHumanReplyClosedAt` stays).
+/// The bot-close condition (`?5` = at, `?6` = close requested).
+const CLOSES: &str = r#"(?6 AND "sourceId" IS NULL AND "botEnabled" AND "awaitingHumanReplySince" IS NOT NULL AND "awaitingHumanReplySince" <= ?5)"#;
+
+async fn record_outbound(
     deps: &Deps,
     conversation: &Conversation,
     contact_inbox: &ContactInbox,
     at: i64,
     bump_activity: bool,
-    step_id: Option<String>,
+    close_window: bool,
+    flow_step: Option<Option<String>>,
 ) {
     record_outbound_message_sent(deps, contact_inbox, conversation.workspace_id, at).await;
     let (id, workspace_id, last_step) = (
@@ -243,20 +251,30 @@ async fn record_outbound_flow_step(
         conversation.workspace_id,
         conversation.current_step.clone(),
     );
+    let (is_flow_step, step_id) = (flow_step.is_some(), flow_step.flatten());
     let result = deps
         .db
         .write(move |tx| {
             tx.execute(
-                r#"UPDATE "Conversation"
-                   SET "lastStep" = ?1, "currentStep" = ?2,
-                       "lastActivityAt" = CASE WHEN ?3 THEN ?4 ELSE "lastActivityAt" END,
-                       "updatedAt" = ?5
-                   WHERE "id" = ?6 AND "workspaceId" = ?7"#,
+                &format!(
+                    r#"UPDATE "Conversation"
+                       SET "lastStep" = CASE WHEN ?1 THEN ?2 ELSE "lastStep" END,
+                           "currentStep" = CASE WHEN ?1 THEN ?3 ELSE "currentStep" END,
+                           "lastActivityAt" = CASE WHEN ?4 THEN ?5 ELSE "lastActivityAt" END,
+                           "awaitingHumanReplySince" = CASE WHEN {CLOSES} THEN NULL ELSE "awaitingHumanReplySince" END,
+                           "responseDueAt" = CASE WHEN {CLOSES} THEN NULL ELSE "responseDueAt" END,
+                           "responseSlaBreachingAt" = CASE WHEN {CLOSES} THEN NULL ELSE "responseSlaBreachingAt" END,
+                           "responseSlaTargetSeconds" = CASE WHEN {CLOSES} THEN NULL ELSE "responseSlaTargetSeconds" END,
+                           "updatedAt" = ?7
+                       WHERE "id" = ?8 AND "workspaceId" = ?9"#
+                ),
                 params![
+                    is_flow_step,
                     last_step,
                     step_id,
                     bump_activity,
                     at,
+                    close_window,
                     now_ms(),
                     id,
                     workspace_id
@@ -516,13 +534,20 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
     )
     .await?;
     let message_value = message_json(&message);
-    record_outbound_flow_step(
+    // An inbox-originated flow send is an agent reply: the producer claim
+    // owns the close, so the worker must not consume the window first.
+    let close_window = !(str_of(data, "sendFrom") == Some("inbox")
+        || metadata
+            .as_ref()
+            .is_some_and(is_proactive_outbound_metadata));
+    record_outbound(
         deps,
         &conversation,
         &contact_inbox,
         created_at,
         !is_bulk,
-        text_field(&resolved, "id"),
+        close_window,
+        Some(text_field(&resolved, "id")),
     )
     .await;
 
@@ -718,6 +743,18 @@ pub async fn send_chat_message(deps: &Deps, data: &Value) -> Result<(), JobError
     )
     .await?;
     let message_value = message_json(&message);
+    record_outbound(
+        deps,
+        &conversation,
+        &contact_inbox,
+        created_at,
+        !is_bulk,
+        !metadata
+            .as_ref()
+            .is_some_and(is_proactive_outbound_metadata),
+        None,
+    )
+    .await;
     let send_data = json!({
         "conversation": { "id": conversation.id.to_string() },
         "contactInbox": { "id": contact_inbox.id.to_string() },

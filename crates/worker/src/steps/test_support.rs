@@ -13,6 +13,7 @@ use chatbotx_jobs::{
 };
 use serde_json::{Value, json};
 
+use crate::channel::RecordingChannel;
 use crate::{Channels, Deps};
 
 pub const CONTACT_INBOX: i64 = 5;
@@ -225,6 +226,38 @@ impl Fixture {
             edges,
         )
         .await;
+    }
+
+    /// Puts inbox 4 and contact inbox 5 on `channel` with its integration
+    /// row; the channel is a [`RecordingChannel`].
+    pub async fn on_channel(&mut self, channel: &'static str) -> Arc<RecordingChannel> {
+        self.sql(move |tx| {
+            tx.execute(
+                r#"UPDATE "ContactInbox" SET "channel" = ?1, "source" = ?1 WHERE "id" = 5"#,
+                chatbotx_db::rusqlite::params![channel],
+            )?;
+            tx.execute(
+                r#"UPDATE "Inbox" SET "channel" = ?1, "markReadOnOutbound" = 1 WHERE "id" = 4"#,
+                chatbotx_db::rusqlite::params![channel],
+            )?;
+            let row = match channel {
+                "messenger" => r#"INSERT INTO "IntegrationMessenger" ("id", "auth", "pageId", "name", "conversationStarters", "persistentMenus", "personas", "workspaceId", "inboxId")
+                                  VALUES (60, '{}', 'p', 'Page', '[]', '[]', '[]', 2, 4)"#,
+                "instagram" => r#"INSERT INTO "IntegrationInstagram" ("id", "auth", "igId", "pageId", "name", "username", "conversationStarters", "persistentMenus", "workspaceId", "inboxId")
+                                  VALUES (61, '{}', 'ig', 'p', 'IG', 'ig', '[]', '[]', 2, 4)"#,
+                "whatsapp" => r#"INSERT INTO "IntegrationWhatsapp" ("id", "auth", "phoneNumberId", "wabaId", "businessId", "name", "workspaceId", "inboxId")
+                                 VALUES (62, '{}', 'pn', 'w', 'b', 'WA', 2, 4)"#,
+                "telegram" => r#"INSERT INTO "IntegrationTelegram" ("id", "auth", "botId", "name", "workspaceId", "inboxId")
+                                 VALUES (63, '{}', 'bot', 'TG', 2, 4)"#,
+                other => panic!("no integration fixture for {other}"),
+            };
+            tx.execute(row, [])?;
+            Ok(())
+        })
+        .await;
+        let recording = RecordingChannel::new();
+        self.deps.channels = Channels::default().with(channel, recording.clone());
+        recording
     }
 
     /// `runFlowNode` for node `n1` with `extra` job fields.

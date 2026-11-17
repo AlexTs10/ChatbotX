@@ -11,8 +11,8 @@ handle to `steps::run`. One step per `sendFlow` job, as in Q.W1.
 | 1 | Basic-bot steps: `condition`; contact (tags, custom field set / clear, notes, email flags, delete, block, sequences, broadcast subscription); conversation (archive, assign, auto assign with the on-shift check, unassign, read / unread with the channel receipt, follow, bot on / off, typing, thread control); smart delays (`wait`, `followUp`, `splitTraffic`, the `resumeWait` / `resumeFollowUp` integration jobs). Worker DB fixtures (`steps/test_support.rs`) | done |
 | 2a | `pipeline` step (`runPipelineFlowAction`, realtime `pipelineItemChanged`); tool steps `countCharacters`, `formatDate`, `generateCode`, `getDataFromJson` (`steps/tools.rs`) | done |
 | 2b | `copyText` / `callPhoneNumber` tap replies (`steps/reply.rs`), `findPlacesNearMe` (`steps/places.rs`) | done |
-| 3 | Steps of domains that are not in Rust: interface + test double, or skip (list below) | todo |
-| 4 | The mock-call tests of `send-flow-step` (81), `send-message-handler` (52), `default-worker` (16) on the fixtures | todo |
+| 3 | Steps of domains that are not in Rust: skipped and listed below (implicit success with a warning, Q.W1) | done |
+| 4 | The mock-call tests of `send-flow-step` (81), `send-message-handler` (52), `default-worker` (16) on the fixtures; the Q.W1 send-path gaps they show (human-reply-window close, chat activity record, last-delivered, auto-unblock, the bulk rule) | done (`default-worker` → Q.W2) |
 
 ## Test map
 
@@ -38,6 +38,9 @@ handle to `steps::run`. One step per `sendFlow` job, as in Q.W1.
 | `count-characters-step.test.ts` | 5 | `tool_steps` (3) | done |
 | `format-date-step.test.ts` | 9 | `tool_steps` (1 test, 5 cases) | done |
 | `get-data-from-json-step.test.ts` | 5 | `tool_steps` (2) | done |
+| `send-flow-step.test.ts` | 81 | `steps/send_flow_step_tests.rs` (18 tests for the early returns, spintax, skips, `whatsappLocation`, the stored message, the job inbox, the human-reply window, bulk activity, rich response / quick replies / presets, activity and mark read, send errors, comment anchors, `sendChatMessage`). n-a: booking-link signing, deep-link interstitial and call-button rewriting (appointments, Q.I1), `sendViewCatalog` marks, `sendProducts` / product collections (ecommerce), mirrored media decoration, WhatsApp / Messenger templates (Q.I1a/b), `message:sent` events and realtime fan-out (Q.W2), repository-shape and variable-context mock calls | partial |
+| `send-message-handler.test.ts` | 52 | `steps/send_message_tests.rs` (10 tests: last delivered, `sendFrom` + `sourceId`, the mark-read matrix, auto-unblock, the send-error record / clear, retry suppression, missing auth). n-a: analytics and `message:failed` events (Q.W2), routing handover / rejection reconciler (Q.D12), templates and media mirroring (Q.I1) | partial |
+| `default-worker.test.ts` | 16 | none: the default queue (bulk tag jobs, appointment reminders, member revocations, audit actor, welcome-message sync, pipeline stage bulk jobs, template worker) is Q.W2, not a flow step | n-a (Q.W2) |
 
 Mock-call assertions become assertions on DB rows and recorded jobs
 (`test_support::Jobs`) or channel calls (`channel::RecordingChannel`).
@@ -65,13 +68,22 @@ Mock-call assertions become assertions on DB rows and recorded jobs
   dot-prop forms the builder emits); `generateCode` draws from the OS
   random source (`math_random`) instead of faker; an invalid `formatDate`
   input fails the job (date-fns-tz throws a `RangeError`).
+- Send path (Q.W1 gaps the send tests show): a bot flow step or chat
+  message closes the human-reply window (not for `sendFrom: "inbox"`,
+  sequence or broadcast metadata, a paused bot or a comment thread);
+  `sendChatMessage` records the outbound activity; `sendMessageToChannel`
+  records last-delivered on a channel without receipts and auto-unblocks the
+  contact after a non-comment send; `is_bulk_outbound` follows
+  `isBulkOutboundMetadata` (a broadcast button continuation is not bulk).
+- `default-worker.test.ts` covers default-queue jobs, not flow steps; it
+  moves to Q.W2.
 - `callApi` (external request service), `evaluateDecision` (decision
   service), `questionnaires`, `getUserData`, coupons wait for their domain
   units and stay implicit successes.
 
 ## State
 
-Slices 1, 2a, 2b: 140 worker tests pass (Dell; 94 before Q.W3); fmt, clippy -D warnings clean.
+All slices done: 168 worker tests pass (Dell; 94 before Q.W3); fmt, clippy -D warnings clean. Left: the partial rows above wait for the units named there.
 
 ## Steps that wait for other units
 
