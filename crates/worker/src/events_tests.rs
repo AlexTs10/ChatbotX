@@ -316,17 +316,35 @@ async fn broadcast_ops_record_the_recipient_outcome() {
         json!({ "context": { "channel": channel }, "metadata": meta, "occurredAt": at,
                 "errorData": { "message": "boom" } })
     };
-    record_broadcast_delivered(&f.deps.db, &[event("whatsapp", "2026-01-01T00:00:00.000Z")], true).await;
-    assert_eq!(f.text(r#"SELECT CAST("deliveredAt" AS TEXT) FROM "ContactOnBroadcast""#).await, None);
-    record_broadcast_delivered(&f.deps.db, &[event("webchat", "2026-01-01T00:00:00.000Z")], true).await;
+    record_broadcast_delivered(
+        &f.deps.db,
+        &[event("whatsapp", "2026-01-01T00:00:00.000Z")],
+        true,
+    )
+    .await;
     assert_eq!(
-        f.text(r#"SELECT CAST("deliveredAt" AS TEXT) FROM "ContactOnBroadcast""#).await.as_deref(),
+        f.text(r#"SELECT CAST("deliveredAt" AS TEXT) FROM "ContactOnBroadcast""#)
+            .await,
+        None
+    );
+    record_broadcast_delivered(
+        &f.deps.db,
+        &[event("webchat", "2026-01-01T00:00:00.000Z")],
+        true,
+    )
+    .await;
+    assert_eq!(
+        f.text(r#"SELECT CAST("deliveredAt" AS TEXT) FROM "ContactOnBroadcast""#)
+            .await
+            .as_deref(),
         Some("1767225600000")
     );
     record_broadcast_failed(&f.deps.db, &[event("webchat", "2026-01-01T00:00:01.000Z")]).await;
     record_broadcast_failed(&f.deps.db, &[event("webchat", "2026-01-01T00:00:02.000Z")]).await;
     assert_eq!(
-        f.text(r#"SELECT "failedAt" || '|' || "errorContent" FROM "ContactOnBroadcast""#).await.as_deref(),
+        f.text(r#"SELECT "failedAt" || '|' || "errorContent" FROM "ContactOnBroadcast""#)
+            .await
+            .as_deref(),
         Some(r#"1767225601000|{"message":"boom"}"#)
     );
 }

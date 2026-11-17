@@ -283,17 +283,6 @@ pub async fn emit_message_event(
     }
 }
 
-/// Emits `message:sent` (`sendFlowStep`, the template sends) with the
-/// action `{ flowId?, flowVersionId?, messageId, sourceId? }`.
-pub async fn emit_message_sent(
-    buses: Option<&EventBuses>,
-    ctx: &MessageContext,
-    action: Value,
-    metadata: Option<&Value>,
-) {
-    emit_message_event(buses, "message:sent", ctx, action, metadata, json!({})).await;
-}
-
 /// Emits `message:failed` (`sendMessageToChannel`'s catch block and the
 /// terminal `sendFlowStep` catch).
 pub async fn emit_message_failed(
