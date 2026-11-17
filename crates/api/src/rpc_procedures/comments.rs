@@ -36,21 +36,11 @@ const ROUTES: &[(&str, &str, &str)] = &[
     ("createThreadsCommentAction", "threadsComments", "create"),
     ("updateThreadsCommentAction", "threadsComments", "update"),
     ("deleteThreadsCommentAction", "threadsComments", "delete"),
-    (
-        "bulkDeleteThreadsCommentsAction",
-        "threadsComments",
-        "deleteMany",
-    ),
     ("listTiktokComments", "tiktokComments", "list"),
     ("getTiktokComment", "tiktokComments", "get"),
     ("createTiktokCommentAction", "tiktokComments", "create"),
     ("updateTiktokCommentAction", "tiktokComments", "update"),
     ("deleteTiktokCommentAction", "tiktokComments", "delete"),
-    (
-        "bulkDeleteTiktokCommentsAction",
-        "tiktokComments",
-        "deleteMany",
-    ),
 ];
 
 const MISSED: &[&str] = &[
