@@ -21,6 +21,7 @@ mod pipelines;
 mod products;
 mod templates;
 mod tools;
+mod working_hours;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -143,6 +144,9 @@ pub async fn procedure(
     if let Some(outcome) = appointments::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = working_hours::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = templates::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -185,6 +189,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || pipelines::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
                 || appointments::ACTIONS.contains(&n)
+                || working_hours::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
@@ -220,6 +225,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = appointments::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = working_hours::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

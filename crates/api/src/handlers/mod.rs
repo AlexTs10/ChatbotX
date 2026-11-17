@@ -59,6 +59,7 @@ pub mod sequences;
 pub mod tags;
 pub mod templates;
 pub mod webchats;
+pub mod working_hours;
 pub mod workspace_members;
 pub mod workspace_settings;
 
@@ -542,7 +543,9 @@ async fn route(
     call: Call<'_>,
     principal: &Principal,
 ) -> Option<Response> {
-    let reply = if appointments::ROUTES.contains(&route_id) {
+    let reply = if working_hours::ROUTES.contains(&route_id) {
+        working_hours::handle(state, route_id, call).await
+    } else if appointments::ROUTES.contains(&route_id) {
         appointments::handle(state, route_id, call, principal).await
     } else if contact_scans::ROUTES.contains(&route_id) {
         contact_scans::handle(state, route_id, call).await
