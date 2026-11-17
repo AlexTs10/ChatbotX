@@ -1009,6 +1009,8 @@ mod tests {
             channels: crate::Channels::builtin(),
             app_url: "http://app.test".into(),
             variables: None,
+            ai: Arc::new(crate::ai::Ai::live()),
+            files: None,
         };
         (deps, jobs)
     }
