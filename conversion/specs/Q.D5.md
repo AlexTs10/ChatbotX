@@ -79,6 +79,6 @@ Slices 1–3 done (`641f599f2`). Slice 4 done (`8b3cfe662`), 4b done (`e67dd7857
 for `chatbotx-business`, `chatbotx-api`, `chatbotx-jobs`, `chatbotx-worker` (Dell).
 
 Parity (Rust stack, Dell, 2026-11-17): `p1-04/11-broadcasts` and
-`p1-08/04-email-topics` 29 of 31 pass — the 2 failures are `listContacts`
+`p1-08/04-email-topics` 27 of 29 pass — the 2 failures are `listContacts`
 ("Operation not ported yet", Q.D11). `p1-04/12-broadcasts-recurrence` 12 of
 12 pass after 5b (the scheduler run is materialized by the worker).
