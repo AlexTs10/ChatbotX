@@ -517,7 +517,7 @@ pub fn read_output_text(body: &str) -> Result<String, HeavyError> {
         last: Option<String>,
     }
     let mut lane: Option<Lane> = None;
-    fn open<'l>(lane: &'l mut Option<Lane>, key: String) -> Result<&'l mut Lane, HeavyError> {
+    fn open(lane: &mut Option<Lane>, key: String) -> Result<&mut Lane, HeavyError> {
         if lane.as_ref().is_some_and(|l| l.key != key) {
             return Err(stream_error(
                 "SAM stream has more than one output text lane",
