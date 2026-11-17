@@ -9,8 +9,12 @@
 //! route ([`public`]) after the member checks, so both stay one code path.
 
 mod contacts;
+mod conversations;
 mod flows;
+mod inboxes;
 mod lists;
+mod media_library;
+mod pipelines;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -103,7 +107,28 @@ pub async fn procedure(
     if let Some(outcome) = flows::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
+        return Some(outcome.map(|output| output.json));
+    }
+    if let Some(outcome) = inboxes::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = pipelines::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = media_library::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = conversations::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
+}
+
+/// The AI procedures' caller (Q.D6). No support sessions in Rust yet.
+fn ai_context(ctx: &Ctx<'_>) -> crate::rpc_ai::RpcAiContext {
+    crate::rpc_ai::RpcAiContext::new(ctx.workspace_id, ctx.user_id)
+        .with_member(ctx.has("superAdmin"), false)
 }
 
 /// Runs the server action `name` with `{ args, workspaceId? }`; `None` = not
@@ -123,7 +148,13 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     // Every other action is a `workspaceActionClient` one.
     if context.workspace.is_none() {
         return match name {
-            n if contacts::ACTIONS.contains(&n) || flows::ACTIONS.contains(&n) => {
+            n if contacts::ACTIONS.contains(&n)
+                || flows::ACTIONS.contains(&n)
+                || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str())
+                || conversations::ACTIONS.contains(&n)
+                || lists::ACTIONS.contains(&n)
+                || media_library::ACTIONS.contains(&n) =>
+            {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
             _ => None,
@@ -132,7 +163,22 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = contacts::action(ctx, name, &args).await {
         return Some(outcome);
     }
-    flows::action(ctx, name, &args).await
+    if let Some(outcome) = conversations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = media_library::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = lists::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = flows::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    let path = format!("actions.{name}");
+    crate::rpc_ai::call(api, &path, &ai_context(ctx), input)
+        .await
+        .map(|outcome| outcome.map(|output| output.json))
 }
 
 // ---- errors ---------------------------------------------------------------

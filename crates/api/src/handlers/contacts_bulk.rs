@@ -263,7 +263,7 @@ fn array<T>(
 }
 
 /// `z.array(zodBigintAsString())` at `name`.
-fn ids(input: &mut Input, name: &str, min: usize, max: usize) -> Option<Vec<i64>> {
+pub(super) fn ids(input: &mut Input, name: &str, min: usize, max: usize) -> Option<Vec<i64>> {
     array(input, name, min, max, |input, path, value| {
         input.id_at(path, Some(value), true)
     })

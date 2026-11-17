@@ -7,7 +7,7 @@ use chatbotx_db::repo::message::{
 };
 use chatbotx_db::repo::models::{ContactInbox, Conversation};
 use chatbotx_db::repo::now_ms;
-use chatbotx_db::rusqlite::params;
+use chatbotx_db::rusqlite::{OptionalExtension as _, params};
 use chatbotx_jobs::{JobCtx, JobError};
 use chatbotx_rt::protocol::{ConversationRoute, route_for_conversation};
 use chatbotx_rt::{Envelope, EventType};
@@ -47,6 +47,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         SEND_FLOW_MESSAGE => crate::send_flow_step::send_flow_step(&deps, &data).await?,
         SEND_CHAT_MESSAGE => crate::send_flow_step::send_chat_message(&deps, &data).await?,
         SEND_TYPING => send_typing_to_channel(&deps, &data).await?,
+        crate::wa_template::SEND_TEMPLATE_TO_CONVERSATION => {
+            crate::wa_template::send_template_to_conversation(&deps, &data).await?
+        }
         DELETE_CHANNEL_MESSAGE => delete_message_from_channel(&deps, &data).await?,
         EDIT_CHANNEL_MESSAGE => edit_message_from_channel(&deps, &data).await?,
         CHANGE_CHANNEL_MESSAGE_STATE => change_message_state_on_channel(&deps, &data).await?,
@@ -61,7 +64,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "broadcastEvent" => {
             tracing::info!(job_id = %job.job_id, "Ignoring legacy broadcastEvent job during realtime v2 rollout");
         }
-        // Templates (WhatsApp / Messenger) are the channel units' (Q.D12, Q.I1).
+        // Messenger templates are the Messenger unit's (Q.I1b).
         other => {
             return Err(JobError::unrecoverable(format!(
                 "ChatJobAction action is not defined: {other}"
@@ -260,13 +263,12 @@ pub(crate) async fn mark_read_after_delivery(
     }
 }
 
-/// `isBulkOutboundMetadata`: a broadcast / sequence / marketing payload, or
-/// the job's `isBulkBroadcast`.
+/// `isBulkOutboundMetadata`: a sequence payload, or a broadcast payload of a
+/// bulk send (`isBulkBroadcast`); a broadcast button continuation is not bulk.
 pub(crate) fn is_bulk_outbound(metadata: Option<&Value>, is_bulk_broadcast: bool) -> bool {
-    is_bulk_broadcast
-        || metadata
-            .and_then(|m| str_of(m, "type"))
-            .is_some_and(|t| matches!(t, "broadcast" | "sequence"))
+    metadata.is_some_and(|m| {
+        chatbotx_core::flow_config::is_bulk_outbound_metadata(m, is_bulk_broadcast)
+    })
 }
 
 /// `sendMessageToChannel`. `attempts_made` > 0 clears an earlier send
@@ -283,7 +285,10 @@ pub async fn send_message_to_channel(
     let message = data.get("message").cloned().unwrap_or(Value::Null);
     let metadata = data.get("metadata").filter(|m| !m.is_null());
     let is_bulk = is_bulk_outbound(metadata, data["isBulkBroadcast"] == json!(true))
-        || is_bulk_outbound(message.pointer("/contentAttributes/metadata"), false);
+        || is_bulk_outbound(
+            message.pointer("/contentAttributes/metadata"),
+            data["isBulkBroadcast"] == json!(true),
+        );
     let message_id = id_of(&message["id"]);
     let created_at = ms_of(&message["createdAt"]);
     let client_id = str_of(&message, "clientId").map(str::to_owned);
@@ -364,11 +369,90 @@ pub async fn send_message_to_channel(
     }
     let at = created_at.unwrap_or_else(now_ms);
     record_outbound_message_sent(deps, &contact_inbox, conversation.workspace_id, at).await;
+    // A public comment reply reaches no one's inbox; a private reply does.
     let is_direct = !is_comment || is_private_reply;
+    if is_direct {
+        record_delivered_when_no_receipts(
+            deps,
+            &contact_inbox,
+            result.sent_count,
+            conversation.workspace_id,
+        )
+        .await;
+    }
     if is_direct && result.sent_count > 0 {
         mark_read_after_delivery(deps, &conversation, contact_inbox.inbox_id, at, is_bulk).await;
     }
+    if !is_comment {
+        unblock_if_blocked(deps, conversation.workspace_id, conversation.contact_id).await;
+    }
     Ok(result)
+}
+
+/// `recordDeliveredWhenNoReceipts`: on a channel without delivery receipts
+/// the accepted send is the "Last Delivered" moment (a channel with
+/// receipts is recorded by the delivered listener). Logged, never rethrown:
+/// the send already happened.
+async fn record_delivered_when_no_receipts(
+    deps: &Deps,
+    contact_inbox: &ContactInbox,
+    sent_count: u32,
+    workspace_id: i64,
+) {
+    let Some(channel) = deps.channels.get(&contact_inbox.channel) else {
+        return;
+    };
+    if channel.delivery_receipts() || sent_count == 0 {
+        return;
+    }
+    let contact_id = contact_inbox.contact_id;
+    let result = deps
+        .db
+        .write(move |tx| {
+            chatbotx_db::repo::contact_activity::upsert_last_delivered(
+                tx,
+                workspace_id,
+                &[(contact_id, now_ms())],
+            )
+            .map_err(crate::repo_err)
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::warn!(err = %err, workspace_id, "last-delivered: failed to record a successful send");
+    }
+}
+
+/// `contactService.unblockIfBlocked` after a successful non-comment send
+/// (best effort).
+async fn unblock_if_blocked(deps: &Deps, workspace_id: i64, contact_id: i64) {
+    let blocked = deps
+        .db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    r#"SELECT "blockedAt" IS NOT NULL FROM "Contact" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+                    params![contact_id, workspace_id],
+                    |r| r.get::<_, bool>(0),
+                )
+                .optional()?
+                .unwrap_or(false))
+        })
+        .await;
+    let result = match blocked {
+        Ok(false) => return,
+        Ok(true) => chatbotx_business::contact::service::unblock_and_record(
+            &deps.db,
+            workspace_id,
+            contact_id,
+        )
+        .await
+        .map(drop)
+        .map_err(|e| e.message()),
+        Err(err) => Err(err.to_string()),
+    };
+    if let Err(err) = result {
+        tracing::warn!(err = %err, "Auto-unblock on successful send failed");
+    }
 }
 
 async fn dispatch_send(

@@ -7,13 +7,16 @@
 
 use std::sync::Arc;
 
+use chatbotx_core::encryption::{EncryptedData, Encryption};
 use chatbotx_core::utils::crypto::{VerifyHmacSha256SignatureInput, verify_hmac_sha256_signature};
 use chatbotx_db::Db;
 use chatbotx_db::repo::integration_whatsapp as repo;
+use chatbotx_db::repo::models::PlatformCredential;
+use chatbotx_db::repo::partials::credential::credential_aad_for;
 use chatbotx_db::repo::{Json, iso, now_ms};
 use chatbotx_jobs::options::Retention;
 use chatbotx_jobs::{Enqueuer, JobOptions, QueueName};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 /// `HUB_SIGNATURE_HEADER`.
 pub const HUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
@@ -416,6 +419,123 @@ pub async fn manual_webhook(
     }
 }
 
+/// `platformCredentialService.findDecryptedPlatform({ type: "whatsapp" })`:
+/// the decrypted config of the platform WhatsApp app.
+// ponytail: the minimum of Q.D11's `platform_credential` service (no config
+// schema parse, no tenant / credential-scoped lookups).
+pub async fn find_platform_whatsapp_config(
+    db: &Arc<Db>,
+    encryption: &Encryption,
+) -> Option<Map<String, Value>> {
+    let row = db
+        .read(|conn| {
+            chatbotx_db::repo::find_one::<PlatformCredential>(
+                conn,
+                r#""userId" IS NULL AND "type" = 'whatsapp'"#,
+                &[],
+            )
+            .map_err(crate::repo_err)
+        })
+        .await
+        .ok()??;
+    let blob: EncryptedData = serde_json::from_value(row.value.0).ok()?;
+    let aad = credential_aad_for(None, "whatsapp");
+    match encryption.decrypt_object::<Map<String, Value>>(&blob, Some(&aad)) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            tracing::error!(%error, "Platform WhatsApp credential could not be decrypted");
+            None
+        }
+    }
+}
+
+/// The request facts the shared route needs.
+pub struct PlatformRequest<'a> {
+    pub is_get: bool,
+    pub query: Option<&'a str>,
+    pub signature_header: Option<&'a str>,
+    /// `x-domain` (cloud only).
+    pub domain: Option<&'a str>,
+    pub body: &'a [u8],
+}
+
+/// `GET|POST /integrations/whatsapp/webhook` (`[...integration]/webhook.ts`
+/// for `whatsapp` + `handlers/webhook.ts`): the platform app's webhook. It
+/// pins no phone number and always enforces the signature.
+pub async fn platform_webhook(
+    db: &Arc<Db>,
+    jobs: &dyn Enqueuer,
+    encryption: Option<&Encryption>,
+    is_cloud: bool,
+    broker_host: &str,
+    request: PlatformRequest<'_>,
+) -> WebhookReply {
+    let not_configured = || json_reply(404, "Integration is not configured");
+    // ponytail: a tenant custom domain (`customDomainService` +
+    // `findDecryptedForUser`) and the credential-scoped `/c/{id}` route are
+    // not ported; only the broker host speaks for the platform in cloud.
+    if is_cloud && request.domain.unwrap_or("") != broker_host {
+        tracing::debug!(domain = ?request.domain, "No active custom domain for integration webhook");
+        return not_configured();
+    }
+    let Some(encryption) = encryption else {
+        return not_configured();
+    };
+    let Some(config) = find_platform_whatsapp_config(db, encryption).await else {
+        tracing::debug!("Integration whatsapp is not configured");
+        return not_configured();
+    };
+    let text = |key: &str| {
+        config
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+    };
+    if request.is_get {
+        // `whatsapp-api-js` `get()`; its errors are not `SdkException`s, so
+        // the route answers 400 with their message.
+        let Some(verify_token) = text("verifyToken") else {
+            return json_reply(400, "Missing verify token");
+        };
+        let mode = query_param(request.query, "hub.mode").filter(|m| !m.is_empty());
+        let token = query_param(request.query, "hub.verify_token").filter(|t| !t.is_empty());
+        let (Some(mode), Some(token)) = (mode, token) else {
+            return json_reply(400, "Missing search params");
+        };
+        if mode != "subscribe" || token != verify_token {
+            return json_reply(400, "Invalid token verification");
+        }
+        return WebhookReply {
+            status: 200,
+            content_type: "text/plain;charset=UTF-8",
+            body: query_param(request.query, "hub.challenge").unwrap_or_default(),
+        };
+    }
+    if let Err(reason) = verify_signature(
+        text("clientSecret"),
+        false,
+        request.signature_header,
+        request.body,
+    ) {
+        tracing::warn!(
+            reason,
+            "Whatsapp webhook rejected: signature verification failed"
+        );
+        return json_reply(401, "Whatsapp webhook signature verification failed");
+    }
+    match enqueue_webhook_jobs(jobs, request.body, None).await {
+        Ok(()) => WebhookReply {
+            status: 200,
+            content_type: "text/plain;charset=UTF-8",
+            body: "ok".into(),
+        },
+        Err(err) => {
+            tracing::error!(err, "Whatsapp webhook handler failed");
+            json_reply(400, "Failed to handle webhook")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,5 +621,125 @@ mod tests {
         assert_eq!(jobs[1].data["data"]["action"], "react");
         // A pinned route drops another number's change.
         assert!(webhook_jobs(&body, Some("222")).is_empty());
+    }
+
+    #[tokio::test]
+    async fn platform_route_reads_the_platform_credential() {
+        let db = Arc::new(Db::open_in_memory().unwrap());
+        db.migrate().await.unwrap();
+        let jobs = crate::steps::test_support::Jobs::default();
+        let encryption =
+            Encryption::new(chatbotx_core::encryption::Keys::new(&"ab".repeat(32)).unwrap());
+        let request = |is_get, query, signature, body| PlatformRequest {
+            is_get,
+            query,
+            signature_header: signature,
+            domain: None,
+            body,
+        };
+        // No credential yet.
+        let reply = platform_webhook(
+            &db,
+            &jobs,
+            Some(&encryption),
+            false,
+            "",
+            request(true, None, None, b""),
+        )
+        .await;
+        assert_eq!(
+            (reply.status, reply.body.as_str()),
+            (404, r#"{"message":"Integration is not configured"}"#)
+        );
+
+        let blob = encryption
+            .encrypt_object(
+                &json!({ "clientId": "app", "clientSecret": "s", "verifyToken": "vt" }),
+                Some(&credential_aad_for(None, "whatsapp")),
+            )
+            .unwrap();
+        let value = serde_json::to_string(&blob).unwrap();
+        db.write(move |tx| {
+            tx.execute(
+                r#"INSERT INTO "PlatformCredential" ("id", "type", "publicConfig", "value") VALUES (1, 'whatsapp', '{}', ?1)"#,
+                [value],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let ok = platform_webhook(
+            &db,
+            &jobs,
+            Some(&encryption),
+            false,
+            "",
+            request(
+                true,
+                Some("hub.mode=subscribe&hub.verify_token=vt&hub.challenge=42"),
+                None,
+                b"",
+            ),
+        )
+        .await;
+        assert_eq!((ok.status, ok.body.as_str()), (200, "42"));
+        let bad = platform_webhook(
+            &db,
+            &jobs,
+            Some(&encryption),
+            false,
+            "",
+            request(
+                true,
+                Some("hub.mode=subscribe&hub.verify_token=x"),
+                None,
+                b"",
+            ),
+        )
+        .await;
+        assert_eq!(
+            (bad.status, bad.body.as_str()),
+            (400, r#"{"message":"Invalid token verification"}"#)
+        );
+
+        let body = br#"{"object":"whatsapp_business_account","entry":[{"id":"w","changes":[{"field":"messages","value":{"metadata":{"phone_number_id":"111"},"messages":[{"id":"wamid.A","from":"849","type":"text","text":{"body":"hi"}}]}}]}]}"#;
+        let unsigned = platform_webhook(
+            &db,
+            &jobs,
+            Some(&encryption),
+            false,
+            "",
+            request(false, None, None, body),
+        )
+        .await;
+        assert_eq!(unsigned.status, 401);
+        let signature = sign("s", body);
+        let signed = platform_webhook(
+            &db,
+            &jobs,
+            Some(&encryption),
+            false,
+            "",
+            request(false, None, Some(&signature), body),
+        )
+        .await;
+        assert_eq!((signed.status, signed.body.as_str()), (200, "ok"));
+        assert_eq!(jobs.named("incomingMessage").len(), 1);
+
+        // Cloud: only the broker host speaks for the platform.
+        let other = platform_webhook(
+            &db,
+            &jobs,
+            Some(&encryption),
+            true,
+            "app.test",
+            PlatformRequest {
+                domain: Some("tenant.test"),
+                ..request(true, None, None, b"")
+            },
+        )
+        .await;
+        assert_eq!(other.status, 404);
     }
 }

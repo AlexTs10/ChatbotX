@@ -16,7 +16,9 @@ pub mod inbound;
 pub mod integration;
 pub mod meta_catalog;
 pub mod send_flow_step;
+pub mod steps;
 pub mod variables;
+pub mod wa_template;
 
 use std::sync::Arc;
 

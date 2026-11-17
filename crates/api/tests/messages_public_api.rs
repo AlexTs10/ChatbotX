@@ -180,8 +180,8 @@ async fn get_message_404s_when_the_message_belongs_to_a_different_conversation()
 
 // ─── GET …/messages/{messageId}/flow-response ───────────────────────────
 
-/// Adapted: the Flow response view (labels from the Meta Flow JSON) is not
-/// ported; a Flow response answers 501, any other message 404.
+/// Adapted: the view comes from the real lib, not a mock; Flow JSON labels are
+/// not ported, so the labels are humanized (`labelSource: "fallback"`).
 #[tokio::test]
 async fn get_flow_response_labels_the_response_through_the_shared_lib_scoped_to_the_token_s_workspace()
  {
@@ -214,8 +214,11 @@ async fn get_flow_response_labels_the_response_through_the_shared_lib_scoped_to_
         );
     }
     let (status, body) = &answers[0];
-    assert_eq!(*status, 501, "{body}");
-    assert_eq!(body["code"], json!("notPorted"));
+    assert_eq!(*status, 200, "{body}");
+    assert_eq!(
+        *body,
+        json!({ "fields": [{ "key": "name", "label": "Name", "kind": "text", "value": "An" }], "labelSource": "fallback" })
+    );
     let (status, body) = &answers[1];
     assert_eq!(*status, 404, "{body}");
     assert_eq!(body["message"], json!("WhatsApp Flow response not found"));
@@ -375,36 +378,42 @@ async fn post_attributes_delegates_to_changemessageattributes() {
 
 // ─── whatsapp-template / whatsapp-call-permission ──────────────────────
 
-/// Adapted: the four `whatsapp-template` cases and the call-permission case
-/// need the WhatsApp template / calling ports; both routes answer 501.
+/// Adapted: the real business path instead of mocks: a template outside the
+/// workspace is not found (404), the call permission checks the conversation
+/// first (404) and validates `text` (422).
 #[tokio::test]
-async fn whatsapp_template_and_call_permission_are_not_ported() {
+async fn whatsapp_template_and_call_permission_check_the_workspace() {
     let f = fixture().await;
     seed(&f).await;
-    for route in [
+    let (status, body) = call(
+        &f,
         "messages.sendWhatsappTemplate",
+        WS,
+        &[("conversationId", "70")],
+        None,
+        Some(json!({ "templateId": "5", "templateParams": { "body.1": "Ada" } })),
+    )
+    .await;
+    assert_eq!(status, 404, "{body}");
+    assert_eq!(body["message"], json!("Template not found"));
+    let (status, body) = call(
+        &f,
         "messages.requestWhatsappCallPermission",
-    ] {
-        let (status, body) = call(
-            &f,
-            route,
-            WS,
-            &[("conversationId", "70")],
-            None,
-            Some(json!({ "templateId": "5", "text": "May we call you?" })),
-        )
-        .await;
-        assert_eq!(status, 501, "{route} {body}");
-        // The conversation check runs first (parity p1-11 42).
-        let (status, body) = call(
-            &f,
-            route,
-            WS,
-            &[("conversationId", "999")],
-            None,
-            Some(json!({})),
-        )
-        .await;
-        assert_eq!(status, 404, "{route} {body}");
-    }
+        WS,
+        &[("conversationId", "999")],
+        None,
+        Some(json!({ "text": "May we call you?" })),
+    )
+    .await;
+    assert_eq!(status, 404, "{body}");
+    let (status, body) = call(
+        &f,
+        "messages.requestWhatsappCallPermission",
+        WS,
+        &[("conversationId", "70")],
+        None,
+        Some(json!({ "text": "   " })),
+    )
+    .await;
+    assert_eq!(status, 422, "{body}");
 }

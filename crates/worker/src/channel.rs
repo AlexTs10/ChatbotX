@@ -194,6 +194,8 @@ pub struct IncomingAttachment {
     /// The stored object key, or the provider URL of a lazy attachment.
     pub origin_path: String,
     pub size: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
     pub name: Option<String>,
     /// A photo message (re-encoded in the background; files keep their bytes).
     pub is_photo_message: bool,
@@ -422,6 +424,18 @@ pub trait Channel: Send + Sync {
     ) -> BoxFuture<'static, ChannelResult<()>> {
         let _ = data;
         missing(ctx, "conversation", "sendTyping")
+    }
+
+    /// `conversation.agentMarkAsRead` (the "Seen" receipt; `message_source_id`
+    /// = WhatsApp wamid of the newest incoming message).
+    fn agent_mark_as_read(
+        &self,
+        ctx: &ChannelCtx,
+        contact: OutgoingContact,
+        message_source_id: Option<String>,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let _ = (contact, message_source_id);
+        missing(ctx, "conversation", "agentMarkAsRead")
     }
 }
 
@@ -824,6 +838,17 @@ impl Channel for RecordingChannel {
             "messageSourceId": data.message_source_id,
         });
         self.record("sendTyping", value, |_| ())
+    }
+
+    fn agent_mark_as_read(
+        &self,
+        _ctx: &ChannelCtx,
+        contact: OutgoingContact,
+        message_source_id: Option<String>,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let value =
+            json!({ "contact": contact_json(&contact), "messageSourceId": message_source_id });
+        self.record("agentMarkAsRead", value, |_| ())
     }
 }
 

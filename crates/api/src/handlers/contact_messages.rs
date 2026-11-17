@@ -99,7 +99,7 @@ fn parse_id(value: Option<&Value>) -> Option<i64> {
 }
 
 /// Adds the jobs and publishes the realtime `messageCreated` event.
-pub(super) async fn deliver(state: &ApiState, conversation: &Conversation, outgoing: Outgoing) {
+pub(crate) async fn deliver(state: &ApiState, conversation: &Conversation, outgoing: Outgoing) {
     if let Some(payload) = outgoing.realtime {
         let route = route_for_conversation(
             Some(&ConversationRoute {
@@ -113,8 +113,16 @@ pub(super) async fn deliver(state: &ApiState, conversation: &Conversation, outgo
         event.route = Some(route);
         state.queue_realtime(conversation.workspace_id, event).await;
     }
+    queue_outgoing_jobs(state, outgoing.jobs).await;
+}
+
+/// Adds the jobs of a business call (`queue.add(name, data, opts)`).
+pub(crate) async fn queue_outgoing_jobs(
+    state: &ApiState,
+    jobs_to_add: Vec<chatbotx_business::message::OutgoingJob>,
+) {
     if let Some(jobs) = &state.jobs {
-        for job in outgoing.jobs {
+        for job in jobs_to_add {
             let opts = JobOptions {
                 attempts: job.attempts,
                 ..JobOptions::default()
@@ -155,7 +163,7 @@ async fn send_message(state: &ApiState, call: Call<'_>) -> Reply {
 /// Validates a `createMessageRequest` body (the other `input` checks are
 /// already queued) and maps it to the ported part of `createOutgoing`.
 /// Media library / device files: 501 `notPorted`.
-pub(super) fn outgoing_input(
+pub(crate) fn outgoing_input(
     input: Input,
     errors: ErrorMap,
 ) -> Result<OutgoingInput, crate::orpc::OrpcError> {
@@ -214,7 +222,7 @@ pub(super) fn outgoing_input(
 }
 
 /// `decodeCursor` (`null` for an invalid cursor: the first page).
-pub(super) fn decode_cursor(text: &str) -> Option<PaginationCursor> {
+pub(crate) fn decode_cursor(text: &str) -> Option<PaginationCursor> {
     let bytes = super::contact_inboxes::lenient_base64(text)?;
     let value: Value = serde_json::from_slice(&bytes).ok()?;
     let object = value.as_object()?;
@@ -245,7 +253,7 @@ pub(super) fn decode_cursor(text: &str) -> Option<PaginationCursor> {
 }
 
 /// `encodeCursor({ direction: "prev", createdAt, id, shardId })`.
-pub(super) fn encode_cursor(cursor: &PaginationCursor) -> String {
+pub(crate) fn encode_cursor(cursor: &PaginationCursor) -> String {
     let mut text = format!(
         r#"{{"direction":"prev","createdAt":"{}","id":"{}""#,
         chatbotx_db::repo::iso(cursor.created_at),

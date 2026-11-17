@@ -10,6 +10,8 @@ import type {
 import type {
   AIFileModel,
   IntegrationMetaCatalogModel,
+  PipelineItemModel,
+  PipelineStageModel,
   TenantHelpItemModel,
 } from "@chatbotx.io/database/types"
 
@@ -107,3 +109,27 @@ export type AIFileWithEmbeddingStatus = Omit<
 
 /** `meta-catalog/integration.service.ts` (`findByWorkspaceId`) */
 export type MetaCatalogConnectionModel = IntegrationMetaCatalogModel
+
+/** `pipeline/item-query.service.ts` */
+export type PipelineItemView = {
+  item: PipelineItemModel
+  contact: {
+    id: string
+    fullName: string | null
+    avatar: string | null
+    email: string | null
+    phoneNumber: string | null
+    channel: string | null
+  } | null
+  assignees: { workspaceMemberIds: string[]; inboxTeamIds: string[] }
+  commentCount: number
+}
+
+/** `pipeline/item-query.service.ts` */
+export type PipelineBoardStage = {
+  stage: PipelineStageModel
+  count: number
+  totalValue: number
+  items: PipelineItemView[]
+  nextCursor: string | null
+}

@@ -2,19 +2,23 @@
 //! `/v1/conversations/{conversationId}/messages`, scope `inbox`). Workspace
 //! tokens only (no member scope): a send is unattributed (`api`). Not ported
 //! (501 `notPorted`): media library / device files, a new attachment on
-//! edit, the WhatsApp Flow response view, WhatsApp templates and call
-//! permission.
+//! edit. The WhatsApp routes (Flow response view, template send, call
+//! permission) call `chatbotx_business::whatsapp`.
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::conversation_list as list;
 use chatbotx_business::message::{self, ListForConversation, message_json};
 use chatbotx_business::message_actions as actions;
+use chatbotx_business::whatsapp;
+use chatbotx_core::flow_config::steps::{TemplateParameterValues, wa_template_params_schema};
 use chatbotx_db::repo::models::Conversation;
 use serde_json::{Value, json};
 
-use super::contact_messages::{decode_cursor, deliver, encode_cursor, outgoing_input};
+use super::contact_messages::{
+    decode_cursor, deliver, encode_cursor, outgoing_input, queue_outgoing_jobs,
+};
 use super::conversations::queue_jobs;
-use super::input::{Input, Num, Str, key};
+use super::input::{Input, Num, Seg, Str, key};
 use super::{ApiState, Call, ErrorMap, FINDING, MUTATING, Reply, business_error, json, no_content};
 
 /// The ported routes.
@@ -230,6 +234,133 @@ async fn change_attributes(state: &ApiState, call: Call<'_>) -> Reply {
     ))
 }
 
+/// An optional `zodBigintAsString` key.
+fn opt_digits_id(input: &mut Input, name: &str) -> Option<i64> {
+    if input.has(name) {
+        input.digits_id(name)
+    } else {
+        None
+    }
+}
+
+/// `messages.requestWhatsappCallPermission` (202 `{ queued: true }`).
+async fn request_call_permission(state: &ApiState, call: Call<'_>) -> Reply {
+    let mut input = Input::from_body(call.params, call.body);
+    let conversation_id = input.digits_id("conversationId");
+    let text = input.string("text", Str::trimmed(1, 1024));
+    let inbox_id = opt_digits_id(&mut input, "inboxId");
+    input.finish()?;
+    let found = conversation(state, &call, conversation_id, MUTATING).await?;
+    let sent = whatsapp::request_call_permission(
+        &state.db,
+        whatsapp::GRAPH_API_URL,
+        &found,
+        text.unwrap_or_default(),
+        inbox_id,
+        &whatsapp::ENGLISH_CALL_PERMISSION_MESSAGES,
+    )
+    .await
+    .map_err(|e| business_error(e, MUTATING))?;
+    deliver(state, &found, sent).await;
+    Ok(json(202, json!({ "queued": true })))
+}
+
+/// `templateParams`: `z.record(z.string(), z.string()).optional()`.
+fn template_params(input: &mut Input) -> Option<TemplateParameterValues> {
+    let value = input.get("templateParams")?.clone();
+    let Value::Object(map) = value else {
+        input.issue(
+            &key("templateParams"),
+            "invalid_type",
+            "Invalid input: expected record, received ",
+        );
+        return None;
+    };
+    let mut out = TemplateParameterValues::new();
+    for (name, value) in map {
+        match value {
+            Value::String(text) => {
+                out.insert(name, text);
+            }
+            _ => input.issue(
+                &[Seg::Key("templateParams".into()), Seg::Key(name)],
+                "invalid_type",
+                "Invalid input: expected string",
+            ),
+        }
+    }
+    Some(out)
+}
+
+/// `templateData`: `waTemplateParamsSchema.optional()`.
+fn template_data(input: &mut Input) -> Option<Value> {
+    let value = input.get("templateData")?.clone();
+    let parsed = wa_template_params_schema().safe_parse(&value);
+    if let Some(error) = parsed.error {
+        let issues = error
+            .issues
+            .iter()
+            .filter_map(|issue| serde_json::to_value(issue).ok())
+            .map(|mut issue| {
+                if let Some(path) = issue["path"].as_array_mut() {
+                    path.insert(0, json!("templateData"));
+                }
+                issue
+            })
+            .collect();
+        input.extend_issues(issues);
+        return None;
+    }
+    parsed.data
+}
+
+/// `messages.sendWhatsappTemplate` (202 `{ queued: true }`).
+async fn send_template(state: &ApiState, call: Call<'_>) -> Reply {
+    let mut input = Input::from_body(call.params, call.body);
+    let template_id = input.string("templateId", Str::trimmed(1, usize::MAX));
+    let params = template_params(&mut input);
+    let data = template_data(&mut input);
+    let inbox_id = opt_digits_id(&mut input, "inboxId");
+    // The object refinement runs only when the fields passed.
+    if !input.failed() && params.is_some() && data.is_some() {
+        input.issue(
+            &key("templateParams"),
+            "custom",
+            "Send templateParams or templateData, not both",
+        );
+    }
+    let conversation_id = input.digits_id("conversationId");
+    input.finish()?;
+    let found = conversation(state, &call, conversation_id, MUTATING).await?;
+    let template_id = template_id.unwrap_or_default();
+    let template_data = match params {
+        Some(values) => Some(
+            whatsapp::resolve_template_params(
+                &state.db,
+                call.workspace_id,
+                template_id.parse().unwrap_or(-1),
+                &values,
+                "templateParams",
+            )
+            .await
+            .map_err(|e| business_error(e, MUTATING))?,
+        ),
+        None => data,
+    };
+    let job = whatsapp::send_template_to_conversation(
+        &state.db,
+        &found,
+        &template_id,
+        template_data,
+        inbox_id,
+        None,
+    )
+    .await
+    .map_err(|e| business_error(e, MUTATING))?;
+    queue_outgoing_jobs(state, vec![job]).await;
+    Ok(json(202, json!({ "queued": true })))
+}
+
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     match route_id {
@@ -237,33 +368,15 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "messages.get" => Ok(json(200, message_json(&find_message(state, &call).await?))),
         "messages.getFlowResponse" => {
             let found = find_message(state, &call).await?;
-            let attrs = found.message.content_attributes.as_ref().map(|j| &j.0);
-            if !actions::is_whatsapp_flow_response(attrs) {
-                return Err(business_error(
-                    BusinessError::not_found("WhatsApp Flow response not found"),
-                    FINDING,
-                ));
-            }
-            Err(not_ported("The WhatsApp Flow response view is", FINDING))
+            let view =
+                whatsapp::flow_response_view(&found).map_err(|e| business_error(e, FINDING))?;
+            Ok(json(200, view))
         }
         "messages.create" => create(state, call).await,
         "messages.update" => update(state, call).await,
         "messages.delete" => delete(state, call).await,
         "messages.changeAttributes" => change_attributes(state, call).await,
-        _ => {
-            // `assertConversationAccessForCaller` runs first: 404 / 422.
-            let mut input = Input::from_body(call.params, call.body);
-            let conversation_id = input.digits_id("conversationId");
-            input.finish()?;
-            conversation(state, &call, conversation_id, MUTATING).await?;
-            Err(not_ported(
-                if route_id == "messages.sendWhatsappTemplate" {
-                    "WhatsApp templates are"
-                } else {
-                    "WhatsApp call permission is"
-                },
-                MUTATING,
-            ))
-        }
+        "messages.sendWhatsappTemplate" => send_template(state, call).await,
+        _ => request_call_permission(state, call).await,
     }
 }

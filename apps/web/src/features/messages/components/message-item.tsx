@@ -1,0 +1,1093 @@
+"use client"
+
+import type {
+  MessageButtonTemplate,
+  MessageStoryReplyEntity,
+  MessageTemplateEntity,
+} from "@chatbotx.io/sdk"
+import {
+  getInboundOrder,
+  getReferredProduct,
+  getViewCatalogEntity,
+  getWhatsappCallEntity,
+  getWhatsappCallPermissionReply,
+  getWhatsappFlowResponse,
+  getWhatsappPaymentMethod,
+  isMessageProductEntity,
+} from "@chatbotx.io/sdk"
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@chatbotx.io/ui/components/ui/avatar"
+import { Button, buttonVariants } from "@chatbotx.io/ui/components/ui/button"
+import { Card, CardContent } from "@chatbotx.io/ui/components/ui/card"
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@chatbotx.io/ui/components/ui/carousel"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@chatbotx.io/ui/components/ui/tooltip"
+import { cn } from "@chatbotx.io/ui/lib/utils"
+import { format } from "date-fns"
+import {
+  BotIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  ImageIcon,
+  LockIcon,
+  PaperclipIcon,
+  PhoneIcon,
+  PhoneOffIcon,
+  ReplyIcon,
+  RotateCwIcon,
+  StoreIcon,
+  ThumbsUp,
+} from "lucide-react"
+import Image from "next/image"
+import Link from "next/link"
+import { useTranslations } from "next-intl"
+import { useState } from "react"
+import { useCopyToClipboard } from "usehooks-ts"
+import type { AttachmentResource } from "@/features/attachments/schema/resource"
+import { useAttachmentSource } from "@/features/attachments/utils"
+import { contactDisplayName } from "@/features/contacts/lib/contact-display-name"
+import {
+  getSentPaymentRequests,
+  getSentTemplateName,
+} from "../lib/payment-request-content"
+import {
+  getThreadControlActivity,
+  getThreadControlContextCard,
+  isThreadControlEcho,
+} from "../lib/thread-control-content"
+import type { MessageResourceWithRelations } from "../schema/resource"
+import { InboundOrderBubble } from "./inbound-order-bubble"
+import { MessageActions, MessageActionsEditor } from "./message-actions"
+import { MessageBubble } from "./message-bubble"
+import { MessageErrorBadge } from "./message-error-badge"
+import { ProductMessageBubble } from "./product-message-bubble"
+import { ReferredProductContext } from "./referred-product-context"
+import { ThreadControlContextCard } from "./thread-control-context-card"
+import { ThreadControlDivider } from "./thread-control-divider"
+import { WhatsappCallCard } from "./whatsapp-call-card"
+import { WhatsappFlowResponseCard } from "./whatsapp-flow-response-card"
+import { WhatsappPaymentConfirmation } from "./whatsapp-payment-confirmation"
+import { WhatsappPaymentRequestCard } from "./whatsapp-payment-request-card"
+
+type MessageItemProps = {
+  message: MessageResourceWithRelations
+  guestDisplay?: boolean
+  /**
+   * Workspace logo shown beside agent/bot bubbles in the guest widget when
+   * `IntegrationWebchat.showLogo` is on. Deliberately opt-in and unused by
+   * the agent inbox, which renders this same component — passing it only
+   * from `webchat-message-list.tsx` keeps inbox rendering unchanged.
+   */
+  avatarUrl?: string
+  onChangeHide?: () => void
+  onChangeLike?: () => void
+  onDelete?: () => void
+  onEdit?: (message: {
+    id: string
+    createdAt: Date
+    text: string
+    newAttachmentPath?: string
+    newAttachmentPublicUrl?: string
+    newAttachmentMimeType?: string
+    newAttachmentName?: string
+    newAttachmentSize?: number
+    removeAttachment?: boolean
+  }) => void
+  onPostback?: (button: MessageButtonTemplate) => void
+  onReply?: (comment: { commentId: string; text: string }) => void
+  onPrivateReply?: (comment: { commentId: string; text: string }) => void
+  /**
+   * Whether THIS comment may be answered with a DM. A predicate rather than a
+   * boolean because TikTok decides per comment, not per channel — see
+   * `canPrivateReplyToComment`. Omitted means "allowed", so the Meta channels
+   * and the guest view keep their existing behaviour.
+   */
+  canPrivateReply?: (message: MessageItemProps["message"]) => boolean
+}
+
+export const MessageItem = (props: MessageItemProps) => {
+  const {
+    message,
+    guestDisplay = false,
+    avatarUrl,
+    onChangeLike,
+    onChangeHide,
+    onReply,
+    onPrivateReply,
+    canPrivateReply,
+    onDelete,
+    onEdit,
+  } = props
+  const t = useTranslations("messages")
+  const tRouting = useTranslations("conversationRouting")
+  const [isEditing, setIsEditing] = useState(false)
+
+  const variants: Record<"left" | "right" | "full", string> = {
+    left: "px-4 py-3 rounded-xl bg-secondary",
+    right: "px-4 py-3 rounded-xl bg-primary text-primary-foreground",
+    full: "text-center w-full text-muted-foreground",
+  }
+
+  let variant: "left" | "right" | "full" = "full"
+  switch (message.messageType) {
+    case "incoming":
+      variant = guestDisplay ? "right" : "left"
+      break
+    case "outgoing":
+      variant = guestDisplay ? "left" : "right"
+      break
+    default:
+      variant = "full"
+      break
+  }
+
+  const isComment = message.type === "comment"
+  const isDeleted = message.deletedAt != null
+  const attributes = message.attributes as {
+    liked?: boolean
+    hidden?: boolean
+  } | null
+  const isLiked = attributes?.liked === true
+  const isHidden = attributes?.hidden === true
+  const hasAttachments = !!message.attachments?.length
+  const storyReply = getStoryReplyEntity(message.contentAttributes)
+  // Call rows render localized labels from contentAttributes; the stored
+  // text is only an English fallback for previews and must not double-render.
+  const whatsappCall = getWhatsappCallEntity(message.contentAttributes)
+  const callPermissionReply = getWhatsappCallPermissionReply(
+    message.contentAttributes,
+  )
+  const paymentMethod = getWhatsappPaymentMethod(message.contentAttributes)
+  // A payment request template renders as its own card (method, amount,
+  // value); the stored "Template: <name>" text would only repeat its name.
+  const paymentRequests = getSentPaymentRequests(message.contentAttributes)
+  const hasPaymentRequests = paymentRequests.length > 0
+  const threadControlActivity = getThreadControlActivity(
+    message.contentAttributes,
+  )
+  const threadControlContext = getThreadControlContextCard(
+    message.contentAttributes,
+  )
+  // A partner's reply seen on the standby feed: outgoing side, but in the
+  // muted bubble and captioned, so it never reads as the agent's own message.
+  const isPartnerEcho = isThreadControlEcho(message.contentAttributes)
+  // An inbound cart renders as its own bubble; the stored text is only its
+  // plain-text summary for keywords and previews.
+  const inboundOrder = getInboundOrder(message.contentAttributes)
+  // A Flow response renders as one card (text, files, answers). The guest
+  // widget is the customer's own view, and the answers are agent-only.
+  const flowResponse =
+    isComment || isDeleted || guestDisplay
+      ? undefined
+      : getWhatsappFlowResponse(message.contentAttributes)
+  const suppressRawText = Boolean(
+    flowResponse ||
+      inboundOrder ||
+      whatsappCall ||
+      callPermissionReply ||
+      paymentMethod ||
+      hasPaymentRequests ||
+      threadControlActivity ||
+      threadControlContext,
+  )
+
+  // A call card defaults to the centered `full` variant, but a call still has
+  // a direction: business-initiated sits right, customer-initiated sits left
+  // (flipped by `guestDisplay`, like `incoming`/`outgoing` above).
+  if (whatsappCall) {
+    const isBusinessInitiated = whatsappCall.direction === "businessInitiated"
+    if (isBusinessInitiated) {
+      variant = guestDisplay ? "left" : "right"
+    } else {
+      variant = guestDisplay ? "right" : "left"
+    }
+  }
+
+  // The buyer's payment confirmation is a conversation event, centered like
+  // routing activity, not a chat bubble.
+  if (paymentMethod) {
+    variant = "full"
+  }
+
+  const createdAt = new Date(message.createdAt)
+
+  return (
+    <MessageBubble className="group" variant={variant}>
+      {variant === "left" && avatarUrl && !whatsappCall && (
+        <Avatar className="mt-2 size-7 self-start">
+          <AvatarImage alt="" src={avatarUrl} />
+          <AvatarFallback>
+            <BotIcon aria-hidden className="size-3.5" />
+          </AvatarFallback>
+        </Avatar>
+      )}
+      <div
+        className={cn(
+          "flex min-h-11 max-w-[70%] flex-col gap-1",
+          variant === "full" && "mx-auto",
+        )}
+      >
+        {storyReply && <StoryReplyContext story={storyReply.story} />}
+        {isPartnerEcho && (
+          <span className="flex items-center gap-1 self-end text-muted-foreground text-xs">
+            <BotIcon aria-hidden className="size-3" />
+            {tRouting("echo.partner")}
+          </span>
+        )}
+        {isComment ? (
+          <div
+            className={cn(
+              "relative text-sm",
+              variants[variant],
+              isDeleted && "opacity-50",
+              isHidden && "opacity-50",
+            )}
+          >
+            {!isEditing && (isDeleted || message.text || !hasAttachments) && (
+              <pre className="wrap-break-word whitespace-pre-line font-sans">
+                <CommentText
+                  deletedLabel={t("messageDeleted")}
+                  hiddenLabel={t("commentHidden")}
+                  isDeleted={isDeleted}
+                  isHidden={isHidden}
+                  mediaUnavailableLabel={t("commentMediaUnavailable")}
+                  text={message.text}
+                />
+              </pre>
+            )}
+            {!(isEditing || isDeleted) && hasAttachments && (
+              <RenderAttachments message={message} />
+            )}
+            {isEditing && onEdit && (
+              <MessageActionsEditor
+                message={message}
+                onEdit={onEdit}
+                onEditingChange={setIsEditing}
+              />
+            )}
+            {isLiked && (
+              <span className="absolute -end-2 -bottom-2 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
+                <ThumbsUp className="size-3" />
+              </span>
+            )}
+          </div>
+        ) : (
+          <>
+            {(isDeleted || (message.text && message.text.length > 0)) &&
+              !suppressRawText && (
+                <div
+                  className={cn(
+                    "text-sm",
+                    isPartnerEcho ? variants.left : variants[variant],
+                    isDeleted && "opacity-50",
+                  )}
+                >
+                  <pre className="wrap-break-word whitespace-pre-line font-sans">
+                    {isDeleted ? (
+                      <span className="text-xs italic">
+                        {t("messageDeleted")}
+                      </span>
+                    ) : (
+                      message.text
+                    )}
+                  </pre>
+                </div>
+              )}
+            {!isDeleted && hasAttachments && !whatsappCall && !flowResponse && (
+              <RenderAttachments message={message} />
+            )}
+            {flowResponse && (
+              <WhatsappFlowResponseCard
+                entity={flowResponse}
+                message={message}
+              />
+            )}
+          </>
+        )}
+        {RenderContentAttributes(props, paymentRequests)}
+      </div>
+
+      <div className="flex">
+        {message.sendError &&
+          (message.messageType === "outgoing" ||
+            (guestDisplay && message.messageType === "incoming")) && (
+            <MessageErrorBadge
+              detail={message.sendError}
+              label={t("sendFailed")}
+            />
+          )}
+        {/* Meta can terminate an ANSWERED call with no audio (e.g. error
+            138021), so this badge isn't gated on the call having been missed. */}
+        {whatsappCall?.failureReason && (
+          <MessageErrorBadge
+            detail={whatsappCall.failureReason}
+            label={t("callFailed")}
+          />
+        )}
+        {isComment && !isEditing && message.messageType === "incoming" && (
+          <Button
+            className="self-center opacity-0 transition-opacity group-hover:opacity-100"
+            onClick={onChangeLike}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <ThumbsUp className={cn("size-4", isLiked && "fill-current")} />
+          </Button>
+        )}
+
+        {isComment &&
+          !isEditing &&
+          onReply &&
+          message.messageType === "incoming" &&
+          message.sourceId && (
+            <Button
+              className="self-center opacity-0 transition-opacity group-hover:opacity-100"
+              onClick={() =>
+                onReply({
+                  commentId: message.sourceId as string,
+                  text: message.text ?? "",
+                })
+              }
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <ReplyIcon className="size-4" />
+            </Button>
+          )}
+
+        {isComment &&
+          !isEditing &&
+          onPrivateReply &&
+          (canPrivateReply?.(message) ?? true) &&
+          message.messageType === "incoming" &&
+          message.sourceId && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    className="self-center opacity-0 transition-opacity group-hover:opacity-100"
+                    onClick={() =>
+                      onPrivateReply({
+                        commentId: message.sourceId as string,
+                        text: message.text ?? "",
+                      })
+                    }
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <LockIcon className="size-4" />
+                  </Button>
+                }
+              />
+              <TooltipContent>
+                <p>{t("privateReply")}</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+
+        {isComment && !isEditing && (
+          <MessageActions
+            message={message}
+            onChangeHide={onChangeHide}
+            onDelete={onDelete}
+            onEdit={message.messageType === "outgoing" ? onEdit : undefined}
+            onEditingChange={setIsEditing}
+          />
+        )}
+      </div>
+      {variant !== "full" && (
+        // Sits beside the bubble (after it for incoming, before it for
+        // outgoing via the reversed row) and appears the moment the bubble
+        // is hovered, or when one of its action buttons has keyboard focus —
+        // an OS `title` tooltip waits about a second.
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <time
+                className="self-center whitespace-nowrap text-muted-foreground text-xs opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+                dateTime={createdAt.toISOString()}
+                suppressHydrationWarning
+              >
+                {format(createdAt, "HH:mm")}
+              </time>
+            }
+          />
+          <TooltipContent side="top">
+            {format(createdAt, "yyyy/MM/dd HH:mm:ss")}
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </MessageBubble>
+  )
+}
+
+// A comment with neither text nor attachment carried media the channel does
+// not expose (e.g. an Instagram GIF comment), so it gets a note instead of an
+// empty bubble.
+const CommentText = (props: {
+  deletedLabel: string
+  hiddenLabel: string
+  mediaUnavailableLabel: string
+  isDeleted: boolean
+  isHidden: boolean
+  text: string | null
+}) => {
+  const {
+    deletedLabel,
+    hiddenLabel,
+    mediaUnavailableLabel,
+    isDeleted,
+    isHidden,
+    text,
+  } = props
+  if (isDeleted) {
+    return <span className="text-xs italic">{deletedLabel}</span>
+  }
+  if (isHidden) {
+    return <span className="text-xs italic">{hiddenLabel}</span>
+  }
+  if (!text) {
+    return (
+      <span className="text-muted-foreground text-xs italic">
+        {mediaUnavailableLabel}
+      </span>
+    )
+  }
+  return text
+}
+
+const RenderAttachments = (props: {
+  message: MessageResourceWithRelations
+}) => {
+  const { message } = props
+  const attachments = message.attachments ?? []
+  // Multiple images in one message render as a grid (album-style, matching
+  // how channels like Messenger/Instagram/Telegram deliver them); a single
+  // image keeps its own aspect-ratio-preserving layout. Non-image attachments
+  // (video/audio/file) are unaffected and keep stacking below.
+  const imageAttachments = attachments.filter(
+    (attachment) => attachment.fileType === "image",
+  )
+  const otherAttachments = attachments.filter(
+    (attachment) => attachment.fileType !== "image",
+  )
+
+  return (
+    <div className="flex flex-col gap-2">
+      {imageAttachments.length > 1 ? (
+        <div
+          className={cn(
+            "grid w-full max-w-80 gap-1",
+            // A 3-column grid with exactly 2 images leaves the last cell
+            // empty; 2 images look intentional as a 2-up grid instead.
+            imageAttachments.length === 2 ? "grid-cols-2" : "grid-cols-3",
+          )}
+          data-slot="attachment-image-grid"
+        >
+          {imageAttachments.map((attachment) => (
+            <RenderImageGridItem attachment={attachment} key={attachment.id} />
+          ))}
+        </div>
+      ) : (
+        imageAttachments.map((attachment) => (
+          <RenderAttachmentItem attachment={attachment} key={attachment.id} />
+        ))
+      )}
+      {otherAttachments.map((attachment) => (
+        <RenderAttachmentItem attachment={attachment} key={attachment.id} />
+      ))}
+    </div>
+  )
+}
+
+const RenderImageGridItem = (props: { attachment: AttachmentResource }) => {
+  const { attachment } = props
+  const { url: attachmentUrl, onError } = useAttachmentSource(attachment)
+  const attachmentLabel =
+    attachment.name || attachment.originPath || "Attachment"
+
+  if (!attachmentUrl) {
+    // A chat bubble sizes to its own content, so with nothing else to size
+    // from (no image yet), this needs an explicit box — `aspect-square`
+    // alone has no width to derive a height from here and collapses to 0×0.
+    return (
+      <div className="flex size-24 items-center justify-center overflow-hidden rounded-lg bg-secondary">
+        <PaperclipIcon className="size-5 text-muted-foreground" />
+      </div>
+    )
+  }
+
+  return (
+    <Link href={attachmentUrl} prefetch={false} target="_blank">
+      <div className="relative aspect-square overflow-hidden rounded-lg">
+        <Image
+          alt={attachmentLabel}
+          className="h-full w-full object-cover"
+          height={120}
+          onError={onError}
+          src={attachmentUrl}
+          unoptimized
+          width={120}
+        />
+      </div>
+    </Link>
+  )
+}
+
+// `unoptimized` keeps the original bytes, so an animated GIF/WebP still plays.
+const RenderImageAttachment = (props: {
+  attachment: AttachmentResource
+  attachmentUrl: string
+  attachmentLabel: string
+  onError: () => void
+}) => {
+  const { attachment, attachmentUrl, attachmentLabel, onError } = props
+
+  if (!(attachment.width && attachment.height)) {
+    // No stored dimensions (e.g. a media-library send): the bubble sizes to its
+    // content, so the frame needs an explicit width — max-width plus an aspect
+    // ratio alone collapses to 0×0 and the message looks missing.
+    return (
+      <Link href={attachmentUrl} prefetch={false} target="_blank">
+        <div
+          className="relative w-80 max-w-full overflow-hidden rounded-xl"
+          style={{ aspectRatio: "4/3" }}
+        >
+          <Image
+            alt={attachmentLabel}
+            className="object-contain"
+            fill
+            onError={onError}
+            src={attachmentUrl}
+            unoptimized
+          />
+        </div>
+      </Link>
+    )
+  }
+  return (
+    <Link href={attachmentUrl} prefetch={false} target="_blank">
+      <Image
+        alt={attachmentLabel}
+        className="max-w-full rounded-xl sm:max-w-80"
+        height={attachment.height}
+        onError={onError}
+        src={attachmentUrl}
+        unoptimized
+        width={attachment.width}
+      />
+    </Link>
+  )
+}
+
+const RenderAttachmentItem = (props: { attachment: AttachmentResource }) => {
+  const { attachment } = props
+  const t = useTranslations("messages")
+  const {
+    url: attachmentUrl,
+    onError,
+    isRecovering,
+    fallbackUrl,
+    retryUrl,
+  } = useAttachmentSource(attachment)
+  const attachmentLabel =
+    attachment.name || attachment.originPath || "Attachment"
+
+  if (!attachmentUrl) {
+    return (
+      <div className="flex items-center gap-2 overflow-hidden rounded-xl bg-secondary p-3 text-sm">
+        <PaperclipIcon className="size-5 flex-none" />
+        <span className="truncate">{attachmentLabel}</span>
+      </div>
+    )
+  }
+
+  switch (attachment.fileType) {
+    case "image":
+      return (
+        <RenderImageAttachment
+          attachment={attachment}
+          attachmentLabel={attachmentLabel}
+          attachmentUrl={attachmentUrl}
+          onError={onError}
+        />
+      )
+    case "gif":
+      // A GIF delivered as a video clip (Telegram animations, video stickers)
+      // plays the way the GIF would: muted, looping, without controls.
+      if (attachment.mimeType.startsWith("video/")) {
+        return (
+          <video
+            autoPlay
+            className="max-w-full rounded-xl sm:max-w-80"
+            key={attachmentUrl}
+            loop
+            muted
+            onError={onError}
+            playsInline
+          >
+            <track default kind="captions" />
+            <source
+              onError={onError}
+              src={attachmentUrl}
+              type={attachment.mimeType}
+            />
+          </video>
+        )
+      }
+      return (
+        <RenderImageAttachment
+          attachment={attachment}
+          attachmentLabel={attachmentLabel}
+          attachmentUrl={attachmentUrl}
+          onError={onError}
+        />
+      )
+    case "video":
+      return (
+        // Keyed by URL: a media element ignores a swapped <source>, so the
+        // fallback URL only takes effect on a fresh element. With
+        // `preload="none"` a load failure only surfaces after the user pressed
+        // Play, so the recovering element loads and plays on its own rather
+        // than waiting for another click.
+        <video
+          autoPlay={isRecovering}
+          controls
+          height="240"
+          key={attachmentUrl}
+          onError={onError}
+          preload={isRecovering ? "auto" : "none"}
+          width="320"
+        >
+          <track default kind="captions" />
+          <source
+            onError={onError}
+            src={attachmentUrl}
+            type={attachment.mimeType}
+          />
+        </video>
+      )
+    case "audio":
+      return (
+        // `preload="metadata"` (not "none") so the player shows the clip's
+        // total duration at rest instead of 0:00 / 0:00.
+        <audio
+          controls
+          key={attachmentUrl}
+          onError={onError}
+          preload="metadata"
+        >
+          <track default kind="captions" />
+          <source
+            onError={onError}
+            src={attachmentUrl}
+            type={attachment.mimeType}
+          />
+        </audio>
+      )
+    default:
+      return (
+        // A download link fires no load error, so it can't walk the fallback
+        // chain on its own: it always goes through the re-signing fallback,
+        // and the reload action re-fetches a file gone from storage. Links that
+        // can reach the media proxy never prefetch — a prefetch would run it.
+        <div className="flex items-center gap-2 overflow-hidden rounded-xl bg-secondary p-3 text-sm">
+          <PaperclipIcon className="size-5 flex-none" />
+          <Link
+            className="truncate"
+            href={fallbackUrl ?? attachmentUrl}
+            prefetch={false}
+          >
+            {attachmentUrl}
+          </Link>
+          {retryUrl ? (
+            <Link
+              aria-label={t("reloadAttachment")}
+              className="flex-none text-muted-foreground hover:text-foreground"
+              href={retryUrl}
+              prefetch={false}
+              rel="noopener noreferrer"
+              target="_blank"
+              title={t("reloadAttachment")}
+            >
+              <RotateCwIcon className="size-4" />
+            </Link>
+          ) : null}
+        </div>
+      )
+  }
+}
+
+const getStoryReplyEntity = (
+  contentAttributes: MessageResourceWithRelations["contentAttributes"],
+): MessageStoryReplyEntity | undefined => {
+  if (
+    !contentAttributes ||
+    typeof contentAttributes !== "object" ||
+    (contentAttributes as { type?: unknown }).type !== "story_reply"
+  ) {
+    return
+  }
+
+  return contentAttributes as MessageStoryReplyEntity
+}
+
+const StoryReplyContext = (props: {
+  story: MessageStoryReplyEntity["story"]
+}) => {
+  const { story } = props
+  const t = useTranslations("messages")
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border bg-secondary/50 px-2 py-1.5 text-muted-foreground text-xs">
+      {story.url ? (
+        <Image
+          alt={t("repliedToStory")}
+          className="size-8 rounded-md object-cover"
+          height={32}
+          src={story.url}
+          width={32}
+        />
+      ) : (
+        <span className="flex size-8 flex-none items-center justify-center rounded-md bg-secondary">
+          <ImageIcon className="size-4" />
+        </span>
+      )}
+      <span>{t("repliedToStory")}</span>
+    </div>
+  )
+}
+
+const WhatsappCallPermissionReply = ({
+  response,
+}: {
+  response: "accept" | "reject"
+}) => {
+  const t = useTranslations("messages")
+  const isAccepted = response === "accept"
+
+  return (
+    <div className="flex items-center gap-1.5 rounded-xl bg-secondary px-4 py-3 text-sm">
+      {isAccepted ? (
+        <PhoneIcon aria-hidden className="size-3.5" />
+      ) : (
+        <PhoneOffIcon aria-hidden className="size-3.5" />
+      )}
+      <span>
+        {isAccepted ? t("acceptedCallPermission") : t("declinedCallPermission")}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * What the contact sees under a "view catalog" message: the footer and the
+ * channel's own button. It is only a picture of that button — nothing here opens
+ * a catalog — so it is disabled.
+ */
+const ViewCatalogCard = ({ footer }: { footer?: string }) => {
+  const t = useTranslations("messages")
+
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      {footer ? (
+        <p
+          className="line-clamp-2 whitespace-pre-line break-words text-muted-foreground text-xs"
+          data-slot="view-catalog-footer"
+        >
+          {footer}
+        </p>
+      ) : null}
+      <Button
+        className="w-full bg-secondary text-secondary-foreground disabled:bg-muted disabled:text-muted-foreground sm:w-auto sm:min-w-60 dark:bg-secondary dark:text-secondary-foreground dark:disabled:bg-muted dark:disabled:text-muted-foreground"
+        data-slot="view-catalog-button"
+        disabled
+        size="sm"
+        variant="outline"
+      >
+        <StoreIcon />
+        {t("viewCatalog")}
+      </Button>
+    </div>
+  )
+}
+
+/** A plain international number: what may follow `tel:`. */
+const TEL_NUMBER = /^\+\d+$/
+
+type TemplateButtonProps = {
+  button: MessageButtonTemplate
+  onPostback?: (button: MessageButtonTemplate) => void
+  className?: string
+}
+
+/**
+ * One button of a template message, shared by the button list and carousel
+ * cards: a link opens its URL, a call button dials its number (`tel:`), and
+ * everything else replies with its postback. The number was validated when
+ * the message was sent; it is checked again here only so nothing but a plain
+ * `+digits` number ever reaches the `tel:` link.
+ */
+/** A Copy Text button copies its text here too, as it did for the contact. */
+const CopyTextTemplateButton = ({
+  label,
+  text,
+  className,
+}: {
+  label: string
+  text: string
+  className?: string
+}) => {
+  const [, copy] = useCopyToClipboard()
+  return (
+    <Button
+      className={cn(
+        buttonVariants({ size: "sm", variant: "secondary" }),
+        className,
+      )}
+      onClick={() => {
+        copy(text).catch(() => undefined)
+      }}
+      size="sm"
+      type="button"
+      variant="secondary"
+    >
+      <CopyIcon />
+      {label}
+    </Button>
+  )
+}
+
+const TemplateButton = ({
+  button,
+  onPostback,
+  className,
+}: TemplateButtonProps) => {
+  if (button.buttonType === "copyText") {
+    return (
+      <CopyTextTemplateButton
+        className={className}
+        label={button.label}
+        text={button.copyText}
+      />
+    )
+  }
+
+  if (button.buttonType === "url") {
+    return (
+      <Link
+        className={cn(
+          buttonVariants({ size: "sm", variant: "secondary" }),
+          className,
+        )}
+        href={button.url}
+        target="_blank"
+      >
+        <ExternalLinkIcon />
+        {button.label}
+      </Link>
+    )
+  }
+
+  if (
+    button.buttonType === "phoneNumber" &&
+    TEL_NUMBER.test(button.phoneNumber)
+  ) {
+    return (
+      <a
+        className={cn(
+          buttonVariants({ size: "sm", variant: "secondary" }),
+          className,
+        )}
+        href={`tel:${button.phoneNumber}`}
+      >
+        <PhoneIcon />
+        {button.label}
+      </a>
+    )
+  }
+
+  return (
+    <Button
+      className={cn(
+        "w-full bg-secondary text-secondary-foreground disabled:bg-muted disabled:text-muted-foreground sm:w-auto sm:min-w-60 dark:bg-secondary dark:text-secondary-foreground dark:disabled:bg-muted dark:disabled:text-muted-foreground",
+        className,
+      )}
+      disabled={!onPostback}
+      onClick={() => {
+        onPostback?.(button)
+      }}
+      size="sm"
+      variant="outline"
+    >
+      {button.label}
+    </Button>
+  )
+}
+
+const RenderContentAttributes = (
+  props: MessageItemProps,
+  paymentRequests: ReturnType<typeof getSentPaymentRequests>,
+) => {
+  const { message, onPostback } = props
+  const viewCatalog = getViewCatalogEntity(message.contentAttributes)
+  if (viewCatalog) {
+    return <ViewCatalogCard footer={viewCatalog.footer} />
+  }
+
+  const whatsappCall = getWhatsappCallEntity(message.contentAttributes)
+  if (whatsappCall) {
+    return (
+      <WhatsappCallCard
+        call={whatsappCall}
+        callEndedAt={message.createdAt}
+        contactName={contactDisplayName(message.contact)}
+        conversationId={message.conversationId}
+        hasRecordingAttachment={Boolean(message.attachments?.length)}
+      />
+    )
+  }
+
+  const callPermissionReply = getWhatsappCallPermissionReply(
+    message.contentAttributes,
+  )
+  if (callPermissionReply) {
+    return (
+      <WhatsappCallPermissionReply response={callPermissionReply.response} />
+    )
+  }
+
+  const paymentMethod = getWhatsappPaymentMethod(message.contentAttributes)
+  if (paymentMethod) {
+    return <WhatsappPaymentConfirmation entity={paymentMethod} />
+  }
+
+  if (paymentRequests.length > 0) {
+    return (
+      <WhatsappPaymentRequestCard
+        requests={paymentRequests}
+        templateName={getSentTemplateName(message.contentAttributes)}
+      />
+    )
+  }
+
+  const threadControlActivity = getThreadControlActivity(
+    message.contentAttributes,
+  )
+  if (threadControlActivity) {
+    return <ThreadControlDivider activity={threadControlActivity} />
+  }
+
+  const threadControlContext = getThreadControlContextCard(
+    message.contentAttributes,
+  )
+  if (threadControlContext) {
+    return <ThreadControlContextCard data={threadControlContext} />
+  }
+
+  if (isMessageProductEntity(message.contentAttributes)) {
+    return <ProductMessageBubble message={message.contentAttributes.payload} />
+  }
+
+  const inboundOrder = getInboundOrder(message.contentAttributes)
+  if (inboundOrder) {
+    return <InboundOrderBubble order={inboundOrder} />
+  }
+
+  const referredProduct = getReferredProduct(message.contentAttributes)
+  if (referredProduct) {
+    return <ReferredProductContext reference={referredProduct} />
+  }
+
+  const contentAttributes = message.contentAttributes as
+    | MessageTemplateEntity
+    | undefined
+
+  if (!contentAttributes) {
+    return null
+  }
+
+  switch (contentAttributes.type) {
+    case "template":
+      return (
+        <div className="mt-1 flex flex-col gap-1">
+          {contentAttributes.payload.templateType === "button" &&
+            contentAttributes.payload.buttons.map((button) => (
+              <TemplateButton
+                button={button}
+                key={button.id}
+                onPostback={onPostback}
+              />
+            ))}
+          {contentAttributes.payload.templateType === "carousel" && (
+            <Carousel
+              opts={{
+                align: "start",
+              }}
+            >
+              <CarouselContent className="ms-0">
+                {contentAttributes.payload.cards.map((card, _) => (
+                  <CarouselItem className="w-32 ps-0" key={card.id}>
+                    <div className="p-1">
+                      <Card className="py-0">
+                        <CardContent className="flex flex-col items-center justify-center overflow-hidden p-0">
+                          <div className="flex w-full flex-1 flex-col gap-1">
+                            {"imageUrl" in card && card.imageUrl && (
+                              <Image
+                                alt={card.title || "Attachment"}
+                                className="max-h-64 w-full object-contain"
+                                height={100}
+                                src={card.imageUrl}
+                                width={100}
+                              />
+                            )}
+                            <span className="truncate px-2 font-semibold">
+                              {card.title}
+                            </span>
+                            {"subtitle" in card && card.subtitle && (
+                              <span className="truncate px-2 text-muted-foreground text-sm">
+                                {card.subtitle}
+                              </span>
+                            )}
+                          </div>
+                          {"buttons" in card &&
+                            card.buttons &&
+                            card.buttons.map((button) => (
+                              <TemplateButton
+                                button={button}
+                                className="w-full sm:w-full sm:min-w-0"
+                                key={button.id}
+                                onPostback={onPostback}
+                              />
+                            ))}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </CarouselItem>
+                ))}
+              </CarouselContent>
+              <CarouselPrevious className="-start-2" />
+              <CarouselNext className="-end-2" />
+            </Carousel>
+          )}
+        </div>
+      )
+    default:
+      return null
+  }
+}

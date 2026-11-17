@@ -216,15 +216,7 @@ pub async fn presign_upload(
     mime_type: &str,
 ) -> Result<PresignedUpload> {
     let path = format!("public/space/{workspace_id}/media-library/{}", new_id());
-    let mut upload_url = uploader
-        .get_presigned_upload(&path)
-        .await
-        .map_err(|e| BusinessError::Repo(chatbotx_db::repo::Error::msg(e.to_string())))?;
-    // ponytail: same rule as `chatbotx_api::files::presigned_upload_url` (the
-    // api crate is above this one): a local URL carries the S3 expiry too.
-    if !upload_url.contains("X-Amz-Expires=") {
-        upload_url = upload_url.replacen('?', "?X-Amz-Expires=300&", 1);
-    }
+    let upload_url = crate::import::presigned_upload_url(uploader, &path).await?;
     let public_url = url_of(&path, storage_url);
     let values = vec![
         ("workspaceId", Sql::Integer(workspace_id)),

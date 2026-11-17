@@ -2,6 +2,11 @@
 //! one module per builder router. [`dispatch`] runs the handler of a route after
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
+pub mod ai_agents;
+pub mod ai_files;
+pub mod ai_functions;
+pub mod ai_handover;
+pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
 pub mod channels;
@@ -22,6 +27,7 @@ pub mod ecommerce_settings;
 pub mod flows;
 pub mod folders;
 pub mod input;
+pub mod integrations_ai;
 pub mod keywords;
 pub mod media_library;
 pub mod messages;
@@ -32,6 +38,7 @@ pub mod pipelines;
 pub mod places;
 pub mod polls;
 pub mod product_categories;
+pub mod product_imports;
 pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
@@ -80,6 +87,9 @@ pub struct ApiState {
     /// The file store (`uploader`; presigned uploads, imports, exports).
     /// `None` = off (tests that need no files).
     pub files: Option<Arc<chatbotx_files::Uploader>>,
+    /// The query embedding client (`aiFiles.search`); the provider APIs by
+    /// default.
+    pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
 }
 
 impl ApiState {
@@ -94,7 +104,17 @@ impl ApiState {
             events: EventBus::new(),
             audit: AuditService::disabled(),
             files: None,
+            embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
         }
+    }
+
+    /// Embeds search queries with `embedder`.
+    pub fn with_embedder(
+        mut self,
+        embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
+    ) -> ApiState {
+        self.embedder = embedder;
+        self
     }
 
     /// Publishes realtime events through `realtime`.
@@ -432,6 +452,18 @@ async fn route(
 ) -> Option<Response> {
     let reply = if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
+    } else if integrations_ai::ROUTES.contains(&route_id) {
+        integrations_ai::handle(state, route_id, call).await
+    } else if ai_files::ROUTES.contains(&route_id) {
+        ai_files::handle(state, route_id, call).await
+    } else if ai_handover::ROUTES.contains(&route_id) {
+        ai_handover::handle(state, route_id, call).await
+    } else if ai_agents::ROUTES.contains(&route_id) {
+        ai_agents::handle(state, route_id, call).await
+    } else if ai_functions::ROUTES.contains(&route_id) {
+        ai_functions::handle(state, route_id, call).await
+    } else if ai_mcp_servers::ROUTES.contains(&route_id) {
+        ai_mcp_servers::handle(state, route_id, call).await
     } else if analytics::ROUTES.contains(&route_id) {
         analytics::handle(state, route_id, call).await
     } else if contact_sequences::ROUTES.contains(&route_id) {
@@ -500,6 +532,8 @@ async fn route(
         workspace_members::handle(state, route_id, call).await
     } else if contact_exports::ROUTES.contains(&route_id) {
         contact_exports::handle(state, route_id, call).await
+    } else if product_imports::ROUTES.contains(&route_id) {
+        product_imports::handle(state, route_id, call).await
     } else if contact_imports::ROUTES.contains(&route_id) {
         contact_imports::handle(state, route_id, call).await
     } else if contact_filter::ROUTES.contains(&route_id) {

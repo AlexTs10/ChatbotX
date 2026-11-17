@@ -6,7 +6,9 @@
 
 pub mod contacts;
 pub mod csv;
+pub mod products;
 pub mod template;
+pub mod xlsx;
 
 use chatbotx_db::Db;
 use chatbotx_db::repo::models::Import;
@@ -141,15 +143,26 @@ pub fn resolve_import_file_format(
     config.accepted_formats.contains(&format).then_some(format)
 }
 
-/// `handler.buildPath`: `import_<id>.<extension as given>` under the
-/// type's storage path (`fileName.split(".").pop() || "txt"`).
-fn build_path(config: &ImportConfig, workspace_id: i64, file_name: &str) -> String {
-    let extension = file_name
-        .rsplit('.')
-        .next()
-        .filter(|e| !e.is_empty())
-        .unwrap_or("txt");
-    config
+/// `handler.buildPath` of the import type: `import_<id>.<extension>` under
+/// the type's storage path. The extension is the file name's last
+/// `.`-segment (`fileName.split(".").pop() || <default>`; contacts `txt`,
+/// coupons `csv`, products `xlsx`); a flow import is always `.json`.
+pub fn import_upload_path(import_type: ImportType, workspace_id: i64, file_name: &str) -> String {
+    let default = match import_type {
+        ImportType::Contacts => "txt",
+        ImportType::Coupons => "csv",
+        ImportType::Products => "xlsx",
+        ImportType::Flow => "json",
+    };
+    let extension = match import_type {
+        ImportType::Flow => "json",
+        _ => file_name
+            .rsplit('.')
+            .next()
+            .filter(|e| !e.is_empty())
+            .unwrap_or(default),
+    };
+    config(import_type)
         .storage_path
         .replace(":workspaceId", &workspace_id.to_string())
         .replace(":fileName", &format!("import_{}.{extension}", new_id()))
@@ -220,7 +233,7 @@ pub async fn create_import_upload(
             400,
         ));
     }
-    let path = build_path(config, input.workspace_id, &input.file_name);
+    let path = import_upload_path(input.import_type, input.workspace_id, &input.file_name);
     let presigned_post_url = presigned_upload_url(uploader, &path).await?;
     let patch: chatbotx_db::repo::patch::Patch = vec![
         ("workspaceId", Sql::Integer(input.workspace_id)),
@@ -268,10 +281,10 @@ fn file_too_large(max_mb: i64) -> BusinessError {
 }
 
 /// `subType`, `fileName`, `mimeType`, `path`, `fileSize` of an import file.
-type ImportFile = (Option<String>, String, String, String, Option<i64>);
+pub(crate) type ImportFile = (Option<String>, String, String, String, Option<i64>);
 
 /// `importService.findFile`: an import `File` of the workspace.
-fn find_import_file(
+pub(crate) fn find_import_file(
     conn: &Connection,
     workspace_id: i64,
     file_id: i64,
@@ -288,8 +301,7 @@ fn find_import_file(
 
 /// `peekImportHeaders`: the header row of an uploaded import file (400
 /// `importUnableToReadHeaders` / `importUnsupportedFileType` /
-/// `importFileTooLarge` with `data: { size }`). XLSX header reading belongs
-/// to the product import slice: an XLSX file is unreadable here.
+/// `importFileTooLarge` with `data: { size }`).
 pub async fn peek_import_headers(
     db: &Db,
     uploader: &Uploader,
@@ -326,8 +338,14 @@ pub async fn peek_import_headers(
     if i64::try_from(bytes.len()).unwrap_or(i64::MAX) > max_bytes {
         return Err(file_too_large(config.max_file_size_mb));
     }
+    if format == "xlsx" {
+        return xlsx::read_headers(&bytes).map_err(|error| {
+            tracing::warn!(%error, workspace_id, file_id, "import header peek failed to parse the file");
+            unable_to_read()
+        });
+    }
     if format != "csv" {
-        // XLSX headers: the product import slice; JSON has no header row.
+        // JSON has no header row.
         return Err(unable_to_read());
     }
     let text = String::from_utf8_lossy(&bytes);

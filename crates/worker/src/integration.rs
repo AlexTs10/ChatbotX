@@ -148,6 +148,13 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::inbound::MESSAGE_STATUS => {
             crate::inbound::message_status(&deps, &job.data["data"]).await?
         }
+        crate::steps::delay::RESUME_WAIT => {
+            let key = flow_execution_key(&job);
+            crate::steps::delay::run_wait_resume(&deps, &job.data["data"], key).await?;
+        }
+        crate::steps::delay::RESUME_FOLLOW_UP => {
+            crate::steps::delay::run_follow_up_resume(&deps, &job.data["data"]).await?;
+        }
         other => {
             // ponytail: every other integration action is a later unit
             // (inbound channels Q.I*, steps, sequences, ...).

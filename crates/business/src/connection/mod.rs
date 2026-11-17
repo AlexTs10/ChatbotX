@@ -2,6 +2,7 @@
 //! self-serve part: `api` and `webchat` channels; P3.6-D2). The provider
 //! catalog, credential / OAuth connects and connect sessions come later.
 
+pub mod credentials;
 pub mod providers;
 
 use chatbotx_db::Db;
@@ -159,8 +160,10 @@ pub(crate) fn mark_disconnected(
     find_or_fail(conn, current.id, current.workspace_id)
 }
 
-fn is_active(status: &str) -> bool {
-    matches!(status, "connected" | "degraded" | "needs_reauth")
+/// `isActiveConnectionStatus` (`ACTIVE_CONNECTION_STATUSES`: `connected`,
+/// `degraded`); `needs_reauth` is inactive.
+pub fn is_active(status: &str) -> bool {
+    matches!(status, "connected" | "degraded")
 }
 
 fn inactive() -> BusinessError {

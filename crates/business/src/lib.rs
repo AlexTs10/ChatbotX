@@ -3,6 +3,12 @@
 //! (`crates/api`) maps their results and [`errors::BusinessError`]s to the
 //! original JSON shapes.
 
+pub mod ai;
+pub mod ai_agent;
+pub mod ai_file;
+pub mod ai_function;
+pub mod ai_handover;
+pub mod ai_mcp_server;
 pub mod audit;
 pub mod automated_response;
 pub mod bot_field;
@@ -30,7 +36,9 @@ pub mod flow_version;
 pub mod folder;
 pub mod import;
 pub mod inbox;
+pub mod integration_ai_provider;
 pub mod integration_api;
+pub mod integration_openai_compatible;
 pub mod integration_webchat;
 pub mod keyword_match;
 pub mod media_library;
@@ -54,6 +62,7 @@ pub mod store_source;
 pub mod tag;
 pub mod tx;
 pub mod vendor;
+pub mod whatsapp;
 pub mod workspace;
 pub mod workspace_api_token;
 pub mod workspace_member;

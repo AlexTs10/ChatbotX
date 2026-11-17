@@ -4,4 +4,7 @@
 pub mod api;
 pub mod webchat;
 pub mod whatsapp;
+pub mod whatsapp_media;
+pub mod whatsapp_steps;
+pub mod whatsapp_template;
 pub mod whatsapp_webhook;
