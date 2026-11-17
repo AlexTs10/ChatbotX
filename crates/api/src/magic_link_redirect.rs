@@ -34,7 +34,7 @@ pub struct RedirectState {
 /// `GET /r/{workspaceId}/{name}`.
 pub fn router(state: RedirectState) -> Router {
     Router::new()
-        .route("/r/{workspace_id}/{*name}", get(handle))
+        .route("/r/{workspace_id}/{name}", get(handle))
         .with_state(state)
 }
 

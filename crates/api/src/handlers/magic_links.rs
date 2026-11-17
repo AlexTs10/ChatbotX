@@ -94,9 +94,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "magicLinks.list" => {
             let mut input = Input::from_query(call.params, call.query);
             let (page, per_page) = public_paging(&mut input);
+            // `.nullish()`: a JSON-less query sends text only.
             let keyword = input.opt_string("keyword", Str::default());
+            let sort = super::qr_codes::sort_query(&mut input, None);
             input.finish()?;
-            let (rows, page_count) = service::list(db, ws, keyword, page, per_page)
+            let (rows, page_count) = service::list(db, ws, keyword, sort, page, per_page)
                 .await
                 .map_err(|e| business_error(e, LISTING))?;
             let data: Vec<Value> = rows.iter().map(|r| public_json(state, r)).collect();

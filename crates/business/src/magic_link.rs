@@ -3,7 +3,8 @@
 use chatbotx_db::Db;
 use chatbotx_db::repo::client::is_unique_violation_error;
 use chatbotx_db::repo::models::MagicLink;
-use chatbotx_db::repo::{self, id_list, new_id, now_ms};
+use chatbotx_db::repo::utils::{SortDir, order_by_sql, parse_order_by};
+use chatbotx_db::repo::{self, SortItem, id_list, new_id, now_ms};
 use chatbotx_db::rusqlite::{Connection, params};
 
 use crate::errors::{BusinessError, Result};
@@ -113,17 +114,22 @@ pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
     delete_many(db, workspace_id, vec![id]).await
 }
 
-/// `list`: `keyword` matches name or url (case-insensitive); newest first.
-///
-/// ponytail: one sort (`createdAt desc`, the builder default); the `sort`
-/// input is not applied.
+/// `list`: `keyword` matches name or url (case-insensitive); `sort` as
+/// `parseOrderByAsObject` (model columns only; none = by id).
 pub async fn list(
     db: &Db,
     workspace_id: i64,
     keyword: Option<String>,
+    sort: Option<Vec<SortItem>>,
     page: i64,
     per_page: i64,
 ) -> Result<(Vec<MagicLink>, i64)> {
+    const COLUMNS: &[&str] = &["id", "createdAt", "updatedAt", "workspaceId", "name", "url"];
+    let mut order = parse_order_by(COLUMNS, sort.as_deref(), None);
+    if order.is_empty() {
+        order.push(("id".to_owned(), SortDir::Asc));
+    }
+    let order = order_by_sql(&order, None);
     let per_page = per_page.max(1);
     let offset = (page.max(1) - 1) * per_page;
     let keyword = keyword.filter(|k| !k.is_empty());
@@ -131,7 +137,7 @@ pub async fn list(
         let filter = r#""workspaceId" = ?1 AND (?2 IS NULL OR instr(lower("name"), lower(?2)) > 0 OR instr(lower("url"), lower(?2)) > 0)"#;
         let rows: Vec<MagicLink> = repo::find_many(
             c,
-            &format!(r#"WHERE {filter} ORDER BY "createdAt" DESC, "id" DESC LIMIT ?3 OFFSET ?4"#),
+            &format!(r#"WHERE {filter} {order} LIMIT ?3 OFFSET ?4"#),
             &[&workspace_id, &keyword, &per_page, &offset],
         )?;
         let total: i64 = c
