@@ -241,15 +241,15 @@ impl WorkspaceTokenDeps for LiveAuthDeps {
                 let error = |e: chatbotx_db::repo::Error| DbError::other(e.to_string());
                 let member = find_one::<WorkspaceMember>(
                     conn,
-                    r#"WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+                    r#""workspaceId" = ?1 AND "userId" = ?2"#,
                     &[&workspace_id, &user_id],
                 )
                 .map_err(error)?;
                 let Some(member) = member else {
                     return Ok(None);
                 };
-                let workspace = find_one::<Workspace>(conn, r#"WHERE "id" = ?1"#, &[&workspace_id])
-                    .map_err(error)?;
+                let workspace =
+                    find_one::<Workspace>(conn, r#""id" = ?1"#, &[&workspace_id]).map_err(error)?;
                 Ok(workspace.map(|w| (member, w)))
             })
             .await

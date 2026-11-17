@@ -166,7 +166,14 @@ async fn a_member_without_inbox_access_is_not_found_before_listing() {
     assert_eq!(status, 404);
     let (status, _) = call_mobile(&fx, &none, "contacts.list", &[], None).await;
     assert_eq!(status, 404);
-    let (status, _) = call_mobile(&fx, &none, "contacts.get", &[("identifier", "301")], None).await;
+    let (status, _) = call_mobile(
+        &fx,
+        &none,
+        "contacts.get",
+        &[("identifier", "id:301")],
+        None,
+    )
+    .await;
     assert_eq!(status, 404);
 }
 
@@ -240,14 +247,14 @@ async fn contacts_and_their_sub_resources_follow_the_agents_scope() {
         "contacts.listTags",
         "contacts.listCustomFields",
     ] {
-        let (status, _) = call_mobile(&fx, &agent, route, &[("identifier", "303")], None).await;
+        let (status, _) = call_mobile(&fx, &agent, route, &[("identifier", "id:303")], None).await;
         assert_eq!(status, 404, "{route} out of scope");
     }
     let (status, _) = call_mobile(
         &fx,
         &agent,
         "contacts.delete",
-        &[("identifier", "304")],
+        &[("identifier", "id:304")],
         None,
     )
     .await;
@@ -266,8 +273,14 @@ async fn contacts_and_their_sub_resources_follow_the_agents_scope() {
         .unwrap();
     assert_eq!(still_there, 1);
 
-    let (status, body) =
-        call_mobile(&fx, &agent, "contacts.get", &[("identifier", "301")], None).await;
+    let (status, body) = call_mobile(
+        &fx,
+        &agent,
+        "contacts.get",
+        &[("identifier", "id:301")],
+        None,
+    )
+    .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["email"], Value::Null);
     assert_eq!(body["phoneNumber"], Value::Null);
@@ -279,7 +292,7 @@ async fn contacts_and_their_sub_resources_follow_the_agents_scope() {
         json!({ "contacts": true, "emailAndPhone": true }),
     )
     .await;
-    let (_, body) = call_mobile(&fx, &pii, "contacts.get", &[("identifier", "303")], None).await;
+    let (_, body) = call_mobile(&fx, &pii, "contacts.get", &[("identifier", "id:303")], None).await;
     assert_eq!(body["email"], "c3@example.test");
 }
 
