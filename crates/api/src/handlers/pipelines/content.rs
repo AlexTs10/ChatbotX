@@ -14,7 +14,7 @@ use super::{IDEMPOTENCY_KEY, MUTATING_PIPELINE, TOKEN, money, no_nul, ok, publis
 use crate::orpc::OrpcError;
 
 /// `PIPELINE_LIMITS.comment`.
-const COMMENT: Str = Str {
+pub(crate) const COMMENT: Str = Str {
     pattern: Some(no_nul),
     ..Str::trimmed(1, 2000)
 };

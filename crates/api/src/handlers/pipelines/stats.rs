@@ -87,6 +87,11 @@ pub async fn handle(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, FINDING))?;
+    ok(200, stats_json(&stats))
+}
+
+/// The `getStats` output.
+pub fn stats_json(stats: &analytics::PipelineStats) -> Value {
     let daily: Vec<Value> = stats
         .daily
         .iter()
@@ -111,9 +116,7 @@ pub async fn handle(state: &ApiState, call: Call<'_>) -> Reply {
             Value::Object(map)
         })
         .collect();
-    ok(
-        200,
-        json!({
+    json!({
             "range": { "from": stats.from, "to": stats.to, "timezone": stats.timezone },
             "current": totals_json(&stats.current),
             "previous": totals_json(&stats.previous),
@@ -126,6 +129,5 @@ pub async fn handle(state: &ApiState, call: Call<'_>) -> Reply {
             },
             "daily": daily,
             "byActor": by_actor,
-        }),
-    )
+    })
 }

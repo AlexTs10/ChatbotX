@@ -1,22 +1,26 @@
-//! `pipeline/item-query.service.ts` (`listItems`, `listStagePage`,
+//! `pipeline/item-query.service.ts` (`listBoard`, `listItems`, `listStagePage`,
 //! `listStageTotals`, `listForContact`) and `pipeline/field-filter.ts`.
 //! Money (`value` filters, stage totals) is the stored x 10,000 integer.
 
 use std::collections::{BTreeMap, HashMap};
 
 use chatbotx_db::Db;
-use chatbotx_db::repo::models::PipelineField;
+use chatbotx_db::repo::models::{PipelineField, PipelineStage};
 use chatbotx_db::repo::partials::pipeline::pipeline_field_condition_error;
 use chatbotx_db::repo::pipeline as pipeline_repo;
 use chatbotx_db::repo::pipeline_field_condition::{CustomFieldType, PipelineFieldCondition};
-use chatbotx_db::repo::pipeline_item::{self as item_repo, ListStagePageInput};
+use chatbotx_db::repo::pipeline_item::{
+    self as item_repo, BoardFirstPageInput, ListStagePageInput,
+};
 use chatbotx_db::repo::pipeline_item_cursor::{PipelineItemSort, is_invalid_cursor};
 use chatbotx_db::repo::pipeline_item_filter::PipelineItemFilter;
 use chatbotx_db::repo::pipeline_stage as stage_repo;
 use chatbotx_db::rusqlite::{Connection, OptionalExtension};
 
 use super::access::{PipelineAccessScope, PipelineAction, can_view_contact_email_and_phone};
-use super::currency::PipelineView;
+use super::currency::{
+    PipelineView, WorkspaceCurrencyDefault, apply_effective_currency, resolve_workspace_default,
+};
 use super::item::{ItemView, views_in};
 use super::service::{list_with_permissions, require_access_in};
 use crate::errors::{BusinessError, Result};
@@ -24,6 +28,8 @@ use crate::tx;
 
 /// `DETAIL_LIST_LIMIT`.
 const DETAIL_LIST_LIMIT: i64 = 100;
+/// `DEFAULT_PER_STAGE_LIMIT`.
+pub const DEFAULT_PER_STAGE_LIMIT: i64 = 50;
 
 /// The public list query as the repository filter, sort and page
 /// (`toItemListQuery`).
@@ -49,6 +55,25 @@ pub struct StageTotal {
     pub name: String,
     pub count: i64,
     pub total_value: i64,
+}
+
+/// `PipelineBoardStage` (`total_value` x 10,000).
+#[derive(Debug, Clone)]
+pub struct BoardStage {
+    pub stage: PipelineStage,
+    pub count: i64,
+    pub total_value: i64,
+    pub items: Vec<ItemView>,
+    pub next_cursor: Option<String>,
+}
+
+/// `listBoard`.
+#[derive(Debug, Clone)]
+pub struct Board {
+    pub pipeline: PipelineView,
+    pub fields: Vec<PipelineField>,
+    pub stages: Vec<BoardStage>,
+    pub workspace_default: WorkspaceCurrencyDefault,
 }
 
 /// One row of `listForContact`: the card and its pipeline.
@@ -196,6 +221,85 @@ pub async fn list_items(
         Ok(ItemViewPage {
             items: views_in(conn, workspace_id, page.items, &scope)?,
             next_cursor: page.next_cursor,
+        })
+    })
+    .await
+}
+
+/// `listBoard`: the first page of every stage with the column totals.
+pub async fn list_board(
+    db: &Db,
+    workspace_id: i64,
+    pipeline_id: i64,
+    scope: PipelineAccessScope,
+    filter: PipelineItemFilter,
+    sort: PipelineItemSort,
+) -> Result<Board> {
+    let workspace_default = resolve_workspace_default(db, workspace_id).await?;
+    tx::read(db, move |conn| {
+        let (pipeline, _) = require_access_in(
+            conn,
+            workspace_id,
+            pipeline_id,
+            &scope,
+            PipelineAction::View,
+        )?;
+        let fields = pipeline_repo::list_fields(conn, workspace_id, pipeline_id)?;
+        let filter = resolve_field_filter_in(
+            conn,
+            workspace_id,
+            pipeline_id,
+            scope_search(filter, &scope),
+        )?;
+        let stages = stage_repo::list_by_pipeline(conn, workspace_id, pipeline_id)?;
+        let pages = item_repo::list_board_first_page(
+            conn,
+            &BoardFirstPageInput {
+                workspace_id,
+                pipeline_id,
+                filter: filter.clone(),
+                sort,
+                per_stage_limit: DEFAULT_PER_STAGE_LIMIT,
+            },
+        )?;
+        let totals: HashMap<i64, (i64, i64)> =
+            item_repo::list_stage_totals(conn, workspace_id, pipeline_id, &filter)?
+                .into_iter()
+                .map(|row| (row.stage_id, (row.count, row.total_value)))
+                .collect();
+        let mut cursors = HashMap::new();
+        let mut items = Vec::new();
+        for page in pages {
+            cursors.insert(page.stage_id, page.next_cursor);
+            items.extend(page.items);
+        }
+        let mut views: HashMap<i64, Vec<ItemView>> = HashMap::new();
+        for view in views_in(conn, workspace_id, items, &scope)? {
+            views.entry(view.item.stage_id).or_default().push(view);
+        }
+        let effective =
+            apply_effective_currency(pipeline.currency.as_deref(), &workspace_default.currency);
+        Ok(Board {
+            pipeline: PipelineView {
+                pipeline,
+                currency: effective.currency,
+                currency_override: effective.currency_override,
+            },
+            fields,
+            stages: stages
+                .into_iter()
+                .map(|stage| {
+                    let (count, total_value) = totals.get(&stage.id).copied().unwrap_or((0, 0));
+                    BoardStage {
+                        count,
+                        total_value,
+                        items: views.remove(&stage.id).unwrap_or_default(),
+                        next_cursor: cursors.remove(&stage.id).flatten(),
+                        stage,
+                    }
+                })
+                .collect(),
+            workspace_default,
         })
     })
     .await
