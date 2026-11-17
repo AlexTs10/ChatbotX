@@ -116,12 +116,23 @@ JSON), the workspace, the `Db` and the realtime handle. Errors are
 
 Slice 1 committed (be107bde8): fmt, clippy -D warnings, 30 tests (25 worker + 5 server) pass.
 Slice 2: 73 worker tests pass; parity p1-14 `22-meta-catalog` 6/6.
+Slices 3–5 (f3bcbcc24, 54becb8fd, e5ffeab05): 24 product-message business tests, 75 worker + 5 server tests pass; fmt, clippy -D warnings clean.
 
-Parity (`run-rust.sh`, Dell, after slice 1):
+Parity (`run-rust.sh`, Dell, rerun after slice 5, 2026-11-17: 26 / 27):
 
 | Suite | Pass | Fail | Cause of the failures |
 |---|---|---|---|
-| p1-06 08-messages | 7 | 0 | (sendFlow case now green) |
+| p1-06 08-messages | 7 | 0 | — |
 | p1-11 40-messages-core | 13 | 1 | media library upload `mediaFileId` (media unit; 501 notPorted). Worker flow send and API-channel callback now green |
-| p1-14 22-meta-catalog | 6 | 0 | (after slice 2) |
+| p1-14 22-meta-catalog | 6 | 0 | — |
 | p1-08 31-mm-campaigns | 0 | 22 | no Rust seed module `stacks/rust/ext/p1-08.ts` and the marketing-message routes / worker (not Q.W1) |
+
+## Left for other units
+
+- `sendCollection` (Q.D8), other default / template job handlers (their
+  domain units), the flow step handlers other than message / branch /
+  start-node (Q.W2 and domain units), `message:failed` / analytics /
+  ErrorLog (Q.W2), the empty variable sources (their domain units), the
+  media copy (media unit), the 81 + 52 + 16 mock-call tests of
+  `send-flow-step`, `send-message-handler`, `default-worker` (need worker DB
+  fixtures; port with Q.W2).
