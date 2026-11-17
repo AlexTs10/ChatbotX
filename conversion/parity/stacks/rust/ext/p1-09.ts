@@ -60,9 +60,126 @@ class SqliteP109Fixtures implements P109Fixtures {
     return { folderId: folderId.toString() }
   }
 
-  createInstagramChannel = notPorted("createInstagramChannel")
-  createInbox = notPorted("createInbox")
-  addWorkspaceMember = notPorted("addWorkspaceMember")
+  private insertInbox(
+    db: DatabaseSync,
+    input: { workspaceId: string; name: string; channel: string; sourceId: string },
+  ): bigint {
+    const inboxId = createId()
+    const now = Date.now()
+    db.prepare(
+      `INSERT INTO "Inbox" ("id", "createdAt", "updatedAt", "name", "channel", "sourceId", "workspaceId", "status")
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'connected')`,
+    ).run(inboxId, now, now, input.name, input.channel, input.sourceId, BigInt(input.workspaceId))
+    return inboxId
+  }
+
+  // Same rows as stacks/original/ext/p1-09.ts (Inbox + IntegrationInstagram + Connection).
+  async createInstagramChannel(input: {
+    workspaceId: string
+    igId: string
+    pageId: string
+    name: string
+    username: string
+    type: "instagram" | "facebook"
+  }): Promise<{ integrationId: string; inboxId: string }> {
+    const db = this.open()
+    db.exec("BEGIN IMMEDIATE")
+    try {
+      const inboxId = this.insertInbox(db, {
+        workspaceId: input.workspaceId,
+        name: input.name,
+        channel: "instagram",
+        sourceId: input.igId,
+      })
+      const integrationId = createId()
+      const now = Date.now()
+      const auth = {
+        authType: "oauth2",
+        clientId: "parity-client",
+        clientSecret: "parity-secret",
+        redirectUrl: "http://app/integrations/instagram/callback",
+        version: "v23.0",
+        tokens: { accessToken: `ig-token-${input.igId}` },
+        metadata: { igId: input.igId, pageId: input.pageId, version: "v23.0" },
+      }
+      db.prepare(
+        `INSERT INTO "IntegrationInstagram"
+           ("id", "createdAt", "updatedAt", "auth", "igId", "pageId", "name", "username", "workspaceId", "inboxId",
+            "type", "conversationStarters", "persistentMenus")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]')`,
+      ).run(
+        integrationId,
+        now,
+        now,
+        JSON.stringify(auth),
+        input.igId,
+        input.pageId,
+        input.name,
+        input.username,
+        BigInt(input.workspaceId),
+        inboxId,
+        input.type,
+      )
+      db.prepare(
+        `INSERT INTO "Connection"
+           ("id", "createdAt", "updatedAt", "workspaceId", "provider", "kind", "channel", "inboxId", "sourceId",
+            "displayName", "status", "connectedAt")
+         VALUES (?, ?, ?, ?, ?, 'channel', 'instagram', ?, ?, ?, 'connected', ?)`,
+      ).run(
+        createId(),
+        now,
+        now,
+        BigInt(input.workspaceId),
+        input.type === "facebook" ? "instagramFacebook" : "instagram",
+        inboxId,
+        input.igId,
+        input.name,
+        now,
+      )
+      db.exec("COMMIT")
+      return { integrationId: String(integrationId), inboxId: String(inboxId) }
+    } catch (error) {
+      db.exec("ROLLBACK")
+      throw error
+    }
+  }
+
+  async createInbox(input: {
+    workspaceId: string
+    name: string
+    channel: string
+    sourceId: string
+  }): Promise<{ inboxId: string }> {
+    return { inboxId: String(this.insertInbox(this.open(), input)) }
+  }
+
+  async addWorkspaceMember(input: { workspaceId: string; userId: string }): Promise<{ memberId: string }> {
+    const memberId = createId()
+    this.open()
+      .prepare(
+        `INSERT INTO "WorkspaceMember"
+           ("id", "workspaceId", "userId", "role", "permissions", "notificationTypes", "notificationChannels")
+         VALUES (?, ?, ?, 'agent', ?, ?, ?)`,
+      )
+      .run(
+        memberId,
+        BigInt(input.workspaceId),
+        BigInt(input.userId),
+        JSON.stringify({
+          superAdmin: false,
+          analytics: true,
+          flows: true,
+          contacts: true,
+          onlyAssignedContacts: false,
+          emailAndPhone: true,
+          broadcast: true,
+          ecommerce: true,
+        }),
+        JSON.stringify({ notifyAdmin: true, newMessageToHuman: true, newOrder: true }),
+        JSON.stringify({ messenger: true, email: true, telegram: true, browser: true }),
+      )
+    return { memberId: String(memberId) }
+  }
   createGoogleAdsConnection = notPorted("createGoogleAdsConnection")
   setGoogleAdsSettings = notPorted("setGoogleAdsSettings")
   insertGoogleAdsEvents = notPorted("insertGoogleAdsEvents")

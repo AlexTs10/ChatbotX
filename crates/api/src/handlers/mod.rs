@@ -14,6 +14,8 @@ pub mod channel_integrations;
 pub mod channel_settings;
 pub mod channels;
 pub mod comment_automations;
+pub mod comment_channels;
+pub mod comment_crud;
 pub mod connect_sessions;
 pub mod connections;
 pub mod contact_custom_fields;
@@ -545,6 +547,10 @@ async fn route(
         contact_scans::handle(state, route_id, call).await
     } else if comment_automations::ROUTES.contains(&route_id) {
         comment_automations::handle(state, route_id, call).await
+    } else if comment_crud::ROUTES.contains(&route_id) {
+        comment_crud::handle(state, route_id, call).await
+    } else if comment_channels::ROUTES.contains(&route_id) {
+        comment_channels::handle(state, route_id, call).await
     } else if connect_sessions::ROUTES.contains(&route_id) {
         connect_sessions::handle(state, route_id, call, principal).await
     } else if connections::ROUTES.contains(&route_id) {

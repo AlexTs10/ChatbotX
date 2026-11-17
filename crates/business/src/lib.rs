@@ -17,6 +17,8 @@ pub mod bot_field;
 pub mod capabilities;
 pub mod channel_integration;
 pub mod comment_automation;
+pub mod comment_automation_crud;
+pub mod comment_automation_posts;
 pub mod connect_session;
 pub mod connection;
 pub mod contact;

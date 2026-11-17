@@ -136,6 +136,29 @@ pub(crate) async fn replay_missed_comment(
     upstream: &impl Upstream,
     data: &Value,
 ) -> Result<(), JobError> {
+    let Some(automation_id) = id_of(&data["replay"]["automationId"]) else {
+        return Err(JobError::unrecoverable("Invalid replayMissedComment data"));
+    };
+    receive_comment(deps, upstream, data, Some(automation_id)).await
+}
+
+/// The `incomingComment` integration job (`receiveComment` +
+/// `processCommentAutomation` over every active automation of the account).
+///
+/// ponytail: Messenger only (the automation runner posts to Graph); the
+/// Instagram / Threads / TikTok comment runners wait for their channel
+/// reply paths (specs/Q.D10.md "Left").
+pub async fn incoming_comment(deps: &Deps, data: &Value) -> Result<(), JobError> {
+    receive_comment(deps, &HttpUpstream, data, None).await
+}
+
+/// `receiveComment`; `only` = the replayed automation (`onlyAutomationId`).
+async fn receive_comment(
+    deps: &Deps,
+    upstream: &impl Upstream,
+    data: &Value,
+    only: Option<i64>,
+) -> Result<(), JobError> {
     let integration_type = str_of(data, "integrationType").unwrap_or("");
     let identifier = str_of(data, "integrationIdentifier").unwrap_or("");
     let c = &data["commentData"];
@@ -148,9 +171,6 @@ pub(crate) async fn replay_missed_comment(
         message: str_of(c, "message").map(str::to_owned),
         created_ms: c["createdTime"].as_i64().unwrap_or(0) * 1000,
     };
-    let Some(automation_id) = id_of(&data["replay"]["automationId"]) else {
-        return Err(JobError::unrecoverable("Invalid replayMissedComment data"));
-    };
     if comment.from_id == identifier {
         tracing::info!(
             comment_id = comment.id,
@@ -159,6 +179,11 @@ pub(crate) async fn replay_missed_comment(
         return Ok(());
     }
     if integration_type != "messenger" {
+        if only.is_none() {
+            return Err(JobError::unrecoverable(format!(
+                "incomingComment: {integration_type} comment automations are not ported"
+            )));
+        }
         tracing::warn!(integration_type, "replayMissedComment: channel not ported");
         return Ok(());
     }
@@ -179,7 +204,7 @@ pub(crate) async fn replay_missed_comment(
 
     // The comment's own message row, dated at the comment.
     let parent_since = comment.created_ms;
-    let (comment_message_id, ..) = store_message(
+    let (comment_message_id, is_new) = store_message(
         deps,
         &contact_inbox,
         &conversation,
@@ -206,17 +231,46 @@ pub(crate) async fn replay_missed_comment(
     if !crate::inbound::workspace_is_active(deps, page.inbox.workspace_id).await? {
         return Ok(());
     }
-    process_comment_automation(
-        deps,
-        upstream,
-        &page,
-        &contact_inbox,
-        &conversation,
-        &comment,
-        comment_message_id,
-        automation_id,
-    )
-    .await
+    let automations = match only {
+        Some(id) => vec![id],
+        // ponytail: a redelivered comment (row already stored) is not run
+        // again; the original re-enqueues under the deduplicating job id.
+        None if !is_new => return Ok(()),
+        None => active_automations(deps, &page.inbox).await?,
+    };
+    for automation_id in automations {
+        process_comment_automation(
+            deps,
+            upstream,
+            &page,
+            &contact_inbox,
+            &conversation,
+            &comment,
+            comment_message_id,
+            automation_id,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// `findActiveAutomations`: the account's own plus the unscoped ones.
+async fn active_automations(deps: &Deps, inbox: &InboundInbox) -> Result<Vec<i64>, JobError> {
+    let (ws, inbox_id) = (inbox.workspace_id, inbox.inbox_id);
+    deps.db
+        .read(move |conn| {
+            let mut stmt = conn.prepare(
+                r#"SELECT "id" FROM "CommentAutomation"
+                   WHERE "workspaceId" = ?1 AND "isActive" = 1 AND "type" = 'messenger'
+                     AND ("inboxId" IS NULL OR "inboxId" = ?2) ORDER BY "id""#,
+            )?;
+            let ids = stmt
+                .query_map(params![ws, inbox_id], |r| r.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ids)
+        })
+        .await
+        .map_err(db_fail)
 }
 
 /// `messageService.create` for a comment row; `(id, is_new)`.
