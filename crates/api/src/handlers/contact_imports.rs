@@ -45,7 +45,7 @@ const CREATING_UPLOAD: ErrorMap = &[
 ];
 
 /// `possibleErrorsOnPeekingImportHeaders`.
-const PEEKING: ErrorMap = &[
+pub(super) const PEEKING: ErrorMap = &[
     ("businessError", 400),
     ("importUnableToReadHeaders", 400),
     ("importUnsupportedFileType", 400),
@@ -69,69 +69,7 @@ const IMPORT_STATUSES: &[&str] = &["pending", "processing", "completed", "failed
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     let ws = call.workspace_id;
     match route_id {
-        "contacts.createImportUpload" => {
-            let mut input = Input::from_body(call.params, call.body);
-            let file_name = input.string(
-                "fileName",
-                Str {
-                    min: Some(1),
-                    max: Some(255),
-                    ..Str::default()
-                },
-            );
-            let mime_type = input.string(
-                "mimeType",
-                Str {
-                    min: Some(1),
-                    max: Some(255),
-                    ..Str::default()
-                },
-            );
-            let file_size = input.number(
-                "fileSize",
-                Num {
-                    int: true,
-                    min: Some(1.0),
-                    max: None,
-                },
-            );
-            input.finish()?;
-            let (Some(file_name), Some(mime_type), Some(file_size)) =
-                (file_name, mime_type, file_size)
-            else {
-                return Err(crate::routes::not_ported_error());
-            };
-            let files = state
-                .files
-                .as_deref()
-                .ok_or_else(|| internal_error("file storage is not configured"))?;
-            let storage_url = super::contacts::tenant_urls(state).storage_url;
-            let upload = create_import_upload(
-                &state.db,
-                files,
-                &storage_url,
-                CreateImportUpload {
-                    workspace_id: ws,
-                    user_id: None,
-                    import_type: ImportType::Contacts,
-                    file_name,
-                    mime_type,
-                    // A positive JSON integer (checked above).
-                    file_size: file_size as i64,
-                },
-            )
-            .await
-            .map_err(|e| business_error(e, CREATING_UPLOAD))?;
-            Ok(json(
-                201,
-                json!({
-                    "fileId": upload.file_id.to_string(),
-                    "presignedPostUrl": upload.presigned_post_url,
-                    "publicUrl": upload.public_url,
-                    "path": upload.path,
-                }),
-            ))
-        }
+        "contacts.createImportUpload" => create_upload(state, call, ImportType::Contacts).await,
         "contacts.getImportTemplate" => {
             let mut input = Input::from_query(call.params, call.query);
             let value = input.get("language").cloned();
@@ -183,46 +121,128 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 json!({ "headers": headers, "suggestedColumnMap": Value::Object(map) }),
             ))
         }
-        "contacts.listImports" => {
-            let mut input = Input::from_query(call.params, call.query);
-            let (page, per_page) = public_paging(&mut input);
-            let value = input.get("status").cloned();
-            let status = input.enum_at(&key("status"), value.as_ref(), IMPORT_STATUSES, false);
-            let keyword = input.nullish_string("keyword", Str::default()).flatten();
-            let sort = sort_query(&mut input, None);
-            input.finish()?;
-            let (rows, page_count) = list(
-                &state.db,
-                ws,
-                ListImports {
-                    import_type: Some(ImportType::Contacts),
-                    status,
-                    keyword,
-                    page: Some(page),
-                    per_page: Some(per_page),
-                    sort,
-                },
-            )
-            .await
-            .map_err(|e| business_error(e, LISTING))?;
-            let data: Vec<Value> = rows.iter().map(import_json).collect();
-            Ok(json(200, json!({ "data": data, "pageCount": page_count })))
-        }
-        "contacts.getImport" => {
-            let mut input = Input::from_query(call.params, call.query);
-            let id = input.id("id");
-            input.finish()?;
-            let row = find(&state.db, ws, id.unwrap_or_default(), ImportType::Contacts)
-                .await
-                .map_err(|e| business_error(e, FINDING))?
-                .ok_or_else(|| {
-                    business_error(BusinessError::not_found("Import not found"), FINDING)
-                })?;
-            Ok(json(200, import_json(&row)))
-        }
+        "contacts.listImports" => list_imports(state, call, ImportType::Contacts).await,
+        "contacts.getImport" => get_import(state, call, ImportType::Contacts).await,
         "contacts.import" => start_import(state, call).await,
         _ => Err(crate::routes::not_ported_error()),
     }
+}
+
+/// `createImportUpload` of an import type (`contacts` / `products`).
+pub(super) async fn create_upload(
+    state: &ApiState,
+    call: Call<'_>,
+    import_type: ImportType,
+) -> Reply {
+    let ws = call.workspace_id;
+    let mut input = Input::from_body(call.params, call.body);
+    let file_name = input.string(
+        "fileName",
+        Str {
+            min: Some(1),
+            max: Some(255),
+            ..Str::default()
+        },
+    );
+    let mime_type = input.string(
+        "mimeType",
+        Str {
+            min: Some(1),
+            max: Some(255),
+            ..Str::default()
+        },
+    );
+    let file_size = input.number(
+        "fileSize",
+        Num {
+            int: true,
+            min: Some(1.0),
+            max: None,
+        },
+    );
+    input.finish()?;
+    let (Some(file_name), Some(mime_type), Some(file_size)) = (file_name, mime_type, file_size)
+    else {
+        return Err(crate::routes::not_ported_error());
+    };
+    let files = state
+        .files
+        .as_deref()
+        .ok_or_else(|| internal_error("file storage is not configured"))?;
+    let storage_url = super::contacts::tenant_urls(state).storage_url;
+    let upload = create_import_upload(
+        &state.db,
+        files,
+        &storage_url,
+        CreateImportUpload {
+            workspace_id: ws,
+            user_id: None,
+            import_type,
+            file_name,
+            mime_type,
+            // A positive JSON integer (checked above).
+            file_size: file_size as i64,
+        },
+    )
+    .await
+    .map_err(|e| business_error(e, CREATING_UPLOAD))?;
+    Ok(json(
+        201,
+        json!({
+            "fileId": upload.file_id.to_string(),
+            "presignedPostUrl": upload.presigned_post_url,
+            "publicUrl": upload.public_url,
+            "path": upload.path,
+        }),
+    ))
+}
+
+/// `listImports` of an import type.
+pub(super) async fn list_imports(
+    state: &ApiState,
+    call: Call<'_>,
+    import_type: ImportType,
+) -> Reply {
+    let ws = call.workspace_id;
+    let mut input = Input::from_query(call.params, call.query);
+    let (page, per_page) = public_paging(&mut input);
+    let value = input.get("status").cloned();
+    let status = input.enum_at(&key("status"), value.as_ref(), IMPORT_STATUSES, false);
+    let keyword = input.nullish_string("keyword", Str::default()).flatten();
+    let sort = sort_query(&mut input, None);
+    input.finish()?;
+    let (rows, page_count) = list(
+        &state.db,
+        ws,
+        ListImports {
+            import_type: Some(import_type),
+            status,
+            keyword,
+            page: Some(page),
+            per_page: Some(per_page),
+            sort,
+        },
+    )
+    .await
+    .map_err(|e| business_error(e, LISTING))?;
+    let data: Vec<Value> = rows
+        .iter()
+        .map(|row| import_json(row, import_type))
+        .collect();
+    Ok(json(200, json!({ "data": data, "pageCount": page_count })))
+}
+
+/// `getImport` of an import type (404 `Import not found`).
+pub(super) async fn get_import(state: &ApiState, call: Call<'_>, import_type: ImportType) -> Reply {
+    let ws = call.workspace_id;
+    let mut input = Input::from_query(call.params, call.query);
+    let id = input.id("id");
+    input.finish()?;
+    let row = find(&state.db, ws, id.unwrap_or_default(), import_type)
+        .await
+        .map_err(|e| business_error(e, FINDING))?
+        .ok_or_else(|| business_error(BusinessError::not_found("Import not found"), FINDING))?;
+    Ok(json(200, import_json(&row, import_type)))
 }
 
 /// `contacts.import` (`importContactsRequest` + `buildContactImportMeta`):
@@ -407,7 +427,7 @@ fn is_bot_field_ref(text: &str) -> bool {
 }
 
 /// `context.workspace.language`.
-async fn workspace_language(
+pub(super) async fn workspace_language(
     state: &ApiState,
     workspace_id: i64,
 ) -> Result<String, crate::orpc::OrpcError> {
@@ -424,14 +444,14 @@ async fn workspace_language(
         .map_err(|e| internal_error(&e.to_string()))
 }
 
-/// `contactImportPublicResource`.
-fn import_json(row: &ImportRow) -> Value {
+/// `contactImportPublicResource` / `productImportPublicResource`.
+pub(super) fn import_json(row: &ImportRow, import_type: ImportType) -> Value {
     json!({
         "id": row.id.to_string(),
         "userId": row.user_id.map(|id| id.to_string()),
         "fileId": row.file_id.to_string(),
         "fileName": row.file_name,
-        "type": "contacts",
+        "type": import_type.as_str(),
         "status": row.status,
         "totalCount": row.total_count,
         "processedCount": row.processed_count,

@@ -37,7 +37,7 @@ pub const GENERIC_IMPORT_FAILURE: &str = "The import failed. Please try again or
 
 const MAX_FIELD_LENGTH: usize = 1000;
 const MIN_PHONE_DIGITS: usize = 5;
-const ERROR_SAMPLE_LIMIT: usize = 50;
+pub(super) const ERROR_SAMPLE_LIMIT: usize = 50;
 /// `config.maxRows` of the contacts registry entry.
 const CONTACTS_MAX_ROWS: u64 = 100_000;
 
@@ -231,7 +231,7 @@ fn as_i64(n: u64) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
-async fn mark_processing(db: &Db, import_id: i64) -> Result<()> {
+pub(super) async fn mark_processing(db: &Db, import_id: i64) -> Result<()> {
     tx::write(db, move |conn| {
         conn.execute(
             r#"UPDATE "Import" SET "status" = 'processing', "updatedAt" = ?2 WHERE "id" = ?1"#,
@@ -245,7 +245,7 @@ async fn mark_processing(db: &Db, import_id: i64) -> Result<()> {
 
 /// `importService.fail` (the public message is [`GENERIC_IMPORT_FAILURE`];
 /// `reason` goes to the log). Without counters the counts stay as stored.
-async fn fail(
+pub(super) async fn fail(
     db: &Db,
     import_id: i64,
     reason: &str,
@@ -280,7 +280,12 @@ async fn fail(
 }
 
 /// `importService.complete`.
-async fn complete(db: &Db, import_id: i64, c: Counters, sample: Vec<ErrorSample>) -> Result<()> {
+pub(super) async fn complete(
+    db: &Db,
+    import_id: i64,
+    c: Counters,
+    sample: Vec<ErrorSample>,
+) -> Result<()> {
     let hidden = c.failed.saturating_sub(sample.len() as u64);
     let message = (hidden > 0).then(|| {
         format!(
@@ -646,17 +651,17 @@ struct Deps {
 }
 
 /// The stored row the run reads (`findForWorker`).
-struct RunRow {
-    workspace_id: i64,
+pub(super) struct RunRow {
+    pub(super) workspace_id: i64,
     inbox_id: Option<i64>,
     import_type: String,
-    format: String,
-    meta: String,
+    pub(super) format: String,
+    pub(super) meta: String,
     path: Option<String>,
 }
 
-/// `runImport`: runs the import `import_id` (a missing row is a no-op). Only
-/// contact imports are ported; another type fails the row.
+/// `runImport`: runs the import `import_id` (a missing row is a no-op):
+/// contacts, products and flows; another type fails the row.
 pub async fn run_import(db: &Db, uploader: &Uploader, import_id: i64) -> Result<()> {
     let row = tx::read(db, move |conn| {
         conn.query_row(
@@ -688,6 +693,14 @@ pub async fn run_import(db: &Db, uploader: &Uploader, import_id: i64) -> Result<
     let Some(path) = row.path.clone() else {
         return fail(db, import_id, "Associated file not found", None, None).await;
     };
+    if row.import_type == "products" {
+        if let Err(error) =
+            super::products::run_products(db, uploader, import_id, &row, &path).await
+        {
+            fail(db, import_id, &error.to_string(), None, None).await?;
+        }
+        return Ok(());
+    }
     if row.import_type != "contacts" {
         return fail(
             db,

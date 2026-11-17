@@ -411,6 +411,29 @@ pub async fn update_full(
     .await
 }
 
+/// `createFromImport`: no new product while the store mirrors Shopify /
+/// WooCommerce; vendors by name (created when missing). The rows inserted.
+/// `vendor` is the vendor name of each row (`vendor_id` is set from it).
+pub fn create_from_import(
+    conn: &Connection,
+    workspace_id: i64,
+    products: Vec<(repo::ProductImportInsert, Option<String>)>,
+) -> Result<Vec<Product>> {
+    assert_managed_here(conn, workspace_id, None)?;
+    let names: Vec<String> = products.iter().filter_map(|(_, v)| v.clone()).collect();
+    let vendor_ids = vendor::resolve_by_names(conn, workspace_id, &names, true)?;
+    let rows: Vec<repo::ProductImportInsert> = products
+        .into_iter()
+        .map(|(mut row, vendor)| {
+            row.vendor_id = vendor
+                .as_deref()
+                .and_then(|name| vendor_ids.get(&name.trim().to_lowercase()).copied());
+            row
+        })
+        .collect();
+    Ok(repo::create_from_import(conn, workspace_id, &rows)?)
+}
+
 /// `delete`: drops the ids from discount codes, then deletes (other
 /// workspaces' ids are ignored).
 pub async fn delete(db: &Db, workspace_id: i64, ids: Vec<i64>) -> Result<()> {

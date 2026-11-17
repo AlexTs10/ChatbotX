@@ -3,7 +3,7 @@
 //! slice contact imports, part one). Adapted: the mocked
 //! `createImportUpload` / `peekImportHeaders` / `importService.list` become
 //! the real services over an in-memory store with the local URL signer and
-//! seeded rows. Moved to the product import slice (P3.6-D1): the products
+//! seeded rows. Moved to `product_imports_public_api.rs` (Q.D1i): the products
 //! upload, products headers, products template and `POST /v1/products/imports`
 //! cases.
 

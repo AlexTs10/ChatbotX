@@ -373,3 +373,90 @@ async fn token_scope_a_single_kind_token_is_restricted_to_its_kind() {
     .expect("handled");
     assert_eq!(status, 403);
 }
+
+/// Port of: apps/builder/__tests__/connections-public-api.test.ts:289 "GET /v1/connection-providers > delegates to listConnectionProviderResources scoped to the token's workspace"
+#[tokio::test]
+async fn get_v1_connection_providers_delegates_to_listconnectionproviderresources_scoped_to_the_token_s_workspace()
+ {
+    let f = fixture().await;
+    // Changed: `kind: "channel"` (the mocked call) fails in the original with
+    // 422 (the `chatbotx` adapter is not a `channelTypes` value; parity
+    // p1-05 `01`), so the real catalog is read with `kind: "integration"`.
+    let (status, body) = run(
+        &f,
+        "connectionProviders.list",
+        WS,
+        &[],
+        Some("kind=channel"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 422);
+    assert_eq!(body["code"], "invalidRequestData");
+    assert_eq!(body["defined"], false);
+    assert_eq!(body["data"][0]["code"], "invalid_value");
+    let (status, body) = run(
+        &f,
+        "connectionProviders.list",
+        WS,
+        &[],
+        Some("kind=integration"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["pageCount"], 1);
+    let data = body["data"].as_array().expect("data");
+    let names: Vec<&str> = data.iter().filter_map(|p| p["provider"].as_str()).collect();
+    assert_eq!(names.first(), Some(&"activeCampaign"));
+    assert!(!names.contains(&"facebookAds"));
+    assert!(!names.contains(&"metaCatalog"));
+    let deepseek = data
+        .iter()
+        .find(|p| p["provider"] == "deepseek")
+        .expect("deepseek");
+    assert_eq!(
+        deepseek,
+        &json!({
+            "provider": "deepseek", "kind": "integration", "channel": null,
+            "strategy": "api_key", "multiAccount": false, "multiInstance": false,
+            "configFields": [{ "name": "apiKey", "type": "secret", "required": true, "label": "apiKey" }],
+            "available": true, "unavailableReason": null,
+        })
+    );
+    let sheets = data
+        .iter()
+        .find(|p| p["provider"] == "googleSheets")
+        .expect("googleSheets");
+    assert_eq!(sheets["unavailableReason"], "credentialMissing");
+    // An integrations-only token gets the integration catalog without a kind.
+    let (status, body) = call_as(
+        &f,
+        "connectionProviders.list",
+        WS,
+        Some(&["integrations"]),
+        &[],
+        None,
+        None,
+    )
+    .await
+    .expect("handled");
+    assert_eq!(status, 200);
+    assert_eq!(body["data"].as_array().map(Vec::len), Some(data.len()));
+}
+
+#[tokio::test]
+async fn a_credential_connect_validates_its_config_before_any_upstream_call() {
+    let f = fixture().await;
+    let (status, body) = run(
+        &f,
+        "connections.create",
+        WS,
+        &[],
+        None,
+        Some(json!({ "provider": "deepseek", "config": {} })),
+    )
+    .await;
+    assert_eq!((status, body["code"].clone()), (422, json!("validation")));
+    assert_eq!(body["message"], "apiKey is required");
+}

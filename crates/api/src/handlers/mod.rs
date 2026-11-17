@@ -32,6 +32,7 @@ pub mod pipelines;
 pub mod places;
 pub mod polls;
 pub mod product_categories;
+pub mod product_imports;
 pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
@@ -500,6 +501,8 @@ async fn route(
         workspace_members::handle(state, route_id, call).await
     } else if contact_exports::ROUTES.contains(&route_id) {
         contact_exports::handle(state, route_id, call).await
+    } else if product_imports::ROUTES.contains(&route_id) {
+        product_imports::handle(state, route_id, call).await
     } else if contact_imports::ROUTES.contains(&route_id) {
         contact_imports::handle(state, route_id, call).await
     } else if contact_filter::ROUTES.contains(&route_id) {
