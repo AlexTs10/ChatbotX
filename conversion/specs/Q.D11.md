@@ -8,13 +8,13 @@ the tests, implement. Test map: `specs/Q.D11-test-map.tsv`.
 
 | # | Slice | State |
 |---|---|---|
-| 1 | Workspace core, `/v1/workspace/settings`, workspace server actions, `workspacesAPI.listMy/listDeleted` | in progress |
-| 2 | Workspace members: invite / update / delete actions, member service, `workspaceMembersAPI.*` | code + tests, gate pending |
-| 3 | Workspace API tokens: create / delete actions | code + tests, gate pending |
-| 4 | Error logs: `/v1/errorLogs.list`, delete action, service | code + tests, gate pending |
-| 5 | Capabilities: `/v1/capabilities`, `/v1/schemas/flow-spec`, `getFlowAuthoringContext` (parity `p1-04/07-capabilities`) | code + tests, gate pending |
-| 6 | User quota + quota enforcement (rest) | code + tests, gate pending |
-| 7 | Platform credential (platform admins, branding, SMTP, email templates moved to slice 10: they are `enterprise/features`) | code + tests, gate pending |
+| 1 | Workspace core, `/v1/workspace/settings`, workspace server actions, `workspacesAPI.listMy/listDeleted` | code + tests |
+| 2 | Workspace members: invite / update / delete actions, member service, `workspaceMembersAPI.*` | code + tests |
+| 3 | Workspace API tokens: create / delete actions | code + tests |
+| 4 | Error logs: `/v1/errorLogs.list`, delete action, service | code + tests |
+| 5 | Capabilities: `/v1/capabilities`, `/v1/schemas/flow-spec`, `getFlowAuthoringContext` (parity `p1-04/07-capabilities`) | code + tests |
+| 6 | User quota + quota enforcement (rest) | code + tests |
+| 7 | Platform credential (platform admins, branding, SMTP, email templates moved to slice 10: they are `enterprise/features`) | code + tests |
 | 8 | Analytics: `/v1/analytics/*` + `analyticsRoutes.*` (parity `p1-03`) | 8a (contacts, conversations, messages, agents, bot messages) code + tests; 8b (broadcasts, sequences, flows, comment automation, magic / ref links) code + tests; 8c (MAC tracking `claimNewActiveContact`, row-level test map, Rust parity ext p1-03) code + tests |
 | 9 | Workspace lifecycle (freeze + heavy-data purge) + jobs admin page (replaces Bull Board) | code + tests |
 | 10 | Enterprise: license, tenant, billing, custom domain, inbox teams, help items, platform admins, platform branding / SMTP / email templates | 10a (inbox teams, help items, license) and 10b (platform admins, tenant, branding / SMTP / email templates, billing, custom domain): code + tests |
@@ -247,4 +247,9 @@ Notes:
 
 ## State
 
-- Slices 1-5: code + tests written; gate pending (Dell link down since 22:40).
+- Done 2026-11-17. Slices 1-11: code + tests, gated on the Dell (fmt, clippy `-D warnings`, cargo test of business, api, jobs, server).
+- Commits: ef702c69b (slices 1-8a), 8c80d2511 (8b), 5d6211132 (8c, 9, 10a), f4a49ed67 (10b, 11), 742e69e77 (merge origin/conversion), c934287e5 (platform credential owner), b3064d71c (purge job).
+- Test map: 271 ported, 261 adapted, 146 n-a, 155 todo. Every todo row names its owner unit: event-bus port (analytics event writer), email campaigns, broadcasts, bulk tag worker, connection-state / inbox (channel teardown), worker cron (license refresh schedule; also schedules `purge_due_scheduled`).
+- Parity (Rust stack, community, fresh build): p1-03 analytics + p1-04/07-capabilities 121 / 129 pass. The 8 failures are outside Q.D11: magic-link create route (5) and sequence step create route (2) answer 404 (their units), and the contacts end-to-end test waits for the event-bus analytics writer (1).
+- Not ported here (owner units): `disconnectWorkspaceIntegrations` / `disconnectWorkspaceChannels` in the purge, the MJML mail templates (plain text until the mail port), the worker cron entries.
+- The Dell link was down from 22:40 to 23:57 on 2026-11-16; the gates of slices 1-5 ran after it came back.
