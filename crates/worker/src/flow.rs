@@ -120,18 +120,18 @@ impl StepStatus {
 }
 
 /// What one flow run shares (`ExecuteStepsAndQuickRepliesProps`).
-struct Run<'a> {
-    deps: &'a Deps,
-    data: &'a Value,
-    conversation: Conversation,
-    contact_inbox: ContactInbox,
-    flow_version: FlowVersion,
-    use_latest_flow_version: bool,
-    target_type: &'static str,
-    target_id: String,
-    target_node_id: String,
-    flow_execution_key: String,
-    is_bulk_broadcast: Option<bool>,
+pub(crate) struct Run<'a> {
+    pub(crate) deps: &'a Deps,
+    pub(crate) data: &'a Value,
+    pub(crate) conversation: Conversation,
+    pub(crate) contact_inbox: ContactInbox,
+    pub(crate) flow_version: FlowVersion,
+    pub(crate) use_latest_flow_version: bool,
+    pub(crate) target_type: &'static str,
+    pub(crate) target_id: String,
+    pub(crate) target_node_id: String,
+    pub(crate) flow_execution_key: String,
+    pub(crate) is_bulk_broadcast: Option<bool>,
 }
 
 /// `seekConnectedNode`: the target of the edge leaving `source_id`.
@@ -193,11 +193,11 @@ const CARRIED: &[&str] = &[
 ];
 
 impl Run<'_> {
-    fn metadata(&self) -> Option<&Value> {
+    pub(crate) fn metadata(&self) -> Option<&Value> {
         self.data.get("metadata").filter(|m| !m.is_null())
     }
 
-    fn base_job(
+    pub(crate) fn base_job(
         &self,
         node_id: &str,
         node_visits: Option<&Value>,
@@ -231,11 +231,11 @@ impl Run<'_> {
         data
     }
 
-    fn version_id(&self) -> Option<String> {
+    pub(crate) fn version_id(&self) -> Option<String> {
         (!self.use_latest_flow_version).then(|| self.flow_version.id.to_string())
     }
 
-    async fn enqueue_send_flow(
+    pub(crate) async fn enqueue_send_flow(
         &self,
         data: Map<String, Value>,
         job_id: Option<String>,
@@ -832,23 +832,14 @@ async fn run_step_handler(
             run.enqueue_send_flow(job, None).await?;
         }
         other if NO_HANDLER_STEP_TYPES.contains(&other) => {}
-        other => {
-            // ponytail: the other step handlers (contact, conversation, AI,
-            // integrations, ...) are later units; until then the step is an
-            // implicit success like a missing TS handler.
-            tracing::warn!(
-                step_type = other,
-                flow_id = run.flow_version.flow_id,
-                "Flow step handler is not ported yet; treated as success"
-            );
-        }
+        _ => return crate::steps::run(run, step, node_visits, anchor).await,
     }
     Ok(StepStatus::Success)
 }
 
 /// `sendFlowMessage` + `enqueueFlowStepMessage`: the `chat` job, then a
 /// bounded wait so the node's steps stay in order.
-async fn send_flow_message(
+pub(crate) async fn send_flow_message(
     run: &Run<'_>,
     step: &Value,
     anchor: Option<Value>,

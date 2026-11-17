@@ -14,6 +14,9 @@ chatbotx-db = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
+# Smart-delay job ids and the on-shift check (working-hours zone).
+chrono = { workspace = true, features = ["std"] }
+chrono-tz = { workspace = true }
 # API channel callback POST (same client as chatbotx-business).
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 # API channel HMAC-SHA256 signature and the delivery id.

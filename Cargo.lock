@@ -461,6 +461,8 @@ dependencies = [
  "chatbotx-jobs",
  "chatbotx-kv",
  "chatbotx-rt",
+ "chrono",
+ "chrono-tz",
  "regex",
  "reqwest",
  "ring",
