@@ -255,7 +255,7 @@ async fn page(
             Ok(session) => channels_create_page(&state, session.user_id, &input).await,
             Err(response) => *response,
         },
-        "workspace" | "contactsAccess" | "folder" | "flow" => {
+        "workspace" | "contactsAccess" | "folder" | "flow" | "aiAgents" | "settingsChannels" => {
             let session = match require_session(&state, &headers).await {
                 Ok(session) => session,
                 Err(response) => return *response,
@@ -415,6 +415,19 @@ async fn workspace_page(state: &AuthState, name: &str, user_id: i64, input: Valu
             flow_page(state, workspace_id, &input).await
         }
         "flow" => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
+        // `resolveGuardedWorkspaceId(params, "flows")` of the `(ai)` layout.
+        "aiAgents" if flag(permissions, "superAdmin") || flag(permissions, "flows") => {
+            read_page(state, move |conn| ai_agents_page(conn, workspace_id)).await
+        }
+        "aiAgents" => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
+        // `resolveGuardedWorkspaceId(params, "superAdmin")` of the settings layout.
+        "settingsChannels" if flag(permissions, "superAdmin") => {
+            read_page(state, move |conn| {
+                settings_channels_page(conn, workspace_id)
+            })
+            .await
+        }
+        "settingsChannels" => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
         _ => ok(json!({
             "allWorkspaces": list.iter().map(|m| m.workspace.clone()).collect::<Vec<_>>(),
             "permissions": permissions,
@@ -499,7 +512,10 @@ async fn flow_page(state: &AuthState, workspace_id: i64, input: &Value) -> Respo
             )?)
         })
         .await;
-    let (Ok(locked), Ok(target_country)) = (locked, target_country) else {
+    let compatible =
+        chatbotx_business::integration_openai_compatible::list(&state.db, workspace_id).await;
+    let (Ok(locked), Ok(target_country), Ok(compatible)) = (locked, target_country, compatible)
+    else {
         return internal("flow page read failed");
     };
     let mut flow_json = flow.flow.to_json();
@@ -510,8 +526,10 @@ async fn flow_page(state: &AuthState, workspace_id: i64, input: &Value) -> Respo
         "hasPublishedVersion": published.is_some(),
         "canRevertToPublished": can_revert,
         "isTemplateLocked": !locked.is_empty(),
-        // ponytail: the openai-compatible integration domain is not ported; [] until it is.
-        "openaiCompatibleIntegrations": [],
+        "openaiCompatibleIntegrations": compatible
+            .iter()
+            .map(crate::rpc_procedures::integrations::openai_compatible_json)
+            .collect::<Vec<_>>(),
         "workspaceTargetCountry": target_country,
     }))
 }
@@ -594,4 +612,83 @@ async fn folder_page(state: &AuthState, workspace_id: i64, input: &Value) -> Res
         Ok(value) => ok(value),
         Err(err) => internal(err),
     }
+}
+
+async fn read_page(
+    state: &AuthState,
+    f: impl FnOnce(&Connection) -> Result<Value, chatbotx_db::rusqlite::Error> + Send + 'static,
+) -> Response {
+    match state.db.read(move |conn| Ok(f(conn)?)).await {
+        Ok(value) => ok(value),
+        Err(err) => internal(err),
+    }
+}
+
+/// `(ai)/ai-agents/page.tsx`: the agent action options (published flows,
+/// active tags, custom fields, admins, inbox teams) as `{ label, value }`.
+fn ai_agents_page(
+    conn: &Connection,
+    workspace_id: i64,
+) -> Result<Value, chatbotx_db::rusqlite::Error> {
+    let options = |sql: &str| -> Result<Vec<Value>, chatbotx_db::rusqlite::Error> {
+        let mut statement = conn.prepare(sql)?;
+        let rows = statement.query_map(params![workspace_id], |row| {
+            let mut option = json!({
+                "label": row.get::<_, String>(1)?,
+                "value": row.get::<_, i64>(0)?.to_string(),
+            });
+            if row.as_ref().column_count() > 2 {
+                option["type"] = json!(row.get::<_, String>(2)?);
+            }
+            Ok(option)
+        })?;
+        rows.collect()
+    };
+    // `flowRepository.listPublishedOptions`.
+    let flows = options(
+        r#"SELECT "id", "name" FROM "Flow" WHERE "workspaceId" = ?1 AND "active" = 1
+           AND "currentVersionId" IS NOT NULL ORDER BY "id""#,
+    )?;
+    let tags = options(
+        r#"SELECT "id", "name" FROM "Tag" WHERE "workspaceId" = ?1 AND "deletedAt" IS NULL ORDER BY "name""#,
+    )?;
+    let custom_fields = options(
+        r#"SELECT "id", "name", "type" FROM "CustomField" WHERE "workspaceId" = ?1 ORDER BY "createdAt" DESC, "id" DESC"#,
+    )?;
+    // `isWorkspaceAdminMember`: the owner or a `superAdmin` member.
+    let admins = options(
+        r#"SELECT u."id", COALESCE(u."name", u."email") FROM "WorkspaceMember" m
+           JOIN "User" u ON u."id" = m."userId"
+           WHERE m."workspaceId" = ?1
+             AND (m."role" = 'owner' OR json_extract(m."permissions", '$.superAdmin') = 1)
+           ORDER BY m."createdAt", m."id""#,
+    )?;
+    let inbox_teams = options(
+        r#"SELECT "id", "name" FROM "InboxTeam" WHERE "workspaceId" = ?1 ORDER BY "createdAt", "id""#,
+    )?;
+    Ok(json!({
+        "flows": flows,
+        "tags": tags,
+        "customFields": custom_fields,
+        "admins": admins,
+        "inboxTeams": inbox_teams,
+    }))
+}
+
+/// `resolveChannelPolicy` for the settings channels pages: the channels the
+/// owner may create and the connected ones (`distinctConnectedChannels`);
+/// the SPA builds `visibleChannels` from them as the builder did.
+// ponytail: tenant channel visibility is not ported; the creatable channels
+// are the ones with a ported connect path.
+fn settings_channels_page(
+    conn: &Connection,
+    workspace_id: i64,
+) -> Result<Value, chatbotx_db::rusqlite::Error> {
+    let mut statement = conn.prepare(
+        r#"SELECT DISTINCT "channel" FROM "Inbox" WHERE "workspaceId" = ?1 AND "status" = 'connected' ORDER BY "channel""#,
+    )?;
+    let connected = statement
+        .query_map(params![workspace_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({ "creatable": ["webchat", "api", "telegram"], "connected": connected }))
 }

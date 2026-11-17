@@ -132,6 +132,13 @@ a stub (`apps/web/src/lib/server-action.ts`):
   like any procedure. `serverError` = the `ChatbotXException` message
   (`handleServerError` in `lib/safe-action.ts`), else the default message.
 - Plain `"use server"` functions: the return value; an error rejects.
+- Server-component queries (`features/*/queries`, not `"use server"`) that
+  have no oRPC procedure run the same way under their export name
+  (`findIntegrationClaude`, `listIntegrationApis`, `hasAIIntegration`, ...):
+  the SPA helper `serverQuery(name, workspaceId, args)` sends
+  `{ args, workspaceId }`, so the `/rpc` membership check replaces
+  `assertCurrentUserCanAccessChatbot`. Handlers:
+  `crates/api/src/rpc_procedures/integrations.rs`.
 - `redirect()` inside an action is not supported (none of the first screens
   use it); `revalidatePath` is a no-op (the SPA refetches).
 
@@ -154,7 +161,9 @@ serialized them: ids as strings, dates as ISO strings, flags as booleans
 | `pages.contactsAccess` | `requireContactsAccess` | `{ workspaceId }` | `{ canViewEmailAndPhone }` (`superAdmin \|\| emailAndPhone`); `404 "Page not found"` without `superAdmin`, `contacts` or `onlyAssignedContacts` |
 | `pages.folder` | `getCurrentFolder` (`folderService.getWithParents`) | `{ id, workspaceId }` | `{ folder \| null, parents[] }` |
 | `pages.deletedWorkspaces` | `features/workspaces/deleted-workspaces.tsx` | `{ page, perPage }` | `{ data: [] }` (deletion records not ported) |
-| `pages.flow` | `app/(no-sidebar)/space/[workspaceId]/flows/[id]/page.tsx` | `{ workspaceId, id }` | the `FlowDetail` props: `{ flow (with flowVersions), flowVersion (draft), hasPublishedVersion, canRevertToPublished, isTemplateLocked, openaiCompatibleIntegrations: [], workspaceTargetCountry }`. Needs the `flows` permission; no flow / no draft = 404. |
+| `pages.flow` | `app/(no-sidebar)/space/[workspaceId]/flows/[id]/page.tsx` | `{ workspaceId, id }` | the `FlowDetail` props: `{ flow (with flowVersions), flowVersion (draft), hasPublishedVersion, canRevertToPublished, isTemplateLocked, openaiCompatibleIntegrations, workspaceTargetCountry }`. Needs the `flows` permission; no flow / no draft = 404. |
+| `pages.aiAgents` | the inline options of `(ai)/ai-agents/page.tsx` | `{ workspaceId }` | `AIAgentActionOptions`: `{ flows, tags, customFields (with type), admins, inboxTeams }` as `{ label, value }`. Needs `flows` (else 404). |
+| `pages.settingsChannels` | `resolveChannelPolicy` | `{ workspaceId }` | `{ creatable: ["webchat", "api", "telegram"], connected: [channels with a connected inbox] }`; the SPA builds `visibleChannels` / `canCreate` from it as the builder did. Needs `superAdmin` (else 404). |
 | `pages.channelsCreate` | `app/(no-sidebar)/channels/create/page.tsx` | `{ workspaceId? }` | `{ offeredChannels: ["webchat", "api"], configuredChannels: [] }`; with `workspaceId` the caller must be its super admin (else 401). |
 
 Workspace loaders answer `401` when the caller is not a member.
@@ -203,8 +212,12 @@ ported yet"`; the UI shows its error or an empty option list. Full lists:
 | tags (`/space/$id/tags`) | works: list, folders, create (name error under the field), rename, delete | – |
 | custom fields + bot fields (`/space/$id/custom-fields`) | works: custom field list / update / delete, bot field list / create / update / delete / reset | – |
 | sequences (`/space/$id/sequences`) | list works (needs `broadcast`) | `updateSequenceAction`, `deleteSequenceAction` and the step editor (Rust has list + create only) |
-| flow editor (`/space/$id/flows/$flowId`) | works: open (`pages.flow`), save draft, publish, revert, restore, versions; option lists for tags, custom / bot fields, sequences, inboxes, pipelines (member grants), reflinks, questionnaires, place categories, sendable products, media library (lists + 8 actions) | `productsAPI.listProductFormOptionsAPI`, `couponsAPI.listCouponTopicOptionsAPI`, `leaderboardsAPI.*`, `miniAppsAPI.*` (no Rust domain); `whatsappMessageTemplateAPIs.*`, `whatsappFlowAPIs.*`, `messengerMessageTemplateAPIs.*`, `aiAgentsAPI.*`, `aiFilesAPI.*`, `aiFunctionsAPI.*`, `aiMcpServerAPIs.*`, `broadcastAPIs.*`, `decisionProfilesAPI.*`, `appointmentCalendarsAPI.*`, `spreadsheetsAPI.*`, `personasAPIs.*`, `userPersistentMenusAPI.*`, `dynamicImagesAPI.*`, `googleAdsAPI.getIntegration`, `platformCredentialsAPI.getGiphyApiKeyAPI`, the email / CRM integrations (`integration{ActiveCampaign,Drip,FacebookAds,GetResponse,Klaviyo,Mailchimp,MailerLite,Moosend,SendGrid}API.*`), `flowsAPI.privateGetFlowStatsAPI`, `flowsAPI.privateGetMessengerAdsJsonAPI`, `testExternalRequestAction`; OpenAI-compatible integrations (`pages.flow` sends `[]`) |
-| settings pages | not routed | members list exists (`workspaceMembersAPI.listWorkspaceMembersAuthenticatedAPI`), but invite / update / remove have no Rust business; API tokens (no management domain), email topics, working hours, workspace general, channels: no Rust domain |
+| flow editor (`/space/$id/flows/$flowId`) | works: open (`pages.flow`), save draft, publish, revert, restore, versions; option lists for tags, custom / bot fields, sequences, inboxes, pipelines (member grants), reflinks, questionnaires, place categories, sendable products, media library (lists + 8 actions) | `productsAPI.listProductFormOptionsAPI`, `couponsAPI.listCouponTopicOptionsAPI`, `leaderboardsAPI.*`, `miniAppsAPI.*` (no Rust domain); `whatsappMessageTemplateAPIs.*`, `whatsappFlowAPIs.*`, `messengerMessageTemplateAPIs.*`, `broadcastAPIs.*`, `decisionProfilesAPI.*`, `appointmentCalendarsAPI.*`, `spreadsheetsAPI.*`, `personasAPIs.*`, `userPersistentMenusAPI.*`, `dynamicImagesAPI.*`, `googleAdsAPI.getIntegration`, `platformCredentialsAPI.getGiphyApiKeyAPI`, the email / CRM integrations (`integration{ActiveCampaign,Drip,FacebookAds,GetResponse,Klaviyo,Mailchimp,MailerLite,Moosend,SendGrid}API.*`), `flowsAPI.privateGetFlowStatsAPI`, `flowsAPI.privateGetMessengerAdsJsonAPI`, `testExternalRequestAction`. AI option lists (agents, files, functions, MCP servers, OpenAI-compatible integrations) work |
+| AI (`/space/$id/ai-agents`, `ai-files`, `ai-files/$id`, `ai-files/test-query`, `ai-functions`, `ai-mcp-servers`) | works: guard (`flows` permission, else 404), "no AI integration" page (`hasAIIntegration`), lists, create / update / delete of agents, files, functions, MCP servers; agent action options (`pages.aiAgents`) | `templatesAPI.listLockedIdsAPI` (lock badges) |
+| settings shell (`/space/$id/settings/*`) | works: guard (super admin, else 404), tabs, `general` (form shown with the workspace data), `admins` (members list) | general / advanced / smart delay / mark-read saves, invite / update / remove member, support access, deletion: workspace / members domain (`feat/conversion-d11`); API tokens, email topics, working hours: no Rust domain |
+| settings channels (`/space/$id/settings/channels/$channel`) | works for `api` (list), `telegram` (list, connect for an existing workspace, disconnect), `webchat` (list, delete); channel policy from `pages.settingsChannels` | `updateApiAction`, `rotateApiTokenAction`, `deleteApiAction` (no Rust business); Telegram webhook registration; the other channels render an empty panel (tenant channel visibility, platform credentials) |
+| settings integrations (`/space/$id/settings/integrations/$slug`) | works for openai, claude, deepseek, gemini, muse, openrouter (connect with key check, update, disconnect) and openai-compatible (connect, update, enable, disconnect) | the other integrations (email / CRM / ads / Google, Shopify, ...) render an empty panel |
+| products / product imports | not routed | e-commerce page (meta catalog, store links, layout): not in this run |
 
 ## 7. Build and run
 

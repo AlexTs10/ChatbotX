@@ -217,7 +217,12 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     let realtime = match rt_config {
         Some(rt_config) => Some(start_realtime(&shared, rt_config, Arc::clone(&jobs) as _)),
         None => {
-            tracing::info!("realtime gateway off: REALTIME_BROADCAST_SECRET is not set");
+            // The inbox needs the gateway: without it the realtime token
+            // procedure answers 500 and the SPA keeps retrying.
+            tracing::warn!(
+                "realtime gateway off: REALTIME_BROADCAST_SECRET is not set (32+ chars); \
+                 the inbox gets no live updates and realtime connect-token calls answer 500"
+            );
             None
         }
     };

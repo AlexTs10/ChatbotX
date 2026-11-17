@@ -685,3 +685,69 @@ async fn flow_step_option_lists_answer_for_a_member() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
 }
+
+#[tokio::test]
+async fn settings_integration_queries_hide_secrets_and_disconnect() {
+    let (router, db) = router().await;
+    let query = |name: &str, args: Value| {
+        let router = router.clone();
+        let name = name.to_string();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": args }),
+            )
+            .await
+        }
+    };
+    let (status, has, _) = query("hasAIIntegration", json!([ws()])).await;
+    assert_eq!((status, has), (StatusCode::OK, json!(false)));
+    let (_, none, _) = query("findIntegrationClaude", json!([{ "workspaceId": ws() }])).await;
+    assert_eq!(none, Value::Null);
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (601, ?1, 'claude')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "IntegrationClaude" ("id", "workspaceId", "integrationId", "auth", "model", "maxOutputTokens")
+               VALUES (602, ?1, 601, '{"authType":"secretText","secretText":"sk-secret"}', 'claude-sonnet-4-6', 1000)"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId", "status")
+               VALUES (603, 'bot', 'telegram', '42', ?1, 'connected')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "IntegrationTelegram" ("id", "auth", "botId", "name", "workspaceId", "inboxId")
+               VALUES (604, '{"authType":"secretText","secretText":"42:bot-token"}', '42', 'bot', ?1, 603)"#,
+            params![WS],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed integrations");
+    let (_, has, _) = query("hasAIIntegration", json!([ws()])).await;
+    assert_eq!(has, json!(true));
+    let (_, claude, _) = query("findIntegrationClaude", json!([{ "workspaceId": ws() }])).await;
+    assert_eq!(claude["id"], "602");
+    assert_eq!(claude["auth"], json!({ "authType": "secretText" }));
+    let (_, telegrams, _) = query(
+        "listIntegrationTelegrams",
+        json!([{ "where": { "workspaceId": ws() } }]),
+    )
+    .await;
+    assert_eq!(telegrams["data"][0]["botId"], "42");
+    assert_eq!(
+        telegrams["data"][0]["auth"],
+        json!({ "authType": "secretText" })
+    );
+    // No `Connection` row: the legacy disconnect deletes the integration.
+    let (status, _, _) = query("disconnectClaudeAction", json!([ws()])).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, none, _) = query("findIntegrationClaude", json!([{ "workspaceId": ws() }])).await;
+    assert_eq!(none, Value::Null);
+}

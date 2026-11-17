@@ -139,3 +139,22 @@ async fn member_ctx(ctx: &Ctx<'_>, workspace_id: i64) -> Result<(String, Value),
         serde_json::from_str(&permissions).unwrap_or(Value::Null),
     ))
 }
+
+/// Whether the caller is a member of the workspace (`hasWorkspaceAccess`).
+pub(super) async fn is_member(ctx: &Ctx<'_>, workspace_id: i64) -> Result<bool, OrpcError> {
+    let user_id = ctx.user_id;
+    ctx.api
+        .db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    r#"SELECT "id" FROM "WorkspaceMember" WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+                    params![workspace_id, user_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .is_some())
+        })
+        .await
+        .map_err(|e| crate::handlers::internal_error(&e.to_string()))
+}
