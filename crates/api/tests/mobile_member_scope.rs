@@ -618,7 +618,7 @@ mod e2e {
         assert_eq!(status, 403);
 
         // Mobile tokens off: `/v1/me` refuses every token.
-        let (status, _) = send(&router(&fx, false), "GET", "/api/v1/me", &jwt, None).await;
+        let (status, _) = send(&self::router(&fx, false), "GET", "/api/v1/me", &jwt, None).await;
         assert_eq!(status, 401);
     }
 }
