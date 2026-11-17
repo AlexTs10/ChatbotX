@@ -130,3 +130,10 @@ Left in slice 1 (before 1b): `aiAnalyzeImage`, `aiEditImage` / `aiGenerateImage`
 2. Slice 4 rest: the default / template handlers (bulk tag, appointment reminders, welcome message sync, pipeline stage removal, template worker) when their domains get a Rust producer (today the API runs them in the request or not at all).
 3. Slice 1 rest: heavy image / speech steps (`aiEditImage`, `aiGenerateImage`, `aiSegmentImage`, text to speech), the automated response (`processAutomatedResponse`, system tools, global router), AI agent actions / handoff re-entry, comment AI reply / moderation, story automations, `summarizeConversation`, conversation sources.
 4. Slice 2 rest: the other heavy actions, the bulk thread-control batches (with Q.D12 / Q.I1b). Parity p1-02 ai-files after the Q.D2c merge (`/v1/integrations/ai/{provider}`).
+
+## Run 3 (2026-11-17, "finish the gaps")
+
+- `message:sent` (`sendFlowStep`, WhatsApp template sends), `message:delivered` / `message:failed` (channel delivery statuses) and the `broadcast-ops` listeners (`deliveredAt`, first `failedAt` / `errorContent` on `ContactOnBroadcast`): a one-off broadcast reaches `sent` when its recipients have an outcome, not after the grace window.
+- `broadcasts.listContacts` (`/v1/broadcasts/{id}/contacts`) and `privateListBroadcastContactsAPI` (`business::broadcast::list_contacts_page`; test `broadcast_list_contacts.rs`).
+- Inbound: `sanitizeFlowAction` of postbacks / quick replies (bare flow id on Messenger only), the contact-hint quick reply, value quick replies, Skip taps (`resolveStepInput` job, not routed as a typed reply), third-party echo drops for unknown contacts. Hooks for Q.D9 (appointment-cancel postback) and Q.D13 (leaderboard award) are comments at their call sites in `inbound::receive_message`.
+- Left: the Zalo / Telegram tap labels, profile lookups (channel profile fetcher unit), Google click, commerce enrichment, thread-control recording; the heavy AI steps (item 3 of "Left": the heavy-step runner with its outcome / resume lease state, `resumeHeavyStep`, image generation / editing / segmentation and text to speech).

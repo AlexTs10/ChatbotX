@@ -188,7 +188,7 @@ pub async fn prepare(
 
 /// The `buildEventFilter` condition of the broadcast / sequence stats
 /// repositories (`message:sent` = delivered or failed; unknown = delivered).
-fn event_condition(event_type: &str) -> &'static str {
+pub(crate) fn event_condition(event_type: &str) -> &'static str {
     match event_type {
         "message:sent" => r#"("deliveredAt" IS NOT NULL OR "failedAt" IS NOT NULL)"#,
         "message:seen" => r#""seenAt" IS NOT NULL"#,

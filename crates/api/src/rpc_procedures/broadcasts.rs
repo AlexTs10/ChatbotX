@@ -1,6 +1,6 @@
 //! Broadcasts: `features/broadcasts/api/private.ts` and
 //! `features/broadcasts/actions/*` (Q.D5). The batch stats and contacts reads
-//! need the delivery analytics (Q.D11).
+//! need the delivery analytics (Q.D11); the contacts list is ported (Q.W2).
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::broadcast::{self as service, history, recurrence, write};
@@ -149,6 +149,51 @@ async fn occurrences(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
     .map_err(fail)
 }
 
+/// `privateListBroadcastContactsAPI` (`listBroadcastContactsRequest`): no
+/// `eventType` is an empty page of a live broadcast.
+async fn contacts(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let data = parsed(
+        z::object(vec![
+            ("broadcastId", z::string()),
+            (
+                "eventType",
+                z::enum_(crate::handlers::broadcasts::BROADCAST_EVENT_TYPES).optional(),
+            ),
+            ("page", z::number().optional()),
+            ("perPage", z::number().optional()),
+        ]),
+        input,
+    )?;
+    let id = bound_id(&data["broadcastId"])
+        .map_err(|_| fail(BusinessError::not_found("Broadcast not found")))?;
+    let page = data["page"].as_f64().unwrap_or(1.0) as i64;
+    let per_page = data["perPage"].as_f64().unwrap_or(20.0) as i64;
+    let Some(event_type) = opt_str(&data, "eventType") else {
+        let ws = ctx.workspace_id;
+        let live = chatbotx_business::tx::read(&ctx.api.db, move |conn| {
+            service::list_existing_ids(conn, ws, &[id])
+        })
+        .await
+        .map_err(fail)?;
+        if live.is_empty() {
+            return Err(fail(BusinessError::not_found("Broadcast not found")));
+        }
+        return Ok(json!({ "data": [], "total": 0, "page": page, "pageCount": 0 }));
+    };
+    let mut out = service::list_contacts_page(
+        &ctx.api.db,
+        ctx.workspace_id,
+        id,
+        event_type,
+        page,
+        per_page.max(1),
+    )
+    .await
+    .map_err(fail)?;
+    out["page"] = json!(page);
+    Ok(out)
+}
+
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
     let db = &ctx.api.db;
     let ws = ctx.workspace_id;
@@ -157,6 +202,7 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
         "broadcastAPIs.privatePreviewBroadcastRecurrenceAPI" => preview(input),
         "broadcastAPIs.privateListBroadcastRunGroupsAPI" => run_groups(ctx, input).await,
         "broadcastAPIs.privateListBroadcastOccurrencesAPI" => occurrences(ctx, input).await,
+        "broadcastAPIs.privateListBroadcastContactsAPI" => contacts(ctx, input).await,
         "broadcastAPIs.privateListBroadcastOptionsAPI" => {
             async {
                 let channel = input_ref

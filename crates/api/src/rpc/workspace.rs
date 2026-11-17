@@ -193,7 +193,10 @@ pub fn action_gate(name: &str) -> Option<Gate> {
         | "createWorkspaceToken"
         | "deleteWorkspaceToken"
         | "deleteErrorLog" => Gate::Workspace,
-        "scheduleWorkspaceDeletion" | "cancelWorkspaceDeletion" => Gate::AllowExpired,
+        "scheduleWorkspaceDeletion"
+        | "cancelWorkspaceDeletion"
+        | "revokeMcpOAuthGrant"
+        | "listMcpOAuthGrants" => Gate::AllowExpired,
         _ => return None,
     })
 }
@@ -658,6 +661,50 @@ pub async fn run_action(
             input.finish()?;
             chatbotx_business::error_log::delete(db, ws, ids.unwrap_or_default()).await?;
             Ok(None)
+        }
+        // `revokeMcpOAuthGrantAction` (Q.A1): the current user's grant only.
+        "revokeMcpOAuthGrant" => {
+            let mut input = input_of(raw);
+            let client_id = input.string(
+                "clientId",
+                Str {
+                    min: Some(1),
+                    ..Str::default()
+                },
+            );
+            input.finish()?;
+            let client_id = client_id.unwrap_or_default();
+            if !chatbotx_business::mcp_oauth::revoke_grant(db, context.user_id, &client_id).await? {
+                return Err(ActionError::ValidationErrors(
+                    json!({ "_errors": ["OAuth grant no longer exists"] }),
+                ));
+            }
+            Ok(None)
+        }
+        // The grants of the `chatbotx-mcp` settings page (`toMcpOAuthGrantDto`).
+        "listMcpOAuthGrants" => {
+            let iso = chatbotx_core::js::to_iso_string;
+            let https_icon = |icon: Option<String>| {
+                icon.filter(|i| url::Url::parse(i).is_ok_and(|u| u.scheme() == "https"))
+            };
+            let now = chatbotx_core::js::now_ms();
+            let grants =
+                chatbotx_business::mcp_oauth::list_grants_for_user(db, context.user_id, now)
+                    .await?;
+            Ok(Some(json!(
+                grants
+                    .into_iter()
+                    .map(|g| json!({
+                        "activeUntil": g.active_until.and_then(iso),
+                        "clientIcon": https_icon(g.client_icon),
+                        "clientId": g.client_id,
+                        "clientName": g.client_name,
+                        "firstAuthorizedAt": iso(g.first_authorized_at),
+                        "lastRefreshedAt": g.last_refreshed_at.and_then(iso),
+                        "scopes": g.scopes,
+                    }))
+                    .collect::<Vec<_>>()
+            )))
         }
         _ => Err(ActionError::Internal(format!(
             "unknown workspace action {name}"

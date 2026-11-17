@@ -28,7 +28,7 @@ appointmentsAPI.key	1	web	missing
 appointmentsAPI.listContactAppointmentsAPI	1	web	missing
 botFieldAPIs.privateListBotFieldsAPI	2	web	rust
 broadcastAPIs.privateGetBatchBroadcastStatsAPI	1		missing
-broadcastAPIs.privateListBroadcastContactsAPI	1		missing
+broadcastAPIs.privateListBroadcastContactsAPI	1		rust
 broadcastAPIs.privateListBroadcastOccurrencesAPI	2		missing
 broadcastAPIs.privateListBroadcastOptionsAPI	1	web	missing
 broadcastAPIs.privateListBroadcastRunGroupsAPI	2		missing

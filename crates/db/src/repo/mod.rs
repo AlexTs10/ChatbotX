@@ -620,6 +620,7 @@ pub mod ai_file_embedding_id;
 pub mod ai_handover_bulk_run;
 pub mod ai_handover_settings;
 pub mod ai_workspace_scope;
+pub mod appointment;
 pub mod appointment_calendar;
 pub mod automation_throttle;
 pub mod broadcast;
