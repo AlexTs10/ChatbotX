@@ -160,6 +160,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::inbound::MESSAGE_STATUS => {
             crate::inbound::message_status(&deps, &job.data["data"]).await?
         }
+        crate::contact_scan::CONTACT_SCAN => {
+            crate::contact_scan::run(&deps, &job.data["data"]).await?
+        }
         other => {
             // ponytail: every other integration action is a later unit
             // (inbound channels Q.I*, steps, sequences, ...).

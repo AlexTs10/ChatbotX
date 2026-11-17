@@ -97,8 +97,9 @@ pub struct ApiState {
     pub files: Option<Arc<chatbotx_files::Uploader>>,
     /// `NEXT_PUBLIC_EDITION` (read once at start; tests set it).
     pub edition: chatbotx_business::keys::Edition,
-    /// `encryptUtils` (`ENCRYPTION_KEY*`, read once at start); `None` = the
-    /// keys are unset (credential writes fail).
+    /// `encryptUtils` (`ENCRYPTION_KEY*`, read once at start: credential
+    /// writes, connect-session auth, platform credentials); `None` = the keys
+    /// are unset (credential writes fail, an OAuth connect is not configured).
     pub encryption: Option<Arc<chatbotx_core::encryption::Encryption>>,
     /// `LICENSE_KEY` (read once at start; tests set it).
     pub license_token: Option<String>,

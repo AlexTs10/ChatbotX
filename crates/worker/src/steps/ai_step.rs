@@ -1,5 +1,6 @@
 //! Q.W2 slice 1: the AI flow steps that run in the integration worker
-//! (`generate-text`, `generate-text-agent`, `delete-message-history`).
+//! (`generate-text`, `generate-text-agent`, `delete-message-history`,
+//! `analyze-image`, `extract-data`).
 //!
 //! A provider failure of `aiGenerateText` is written to `ErrorLog`
 //! (`logStepProviderError`) through the error-log bus.
@@ -11,7 +12,7 @@ use chatbotx_jobs::JobError;
 use serde_json::{Value, json};
 
 use super::{StepCtx, step_error};
-use crate::ai::llm::{self, Request, ToolChoice, Turn};
+use crate::ai::llm::{self, Part, Request, ToolChoice, Turn};
 use crate::ai::{self, Agent, model, text, toolset};
 use crate::flow::StepStatus;
 use crate::{db_fail, id_of, str_of};
@@ -28,6 +29,8 @@ pub(crate) async fn run(
         "aiGenerateText" => generate_text(ctx).await?,
         "aiGenerateTextAgent" => generate_text_agent(ctx).await?,
         "aiDeleteMessageHistory" => delete_message_history(ctx).await?,
+        "aiAnalyzeImage" => analyze_image(ctx).await?,
+        "aiExtractData" => extract_data(ctx).await?,
         _ => return Ok(None),
     }))
 }
@@ -402,4 +405,297 @@ async fn delete_message_history(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, Job
             Ok(step_error(ctx, &err))
         }
     }
+}
+
+/// `resolveFlowAIModel` for a step; `Err` is the step result (logged).
+async fn step_model(ctx: &StepCtx<'_, '_>, label: &str) -> Result<llm::Model, StepStatus> {
+    let provider = ctx.str("provider").unwrap_or("");
+    let integration = (provider == "openaiCompatible")
+        .then(|| ctx.str("integrationId"))
+        .flatten();
+    let resolved = model::resolve_flow_model(
+        &ctx.run.deps.db,
+        ctx.workspace_id(),
+        provider,
+        integration,
+        ctx.str("model").unwrap_or(""),
+    )
+    .await;
+    match resolved {
+        Ok(model) => Ok(model),
+        Err(model::NoModel::Missing(message) | model::NoModel::Failed(message)) => {
+            tracing::warn!(
+                workspace_id = ctx.workspace_id(),
+                conversation_id = ctx.run.conversation.id,
+                step_id = ctx.str("id"),
+                provider,
+                reason = %message,
+                "[{label}] Failed to resolve AI model"
+            );
+            Err(step_error(ctx, &message))
+        }
+    }
+}
+
+/// `isImageUrl`: an http(s) URL whose path ends in an image extension.
+fn is_image_url(url: &str) -> bool {
+    let s = url.trim().to_ascii_lowercase();
+    let Some(rest) = s
+        .strip_prefix("http://")
+        .or_else(|| s.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let path = rest.split(['?', '#']).next().unwrap_or("");
+    let path = path.find('/').map_or("", |i| &path[i..]);
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
+        .iter()
+        .any(|ext| path.ends_with(ext))
+}
+
+/// `handleAIAnalyzeImage`: the prompt and the image of a custom field to
+/// the model; the answer is saved to `outputFieldId`.
+async fn analyze_image(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobError> {
+    let model = match step_model(ctx, "ai-analyze-image").await {
+        Ok(model) => model,
+        Err(status) => return Ok(status),
+    };
+    let db = &ctx.run.deps.db;
+    let image = crate::condition::find_custom_field_value(
+        db,
+        &ctx.contact_id().to_string(),
+        ctx.str("inputFieldId").unwrap_or(""),
+    )
+    .await
+    .map_err(db_fail)?
+    .filter(|url| !url.is_empty() && is_image_url(url));
+    let Some(image) = image else {
+        return Ok(step_error(ctx, "Invalid image URL provided"));
+    };
+    let prompt = match ctx
+        .resolve_variables(ctx.step.get("prompt").unwrap_or(&Value::Null), false)
+        .await
+    {
+        Ok(Value::String(prompt)) => prompt,
+        Ok(other) => js_text(&other),
+        Err(err) => return Ok(step_error(ctx, &err)),
+    };
+    let mut request = Request::new(
+        Some(text::with_channel_length_instruction(
+            None,
+            Some(ctx.run.contact_inbox.channel.as_str()),
+        )),
+        vec![Turn::User(vec![
+            Part::Text(prompt),
+            Part::File {
+                url: image,
+                media_type: "image/*".into(),
+            },
+        ])],
+    );
+    request.max_output_tokens = ctx.step.get("maxOutputTokens").and_then(Value::as_i64);
+    request.temperature = ctx.step.get("temperature").and_then(Value::as_f64);
+    let generated = llm::generate(&*ctx.run.deps.ai.http, &model, &request, &llm::NoTools).await;
+    let result = match generated {
+        Ok(generated) => match ctx.str("outputFieldId").filter(|f| !f.is_empty()) {
+            Some(field) => save_result(ctx, field, generated.text()).await,
+            None => Ok(()),
+        },
+        Err(err) => {
+            log_step_provider_error(ctx, &err).await;
+            Err(err.message)
+        }
+    };
+    match result {
+        Ok(()) => Ok(StepStatus::Success),
+        Err(message) => {
+            tracing::error!(err = %message, "[ai-analyze-image] Step failed");
+            Ok(step_error(ctx, &message))
+        }
+    }
+}
+
+/// `String(value)` for a resolved prompt that is not a string.
+fn js_text(value: &Value) -> String {
+    chatbotx_core::js::string_of(value)
+}
+
+/// `stringifyFieldValue`.
+fn stringify_field_value(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// `getInputValue` of `handleAIExtractData`: the typed text (variables
+/// resolved, the file attribute replaced) or the input field's value.
+async fn extract_input(ctx: &StepCtx<'_, '_>, input_type: &str) -> Result<Option<String>, String> {
+    let input_field = ctx.str("inputFieldId").unwrap_or("");
+    if input_type == "text" {
+        let resolved = ctx
+            .resolve_variables(&json!(input_field.trim()), false)
+            .await?;
+        let mut text = resolved
+            .as_str()
+            .map_or_else(|| js_text(&resolved), str::to_owned);
+        if let Some(file) = ctx.step.get("file").filter(|f| f.is_object()) {
+            let attribute = file.get("attribute").map(js_text).unwrap_or_default();
+            let value = file.get("value").map(js_text).unwrap_or_default();
+            // `String.replace` with a string pattern: the first match only.
+            text = text.replacen(&attribute, &value, 1);
+        }
+        return Ok((!text.is_empty()).then_some(text));
+    }
+    let value = crate::condition::find_custom_field_value(
+        &ctx.run.deps.db,
+        &ctx.contact_id().to_string(),
+        input_field,
+    )
+    .await?;
+    Ok(value.filter(|v| !chatbotx_core::js::trim(v).is_empty()))
+}
+
+/// `handleAIExtractData`: the model fills one nullable string per extract
+/// field; each non-null value is saved to its custom field.
+async fn extract_data(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobError> {
+    let fields: Vec<(String, String, Option<String>)> = ctx
+        .step
+        .get("extractFields")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|f| {
+            let text = |k: &str| f.get(k).and_then(Value::as_str).map(str::to_owned);
+            (
+                text("key").unwrap_or_default(),
+                text("customFieldId").unwrap_or_default(),
+                text("description").filter(|d| !d.is_empty()),
+            )
+        })
+        .collect();
+    if fields.is_empty() {
+        tracing::debug!("No extract fields configured");
+        return Ok(StepStatus::Skip);
+    }
+    let input_type = ctx.str("inputType").unwrap_or("text").to_owned();
+    let outcome = async {
+        let Some(input) = extract_input(ctx, &input_type).await? else {
+            tracing::debug!("Input field is empty");
+            return Ok(Some(StepStatus::Skip));
+        };
+        let model = match step_model(ctx, "ai-extract-data").await {
+            Ok(model) => model,
+            Err(status) => return Ok(Some(status)),
+        };
+        let description: Vec<String> = fields
+            .iter()
+            .map(|(key, _, d)| d.as_ref().map_or_else(|| format!("- {key}"), |d| format!("- {key}: {d}")))
+            .collect();
+        let system = format!(
+            "You are a data extraction expert. Extract the following information from the provided {input_type}.\nFields to extract:\n{}",
+            description.join("\n")
+        );
+        let mut parts = vec![match input_type.as_str() {
+            "text" => Part::Text(input),
+            "image" => Part::File { url: input, media_type: "image/*".into() },
+            _ => Part::File { url: input, media_type: "application/pdf".into() },
+        }];
+        parts.push(Part::Text(format!("Please extract data from this {input_type}")));
+        let mut properties = serde_json::Map::new();
+        for (key, _, _) in &fields {
+            properties.insert(
+                key.clone(),
+                json!({ "anyOf": [{ "type": "string" }, { "type": "null" }], "description": format!("The value for {key}") }),
+            );
+        }
+        let keys: Vec<&String> = properties.keys().collect();
+        let schema = json!({
+            "type": "object",
+            "properties": properties,
+            "required": keys,
+            "additionalProperties": false,
+        });
+        let request = Request::new(Some(system), vec![Turn::User(parts)]);
+        let data = match llm::generate_object(&*ctx.run.deps.ai.http, &model, &request, schema).await {
+            Ok(data) => data,
+            Err(err) => {
+                log_step_provider_error(ctx, &err).await;
+                if err.status == Some(402) {
+                    tracing::error!(err = %err, "AI provider insufficient credits");
+                    return Ok(Some(step_error(ctx, ERROR_INSUFFICIENT_CREDITS)));
+                }
+                return Err(err.message);
+            }
+        };
+        for (key, field, _) in &fields {
+            match data.get(key) {
+                None | Some(Value::Null) => {}
+                Some(value) => save_result(ctx, field, stringify_field_value(value)).await?,
+            }
+        }
+        Ok::<_, String>(None)
+    }
+    .await;
+    match outcome {
+        Ok(Some(status)) => Ok(status),
+        Ok(None) => Ok(StepStatus::Success),
+        Err(message) => {
+            tracing::error!(
+                workspace_id = ctx.workspace_id(),
+                conversation_id = ctx.run.conversation.id,
+                step_id = ctx.str("id"),
+                err = %message,
+                reason = "ai_generation_failed",
+                "Error in handleAIExtractData"
+            );
+            send_text_and_wait(ctx, "Error extracting data").await?;
+            Ok(step_error(ctx, &message))
+        }
+    }
+}
+
+/// `sendMessageWithRender(conversationId, text, undefined, { metadata,
+/// isBulkBroadcast })` + `waitForChatJobCompletion`.
+async fn send_text_and_wait(ctx: &StepCtx<'_, '_>, text: &str) -> Result<(), JobError> {
+    let run = ctx.run;
+    let mut data = serde_json::Map::new();
+    data.insert(
+        "conversationId".into(),
+        json!(run.conversation.id.to_string()),
+    );
+    data.insert("text".into(), json!(text));
+    if let Some(metadata) = run.metadata() {
+        data.insert("metadata".into(), metadata.clone());
+    }
+    if let Some(bulk) = run.is_bulk_broadcast {
+        data.insert("isBulkBroadcast".into(), json!(bulk));
+    }
+    let added = run
+        .deps
+        .jobs
+        .add(
+            chatbotx_jobs::QueueName::Chat,
+            chatbotx_jobs::chat_wait::SEND_CHAT_MESSAGE_ACTION,
+            json!({ "type": chatbotx_jobs::chat_wait::SEND_CHAT_MESSAGE_ACTION, "data": Value::Object(data) }),
+            chatbotx_jobs::JobOptions::default(),
+        )
+        .await
+        .map_err(db_fail)?;
+    let target = chatbotx_jobs::WaitTarget {
+        queue: Some(chatbotx_jobs::QueueName::Chat),
+        job_id: added.job_id,
+        ..chatbotx_jobs::WaitTarget::default()
+    };
+    let context = chatbotx_jobs::chat_wait::ChatWaitContext {
+        conversation_id: Some(run.conversation.id.to_string()),
+        step_id: None,
+    };
+    chatbotx_jobs::chat_wait::wait_for_chat_job_completion(
+        run.deps.waiter.as_ref(),
+        Some(&target),
+        &context,
+    )
+    .await;
+    Ok(())
 }

@@ -11,6 +11,11 @@ use crate::{Deps, purge, str_of};
 /// The scheduler ids with a Rust handler (see [`handle`]).
 pub const PORTED: &[&str] = &[
     "scanAiHandoverBulkRuns",
+    "scanContactScans",
+    "evaluateTriggers",
+    "cleanupTriggers",
+    "evaluateDateTimeWebhooks",
+    "cleanupWebhookExecutions",
     "purgeErrorLogs",
     "purgeInboundWebhookRequests",
     "purgeCommentAutomationEvents",
@@ -46,6 +51,11 @@ pub async fn register(store: &dyn SchedulerStore) -> Result<(), JobsError> {
 pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     match str_of(&job.data, "type").unwrap_or("") {
         "scanAiHandoverBulkRuns" => crate::ai_handover::scan(&deps).await?,
+        "scanContactScans" => crate::contact_scan::sweep(&deps).await?,
+        "evaluateTriggers" => crate::datetime_sweep::scan_triggers(&deps).await?,
+        "cleanupTriggers" => crate::datetime_sweep::cleanup(&deps, false).await?,
+        "evaluateDateTimeWebhooks" => crate::datetime_sweep::scan_webhooks(&deps).await?,
+        "cleanupWebhookExecutions" => crate::datetime_sweep::cleanup(&deps, true).await?,
         "purgeErrorLogs" => purge::purge_error_logs(&deps.db).await?,
         "purgeInboundWebhookRequests" => purge::purge_inbound_webhook_requests(&deps.db).await?,
         "purgeCommentAutomationEvents" => purge::purge_comment_automation_events(&deps.db).await?,
