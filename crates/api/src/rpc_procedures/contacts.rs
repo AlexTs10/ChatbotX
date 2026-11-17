@@ -9,7 +9,9 @@ use chatbotx_business::contact::list::{
     ContactListScope, ListOptions, ListRows, ListScope, Projection, count, list,
 };
 use chatbotx_business::count_mode::CountMode;
-use chatbotx_business::{contact, contact_custom_field, contact_sequence, tag};
+use chatbotx_business::{
+    contact, contact_custom_field, contact_note, contact_sequence, custom_field, tag,
+};
 use chatbotx_core::utils::custom_field_operation::FieldOperationType;
 use chatbotx_db::repo::contact::ContactTableRow;
 use chatbotx_db::rusqlite::params_from_iter;
@@ -17,12 +19,14 @@ use serde_json::{Value, json};
 
 use super::{Ctx, In, Outcome, action_fail, arg, fail, invalid, public, query_of};
 use crate::handlers::Member;
+use crate::handlers::contact_notes::note_json;
 use crate::handlers::contacts::{parse_list_input, tenant_urls};
 use crate::handlers::input::Input;
 use crate::orpc::OrpcError;
 
 /// The ported actions.
 pub const ACTIONS: &[&str] = &[
+    "peekImportHeadersAction",
     "addContactTagAction",
     "removeContactTagAction",
     "addContactSequenceAction",
@@ -32,7 +36,16 @@ pub const ACTIONS: &[&str] = &[
     "deleteContactAction",
     "createContactAction",
     "exportContactsAction",
+    "createContactNoteAction",
+    "editContactNoteAction",
+    "deleteContactNoteAction",
+    "blockContactAction",
+    "unblockContactAction",
+    "updateContactFieldAction",
+    "updateContactTagAction",
     "updateContactSequenceAction",
+    "resetContactCustomFieldsAction",
+    "createCustomFieldAction",
 ];
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
@@ -251,11 +264,29 @@ async fn scoped_ids(ctx: &Ctx<'_>, member: Member, ids: Vec<i64>) -> Result<Vec<
 async fn contact_route(ctx: &Ctx<'_>, input: &Value, route_id: &str) -> Result<Value, OrpcError> {
     let scope = ctx.require_contact_scope()?;
     let contact_id = In(input).id("contactId")?;
+    contact_call(ctx, scope, contact_id, route_id, None).await
+}
+
+/// `contactService.findByIdOrFail({ accessScope })` (404 "Contact not
+/// found" outside the member's scope), then the public route of the contact.
+async fn contact_call(
+    ctx: &Ctx<'_>,
+    scope: Member,
+    contact_id: i64,
+    route_id: &str,
+    body: Option<&Value>,
+) -> Result<Value, OrpcError> {
+    accessible(ctx, scope, contact_id).await?;
+    let params = [("identifier", format!("id:{contact_id}"))];
+    public(ctx, route_id, &params, None, body).await
+}
+
+/// 404 "Contact not found" when the member may not touch the contact.
+async fn accessible(ctx: &Ctx<'_>, scope: Member, contact_id: i64) -> Result<(), OrpcError> {
     if scoped_ids(ctx, scope, vec![contact_id]).await?.is_empty() {
         return Err(fail(BusinessError::not_found("Contact not found")));
     }
-    let params = [("identifier", format!("id:{contact_id}"))];
-    public(ctx, route_id, &params, None, None).await
+    Ok(())
 }
 
 /// `getContact`: the contact columns (PII masked without `emailAndPhone`),
@@ -353,6 +384,30 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
     Some(
         async {
             match name {
+                // Any member (`workspaceActionClient`), no import-type check
+                // (the session UI leaves it out).
+                // ponytail: the error copy is the business English message,
+                // not the builder's `fields.import.*` translation.
+                "peekImportHeadersAction" => {
+                    let file_id = input.id("fileId")?;
+                    let files = ctx.api.files.as_deref().ok_or_else(|| {
+                        OrpcError::new(
+                            "INTERNAL_SERVER_ERROR",
+                            Some(500),
+                            Some("file storage is not configured"),
+                        )
+                    })?;
+                    return chatbotx_business::import::peek_import_headers(
+                        db,
+                        files,
+                        ctx.workspace_id,
+                        file_id,
+                        None,
+                    )
+                    .await
+                    .map(|headers| json!(headers))
+                    .map_err(action_fail);
+                }
                 "createContactAction" => {
                     let created =
                         public(ctx, "contacts.create", &[], None, Some(arg(args, 1))).await?;
@@ -362,40 +417,17 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                     let contact = find_detail(ctx, workspace_id, contact_id).await?;
                     return Ok(contact.map_or(Value::Null, |c| c.contact.to_json()));
                 }
-                "updateContactSequenceAction" => {
-                    // `findByIdOrFail({ accessScope })`, then the set replace.
-                    let scope = ctx.require_contact_scope()?;
-                    let contact_id = input.id("contactId")?;
-                    let sequences = input.ids("sequences")?;
-                    if scoped_ids(ctx, scope, vec![contact_id]).await?.is_empty() {
-                        return Err(fail(BusinessError::not_found("Contact not found")));
-                    }
-                    // 404 for a contact outside the workspace.
-                    contact_sequence::list_by_contact_id(db, ctx.workspace_id, contact_id)
-                        .await
-                        .map_err(action_fail)?;
-                    let rows = contact_sequence::update_contact_sequences(
-                        db,
-                        ctx.workspace_id,
-                        contact_id,
-                        &sequences,
-                    )
-                    .await
-                    .map_err(action_fail)?;
-                    return Ok(rows
-                        .iter()
-                        .map(|row| {
-                            json!({ "sequence": { "id": row.sequence_id.to_string(), "name": row.sequence_name } })
-                        })
-                        .collect());
-                }
                 "exportContactsAction" => {
                     require_scope(ctx)?;
                     let started =
                         public(ctx, "contacts.export", &[], None, Some(arg(args, 1))).await?;
                     return Ok(started);
                 }
+                "createCustomFieldAction" => return create_custom_field(ctx, arg(args, 1)).await,
                 _ => {}
+            }
+            if let Some(outcome) = detail_action(ctx, name, args).await {
+                return outcome;
             }
             let scope = require_scope(ctx)?;
             let ids = scoped_ids(ctx, scope, input.ids("ids")?).await?;
@@ -465,4 +497,178 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
         }
         .await,
     )
+}
+
+/// The contact detail actions (`[workspaceId, contactId?]` bind args).
+async fn detail_action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
+    const DETAIL: &[&str] = &[
+        "createContactNoteAction",
+        "editContactNoteAction",
+        "deleteContactNoteAction",
+        "blockContactAction",
+        "unblockContactAction",
+        "updateContactFieldAction",
+        "updateContactTagAction",
+        "updateContactSequenceAction",
+        "resetContactCustomFieldsAction",
+    ];
+    if !DETAIL.contains(&name) {
+        return None;
+    }
+    let db = &ctx.api.db;
+    let ws = ctx.workspace_id;
+    let bound_id = || In(&json!({ "id": arg(args, 1) })).id("id");
+    Some(
+        async {
+            let scope = require_scope(ctx)?;
+            match name {
+                "createContactNoteAction" | "editContactNoteAction" | "deleteContactNoteAction" => {
+                    let contact_id = bound_id()?;
+                    let input = In(arg(args, 2));
+                    let text = match name {
+                        "createContactNoteAction" => Some(input.str("text", true, 1, 1000)?),
+                        "editContactNoteAction" if input.get("text").is_some() => {
+                            Some(input.str("text", true, 1, 1000)?)
+                        }
+                        _ => None,
+                    };
+                    let note_id = match name {
+                        "createContactNoteAction" => None,
+                        _ => Some(input.id("contactNoteId")?),
+                    };
+                    accessible(ctx, scope, contact_id).await?;
+                    let note = match (name, note_id) {
+                        ("createContactNoteAction", _) => {
+                            contact_note::create(
+                                db,
+                                ws,
+                                contact_id,
+                                &text.unwrap_or_default(),
+                                Some(ctx.user_id),
+                            )
+                            .await
+                        }
+                        ("editContactNoteAction", Some(note)) => {
+                            contact_note::update(db, ws, contact_id, note, text.as_deref()).await
+                        }
+                        (_, note) => {
+                            // A deleted note is a no-op for the optimistic list.
+                            return match contact_note::delete(
+                                db,
+                                ws,
+                                contact_id,
+                                note.unwrap_or(-1),
+                            )
+                            .await
+                            {
+                                Err(BusinessError::Exception { code, .. })
+                                    if code == "notFound" =>
+                                {
+                                    Ok(Value::Null)
+                                }
+                                other => other.map(|()| Value::Null).map_err(action_fail),
+                            };
+                        }
+                    };
+                    note.map(|row| note_json(&row)).map_err(action_fail)
+                }
+                "blockContactAction" | "unblockContactAction" => {
+                    let route = if name == "blockContactAction" {
+                        "contacts.block"
+                    } else {
+                        "contacts.unblock"
+                    };
+                    contact_call(ctx, scope, bound_id()?, route, None).await
+                }
+                "updateContactFieldAction" => {
+                    let body = arg(args, 2);
+                    let valid = body
+                        .as_object()
+                        .is_some_and(|fields| fields.values().all(Value::is_string));
+                    if !valid {
+                        return Err(invalid());
+                    }
+                    contact_call(ctx, scope, bound_id()?, "contacts.updateLegacy", Some(body)).await
+                }
+                "updateContactTagAction" => {
+                    let input = In(arg(args, 1));
+                    let contact_id = input.id("contactId")?;
+                    let tags: Vec<String> = input
+                        .strings("tags")?
+                        .iter()
+                        .map(|t| t.trim().to_string())
+                        .collect();
+                    accessible(ctx, scope, contact_id).await?;
+                    let rows = tag::replace_contact_tags_by_names(db, ws, contact_id, &tags)
+                        .await
+                        .map_err(action_fail)?;
+                    Ok(rows.iter().map(|t| t.to_json()).collect())
+                }
+                "updateContactSequenceAction" => {
+                    let input = In(arg(args, 1));
+                    let contact_id = input.id("contactId")?;
+                    let sequences = input.ids("sequences")?;
+                    accessible(ctx, scope, contact_id).await?;
+                    let rows =
+                        contact_sequence::update_contact_sequences(db, ws, contact_id, &sequences)
+                            .await
+                            .map_err(action_fail)?;
+                    Ok(rows
+                        .iter()
+                        .map(|row| {
+                            json!({ "sequence": {
+                                "id": row.sequence_id.to_string(),
+                                "name": row.sequence_name,
+                            } })
+                        })
+                        .collect())
+                }
+                _ => {
+                    // `resetContactCustomFieldsAction`.
+                    let contact_id = In(arg(args, 1)).id("contactId")?;
+                    accessible(ctx, scope, contact_id).await?;
+                    contact_custom_field::clear_by_contact_id(db, ws, contact_id)
+                        .await
+                        .map_err(action_fail)?;
+                    Ok(Value::Null)
+                }
+            }
+        }
+        .await,
+    )
+}
+
+/// `createCustomFieldAction`: `customFieldService.create` (a taken name is
+/// the `name` validation error).
+async fn create_custom_field(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    use crate::handlers::custom_fields::{CUSTOM_FIELD_TYPES, field_name, nullish_digits};
+    let object = input.as_object().cloned().ok_or_else(invalid)?;
+    let mut input = Input::from_object(object);
+    let name = field_name(&mut input);
+    let kind = input.enum_at(
+        &crate::handlers::input::key("type"),
+        input.get("type").cloned().as_ref(),
+        CUSTOM_FIELD_TYPES,
+        true,
+    );
+    let folder_id = nullish_digits(&mut input, "folderId").flatten();
+    let description = input
+        .nullish_string("description", crate::handlers::input::Str::max(usize::MAX))
+        .flatten();
+    if input.failed() {
+        return Err(invalid());
+    }
+    custom_field::create(
+        &ctx.api.db,
+        ctx.workspace_id,
+        custom_field::CreateCustomField {
+            name: name.unwrap_or_default(),
+            r#type: kind.unwrap_or_default(),
+            description,
+            folder_id,
+        },
+    )
+    .await
+    .map(|_| Value::Null)
+    .map_err(action_fail)
 }

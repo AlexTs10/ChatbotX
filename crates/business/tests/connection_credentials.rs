@@ -342,3 +342,64 @@ async fn a_needs_reauth_connection_is_inactive_for_verify_and_refresh() {
         );
     }
 }
+
+/// Own (Q.D2c, `integrations.connectAiProvider`): `allowUpdate` replaces the
+/// key and the model config of a connected provider in place (same
+/// satellite and connection); without it the repeat is 409.
+#[tokio::test]
+async fn allow_update_replaces_key_and_config_in_place() {
+    let db = two_workspaces().await;
+    let provider = ai_key_provider("claude").expect("provider");
+    let upstream = Script::with(vec![ok(), ok(), ok()]);
+    let cfg = |key: &str, model: &str| {
+        config(
+            json!({ "apiKey": key, "model": model, "temperature": 0.4, "maxOutputTokens": 1024 }),
+        )
+    };
+    let first = credentials::connect_ai_key_with(
+        &db,
+        &upstream,
+        WS,
+        provider,
+        &cfg("sk-1", "m1"),
+        None,
+        true,
+    )
+    .await
+    .expect("connect");
+    let error = connect_ai_key(&db, &upstream, WS, provider, &cfg("sk-x", "m1"), None)
+        .await
+        .expect_err("strict");
+    assert_eq!(error.code(), Some("connectionAlreadyConnected"));
+    let second = credentials::connect_ai_key_with(
+        &db,
+        &upstream,
+        WS,
+        provider,
+        &cfg("sk-2", "m2"),
+        None,
+        true,
+    )
+    .await
+    .expect("upsert");
+    assert_eq!(
+        (second.id, second.integration_id),
+        (first.id, first.integration_id)
+    );
+    let row = chatbotx_business::integration_ai_provider::find(&db, "claude", WS)
+        .await
+        .expect("find")
+        .expect("row");
+    assert_eq!(
+        (row.model.as_str(), row.temperature, row.max_output_tokens),
+        ("m2", Some(0.4), 1024)
+    );
+    assert_eq!(
+        upstream.seen()[2]
+            .headers
+            .iter()
+            .find(|(k, _)| k == "x-api-key")
+            .map(|(_, v)| v.as_str()),
+        Some("sk-2")
+    );
+}

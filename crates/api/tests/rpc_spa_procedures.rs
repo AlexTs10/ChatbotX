@@ -410,6 +410,520 @@ async fn ai_procedures_and_actions_are_wired() {
 }
 
 #[tokio::test]
+async fn inbox_screen_lists_and_acts_on_conversations() {
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId") VALUES (601, 'Site', 'webchat', 's', ?1)"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "InboxTeam" ("id", "workspaceId", "name") VALUES (602, ?1, 'Support')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "InboxTeamMember" ("id", "inboxTeamId", "userId") VALUES (603, 602, ?1)"#,
+            params![ADMIN_ID],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId", "lastActivityAt") VALUES (604, ?1, ?2, ?3)"#,
+            params![WS, CONTACT_ID, NOW_MS],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed inbox");
+
+    let (status, inboxes, _) = post(
+        &router,
+        "inboxesAPI/listAllInboxesAuthenticatedAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "includes": ["integration"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inboxes}");
+    assert_eq!(inboxes["data"][0]["id"], "601");
+    assert_eq!(inboxes["data"][0]["integrationWebchat"], Value::Null);
+
+    let (status, teams, _) = post(
+        &router,
+        "inboxTeamsAPI/listInboxTeamsAuthenticatedAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{teams}");
+    assert_eq!(
+        teams["data"][0]["inboxTeamMembers"][0]["user"]["id"],
+        ADMIN_ID.to_string()
+    );
+
+    // The builder list has no assigned-only filter: the agent sees it too.
+    let list = |token: &'static str| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                "conversationsAPI/listConversationsByPOSTAuthenticatedAPI",
+                token,
+                json!({ "workspaceId": ws() }),
+            )
+            .await
+        }
+    };
+    let (status, page, _) = list("assignedtoken").await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["data"][0]["id"], "604");
+
+    let (status, _, _) = post(
+        &router,
+        "actions/assignConversationAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "contactIds": [CONTACT_ID.to_string()], "assignedId": "t_602" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, page, _) = list("admintoken").await;
+    assert_eq!(page["data"][0]["assignedInboxTeamId"], "602");
+
+    let (status, read, _) = post(
+        &router,
+        "actions/readConversationAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), "604"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(read["agentLastReadAt"].is_string(), "{read}");
+
+    let (status, _, _) = post(
+        &router,
+        "actions/archiveConversationAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "ids": ["604"] }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, page, _) = list("admintoken").await;
+    assert_eq!(page["data"], json!([]));
+}
+
+#[tokio::test]
+async fn contact_notes_keep_the_author_and_the_member_scope() {
+    let (router, _) = router().await;
+    let note = |token: &'static str, name: &'static str, input: Value| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                token,
+                json!({ "workspaceId": ws(), "args": [ws(), CONTACT_ID.to_string(), input] }),
+            )
+            .await
+        }
+    };
+    let (status, created, _) = note(
+        "admintoken",
+        "createContactNoteAction",
+        json!({ "text": " hi " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["text"], "hi");
+    assert_eq!(created["createdById"], ADMIN_ID.to_string());
+
+    // An assigned-only agent without the conversation: 404, no write.
+    let (status, error, _) = note(
+        "assignedtoken",
+        "createContactNoteAction",
+        json!({ "text": "x" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(error["message"], "Contact not found");
+
+    let id = created["id"].as_str().unwrap().to_string();
+    let (status, edited, _) = note(
+        "admintoken",
+        "editContactNoteAction",
+        json!({ "contactNoteId": id, "text": "edited" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(edited["text"], "edited");
+    for _ in 0..2 {
+        // The second delete is a no-op, not an error.
+        let (status, _, _) = note(
+            "admintoken",
+            "deleteContactNoteAction",
+            json!({ "contactNoteId": id }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+}
+
+#[tokio::test]
+async fn tag_actions_create_validate_and_delete() {
+    let (router, _) = router().await;
+    let act = |name: &'static str, args: Value| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": args }),
+            )
+            .await
+        }
+    };
+    let (status, tag, _) = act("createTagAction", json!([ws(), { "name": "promo" }])).await;
+    assert_eq!(status, StatusCode::OK, "{tag}");
+    assert_eq!(tag["name"], "promo");
+
+    // A duplicate name is a form error on `name` (next-safe-action shape).
+    let (status, error, _) = act("createTagAction", json!([ws(), { "name": "promo" }])).await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(
+        error["data"]["validationErrors"]["name"]["_errors"][0].is_string(),
+        "{error}"
+    );
+
+    let id = tag["id"].as_str().unwrap().to_string();
+    let (status, _, _) = act("deleteTagAction", json!([ws(), { "ids": [id.clone()] }])).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, json, _) = post(
+        &router,
+        "tagsAPI/privateListWorkspaceTagsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert!(
+        json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["id"] != id),
+        "{json}"
+    );
+}
+
+#[tokio::test]
+async fn media_library_folders_round_trip_through_the_actions() {
+    let (router, _) = router().await;
+    let act = |name: &'static str, input: Value| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": [ws(), input] }),
+            )
+            .await
+        }
+    };
+    let (status, folder, _) =
+        act("createMediaLibraryFolderAction", json!({ "name": "Logos" })).await;
+    assert_eq!(status, StatusCode::OK, "{folder}");
+    let id = folder["id"].as_str().unwrap().to_string();
+    let (status, _, _) = act(
+        "renameMediaLibraryFolderAction",
+        json!({ "folderId": id, "name": "Brand" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, json, _) = post(
+        &router,
+        "mediaLibraryAPI/listMediaLibraryFolders",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"][0]["name"], "Brand");
+    assert_eq!(json["data"][0]["fileCount"], 0);
+
+    let (status, json, _) = post(
+        &router,
+        "mediaLibraryAPI/listMediaLibraryFiles",
+        "admintoken",
+        json!({ "workspaceId": ws(), "folderId": id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"], json!([]));
+
+    // A bare id input (`zodBigintAsString()`).
+    let (status, _, _) = act("deleteMediaLibraryFolderAction", json!(id)).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn flow_step_option_lists_answer_for_a_member() {
+    let (router, _) = router().await;
+    for (path, data) in [
+        ("pipelinesAPI/privateListPipelineOptionsAPI", "/data"),
+        ("refLinksAPI/listRefLinkOptionsAuthenticatedAPI", "/data"),
+        ("placesNearMeAPI/listPlaceCategoryOptionsAPI", "/data"),
+        ("questionnairesAPI/listQuestionnairesForFlowAPI", ""),
+    ] {
+        let (status, json, _) =
+            post(&router, path, "admintoken", json!({ "workspaceId": ws() })).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {json}");
+        assert!(json.pointer(data).unwrap().is_array(), "{path}: {json}");
+    }
+    let (status, json, _) = post(
+        &router,
+        "pipelinesAPI/privateGetPipelineAPI",
+        "assignedtoken",
+        json!({ "workspaceId": ws(), "pipelineId": "999" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+}
+
+#[tokio::test]
+async fn settings_integration_queries_hide_secrets_and_disconnect() {
+    let (router, db) = router().await;
+    let query = |name: &str, args: Value| {
+        let router = router.clone();
+        let name = name.to_string();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": args }),
+            )
+            .await
+        }
+    };
+    let (status, has, _) = query("hasAIIntegration", json!([ws()])).await;
+    assert_eq!((status, has), (StatusCode::OK, json!(false)));
+    let (_, none, _) = query("findIntegrationClaude", json!([{ "workspaceId": ws() }])).await;
+    assert_eq!(none, Value::Null);
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (601, ?1, 'claude')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "IntegrationClaude" ("id", "workspaceId", "integrationId", "auth", "model", "maxOutputTokens")
+               VALUES (602, ?1, 601, '{"authType":"secretText","secretText":"sk-secret"}', 'claude-sonnet-4-6', 1000)"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId", "status")
+               VALUES (603, 'bot', 'telegram', '42', ?1, 'connected')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "IntegrationTelegram" ("id", "auth", "botId", "name", "workspaceId", "inboxId")
+               VALUES (604, '{"authType":"secretText","secretText":"42:bot-token"}', '42', 'bot', ?1, 603)"#,
+            params![WS],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed integrations");
+    let (_, has, _) = query("hasAIIntegration", json!([ws()])).await;
+    assert_eq!(has, json!(true));
+    let (_, claude, _) = query("findIntegrationClaude", json!([{ "workspaceId": ws() }])).await;
+    assert_eq!(claude["id"], "602");
+    assert_eq!(claude["auth"], json!({ "authType": "secretText" }));
+    let (_, telegrams, _) = query(
+        "listIntegrationTelegrams",
+        json!([{ "where": { "workspaceId": ws() } }]),
+    )
+    .await;
+    assert_eq!(telegrams["data"][0]["botId"], "42");
+    assert_eq!(
+        telegrams["data"][0]["auth"],
+        json!({ "authType": "secretText" })
+    );
+    // No `Connection` row: the legacy disconnect deletes the integration.
+    let (status, _, _) = query("disconnectClaudeAction", json!([ws()])).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, none, _) = query("findIntegrationClaude", json!([{ "workspaceId": ws() }])).await;
+    assert_eq!(none, Value::Null);
+}
+
+/// `actions/<name>` as the admin in [`WS`].
+async fn act(router: &axum::Router, token: &str, name: &str, args: Value) -> (StatusCode, Value) {
+    let (status, json, _) = post(
+        router,
+        &format!("actions/{name}"),
+        token,
+        json!({ "workspaceId": ws(), "args": args }),
+    )
+    .await;
+    (status, json)
+}
+
+#[tokio::test]
+async fn api_channel_update_rotate_and_delete() {
+    let (router, db) = router().await;
+    let (status, created) = act(
+        &router,
+        "admintoken",
+        "createApiAction",
+        json!([{ "name": "Bot", "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let row = |db: Arc<Db>| async move {
+        db.read(|conn| {
+            Ok(conn.query_row(
+                r#"SELECT "id", "name", "tokenHash" FROM "IntegrationApi" WHERE "workspaceId" = ?1"#,
+                params![WS],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+            )?)
+        })
+        .await
+    };
+    let (id, _, hash) = row(Arc::clone(&db)).await.unwrap();
+    let id_arg = id.to_string();
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateApiAction",
+        json!([ws(), id_arg, { "name": "Renamed" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(row(Arc::clone(&db)).await.unwrap().1, "Renamed");
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "rotateApiTokenAction",
+        json!([ws(), id_arg]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert!(out["token"].as_str().is_some_and(|t| !t.is_empty()));
+    assert_ne!(row(Arc::clone(&db)).await.unwrap().2, hash);
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteApiAction",
+        json!([ws(), id_arg]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert!(row(Arc::clone(&db)).await.is_err());
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "rotateApiTokenAction",
+        json!([ws(), id_arg]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn ecommerce_pages_need_the_permission_and_list_categories() {
+    let (router, _) = router().await;
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createProductCategoryAction",
+        json!([ws(), { "name": "Drinks" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, page) = act(
+        &router,
+        "admintoken",
+        "productCategoriesPage",
+        json!([ws(), {}]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["data"][0]["name"], "Drinks");
+    assert_eq!(page["parent"], Value::Null);
+    let (status, page) = act(&router, "admintoken", "productsPage", json!([ws(), {}])).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["categories"][0]["name"], "Drinks");
+    // An agent without `ecommerce` gets the layout's 404.
+    let (status, _) = act(
+        &router,
+        "assignedtoken",
+        "productCategoriesPage",
+        json!([ws(), {}]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn pipelines_and_questionnaires_round_trip() {
+    let (router, _) = router().await;
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createPipelineAction",
+        json!([ws(), { "type": "opportunity", "name": "Sales" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, list, _) = post(
+        &router,
+        "pipelinesAPI/privateListPipelinesAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list[0]["pipeline"]["name"], "Sales");
+    assert_eq!(list[0]["itemsCount"], 0);
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createQuestionnaireAction",
+        json!([ws(), { "name": " Survey " }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "renameQuestionnaireAction",
+        json!([ws(), id, { "name": "Poll" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, list) = act(
+        &router,
+        "admintoken",
+        "listQuestionnaires",
+        json!([{ "page": 1, "perPage": 10, "sort": [{ "id": "name", "desc": false }] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["data"][0]["name"], "Poll");
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteQuestionnairesAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, list) = act(&router, "admintoken", "listQuestionnaires", json!([{}])).await;
+    assert_eq!(list["data"], json!([]));
+}
+
+#[tokio::test]
 async fn email_topic_procedures_and_actions_are_wired() {
     let (router, _) = router().await;
     let (status, topic, _) = post(
@@ -630,4 +1144,194 @@ async fn sequence_actions_are_wired() {
     let (status, missing) = call("actions/deleteSequenceAction", json!([ws(), id])).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
     assert_eq!(missing["message"], "Sequence not found");
+}
+
+// --- Port of `create-automated-response-action.test.ts` and
+// `automated-response-type-scope.test.ts` (Q.D5). Adapted: the mocked
+// service calls become stored `AutomatedResponse` rows.
+
+async fn keyword_rule(db: &Db, id: i64, kind: &'static str) {
+    db.write(move |tx| {
+        tx.execute(
+            r#"INSERT INTO "AutomatedResponse" ("id", "workspaceId", "keywords", "status", "text", "type")
+               VALUES (?1, ?2, '["x"]', 0, 'old', ?3)"#,
+            params![id, WS, kind],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+async fn keyword_text(db: &Db, sql: &'static str, id: i64) -> Option<String> {
+    db.read(move |conn| {
+        Ok(conn
+            .query_row(sql, [id], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten())
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn create_automated_response_delegates_with_the_resolved_workspace_and_type() {
+    let (router, db) = router().await;
+    let (status, out, _) = post(
+        &router,
+        "actions/createAutomatedResponseAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), "outbound", {
+            "text": "hello", "flowId": null, "folderId": null, "keywords": [{ "value": "hi" }],
+        }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let row = keyword_text(
+        &db,
+        r#"SELECT json_array("workspaceId", "type", "text", "keywords") FROM "AutomatedResponse" WHERE "workspaceId" = ?1"#,
+        WS,
+    )
+    .await;
+    assert_eq!(
+        row.as_deref(),
+        Some(r#"[201,"outbound","hello","[\"hi\"]"]"#)
+    );
+}
+
+// Adapted: the mocked "Flow not found" validation exception becomes the
+// service's own flowId validation (a text and a flow at once).
+#[tokio::test]
+async fn create_automated_response_maps_a_field_scoped_validation_exception_to_a_form_field_error()
+{
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "Flow" ("id", "workspaceId", "name") VALUES (901, ?1, 'f')"#,
+            [WS],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let (status, out, _) = post(
+        &router,
+        "actions/createAutomatedResponseAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), "inbound", {
+            "text": "hello", "flowId": "901", "keywords": [{ "value": "hi" }],
+        }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    assert_eq!(
+        out["data"]["validationErrors"],
+        json!({
+            "_errors": ["Validation Exception"],
+            "flowId": { "_errors": ["A keyword replies with either text or a flow, not both"] },
+        })
+    );
+}
+
+#[tokio::test]
+async fn update_automated_response_passes_the_callers_type_through_to_the_service() {
+    let (router, db) = router().await;
+    keyword_rule(&db, 911, "outbound").await;
+    let update = |kind: &str| {
+        json!({ "workspaceId": ws(), "args": [ws(), "911", kind, {
+            "text": "hi", "flowId": null, "folderId": null, "keywords": [{ "value": "x" }],
+        }] })
+    };
+    let (status, _, _) = post(
+        &router,
+        "actions/updateAutomatedResponseAction",
+        "admintoken",
+        update("inbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, out, _) = post(
+        &router,
+        "actions/updateAutomatedResponseAction",
+        "admintoken",
+        update("outbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        keyword_text(
+            &db,
+            r#"SELECT "text" FROM "AutomatedResponse" WHERE "id" = ?1"#,
+            911
+        )
+        .await
+        .as_deref(),
+        Some("hi")
+    );
+}
+
+#[tokio::test]
+async fn enable_automated_response_scopes_both_find_or_fail_and_set_status_by_the_callers_type() {
+    let (router, db) = router().await;
+    keyword_rule(&db, 912, "outbound").await;
+    let enable = |kind: &str| json!({ "workspaceId": ws(), "args": [ws(), "912", kind, { "status": true }] });
+    let (status, _, _) = post(
+        &router,
+        "actions/enableAutomatedResponseAction",
+        "admintoken",
+        enable("inbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, out, _) = post(
+        &router,
+        "actions/enableAutomatedResponseAction",
+        "admintoken",
+        enable("outbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        keyword_text(
+            &db,
+            r#"SELECT CAST("status" AS TEXT) FROM "AutomatedResponse" WHERE "id" = ?1"#,
+            912
+        )
+        .await
+        .as_deref(),
+        Some("1")
+    );
+}
+
+#[tokio::test]
+async fn delete_automated_response_action_scopes_the_bulk_delete_by_the_callers_type() {
+    let (router, db) = router().await;
+    keyword_rule(&db, 913, "outbound").await;
+    keyword_rule(&db, 914, "outbound").await;
+    let delete = |kind: &str| json!({ "workspaceId": ws(), "args": [ws(), kind, { "ids": ["913", "914"] }] });
+    let count = || {
+        keyword_text(
+            &db,
+            r#"SELECT CAST(count(*) AS TEXT) FROM "AutomatedResponse" WHERE "workspaceId" = ?1"#,
+            WS,
+        )
+    };
+    let (status, _, _) = post(
+        &router,
+        "actions/deleteAutomatedResponseAction",
+        "admintoken",
+        delete("inbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(count().await.as_deref(), Some("2"));
+    let (status, _, _) = post(
+        &router,
+        "actions/deleteAutomatedResponseAction",
+        "admintoken",
+        delete("outbound"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(count().await.as_deref(), Some("0"));
 }

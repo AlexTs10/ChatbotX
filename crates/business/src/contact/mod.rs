@@ -5,6 +5,7 @@
 pub mod avatar;
 pub mod bulk_tag_stats;
 pub mod create;
+pub mod extract;
 pub mod filter_fields;
 pub mod filter_value_labels;
 pub mod identifier;

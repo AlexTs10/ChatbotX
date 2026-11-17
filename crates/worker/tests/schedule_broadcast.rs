@@ -197,6 +197,11 @@ async fn fixture() -> Fixture {
         channels: chatbotx_worker::Channels::new(),
         app_url: "http://app.test".into(),
         variables: None,
+        ai: Arc::new(chatbotx_worker::ai::Ai::live()),
+        files: None,
+        webhook_http: Arc::new(chatbotx_worker::webhook::RecordingWebhookHttp::default()),
+        events: None,
+        push: None,
     };
     Fixture {
         db,
@@ -1224,16 +1229,17 @@ async fn the_draft_purge_keeps_the_rows_of_a_non_draft() {
 
 // --- schedule worker routing ---
 
-/// schedule/worker.ts switch: an unported schedule job fails unrecoverably.
+/// schedule/worker.ts switch: an unported schedule job logs a warning and
+/// completes (the original's `default` branch).
 #[tokio::test]
-async fn an_unported_schedule_job_is_refused() {
+async fn an_unported_schedule_job_completes() {
     let f = fixture().await;
     let out = chatbotx_worker::schedule::handle(
         f.deps.clone(),
         job(json!({ "type": "scanAppointmentReminders", "data": {} })),
     )
     .await;
-    assert!(matches!(out, Err(JobError::Unrecoverable(_))));
+    assert_eq!(out.unwrap(), Value::Null);
     let out = chatbotx_worker::schedule::handle(
         f.deps.clone(),
         job(json!({ "type": "reconcileBroadcasts", "data": {} })),

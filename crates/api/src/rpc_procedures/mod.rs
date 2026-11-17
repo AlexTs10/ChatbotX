@@ -8,12 +8,20 @@
 //! returns the same JSON as a ported public `/v1` route, the handler runs that
 //! route ([`public`]) after the member checks, so both stay one code path.
 
+mod automated_responses;
 mod broadcasts;
 mod contacts;
+mod conversations;
 mod email_topics;
 mod flows;
+mod inboxes;
+pub(crate) mod integrations;
 mod lists;
+mod media_library;
+mod pipelines;
+mod products;
 mod sequences;
+mod tools;
 mod triggers;
 mod workspaces;
 
@@ -119,6 +127,24 @@ pub async fn procedure(
     if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
         return Some(outcome.map(|output| output.json));
     }
+    if let Some(outcome) = inboxes::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = pipelines::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = media_library::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = conversations::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = products::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = tools::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 
@@ -142,16 +168,27 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = workspaces::action(ctx, name, &args).await {
         return Some(outcome);
     }
+    if let Some(outcome) = integrations::auth_action(ctx, name, &args).await {
+        return Some(outcome);
+    }
     // Every other action is a `workspaceActionClient` one.
     if context.workspace.is_none() {
         return match name {
             n if broadcasts::ACTIONS.contains(&n)
                 || contacts::ACTIONS.contains(&n)
                 || flows::ACTIONS.contains(&n)
+                || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str())
+                || conversations::ACTIONS.contains(&n)
+                || lists::ACTIONS.contains(&n)
+                || media_library::ACTIONS.contains(&n)
+                || products::ACTIONS.contains(&n)
+                || pipelines::ACTIONS.contains(&n)
+                || tools::ACTIONS.contains(&n)
+                || integrations::ACTIONS.contains(&n)
                 || email_topics::ACTIONS.contains(&n)
                 || sequences::ACTIONS.contains(&n)
                 || triggers::ACTIONS.contains(&n)
-                || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str()) =>
+                || automated_responses::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -164,7 +201,28 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = contacts::action(ctx, name, &args).await {
         return Some(outcome);
     }
+    if let Some(outcome) = conversations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = media_library::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = lists::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = flows::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = integrations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = products::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = pipelines::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = tools::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = email_topics::action(ctx, name, &args).await {
@@ -174,6 +232,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = triggers::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = automated_responses::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

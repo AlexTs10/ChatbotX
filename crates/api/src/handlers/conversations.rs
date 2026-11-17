@@ -183,7 +183,7 @@ fn contact_inbox_json(row: &ContactInboxWithInbox, compact: bool) -> Value {
 }
 
 /// One `listConversationsItemResource` / `findConversationResponse.data`.
-fn conversation_json(state: &ApiState, row: &ConversationRow, compact: bool) -> Value {
+pub(crate) fn conversation_json(state: &ApiState, row: &ConversationRow, compact: bool) -> Value {
     let c = &row.conversation;
     let contact = row.contact.as_ref().map_or(Value::Null, |contact| {
         let mut out = super::contacts::contact_json(contact);
@@ -258,7 +258,7 @@ fn conversation_json(state: &ApiState, row: &ConversationRow, compact: bool) -> 
 // ---- cursor ---------------------------------------------------------------
 
 /// `encodeCursor({ lastActivityAt, id })` (base64 JSON).
-fn encode_cursor(cursor: &ListCursor) -> String {
+pub(crate) fn encode_cursor(cursor: &ListCursor) -> String {
     let body = json!({
         "lastActivityAt": cursor.last_activity_at.map(chatbotx_db::repo::iso),
         "id": cursor.id.to_string(),
@@ -330,7 +330,7 @@ fn opt_enum(input: &mut Input, name: &str, options: &[&str]) -> Option<String> {
     input.enum_at(&key(name), value.as_ref(), options, false)
 }
 
-fn list_input(input: &mut Input, workspace_id: i64) -> (ListInput, bool) {
+pub(crate) fn list_input(input: &mut Input, workspace_id: i64) -> (ListInput, bool) {
     let bot_category = opt_enum(input, "botCategory", &["bot", "human", "all"]);
     let assigned_id = input.opt_string("assignedId", Str::default());
     let channel = opt_enum(input, "channel", CHANNELS);
@@ -377,6 +377,7 @@ fn list_input(input: &mut Input, workspace_id: i64) -> (ListInput, bool) {
             contact_filter,
             per_page,
             cursor: cursor.as_deref().and_then(decode_cursor),
+            hide_email_and_phone: false,
         },
         compact,
     )
@@ -415,7 +416,7 @@ fn assigned_id(input: &mut Input) -> Option<Option<String>> {
 
 // ---- handlers -------------------------------------------------------------
 
-pub(super) async fn queue_jobs(state: &ApiState, job: Option<actions::ActionJob>) {
+pub(crate) async fn queue_jobs(state: &ApiState, job: Option<actions::ActionJob>) {
     let (Some(jobs), Some(job)) = (&state.jobs, job) else {
         return;
     };

@@ -144,6 +144,23 @@ pub struct OutgoingContact {
     pub source_conversation_id: Option<String>,
 }
 
+impl OutgoingContact {
+    /// `sourceConversationId: resolveChannelConversationId(conversation)`.
+    pub fn new(
+        contact_inbox: &ContactInbox,
+        conversation: &chatbotx_db::repo::models::Conversation,
+    ) -> OutgoingContact {
+        OutgoingContact {
+            contact_inbox: contact_inbox.clone(),
+            source_conversation_id:
+                chatbotx_db::repo::partials::channel::resolve_channel_conversation_id(
+                    conversation.source_id.as_deref(),
+                    conversation.additional_attributes.as_ref().map(|a| &a.0),
+                ),
+        }
+    }
+}
+
 /// `sendMessage` / `sendComment` / `sendPrivateReply` data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SendMessage {
@@ -184,6 +201,112 @@ pub struct SendTyping {
     pub message_source_id: Option<String>,
 }
 
+/// `IncomingAttachment`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct IncomingAttachment {
+    pub source_id: Option<String>,
+    /// `image` | `video` | `audio` | `gif` | `file`.
+    pub file_type: String,
+    pub mime_type: String,
+    /// The stored object key, or the provider URL of a lazy attachment.
+    pub origin_path: String,
+    pub size: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub name: Option<String>,
+    /// A photo message (re-encoded in the background; files keep their bytes).
+    pub is_photo_message: bool,
+}
+
+/// `IncomingMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IncomingMessage {
+    pub source_id: Option<String>,
+    /// `incoming` | `outgoing`.
+    pub message_type: String,
+    /// `text` | `location`.
+    pub content_type: String,
+    pub text: Option<String>,
+    pub content_attributes: Option<Value>,
+    pub attachments: Vec<IncomingAttachment>,
+    /// `message` (default) | `comment`.
+    pub kind: Option<String>,
+    pub parent_id: Option<String>,
+}
+
+impl IncomingMessage {
+    pub fn incoming(source_id: Option<String>) -> IncomingMessage {
+        IncomingMessage {
+            source_id,
+            message_type: "incoming".into(),
+            content_type: "text".into(),
+            text: None,
+            content_attributes: None,
+            attachments: Vec::new(),
+            kind: None,
+            parent_id: None,
+        }
+    }
+}
+
+/// `IncomingContact`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct IncomingContact {
+    pub source_id: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub email: Option<String>,
+    pub phone_number: Option<String>,
+    pub avatar: Option<String>,
+    pub locale: Option<String>,
+    pub language: Option<String>,
+    /// WhatsApp BSUID.
+    pub source_user_id: Option<String>,
+    pub source_parent_user_id: Option<String>,
+    pub source_username: Option<String>,
+    /// Keys the conversation (a post id for comments); `None` for DMs.
+    pub source_conversation_id: Option<String>,
+    /// The channel's own DM id (TikTok `conversation_id`), stored on
+    /// `Conversation.additionalAttributes.channelConversationId`.
+    pub channel_conversation_id: Option<String>,
+}
+
+/// `ReceivedMessageResult`: what a channel parser read from one webhook
+/// event. JSON fields keep the SDK shapes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Received {
+    pub message: Option<IncomingMessage>,
+    pub contact: IncomingContact,
+    pub postback_action: Option<String>,
+    pub quick_reply_action: Option<String>,
+    pub r#ref: Option<String>,
+    pub template_flow_token: Option<String>,
+    pub referral: Option<Value>,
+    pub referral_source: Option<String>,
+    pub button_title: Option<String>,
+    /// `echoOrigin` (`thirdParty` | `firstParty`).
+    pub echo_origin: Option<String>,
+    /// `ThreadControlReceiveInfo` (`{ delivery, ownerRole, ... }`).
+    pub thread_control: Option<Value>,
+    /// `IncomingCommerceEvent`.
+    pub commerce: Option<Value>,
+}
+
+/// `messageStatus` data of a channel (`handleMessageStatus` result).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MessageStatus {
+    /// The provider message id (the stored `sourceId`).
+    pub message_id: String,
+    /// `delivered` | `read` | `failed`.
+    pub status: String,
+    /// Unix ms.
+    pub timestamp: Option<i64>,
+    /// The provider error text of a `failed` status.
+    pub error: Option<String>,
+    /// The recipient (phone / BSUID) the status is for.
+    pub recipient: Option<String>,
+}
+
 fn missing<T: Send + 'static>(
     ctx: &ChannelCtx,
     group: &str,
@@ -204,6 +327,28 @@ pub trait Channel: Send + Sync {
     /// worker does not record "Last Delivered" at send time).
     fn delivery_receipts(&self) -> bool {
         false
+    }
+
+    /// `message.receiveMessage`: parse one queued webhook payload
+    /// (`IntegrationJobReceiveMessage.data.payload`). `None` = nothing to
+    /// store (the job is dropped).
+    fn receive_message(
+        &self,
+        ctx: &ChannelCtx,
+        payload: Value,
+    ) -> BoxFuture<'static, ChannelResult<Option<Received>>> {
+        let _ = payload;
+        missing(ctx, "message", "receiveMessage")
+    }
+
+    /// `message.handleMessageStatus`: parse one queued status payload.
+    fn message_status(
+        &self,
+        ctx: &ChannelCtx,
+        payload: Value,
+    ) -> BoxFuture<'static, ChannelResult<Option<MessageStatus>>> {
+        let _ = payload;
+        missing(ctx, "message", "handleMessageStatus")
     }
 
     /// `message.sendMessage`.
@@ -300,6 +445,18 @@ pub trait Channel: Send + Sync {
         let _ = data;
         missing(ctx, "conversation", "sendTyping")
     }
+
+    /// `conversation.agentMarkAsRead` (the "Seen" receipt; `message_source_id`
+    /// = WhatsApp wamid of the newest incoming message).
+    fn agent_mark_as_read(
+        &self,
+        ctx: &ChannelCtx,
+        contact: OutgoingContact,
+        message_source_id: Option<String>,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let _ = (contact, message_source_id);
+        missing(ctx, "conversation", "agentMarkAsRead")
+    }
 }
 
 /// The registered channels (`allIntegrations` / `getRegisteredIntegration`).
@@ -318,6 +475,16 @@ impl Channels {
         Channels::new()
             .with("webchat", Arc::new(crate::channels::webchat::Webchat))
             .with("api", Arc::new(crate::channels::api::ApiChannel::new()))
+            .with(
+                "whatsapp",
+                Arc::new(crate::channels::whatsapp::Whatsapp::new()),
+            )
+            .with(
+                "telegram",
+                Arc::new(crate::channels::telegram::Telegram::new()),
+            )
+            .with("tiktok", Arc::new(crate::channels::tiktok::Tiktok::new()))
+            .with("zalo", Arc::new(crate::channels::zalo::Zalo::new()))
     }
 
     pub fn with(mut self, channel: &str, implementation: Arc<dyn Channel>) -> Channels {
@@ -386,6 +553,94 @@ impl Channels {
         };
         Ok((channel, ctx))
     }
+}
+
+/// The inbox an inbound job is for (`identifyInboxAndIntegrationAuthFromIdentifier`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct InboundInbox {
+    pub inbox_id: i64,
+    pub workspace_id: i64,
+    /// `Inbox.channel`.
+    pub channel: String,
+}
+
+impl Channels {
+    /// `identifyInboxAndIntegrationAuthFromIdentifier`: the channel, the
+    /// integration row found by the channel's identifier column and its
+    /// inbox. `Ok(None)` = no such integration (`IntegrationNotFoundError`).
+    pub async fn resolve_by_identifier(
+        &self,
+        db: &Arc<Db>,
+        realtime: Option<&Realtime>,
+        integration_type: &str,
+        identifier: &str,
+    ) -> ChannelResult<Option<(Arc<dyn Channel>, ChannelCtx, InboundInbox)>> {
+        let Some(channel) = self.get(integration_type) else {
+            return Err(SendFailure::Other(format!(
+                "Unsupported integration: {integration_type}"
+            )));
+        };
+        let Some((table, column)) = identifier_column(integration_type) else {
+            return Err(SendFailure::Other(format!(
+                "Unsupported integration: {integration_type}"
+            )));
+        };
+        let identifier = identifier.to_owned();
+        let row = db
+            .read(move |conn| {
+                Ok(conn
+                    .query_row(
+                        &format!(
+                            r#"SELECT t."id", t."auth", i."id", i."workspaceId", i."channel"
+                               FROM "{table}" t JOIN "Inbox" i ON i."id" = t."inboxId"
+                               WHERE t."{column}" = ?1 LIMIT 1"#
+                        ),
+                        params![identifier],
+                        |r| {
+                            Ok((
+                                r.get::<_, i64>(0)?,
+                                r.get::<_, String>(1)?,
+                                InboundInbox {
+                                    inbox_id: r.get(2)?,
+                                    workspace_id: r.get(3)?,
+                                    channel: r.get(4)?,
+                                },
+                            ))
+                        },
+                    )
+                    .optional()?)
+            })
+            .await
+            .map_err(|e| SendFailure::Other(e.to_string()))?;
+        Ok(row.map(|(integration_id, auth, inbox)| {
+            let ctx = ChannelCtx {
+                workspace_id: inbox.workspace_id,
+                channel: integration_type.to_owned(),
+                inbox_id: inbox.inbox_id,
+                integration_id,
+                auth: serde_json::from_str(&auth).unwrap_or(Value::Null),
+                db: Arc::clone(db),
+                realtime: realtime.cloned(),
+            };
+            (channel, ctx, inbox)
+        }))
+    }
+}
+
+/// The identifier column of each channel's integration table.
+fn identifier_column(channel: &str) -> Option<(&'static str, &'static str)> {
+    Some(match channel {
+        "whatsapp" => ("IntegrationWhatsapp", "phoneNumberId"),
+        "telegram" => ("IntegrationTelegram", "botId"),
+        "messenger" => ("IntegrationMessenger", "pageId"),
+        "zalo" => ("IntegrationZalo", "oaId"),
+        "instagram" | "instagramFacebook" => ("IntegrationInstagram", "igId"),
+        "tiktok" => ("IntegrationTiktok", "openId"),
+        "threads" => ("IntegrationThreads", "threadsUserId"),
+        "webchat" => ("IntegrationWebchat", "inboxId"),
+        "api" => ("IntegrationApi", "inboxId"),
+        _ => return None,
+    })
 }
 
 /// `integrationTableByChannel` (+ Threads).
@@ -609,6 +864,17 @@ impl Channel for RecordingChannel {
             "messageSourceId": data.message_source_id,
         });
         self.record("sendTyping", value, |_| ())
+    }
+
+    fn agent_mark_as_read(
+        &self,
+        _ctx: &ChannelCtx,
+        contact: OutgoingContact,
+        message_source_id: Option<String>,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let value =
+            json!({ "contact": contact_json(&contact), "messageSourceId": message_source_id });
+        self.record("agentMarkAsRead", value, |_| ())
     }
 }
 

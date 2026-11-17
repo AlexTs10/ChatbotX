@@ -453,7 +453,7 @@ async fn an_unported_procedure_passes_auth_and_answers_not_ported() {
     let (status, body) = call(
         &fixture,
         "GET",
-        "/rpc/pollsAPI/listPollsAPI",
+        "/rpc/leaderboardsAPI/listLeaderboardOptionsAPI",
         Some("membertoken"),
         json!({ "workspaceId": WORKSPACE_ID.to_string() }),
     )
@@ -464,10 +464,11 @@ async fn an_unported_procedure_passes_auth_and_answers_not_ported() {
         rpc_error("NOT_FOUND", 404, "Operation not ported yet")
     );
     // A procedure without a workspace mapper skips the membership check.
+    // (Q.D11 ported `listMyWorkspacesAPI`; another unmapped procedure stands in.)
     let (status, body) = call(
         &fixture,
-        "GET",
-        "/rpc/workspacesAPI/listMyWorkspacesAPI",
+        "POST",
+        "/rpc/integrationWhatsappAPIs/listWhatsappPhoneNumbersInternalAPI",
         Some("membertoken"),
         json!({ "workspaceId": FOREIGN_WORKSPACE_ID.to_string() }),
     )

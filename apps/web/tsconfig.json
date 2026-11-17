@@ -8,6 +8,7 @@
     "allowArbitraryExtensions": true,
     "noImplicitAny": false,
     "paths": {
+      "@chatbotx.io/analytics": ["./src/shims/analytics.d.ts"],
       "@chatbotx.io/analytics-nextjs/provider/analytics-api-context": [
         "./src/shims/analytics-api-context.d.ts"
       ],

@@ -1,10 +1,13 @@
-//! `packages/business/src/trigger/service.ts` (Q.D5): the CRUD part. The
-//! worker part (executions, run limiter, stats) is the trigger worker slice.
+//! `packages/business/src/trigger/service.ts` (Q.D5): the CRUD part and the
+//! datetime-sweep execution surface (`listActiveWithConditionsPage`,
+//! `listExecutedPairs`, `recordExecution`, `purgeExecutionsOlderThan`). The
+//! run limiter, contact history and daily stats live in the trigger queue
+//! (`chatbotx_worker::trigger`, Q.W2).
 //! No template locks / delete guards (P3.6-D1 rule). The trigger condition
 //! cache is the 5 s RAM cache of `events::cache` (no explicit refresh).
 
 use chatbotx_db::Db;
-use chatbotx_db::repo::models::Trigger;
+use chatbotx_db::repo::models::{Condition, Trigger};
 use chatbotx_db::repo::trigger::{
     ListTriggersInput, TriggerWithConditions, find_with_conditions, list_paginated_with_conditions,
 };
@@ -308,4 +311,121 @@ pub fn trigger_json(found: &TriggerWithConditions) -> Value {
         })
         .collect();
     out
+}
+
+/// One row of [`list_active_with_conditions_page`]
+/// (`ActiveTriggerWithConditionsPageRow`): the trigger, its conditions and
+/// the workspace timezone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveTriggerPageRow {
+    pub trigger: TriggerWithConditions,
+    pub timezone: String,
+}
+
+/// `listActiveWithConditionsPage`: every active trigger, keyset-paginated
+/// by id; `next_cursor` only when the page is full.
+pub async fn list_active_with_conditions_page(
+    db: &Db,
+    cursor: Option<i64>,
+    limit: i64,
+) -> Result<(Vec<ActiveTriggerPageRow>, Option<i64>)> {
+    tx::read(db, move |conn| {
+        let triggers: Vec<Trigger> = repo::find_many(
+            conn,
+            r#"WHERE "active" = 1 AND (?1 IS NULL OR "id" > ?1) ORDER BY "id" LIMIT ?2"#,
+            &[&cursor, &limit],
+        )?;
+        let mut rows = Vec::with_capacity(triggers.len());
+        for trigger in triggers {
+            let conditions: Vec<Condition> = repo::find_many(
+                conn,
+                r#"WHERE "triggerId" = ?1 ORDER BY "id""#,
+                &[&trigger.id],
+            )?;
+            let timezone: String = conn
+                .query_row(
+                    r#"SELECT "timezone" FROM "Workspace" WHERE "id" = ?1"#,
+                    [trigger.workspace_id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(repo_err)?
+                .filter(|tz: &String| !tz.is_empty())
+                .unwrap_or_else(|| "UTC".to_string());
+            rows.push(ActiveTriggerPageRow {
+                trigger: TriggerWithConditions {
+                    trigger,
+                    conditions,
+                },
+                timezone,
+            });
+        }
+        let next_cursor = (rows.len() as i64 == limit)
+            .then(|| rows.last().map(|r| r.trigger.trigger.id))
+            .flatten();
+        Ok((rows, next_cursor))
+    })
+    .await
+}
+
+/// `listExecutedPairs`: the stored `(triggerId, contactId)` executions;
+/// no query when either list is empty.
+pub async fn list_executed_pairs(
+    db: &Db,
+    trigger_ids: Vec<i64>,
+    contact_ids: Vec<i64>,
+) -> Result<Vec<(i64, i64)>> {
+    if trigger_ids.is_empty() || contact_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    tx::read(db, move |conn| {
+        let triggers = serde_json::to_string(&trigger_ids).unwrap_or_default();
+        let contacts = serde_json::to_string(&contact_ids).unwrap_or_default();
+        let mut stmt = conn
+            .prepare_cached(
+                r#"SELECT "triggerId", "contactId" FROM "TriggerExecution"
+                   WHERE "triggerId" IN (SELECT value FROM json_each(?1))
+                     AND "contactId" IN (SELECT value FROM json_each(?2))"#,
+            )
+            .map_err(repo_err)?;
+        let pairs = stmt
+            .query_map(params![triggers, contacts], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(repo_err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(repo_err)?;
+        Ok(pairs)
+    })
+    .await
+}
+
+/// `recordExecution`: one datetime execution row (insert, conflict ignored).
+pub async fn record_execution(
+    db: &Db,
+    trigger_id: i64,
+    contact_id: i64,
+    workspace_id: i64,
+) -> Result<()> {
+    tx::write(db, move |tx| {
+        let now = now_ms();
+        tx.execute(
+            r#"INSERT INTO "TriggerExecution" ("id", "triggerId", "contactId", "workspaceId", "createdAt", "executedAt")
+               VALUES (?1, ?2, ?3, ?4, ?5, ?5) ON CONFLICT DO NOTHING"#,
+            params![new_id(), trigger_id, contact_id, workspace_id, now],
+        )
+        .map_err(repo_err)?;
+        Ok(())
+    })
+    .await
+}
+
+/// `purgeExecutionsOlderThan`: the number of rows deleted.
+pub async fn purge_executions_older_than(db: &Db, cutoff_ms: i64) -> Result<usize> {
+    tx::write(db, move |tx| {
+        tx.execute(
+            r#"DELETE FROM "TriggerExecution" WHERE "executedAt" < ?1"#,
+            [cutoff_ms],
+        )
+        .map_err(repo_err)
+    })
+    .await
 }

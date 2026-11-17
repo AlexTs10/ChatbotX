@@ -10,7 +10,11 @@ pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
 pub mod broadcasts;
+pub mod capabilities;
+pub mod channel_integrations;
 pub mod channels;
+pub mod comment_automations;
+pub mod connect_sessions;
 pub mod connections;
 pub mod contact_custom_fields;
 pub mod contact_exports;
@@ -19,6 +23,7 @@ pub mod contact_imports;
 pub mod contact_inboxes;
 pub mod contact_messages;
 pub mod contact_notes;
+pub mod contact_scans;
 pub mod contact_sequences;
 pub mod contacts;
 pub mod contacts_bulk;
@@ -26,8 +31,10 @@ pub mod conversations;
 pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod email_topics;
+pub mod error_logs;
 pub mod flows;
 pub mod folders;
+pub mod inbox_teams;
 pub mod input;
 pub mod integrations_ai;
 pub mod keywords;
@@ -51,6 +58,7 @@ pub mod tags;
 pub mod triggers;
 pub mod webchats;
 pub mod workspace_members;
+pub mod workspace_settings;
 
 use std::sync::Arc;
 
@@ -90,6 +98,15 @@ pub struct ApiState {
     /// The file store (`uploader`; presigned uploads, imports, exports).
     /// `None` = off (tests that need no files).
     pub files: Option<Arc<chatbotx_files::Uploader>>,
+    /// `NEXT_PUBLIC_EDITION` (read once at start; tests set it).
+    pub edition: chatbotx_business::keys::Edition,
+    /// `encryptUtils` (`ENCRYPTION_KEY*`, read once at start); `None` = the
+    /// keys are unset (credential writes fail).
+    pub encryption: Option<Arc<chatbotx_core::encryption::Encryption>>,
+    /// `LICENSE_KEY` (read once at start; tests set it).
+    pub license_token: Option<String>,
+    /// The license verification keys (`LICENSE_PUBLIC_KEYS`; tests set them).
+    pub license_keys: &'static [(&'static str, &'static str)],
     /// The query embedding client (`aiFiles.search`); the provider APIs by
     /// default.
     pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
@@ -107,8 +124,75 @@ impl ApiState {
             events: EventBus::new(),
             audit: AuditService::disabled(),
             files: None,
+            edition: chatbotx_business::keys::Edition::from_env(),
+            encryption: chatbotx_core::encryption::Keys::from_env(&chatbotx_core::env::ProcessEnv)
+                .ok()
+                .map(|keys| Arc::new(chatbotx_core::encryption::Encryption::new(keys))),
+            license_token: std::env::var("LICENSE_KEY").ok(),
+            license_keys: chatbotx_business::license::LICENSE_PUBLIC_KEYS,
             embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
         }
+    }
+
+    /// Verifies `token` with `keys` instead of `LICENSE_KEY` and the built-in keys.
+    pub fn with_license(
+        mut self,
+        token: Option<String>,
+        keys: &'static [(&'static str, &'static str)],
+    ) -> ApiState {
+        self.license_token = token;
+        self.license_keys = keys;
+        self
+    }
+
+    /// `assertEnterpriseFeatures()`: 403 `enterpriseFeatureRequired` unless
+    /// the edition is not community and the license is valid or in grace.
+    pub async fn assert_enterprise_features(&self) -> chatbotx_business::Result<()> {
+        let entitled = !self.edition.is_community()
+            && chatbotx_business::license::resolve_license(
+                &self.db,
+                self.license_token.as_deref(),
+                self.edition,
+                self.license_keys,
+                chatbotx_core::js::now_ms(),
+            )
+            .await
+            .state
+            .is_entitled();
+        if entitled {
+            Ok(())
+        } else {
+            Err(chatbotx_business::license::enterprise_feature_required())
+        }
+    }
+
+    /// Uses the `ENCRYPTION_KEY` keys of the process env (a missing or
+    /// invalid key is logged; OAuth connects are then not configured).
+    pub fn with_encryption_from_env(self) -> ApiState {
+        match chatbotx_core::encryption::Keys::from_env(&chatbotx_core::env::ProcessEnv) {
+            Ok(keys) => {
+                self.with_encryption(Arc::new(chatbotx_core::encryption::Encryption::new(keys)))
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "OAuth connects off: ENCRYPTION_KEY is not valid");
+                self
+            }
+        }
+    }
+
+    /// Uses `encryption` (`encryptUtils`).
+    pub fn with_encryption(
+        mut self,
+        encryption: Arc<chatbotx_core::encryption::Encryption>,
+    ) -> ApiState {
+        self.encryption = Some(encryption);
+        self
+    }
+
+    /// Runs the services as this edition.
+    pub fn with_edition(mut self, edition: chatbotx_business::keys::Edition) -> ApiState {
+        self.edition = edition;
+        self
     }
 
     /// Embeds search queries with `embedder`.
@@ -453,7 +537,13 @@ async fn route(
     call: Call<'_>,
     principal: &Principal,
 ) -> Option<Response> {
-    let reply = if connections::ROUTES.contains(&route_id) {
+    let reply = if contact_scans::ROUTES.contains(&route_id) {
+        contact_scans::handle(state, route_id, call).await
+    } else if comment_automations::ROUTES.contains(&route_id) {
+        comment_automations::handle(state, route_id, call).await
+    } else if connect_sessions::ROUTES.contains(&route_id) {
+        connect_sessions::handle(state, route_id, call, principal).await
+    } else if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
     } else if integrations_ai::ROUTES.contains(&route_id) {
         integrations_ai::handle(state, route_id, call).await
@@ -511,6 +601,8 @@ async fn route(
         flows::handle(state, route_id, call).await
     } else if webchats::ROUTES.contains(&route_id) {
         webchats::handle(state, route_id, call).await
+    } else if channel_integrations::ROUTES.contains(&route_id) {
+        channel_integrations::handle(state, route_id, call).await
     } else if places::ROUTES.contains(&route_id) {
         places::handle(state, route_id, call).await
     } else if open_hours::ROUTES.contains(&route_id) {
@@ -547,6 +639,14 @@ async fn route(
         contact_imports::handle(state, route_id, call).await
     } else if contact_filter::ROUTES.contains(&route_id) {
         contact_filter::handle(state, route_id, call).await
+    } else if workspace_settings::ROUTES.contains(&route_id) {
+        workspace_settings::handle(state, route_id, call).await
+    } else if error_logs::ROUTES.contains(&route_id) {
+        error_logs::handle(state, route_id, call).await
+    } else if inbox_teams::ROUTES.contains(&route_id) {
+        inbox_teams::handle(state, route_id, call).await
+    } else if capabilities::ROUTES.contains(&route_id) {
+        capabilities::handle(state, route_id, call).await
     } else {
         return None;
     };

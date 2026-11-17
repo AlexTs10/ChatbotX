@@ -72,3 +72,16 @@ export function loadPage<T>(
 ): Promise<T> {
   return client.pages[name](input) as Promise<T>
 }
+
+/**
+ * A builder server-component query (`features/*\/queries`) that runs in the
+ * Rust server as `POST /rpc/actions/<name>`; `workspaceId` makes the `/rpc`
+ * membership check run (`assertCurrentUserCanAccessChatbot`).
+ */
+export function serverQuery<T>(
+  name: string,
+  workspaceId: string,
+  args: unknown[],
+): Promise<T> {
+  return client.actions[name]({ args, workspaceId }) as Promise<T>
+}

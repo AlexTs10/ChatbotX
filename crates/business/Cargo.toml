@@ -19,6 +19,8 @@ chatbotx-files = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
+# Concurrent error-log emits (`Promise.allSettled`, Q.D11).
+futures = { workspace = true }
 # Q.D1i product imports: XLSX (a ZIP of XML parts) read / template write; same versions as the lockfile.
 flate2 = "1.1"
 quick-xml = "0.41"

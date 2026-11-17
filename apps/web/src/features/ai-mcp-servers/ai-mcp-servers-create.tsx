@@ -1,0 +1,365 @@
+"use client"
+
+import { aiMcpServerAuthTypes } from "@chatbotx.io/database/partials"
+import { CheckboxGroupField } from "@chatbotx.io/ui/components/form/checkbox-field"
+import { InputField } from "@chatbotx.io/ui/components/form/input-field"
+import { SelectField } from "@chatbotx.io/ui/components/form/select-field"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@chatbotx.io/ui/components/ui/dialog"
+import { Form } from "@chatbotx.io/ui/components/ui/form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useHookFormAction } from "@next-safe-action/adapter-react-hook-form/hooks"
+import { Loader2Icon, MoveRightIcon, PlusIcon, TrashIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { useEffect, useMemo, useState } from "react"
+import { useFieldArray, useWatch } from "react-hook-form"
+import { toast } from "sonner"
+import { PlainTextEditorField } from "@/components/tiptap/plain-text-editor-field"
+import { useIsLocked } from "@/features/templates/components/lock-context"
+import { client } from "@/lib/orpc/orpc"
+import { createAIMcpServerAction } from "./actions/create-ai-mcp-server.action"
+import { updateAIMcpServerAction } from "./actions/update-ai-mcp-server.action"
+import { createPrivateAIMcpServerRequest } from "./schema/action"
+import type { AIMcpServerResource } from "./schema/resource"
+
+type ToolInfo = { name: string; description?: string }
+
+type AIMcpServersCreateProps = {
+  workspaceId: string
+  onSuccess?: () => void
+  mode?: "create" | "edit"
+  initialData?: AIMcpServerResource
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+export function AIMcpServersCreate({
+  workspaceId,
+  onSuccess,
+  mode = "create",
+  initialData,
+  open: controlledOpen,
+  onOpenChange: setControlledOpen,
+}: AIMcpServersCreateProps) {
+  const t = useTranslations()
+  const tLocked = useTranslations("templates.locked")
+  const isLocked = useIsLocked(mode === "edit" ? initialData?.id : undefined)
+
+  const [isMcpServerValidating, setIsMcpServerValidating] =
+    useState<boolean>(false)
+  const [isMcpServerValidated, setIsMcpServerValidated] =
+    useState<boolean>(false)
+  const [allTools, setAllTools] = useState<ToolInfo[]>([])
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isOpen = controlledOpen ?? internalOpen
+  const setIsOpen = setControlledOpen ?? setInternalOpen
+
+  const authOptions = useMemo(
+    () => [
+      {
+        label: t("messages.none"),
+        value: aiMcpServerAuthTypes.enum.none,
+      },
+      {
+        label: t("fields.authType.token"),
+        value: aiMcpServerAuthTypes.enum.token,
+      },
+      {
+        label: t("fields.authType.headers"),
+        value: aiMcpServerAuthTypes.enum.header,
+      },
+    ],
+    [t],
+  )
+
+  const action =
+    mode === "edit" && initialData
+      ? updateAIMcpServerAction.bind(null, workspaceId, initialData.id)
+      : createAIMcpServerAction.bind(null, workspaceId)
+
+  const { form, handleSubmitWithAction, resetFormAndAction } =
+    useHookFormAction(action, zodResolver(createPrivateAIMcpServerRequest), {
+      formProps: {
+        mode: "onChange",
+        defaultValues: {
+          url: "",
+          name: "",
+          auth: {
+            type: aiMcpServerAuthTypes.enum.none,
+          },
+          availableTools: {},
+          selectedTools: [],
+        },
+      },
+      actionProps: {
+        onSuccess: () => {
+          toast.success(
+            t(
+              `messages.${mode === "edit" ? "updatedSuccess" : "createdSuccess"}`,
+              {
+                feature: t("fields.mcpServer.label"),
+              },
+            ),
+          )
+          resetFormAndAction()
+          setAllTools([])
+          setIsMcpServerValidated(false)
+          setIsOpen(false)
+          onSuccess?.()
+        },
+        onError: ({ error }) => {
+          if (error.serverError) {
+            toast.error(error.serverError)
+          }
+        },
+      },
+      errorMapProps: {},
+    })
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    if (initialData) {
+      const availableTools =
+        (initialData.availableTools as Record<
+          string,
+          { description?: string }
+        >) ?? {}
+      const selectedTools = initialData.selectedTools?.length
+        ? initialData.selectedTools
+        : Object.keys(availableTools)
+
+      form.reset({
+        url: initialData.url,
+        name: initialData.name,
+        auth: initialData.auth ?? { type: aiMcpServerAuthTypes.enum.none },
+        availableTools,
+        selectedTools,
+      })
+
+      setAllTools(
+        Object.keys(availableTools).map((key) => ({
+          name: key,
+          description: availableTools[key]?.description,
+        })),
+      )
+      setIsMcpServerValidated(true)
+      return
+    }
+
+    form.reset({
+      url: "",
+      name: "",
+      auth: {
+        type: aiMcpServerAuthTypes.enum.none,
+      },
+      availableTools: {},
+      selectedTools: [],
+    })
+    setAllTools([])
+    setIsMcpServerValidated(false)
+  }, [isOpen, initialData, form])
+
+  const validateMcpServer = async () => {
+    try {
+      setIsMcpServerValidating(true)
+      const data =
+        (await client.aiMcpServerAPIs.validateAIMcpServerAuthenticatedAPI(
+          { ...form.getValues(), workspaceId },
+          { signal: AbortSignal.timeout(15_000) },
+        )) as Record<string, { description?: string }>
+
+      const toolInfos = Object.keys(data).map((key) => ({
+        name: key,
+        description: data[key]?.description,
+      }))
+      const toolNames = toolInfos.map((t) => t.name)
+      setIsMcpServerValidated(toolInfos.length > 0)
+      setAllTools(toolInfos)
+      form.setValue("availableTools", data)
+      form.setValue("selectedTools", toolNames)
+    } catch (error) {
+      setAllTools([])
+      setIsMcpServerValidated(false)
+      form.setValue("availableTools", {})
+      form.setValue("selectedTools", [])
+      toast.error(
+        error instanceof Error ? error.message : t("messages.unknownError"),
+      )
+    } finally {
+      setIsMcpServerValidating(false)
+    }
+  }
+
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: "auth.headers",
+  })
+
+  const title =
+    mode === "edit"
+      ? t("messages.editFeature", { feature: t("fields.mcpServer.label") })
+      : t("messages.createFeature", { feature: t("fields.mcpServer.label") })
+
+  const trigger = controlledOpen === undefined && (
+    <DialogTrigger
+      render={
+        <Button>
+          <PlusIcon className="h-4 w-4" />
+          {t("actions.createFeature", {
+            feature: t("fields.mcpServer.label"),
+          })}
+        </Button>
+      }
+    />
+  )
+
+  const watchAuthType = useWatch({
+    name: "auth.type",
+    control: form.control,
+  })
+  return (
+    <Dialog onOpenChange={setIsOpen} open={isOpen}>
+      {trigger}
+      <DialogContent className="max-h-[90vh] w-[92vw] overflow-y-auto sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+
+        <Form {...form}>
+          <form
+            className="flex flex-col space-y-6 py-4"
+            onSubmit={handleSubmitWithAction}
+          >
+            {isLocked && (
+              <div
+                className="rounded-md border bg-muted px-4 py-2 text-muted-foreground text-sm"
+                data-testid="template-locked-banner"
+                role="status"
+              >
+                {tLocked("editorBanner")}
+              </div>
+            )}
+            <fieldset className="m-0 min-w-0 border-0 p-0" disabled={isLocked}>
+              <InputField label={t("fields.name.label")} name="name" required />
+            </fieldset>
+            <InputField label={t("fields.url.label")} name="url" required />
+            <SelectField
+              label={t("fields.auth.label")}
+              name="auth.type"
+              options={authOptions}
+              required
+            />
+            {watchAuthType === aiMcpServerAuthTypes.enum.token && (
+              <PlainTextEditorField
+                botFieldsOnly
+                editorClassName="tiptap-plain-text-inline"
+                includeBotFieldVariables
+                inline
+                label={t("fields.authToken.label")}
+                name="auth.token"
+                required
+                showEmojiPicker={false}
+              />
+            )}
+            {watchAuthType === aiMcpServerAuthTypes.enum.header && fields && (
+              <div className="flex flex-col gap-2">
+                {fields.map((field, index) => (
+                  <div className="flex items-start gap-2" key={field.id}>
+                    <InputField
+                      name={`auth.headers.${index}.header`}
+                      placeholder="Header"
+                    />
+                    <MoveRightIcon className="size-10" />
+                    <InputField
+                      name={`auth.headers.${index}.value`}
+                      placeholder="Value"
+                    />
+                    <Button
+                      onClick={() => remove(index)}
+                      size="icon"
+                      variant="outline"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  onClick={() => append({ header: "", value: "" })}
+                  variant="secondary"
+                >
+                  <PlusIcon className="h-4 w-4" />
+                  {t("actions.addMore")}
+                </Button>
+              </div>
+            )}
+            {allTools.length > 0 && (
+              <fieldset
+                className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0"
+                disabled={isLocked}
+              >
+                <div className="font-medium text-sm leading-none">
+                  {t("aiMcpServers.tools.label")}
+                </div>
+                <CheckboxGroupField
+                  name="selectedTools"
+                  options={allTools.map((tool) => ({
+                    description: tool.description,
+                    label: tool.name,
+                    value: tool.name,
+                  }))}
+                />
+              </fieldset>
+            )}
+            <DialogFooter className="gap-2 sm:space-x-0">
+              <DialogClose
+                render={
+                  <Button variant="outline">{t("actions.cancel")}</Button>
+                }
+              />
+
+              <Button
+                disabled={
+                  isMcpServerValidating ||
+                  !form.formState.isValid ||
+                  form.formState.isSubmitting
+                }
+                onClick={async () => validateMcpServer()}
+                type="button"
+              >
+                {isMcpServerValidating && (
+                  <Loader2Icon className="animate-spin" />
+                )}
+                {t("actions.getTools")}
+              </Button>
+
+              {isMcpServerValidated && (
+                <Button
+                  disabled={
+                    !form.formState.isValid || form.formState.isSubmitting
+                  }
+                  type="submit"
+                >
+                  {form.formState.isSubmitting && (
+                    <Loader2Icon className="animate-spin" />
+                  )}
+                  {t("actions.confirm")}
+                </Button>
+              )}
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  )
+}

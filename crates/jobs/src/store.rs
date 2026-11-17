@@ -2746,3 +2746,65 @@ mod tests {
         );
     }
 }
+
+/// One failed job of the jobs admin page (the Bull Board "failed" tab).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FailedJob {
+    pub job_id: String,
+    pub name: String,
+    pub failed_reason: Option<String>,
+    pub attempts_made: i64,
+    pub finished_at_ms: Option<i64>,
+}
+
+impl JobStore {
+    /// The newest failed jobs of `queue` (Bull Board's failed list).
+    pub async fn failed_jobs(
+        &self,
+        queue: QueueName,
+        limit: u32,
+    ) -> Result<Vec<FailedJob>, JobsError> {
+        Ok(self
+            .read_retry(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT job_id, name, failed_reason, attempts_made, finished_at_ms FROM jobs \
+                     WHERE queue = ?1 AND state = 'failed' ORDER BY finished_at_ms DESC, id DESC LIMIT ?2",
+                )?;
+                let rows = stmt
+                    .query_map(params![queue.as_str(), limit], |r| {
+                        Ok(FailedJob {
+                            job_id: r.get(0)?,
+                            name: r.get(1)?,
+                            failed_reason: r.get(2)?,
+                            attempts_made: r.get(3)?,
+                            finished_at_ms: r.get(4)?,
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await?)
+    }
+
+    /// `job.retry("failed")`: a failed job goes back to waiting (attempts
+    /// kept, the failure and finish time cleared). `false` when the job is
+    /// not failed.
+    pub async fn retry_failed(&self, queue: QueueName, job_id: &str) -> Result<bool, JobsError> {
+        let job_id = job_id.to_owned();
+        let retried = self
+            .write_retry(move |tx| {
+                let seq = bump(tx, "ready_seq", 1)?;
+                Ok(tx.execute(
+                    "UPDATE jobs SET state = 'waiting', ready_seq = ?3, failed_reason = NULL, stacktrace = NULL, \
+                     finished_at_ms = NULL, processed_at_ms = NULL, keep_count = NULL, keep_until_ms = NULL \
+                     WHERE queue = ?1 AND job_id = ?2 AND state = 'failed'",
+                    params![queue.as_str(), job_id, seq],
+                )? > 0)
+            })
+            .await?;
+        if retried {
+            self.wake(queue);
+        }
+        Ok(retried)
+    }
+}

@@ -2,6 +2,8 @@
 
 mod config;
 mod web;
+mod webchat;
+mod whatsapp;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -217,7 +219,12 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     let realtime = match rt_config {
         Some(rt_config) => Some(start_realtime(&shared, rt_config, Arc::clone(&jobs) as _)),
         None => {
-            tracing::info!("realtime gateway off: REALTIME_BROADCAST_SECRET is not set");
+            // The inbox needs the gateway: without it the realtime token
+            // procedure answers 500 and the SPA keeps retrying.
+            tracing::warn!(
+                "realtime gateway off: REALTIME_BROADCAST_SECRET is not set (32+ chars); \
+                 the inbox gets no live updates and realtime connect-token calls answer 500"
+            );
             None
         }
     };
@@ -233,8 +240,30 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         mailer: mailer(),
         now_ms,
     });
+    // `assertLicenseAtStartup`: enterprise / cloud need a valid or lapsed license.
+    let edition_now = chatbotx_business::keys::Edition::from_env();
+    let license = chatbotx_business::license::license_status(&shared.db, edition_now).await;
+    if let chatbotx_business::license::StartupCheck::Refuse { .. } =
+        chatbotx_business::license::startup_check(edition_now, &license)
+    {
+        std::process::exit(1);
+    }
     chatbotx_api::session::bootstrap_platform_admin_at_startup(&shared.db).await;
-    let (shutdown, exited) = start_workers(&shared, &jobs, realtime.as_ref())?;
+    // The events worker (SQLite event bus): the error-log writer and the
+    // `message:failed` listeners.
+    let (buses, event_worker) = match chatbotx_worker::events::start(Arc::clone(&shared.db)).await {
+        Ok((buses, worker)) => (Some(buses), Some(worker)),
+        Err(err) => {
+            tracing::error!(err = %err, "events worker did not start");
+            (None, None)
+        }
+    };
+    let (shutdown, exited, worker_deps) = start_workers(&shared, &jobs, realtime.as_ref(), buses)?;
+    let jobs_admin =
+        chatbotx_api::jobs_admin::router(Arc::new(chatbotx_api::jobs_admin::JobsAdminState {
+            auth: Arc::clone(&sessions),
+            store: Arc::clone(&jobs),
+        }));
     let api = Arc::new(api_state(&shared, Arc::clone(&jobs), realtime.as_ref()));
     let mut app = chatbotx_api::router()
         .merge(chatbotx_api::spa::spa_router(Arc::clone(&sessions)))
@@ -248,6 +277,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         .merge(chatbotx_api::session::oauth_router(Arc::new(
             chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,
         )))
+        .merge(jobs_admin)
         .merge(chatbotx_api::presigned_upload::router(
             chatbotx_api::presigned_upload::UploadState {
                 auth: Arc::clone(&sessions),
@@ -256,11 +286,24 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             },
         ))
         .merge(chatbotx_api::session::auth_router(sessions))
-        .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)));
+        .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
+        .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
     app = app.merge(chatbotx_api::files::router(Arc::clone(&shared.files)));
+    app = app.merge(webchat::router(
+        Arc::clone(&api),
+        worker_deps,
+        env_or("BETTER_AUTH_SECRET", ""),
+        realtime_secret(),
+    ));
+    app = app.merge(whatsapp::router(
+        Arc::clone(&shared.db),
+        Arc::clone(&jobs) as _,
+        is_cloud(),
+        &app_url(),
+    ));
     // The public API and the SPA (`apps/web/dist`, P4) answer every path no
     // route matched: the SPA takes the GETs outside the API paths.
     let public_api = chatbotx_api::routes::public_api_router_with(auth, api);
@@ -272,6 +315,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             app = app.merge(public_api);
         }
     }
+    let app = app.layer(axum::middleware::from_fn(whatsapp::zalo_verifier_rewrite));
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
     tracing::info!(
         addr = %listener.local_addr()?,
@@ -282,6 +326,9 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(realtime, shutdown, exited))
         .await?;
+    if let Some(worker) = event_worker {
+        worker.stop().await;
+    }
     tracing::info!("shutdown complete");
     Ok(())
 }
@@ -318,7 +365,7 @@ fn api_state(
     if let Some(realtime) = realtime {
         state = state.with_realtime(realtime.clone());
     }
-    state
+    state.with_encryption_from_env()
 }
 
 /// `NEXT_PUBLIC_BUILDER_URL` without a trailing `/`.
@@ -338,7 +385,8 @@ fn start_workers(
     shared: &Shared,
     jobs: &Arc<chatbotx_jobs::JobStore>,
     realtime: Option<&Realtime>,
-) -> std::io::Result<(Arc<Shutdown>, Exited)> {
+    events: Option<chatbotx_jobs::events::EventBuses>,
+) -> std::io::Result<(Arc<Shutdown>, Exited, chatbotx_worker::Deps)> {
     let (exit_tx, exited) = tokio::sync::watch::channel(None);
     let timeout_ms = std::env::var("WORKER_SHUTDOWN_TIMEOUT_MS")
         .ok()
@@ -356,24 +404,59 @@ fn start_workers(
         Arc::clone(&shutdown),
         Arc::new(chatbotx_jobs::SystemClock),
     );
+    let media = chatbotx_worker::channels::whatsapp_media::WhatsappMedia {
+        files: Arc::clone(&shared.files),
+        storage_url: chatbotx_business::contact::avatar::TenantUrls::from_app_url(
+            &app_url(),
+            std::env::var("NEXT_PUBLIC_STORAGE_URL").ok().as_deref(),
+        )
+        .storage_url,
+    };
     let deps = chatbotx_worker::Deps {
         db: Arc::clone(&shared.db),
         jobs: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::Enqueuer>,
         waiter: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::JobWaiter>,
         realtime: realtime.cloned(),
-        channels: chatbotx_worker::Channels::builtin(),
+        channels: chatbotx_worker::Channels::builtin()
+            .with(
+                "whatsapp",
+                Arc::new(
+                    chatbotx_worker::channels::whatsapp::Whatsapp::new().with_media(media.clone()),
+                ),
+            )
+            .with(
+                "telegram",
+                Arc::new(
+                    chatbotx_worker::channels::telegram::Telegram::new().with_media(media.clone()),
+                ),
+            )
+            .with(
+                "zalo",
+                Arc::new(chatbotx_worker::channels::zalo::Zalo::new().with_media(media)),
+            ),
         app_url: app_url(),
         variables: chatbotx_worker::variables::VariableDeps::from_env(
             Arc::clone(&shared.db),
             app_url(),
         )
         .map(Arc::new),
+        ai: Arc::new(chatbotx_worker::ai::Ai::live()),
+        files: Some(Arc::clone(&shared.files)),
+        webhook_http: Arc::new(chatbotx_worker::webhook::LiveWebhookHttp::default()),
+        events,
+        push: chatbotx_worker::notification::ExpoPush::from_env()
+            .map(|p| Arc::new(p) as Arc<dyn chatbotx_worker::notification::PushSender>),
     };
     chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
     chatbotx_worker::sequence::start(&runtime, &deps, &shutdown).map_err(std::io::Error::other)?;
     let store = Arc::clone(jobs);
-    tokio::spawn(async move { chatbotx_worker::schedule::register_schedules(&*store).await });
-    Ok((shutdown, exited))
+    tokio::spawn(async move {
+        match chatbotx_worker::schedule::register(&*store).await {
+            Ok(()) => tracing::info!("Schedules registered"),
+            Err(err) => tracing::error!(err = %err, "Error registering schedules"),
+        }
+    });
+    Ok((shutdown, exited, deps))
 }
 
 /// Resolve on SIGINT (Ctrl-C) or SIGTERM, after the worker drain and the

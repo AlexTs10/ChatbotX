@@ -29,7 +29,7 @@ pub use ctx::{BoxError, JobCtx, JobError, has_exhausted_attempts, is_final_attem
 pub use enqueue::{BoxFuture, Enqueuer, JobsError};
 pub use options::{AddResult, Backoff, Dedup, JobOptions, NewJob, Retention};
 pub use queue::{QueueGroup, QueueName, queue_group};
-pub use store::{JobInspector, JobRecord, JobState, JobStore};
+pub use store::{FailedJob, JobInspector, JobRecord, JobState, JobStore};
 pub use wait::{CompletionRegistry, JobEvent, JobWaiter, WaitError, WaitTarget};
 
 /// A fresh file database in the temp dir (WAL, no shared-cache table

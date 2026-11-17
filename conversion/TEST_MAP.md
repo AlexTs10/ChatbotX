@@ -88,7 +88,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/auth-redirect.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
 | `apps/builder/__tests__/auth-route.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
 | `apps/builder/__tests__/authorize-workspace-access.test.ts` | C | tbd | todo | Workspaces; builder server code |
-| `apps/builder/__tests__/automated-response-type-scope.test.ts` | C | tbd | todo | Automated responses and keywords; builder server code |
+| `apps/builder/__tests__/automated-response-type-scope.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs` | ported | Automated responses and keywords; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/automation-public-scope.test.ts` | C | tbd | todo | Automated responses and keywords; builder server code |
 | `apps/builder/__tests__/booking-webview-pages.test.tsx` | C | tbd | todo | Appointments and booking; builder server code |
 | `apps/builder/__tests__/bot-block-conditions-schema.test.ts` | B | - | todo | Bot fields; builder node-env, client logic |
@@ -286,7 +286,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/create-admin-workspace-action.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/create-ai-file-action.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files); builder server code |
 | `apps/builder/__tests__/create-api.action.test.ts` | C | tbd | todo | API channel integration (custom channels); builder server code |
-| `apps/builder/__tests__/create-automated-response-action.test.ts` | C | tbd | todo | Automated responses and keywords; builder server code |
+| `apps/builder/__tests__/create-automated-response-action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs` | ported | Automated responses and keywords; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/create-broadcast-defaults-send-limit.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/create-broadcast-flow-filter.test.ts` | C | tbd | todo | Broadcasts (incl. recurring); builder server code |
 | `apps/builder/__tests__/create-broadcast-form-plan-limit.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
@@ -904,7 +904,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/voip-attach-microphone.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/webchat-brand-color.test.ts` | B | - | todo | Webchat channel; builder jsdom |
 | `apps/builder/__tests__/webchat-browser-profile-fields.test.ts` | B | - | todo | Webchat channel; builder jsdom |
-| `apps/builder/__tests__/webchat-guest-session.test.ts` | C | tbd | todo | Webchat channel; builder server code |
+| `apps/builder/__tests__/webchat-guest-session.test.ts` | C | `crates/business/src/integration_webchat.rs` | passing | Webchat channel; builder server code |
 | `apps/builder/__tests__/webchat-message-schema.test.ts` | B | - | todo | Webchat channel; builder jsdom |
 | `apps/builder/__tests__/webchat-mutation-schema.test.ts` | B | - | todo | Webchat channel; builder jsdom |
 | `apps/builder/__tests__/webchat-page-guards.test.tsx` | C | tbd | todo | Webchat channel; builder server code |
@@ -1792,16 +1792,16 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/sendgrid/__tests__/integration.test.ts` | C | tbd | todo | SendGrid integration |
 | `integrations/shopify/__tests__/lib.test.ts` | C | tbd | todo | Shopify integration |
 | `integrations/smtp/__tests__/smoke.test.ts` | C | tbd | todo | SMTP email integration |
-| `integrations/telegram/__tests__/call-phone-number-button.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/connection.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/copy-text-button.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/error-mapper.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/group-routing.test.ts` | C | tbd | todo | Telegram channel |
+| `integrations/telegram/__tests__/call-phone-number-button.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/connection.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/copy-text-button.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/error-mapper.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/group-routing.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
 | `integrations/telegram/__tests__/incoming-image-compression.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/incoming-message.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/quick-replies-attachment.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/send-message-multiple-images.test.ts` | C | tbd | todo | Telegram channel |
-| `integrations/telegram/__tests__/send-multiple-images.test.ts` | C | tbd | todo | Telegram channel |
+| `integrations/telegram/__tests__/incoming-message.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel; parse half (download cases use the shared WhatsApp copy, tested there) |
+| `integrations/telegram/__tests__/quick-replies-attachment.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/send-message-multiple-images.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
+| `integrations/telegram/__tests__/send-multiple-images.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
 | `integrations/threads/__tests__/auth.test.ts` | C | tbd | todo | Threads channel |
 | `integrations/threads/__tests__/comment-moderation.test.ts` | C | tbd | todo | Threads channel |
 | `integrations/threads/__tests__/comment.test.ts` | C | tbd | todo | Threads channel |
@@ -1813,19 +1813,19 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/tiktok/__tests__/call-phone-number-button.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/callback.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/comment-api.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/comment-webhook.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/comment-webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/connection-oauth.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/direct-reply-api.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/high-intent-comment-webhook.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/incoming-message.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/high-intent-comment-webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
+| `integrations/tiktok/__tests__/incoming-message.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/message-send.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/outgoing-comment.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/private-reply.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/quick-replies-attachment.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/quick-replies-attachment.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/scopes.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/send-multiple-images.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/subscribe-webhooks.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/webhook.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/webchat/__tests__/integration.test.ts` | C | tbd | todo | Webchat channel |
 | `integrations/webchat/__tests__/realtime-sender.test.ts` | C | tbd | todo | Webchat channel |
 | `integrations/webchat/__tests__/send-flow-step.test.ts` | C | tbd | todo | Webchat channel |
@@ -1897,21 +1897,21 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/whatsapp/__tests__/webhook-hmac.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/woocommerce/__tests__/client.test.ts` | C | tbd | todo | WooCommerce integration |
 | `integrations/woocommerce/__tests__/lib.test.ts` | C | tbd | todo | WooCommerce integration |
-| `integrations/zalo/__tests__/call-phone-number-button.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/call-phone-number-button.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/connection-oauth.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/error-mapper.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/follow-event.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/error-mapper.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
+| `integrations/zalo/__tests__/follow-event.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/get-user-profile.test.ts` | C | tbd | todo | Zalo channel |
 | `integrations/zalo/__tests__/google-click-partner-samples.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/incoming-gif-message.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/incoming-gif-message.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/incoming-image-compression.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/outgoing-message-ids.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/outgoing-text-with-images.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/quick-replies-attachment.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/outgoing-message-ids.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
+| `integrations/zalo/__tests__/outgoing-text-with-images.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
+| `integrations/zalo/__tests__/quick-replies-attachment.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/refresh-access-token.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/send-multiple-images.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/send-multiple-images.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/tag.test.ts` | C | tbd | todo | Zalo channel |
-| `integrations/zalo/__tests__/webhook-routing.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/webhook-routing.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `packages/ai/__tests__/ai-context-service.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/ai/__tests__/call-summarizer.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/ai/__tests__/embedding-model.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
@@ -2514,7 +2514,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/thread-control-constants.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `packages/business/__tests__/thread-control-service.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `packages/business/__tests__/tiktok-post-details.test.ts` | C | tbd | todo | TikTok channel |
-| `packages/business/__tests__/trigger-service-executions.test.ts` | C | tbd | todo | Triggers |
+| `packages/business/__tests__/trigger-service-executions.test.ts` | C | `crates/business/tests/trigger_executions.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger-service-update-settings.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger-service-update-with-conditions.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger.service.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
@@ -2817,7 +2817,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/thread-control-repository.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `packages/database/__tests__/thread-control-sdk-parity.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `packages/database/__tests__/timescale.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
-| `packages/database/__tests__/trigger-repository.test.ts` | C | tbd | todo | Triggers |
+| `packages/database/__tests__/trigger-repository.test.ts` | C | `crates/db/tests/repo_trigger_repository.rs` | ported | Triggers; P3.3 (see specs/P3.3-test-map.tsv) |
 | `packages/database/__tests__/user-repository.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/whatsapp-business-account-repository.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/database/__tests__/whatsapp-call-display-outcome.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |

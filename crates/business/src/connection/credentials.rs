@@ -327,7 +327,7 @@ pub fn parse_config(
     Ok(parsed)
 }
 
-fn credentials_rejected() -> BusinessError {
+pub(super) fn credentials_rejected() -> BusinessError {
     // `toPublicErrorMessage(ConnectionProviderRejectedError, fallback)`: not a
     // `ChatbotXException`, so the fallback.
     BusinessError::exception(
@@ -338,10 +338,15 @@ fn credentials_rejected() -> BusinessError {
 }
 
 fn provider_unavailable() -> BusinessError {
+    provider_unavailable_status(502)
+}
+
+/// `connectionProviderUnavailableException(retryStatus)` (502 or 503).
+pub(super) fn provider_unavailable_status(status: u16) -> BusinessError {
     BusinessError::exception(
         "The provider is temporarily unavailable. Please try again.",
         "connectionProviderUnavailable",
-        502,
+        status,
     )
 }
 
@@ -404,6 +409,30 @@ pub async fn connect_ai_key(
     config: &Map<String, Value>,
     actor_user_id: Option<i64>,
 ) -> Result<ConnectionRow> {
+    connect_ai_key_with(
+        db,
+        upstream,
+        workspace_id,
+        provider,
+        config,
+        actor_user_id,
+        false,
+    )
+    .await
+}
+
+/// [`connect_ai_key`] with `allowUpdate`: `true` (the builder connect
+/// actions) updates an active connection of the same source in place
+/// instead of answering `connectionAlreadyConnected`.
+pub async fn connect_ai_key_with(
+    db: &Db,
+    upstream: &impl Upstream,
+    workspace_id: i64,
+    provider: AiKeyProvider,
+    config: &Map<String, Value>,
+    actor_user_id: Option<i64>,
+    allow_update: bool,
+) -> Result<ConnectionRow> {
     let fields = config_fields(provider.provider);
     let parsed = parse_config(fields, config)?;
     let columns = provider.config_columns();
@@ -441,10 +470,51 @@ pub async fn connect_ai_key(
         KeyValidation::Unknown => return Err(provider_unavailable()),
     }
     let auth = json!({ "authType": "secretText", "secretText": api_key }).to_string();
+    let target = SatelliteTarget {
+        provider: provider.provider,
+        display_name: provider.display_name,
+        table: provider.table,
+        ai_defaults: Some((provider.model, provider.max_output_tokens)),
+    };
+    persist_key_connection(
+        db,
+        workspace_id,
+        target,
+        auth,
+        extra,
+        actor_user_id,
+        allow_update,
+    )
+    .await
+}
+
+/// The `Connection` + satellite target of a key connect
+/// (`makeWorkspaceIntegrationBinding`).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SatelliteTarget {
+    pub provider: &'static str,
+    pub display_name: &'static str,
+    pub table: &'static str,
+    /// `AI_KEY_PROVIDER_DEFAULTS` (`model`, `maxOutputTokens`); `None` for a
+    /// satellite with only `auth`.
+    pub ai_defaults: Option<(&'static str, i64)>,
+}
+
+/// The write half of `connectFromCredentials`: revive / update / insert the
+/// satellite and the `connected` `Connection`.
+pub(super) async fn persist_key_connection(
+    db: &Db,
+    workspace_id: i64,
+    provider: SatelliteTarget,
+    auth: String,
+    extra: Vec<(String, Value)>,
+    actor_user_id: Option<i64>,
+    allow_update: bool,
+) -> Result<ConnectionRow> {
     let now = repo::now_ms();
     tx::write(db, move |tx| {
         let existing = find_by_source(tx, workspace_id, provider.provider, "workspace")?;
-        if existing.as_ref().is_some_and(|row| is_active(&row.status)) {
+        if !allow_update && existing.as_ref().is_some_and(|row| is_active(&row.status)) {
             return Err(already_connected());
         }
         // `saveOrInsertSatellite`: update the satellite of a revived row, else
@@ -547,7 +617,7 @@ fn unique_or(error: chatbotx_db::rusqlite::Error, table: &str) -> BusinessError 
 fn insert_satellite(
     conn: &Connection,
     workspace_id: i64,
-    provider: &AiKeyProvider,
+    provider: &SatelliteTarget,
     auth: &str,
     extra: &[(String, Value)],
     now: i64,
@@ -559,10 +629,11 @@ fn insert_satellite(
         params![integration_id, now, workspace_id, provider.provider],
     )
     .map_err(repo_err)?;
-    let mut values: Vec<(String, chatbotx_db::rusqlite::types::Value)> = vec![
-        ("model".into(), provider.model.to_string().into()),
-        ("maxOutputTokens".into(), provider.max_output_tokens.into()),
-    ];
+    let mut values: Vec<(String, chatbotx_db::rusqlite::types::Value)> = Vec::new();
+    if let Some((model, max_output_tokens)) = provider.ai_defaults {
+        values.push(("model".into(), model.to_string().into()));
+        values.push(("maxOutputTokens".into(), max_output_tokens.into()));
+    }
     for (key, value) in extra {
         values.retain(|(column, _)| column != key);
         values.push((key.clone(), sql_value(value)));
@@ -642,6 +713,17 @@ pub async fn verify_ai_key_connection(
         KeyValidation::Invalid => ("needs_reauth", Some("token_revoked")),
         KeyValidation::Unknown => ("degraded", Some("verify_failed")),
     };
+    set_health(db, current, status, reason).await
+}
+
+/// The `verify.ok` / `markUnhealthy(token_revoked)` / `verify.failed_non_auth`
+/// write of a verify.
+pub(super) async fn set_health(
+    db: &Db,
+    current: ConnectionRow,
+    status: &'static str,
+    reason: Option<&'static str>,
+) -> Result<ConnectionRow> {
     let now = repo::now_ms();
     tx::write(db, move |tx| {
         tx.execute(
@@ -671,6 +753,20 @@ pub async fn disconnect_integration(db: &Db, current: ConnectionRow) -> Result<C
             .map_err(repo_err)?;
         }
         Ok(updated)
+    })
+    .await
+}
+
+/// `connectionStateService.findByProviderSourceId({ provider, sourceId:
+/// "workspace" })`: the workspace-singleton connection of `provider`.
+pub async fn find_workspace_connection(
+    db: &Db,
+    workspace_id: i64,
+    provider: &str,
+) -> Result<Option<ConnectionRow>> {
+    let provider = provider.to_string();
+    tx::read(db, move |conn| {
+        find_by_source(conn, workspace_id, &provider, "workspace")
     })
     .await
 }
@@ -759,6 +855,70 @@ async fn telegram_call(
 fn telegram_bot_id(token: &str) -> Option<&str> {
     let (bot_id, _) = token.split_once(':')?;
     (!bot_id.is_empty() && bot_id.bytes().all(|b| b.is_ascii_digit())).then_some(bot_id)
+}
+
+/// `TELEGRAM_ALLOWED_UPDATES`.
+pub const TELEGRAM_ALLOWED_UPDATES: [&str; 4] =
+    ["message", "callback_query", "my_chat_member", "chat_member"];
+
+/// `generateWebhookSecretToken`: 32 random bytes as hex.
+pub fn generate_webhook_secret_token() -> String {
+    let mut bytes = [0u8; 32];
+    let _ = ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The `onConnected` hook of `connectTelegramAction`: a fresh webhook
+/// secret on the inbox's `IntegrationTelegram` row (`auth.metadata`) and
+/// `setWebhook` to `<broker>/integrations/telegram/webhook?botId=<id>`.
+pub async fn register_telegram_webhook(
+    db: &Db,
+    upstream: &impl Upstream,
+    workspace_id: i64,
+    inbox_id: i64,
+    broker_url: &str,
+) -> Result<()> {
+    let row = tx::read(db, move |conn| {
+        conn.query_row(
+            r#"SELECT "auth", "botId" FROM "IntegrationTelegram" WHERE "inboxId" = ?1 AND "workspaceId" = ?2"#,
+            params![inbox_id, workspace_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(repo_err)
+    })
+    .await?
+    .ok_or_else(|| BusinessError::not_found("Telegram integration not found"))?;
+    let (auth, bot_id) = row;
+    let mut auth: Value = serde_json::from_str(&auth).unwrap_or_else(|_| json!({}));
+    let token = auth["secretText"].as_str().unwrap_or_default().to_owned();
+    let secret = generate_webhook_secret_token();
+    let webhook_url = format!(
+        "{}/integrations/telegram/webhook?botId={bot_id}",
+        broker_url.trim_end_matches('/')
+    );
+    let body = json!({
+        "url": webhook_url,
+        "allowed_updates": TELEGRAM_ALLOWED_UPDATES,
+        "secret_token": secret,
+    });
+    if telegram_call(upstream, &token, "setWebhook", "POST", Some(body))
+        .await
+        .is_err()
+    {
+        return Err(BusinessError::exception("setWebhook", "telegramError", 400));
+    }
+    auth["metadata"] = json!({ "botId": bot_id, "webhookSecretToken": secret });
+    let auth = auth.to_string();
+    tx::write(db, move |tx| {
+        tx.execute(
+            r#"UPDATE "IntegrationTelegram" SET "auth" = ?1, "updatedAt" = ?2 WHERE "inboxId" = ?3 AND "workspaceId" = ?4"#,
+            params![auth, repo::now_ms(), inbox_id, workspace_id],
+        )
+        .map_err(repo_err)?;
+        Ok(())
+    })
+    .await
 }
 
 /// `connectFromCredentials` for `telegram`: `getMe`, then a `connected`

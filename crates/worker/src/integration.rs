@@ -145,6 +145,24 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         chatbotx_jobs::sequence::consumer::SEND_SEQUENCE_FLOW_ACTION => {
             crate::sequence::handle_send_sequence_flow(&deps, &job).await?;
         }
+        crate::steps::delay::RESUME_WAIT => {
+            let key = flow_execution_key(&job);
+            crate::steps::delay::run_wait_resume(&deps, &job.data["data"], key).await?;
+        }
+        crate::steps::delay::RESUME_FOLLOW_UP => {
+            crate::steps::delay::run_follow_up_resume(&deps, &job.data["data"]).await?;
+        }
+        "aiHandoverBulkToggle" => {
+            crate::ai_handover::run_bulk_toggle(&deps, &job.data["data"]).await?;
+        }
+        // `incomingMessageEcho` (a message the account itself sent) takes the
+        // same path; an echo never matches the contact-input rules.
+        crate::inbound::INCOMING_MESSAGE | "incomingMessageEcho" => {
+            crate::inbound::incoming_message(&deps, &job.data["data"]).await?
+        }
+        crate::inbound::MESSAGE_STATUS => {
+            crate::inbound::message_status(&deps, &job.data["data"]).await?
+        }
         other => {
             // ponytail: every other integration action is a later unit
             // (inbound channels Q.I*, steps, sequences, ...).

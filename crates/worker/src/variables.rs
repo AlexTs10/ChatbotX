@@ -739,6 +739,27 @@ impl VariableDeps {
         appointment_id: Option<String>,
         sent_by_user_id: Option<String>,
     ) -> Result<Value, String> {
+        self.resolve(
+            conversation,
+            contact_inbox,
+            step,
+            appointment_id,
+            sent_by_user_id,
+            true,
+        )
+        .await
+    }
+
+    /// `resolveContactVariablesDeep` with the spintax option.
+    pub async fn resolve(
+        &self,
+        conversation: &Conversation,
+        contact_inbox: &ContactInbox,
+        step: &Value,
+        appointment_id: Option<String>,
+        sent_by_user_id: Option<String>,
+        spintax: bool,
+    ) -> Result<Value, String> {
         use chatbotx_core::variables::Variables;
         use chatbotx_core::variables::contact_variable::ContactInboxArg;
         use chatbotx_core::variables::deep_replace::{DeepOptions, DeepSource};
@@ -757,7 +778,7 @@ impl VariableDeps {
                     sent_by_user_id,
                 },
                 DeepOptions {
-                    spintax: true,
+                    spintax,
                     pick: None,
                 },
             )

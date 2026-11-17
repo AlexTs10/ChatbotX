@@ -7,7 +7,9 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
+  parseSearchWith,
   redirect,
+  stringifySearchWith,
 } from "@tanstack/react-router"
 import { sessionQuery } from "@/lib/session"
 import { DefaultErrorPage, NotFoundPage, RootLayout } from "@/routes/root"
@@ -16,6 +18,13 @@ import { DefaultErrorPage, NotFoundPage, RootLayout } from "@/routes/root"
 const auth = () => import("@/routes/auth")
 const workspace = () => import("@/routes/workspace")
 const flows = () => import("@/routes/flows")
+const fields = () => import("@/routes/fields")
+const sequences = () => import("@/routes/sequences")
+const ai = () => import("@/routes/ai")
+const settings = () => import("@/routes/settings")
+const dashboard = () => import("@/routes/dashboard")
+const ecommerce = () => import("@/routes/ecommerce")
+const tools = () => import("@/routes/tools")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -119,6 +128,11 @@ const workspacePages = [
       "ContactsPage",
     ),
   }),
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path: "inbox",
+    component: lazyRouteComponent(() => import("@/routes/inbox"), "InboxPage"),
+  }),
 ]
 const flowsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -132,6 +146,204 @@ const flowsPages = [
     component: lazyRouteComponent(flows, "FlowsPage"),
   }),
 ]
+// A layout route with one index page (`<name>/layout.tsx` + `page.tsx`).
+function sectionRoute<T extends Record<string, unknown>>(
+  path: string,
+  load: () => Promise<T>,
+  layout: keyof T & string,
+  page: keyof T & string,
+) {
+  const section = createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(load, layout),
+  })
+  return section.addChildren([
+    createRoute({
+      getParentRoute: () => section,
+      path: "/",
+      component: lazyRouteComponent(load, page),
+    }),
+  ])
+}
+const sectionRoutes = [
+  sectionRoute("tags", fields, "TagsLayout", "TagsPage"),
+  sectionRoute(
+    "custom-fields",
+    fields,
+    "CustomFieldsLayout",
+    "CustomFieldsPage",
+  ),
+  sectionRoute("sequences", sequences, "SequencesLayout", "SequencesPage"),
+]
+
+// `dashboard/layout.tsx`: the analytics section (inbox cards + sub-pages).
+const dashboardRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "dashboard",
+  component: lazyRouteComponent(dashboard, "DashboardLayout"),
+})
+const dashboardRoutes = dashboardRoute.addChildren(
+  (
+    [
+      ["/", "DashboardIndexPage"],
+      ["contacts", "DashboardContactsPage"],
+      ["conversations", "DashboardConversationsPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => dashboardRoute,
+      path,
+      component: lazyRouteComponent(dashboard, page),
+    }),
+  ),
+)
+
+// `(e-commerce)`: a pathless layout (ecommerce permission, tabs, shop link);
+// `products/*`: the product forms outside it.
+const ecommerceRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "e-commerce",
+  component: lazyRouteComponent(ecommerce, "EcommerceLayout"),
+})
+const ecommercePages = (
+  [
+    ["products", "ProductsPage"],
+    ["product-categories", "ProductCategoriesPage"],
+    ["product-vendors", "ProductVendorsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => ecommerceRoute,
+    path,
+    component: lazyRouteComponent(ecommerce, page),
+  }),
+)
+const productFormsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "product-forms",
+  component: lazyRouteComponent(ecommerce, "ProductsLayout"),
+})
+const productFormPages = (
+  [
+    ["products/create", "CreateProductPage"],
+    ["products/$id/edit", "EditProductPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => productFormsRoute,
+    path,
+    component: lazyRouteComponent(ecommerce, page),
+  }),
+)
+
+// The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
+const toolPages = (
+  [
+    ["polls", "PollsPage"],
+    ["questionnaires", "QuestionnairesPage"],
+    ["reflinks", "ReflinksPage"],
+    ["qr-codes", "QrCodesPage"],
+    ["minigames", "MinigamesPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(tools, page),
+  }),
+)
+const pipelinesRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "pipelines",
+  component: lazyRouteComponent(tools, "PipelinesLayout"),
+})
+const pipelinesRoutes = pipelinesRoute.addChildren([
+  createRoute({
+    getParentRoute: () => pipelinesRoute,
+    path: "/",
+    component: lazyRouteComponent(tools, "PipelinesPage"),
+  }),
+])
+
+// `(ai)`: a pathless layout (flows permission, AI integration check).
+const aiRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "ai",
+  component: lazyRouteComponent(ai, "AILayout"),
+})
+const aiPages = (
+  [
+    ["ai-agents", "AIAgentsPage"],
+    ["ai-files", "AIFilesPage"],
+    ["ai-files/test-query", "AIFilesTestQueryPage"],
+    ["ai-files/$aiFileId", "AIFileDetailPage"],
+    ["ai-functions", "AIFunctionsPage"],
+    ["ai-mcp-servers", "AIMcpServersPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => aiRoute,
+    path,
+    component: lazyRouteComponent(ai, page),
+  }),
+)
+
+// `(settings)/settings`: the settings tabs (superAdmin).
+const settingsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "settings",
+  component: lazyRouteComponent(settings, "SettingsLayout"),
+})
+const settingsPage = (
+  parent: () => typeof settingsRoute,
+  path: string,
+  page: keyof Awaited<ReturnType<typeof settings>>,
+) =>
+  createRoute({
+    getParentRoute: parent,
+    path,
+    component: lazyRouteComponent(settings, page),
+  })
+const settingsChannelsRoute = settingsPage(
+  () => settingsRoute,
+  "channels",
+  "SettingsChannelsLayout",
+)
+const settingsIntegrationsRoute = settingsPage(
+  () => settingsRoute,
+  "integrations",
+  "SettingsIntegrationsLayout",
+)
+const settingsRoutes = settingsRoute.addChildren([
+  settingsPage(() => settingsRoute, "/", "SettingsIndexPage"),
+  settingsPage(() => settingsRoute, "general", "SettingsGeneralPage"),
+  settingsPage(() => settingsRoute, "admins", "SettingsAdminsPage"),
+  settingsChannelsRoute.addChildren([
+    createRoute({
+      getParentRoute: () => settingsChannelsRoute,
+      path: "/",
+      component: lazyRouteComponent(settings, "SettingsChannelsIndexPage"),
+    }),
+    createRoute({
+      getParentRoute: () => settingsChannelsRoute,
+      path: "$channel",
+      component: lazyRouteComponent(settings, "SettingsChannelPage"),
+    }),
+  ]),
+  settingsIntegrationsRoute.addChildren([
+    createRoute({
+      getParentRoute: () => settingsIntegrationsRoute,
+      path: "/",
+      component: lazyRouteComponent(settings, "SettingsIntegrationsIndexPage"),
+    }),
+    createRoute({
+      getParentRoute: () => settingsIntegrationsRoute,
+      path: "$slug",
+      component: lazyRouteComponent(settings, "SettingsIntegrationPage"),
+    }),
+  ]),
+])
 
 // `(no-sidebar)`: the flow editor is outside the workspace sidebar layout.
 const flowDetailRoute = createRoute({
@@ -161,6 +373,14 @@ const routeTree = rootRoute.addChildren([
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
+      ...sectionRoutes,
+      dashboardRoutes,
+      ecommerceRoute.addChildren(ecommercePages),
+      productFormsRoute.addChildren(productFormPages),
+      ...toolPages,
+      pipelinesRoutes,
+      aiRoute.addChildren(aiPages),
+      settingsRoutes,
     ]),
   ]),
 ])
@@ -171,6 +391,11 @@ export function createAppRouter(queryClient: QueryClient) {
     context: { queryClient },
     defaultPreload: false,
     scrollRestoration: true,
+    // Next.js search params are plain strings. The default JSON parse turns
+    // an id above 2^53 into a rounded number (`useSearchParams` then reads
+    // `…683` as `…684`); values that round-trip exactly still become numbers.
+    parseSearch: parseSearchWith((value) => value),
+    stringifySearch: stringifySearchWith(JSON.stringify),
   })
 }
 

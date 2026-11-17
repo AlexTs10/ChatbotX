@@ -132,6 +132,25 @@ a stub (`apps/web/src/lib/server-action.ts`):
   like any procedure. `serverError` = the `ChatbotXException` message
   (`handleServerError` in `lib/safe-action.ts`), else the default message.
 - Plain `"use server"` functions: the return value; an error rejects.
+- Server-component queries (`features/*/queries`, not `"use server"`) that
+  have no oRPC procedure run the same way under their export name
+  (`findIntegrationClaude`, `listIntegrationApis`, `hasAIIntegration`, ...):
+  the SPA helper `serverQuery(name, workspaceId, args)` sends
+  `{ args, workspaceId }`, so the `/rpc` membership check replaces
+  `assertCurrentUserCanAccessChatbot`. Handlers:
+  `crates/api/src/rpc_procedures/integrations.rs`.
+- Page queries: server pages whose data is several queries run as one
+  `serverQuery` under a page name, `args: [workspaceId, search]`
+  (`crates/api/src/rpc_procedures/products.rs`): `productsPage` →
+  `{ products: { data, pageCount }, categories, importHistory, metaCatalog,
+  externalStoreLinks: null }`; `productEditPage` (`{ id }`) → `{ product,
+  metaCatalogId, publicUrl }`; `productCategoriesPage` → `{ data, pageCount,
+  parent }`; `productVendorsPage` → `{ vendors, categories, openHours }`;
+  `ecommerceShareLinks` → `{ previewUrl, buttonUrls: { shop, cart,
+  categories } }`. All need the `ecommerce` permission (else 404). The
+  tools lists (`listPolls`, `listQuestionnaires`, `listReflinks`,
+  `listQrCodes`, `listMinigames`, `args: [search]`) are the builder query
+  names (`rpc_procedures/tools.rs`).
 - `redirect()` inside an action is not supported (none of the first screens
   use it); `revalidatePath` is a no-op (the SPA refetches).
 
@@ -151,10 +170,12 @@ serialized them: ids as strings, dates as ISO strings, flags as booleans
 | `pages.authOptions` | `resolveAuthPageOptions` | – | `{ enabledProviders: [], genericOAuth: null, signUpAllowed }` |
 | `pages.home` | `app/(main)/page.tsx` | – | `{ user, createdWorkspaceId, workspaces[], ownerWorkspaceIds[], superAdminWorkspaceIds[], blocked, reason, isAtLimit, canAccessManage, isPlatformContext, isSuperAdmin, metrics, planName, planStatus, trialEndsAt }`. A user with no membership gets a first workspace (`"{name}'s workspace"`, owner, full permissions) and `createdWorkspaceId`; the SPA then opens it. Community: no quota, `isAtLimit` when the user owns one workspace. |
 | `pages.workspace` | `app/space/[workspaceId]/layout.tsx` | `{ workspaceId }` | `{ allWorkspaces[], permissions, isSupportSession, scheduledForDeletion, supportAccessUntil, consentRequired, canAccessManage, isSuperAdmin, blocked, blockReason, quota, tokenRefreshErrors: [], hasCallCapableChannel: false }`. Landing segment and realtime gates are computed in the SPA (pure builder code). |
-| `pages.contactsAccess` | `requireContactsAccess` | `{ workspaceId }` | `{ canViewEmailAndPhone }` (`superAdmin \|\| emailAndPhone`) |
+| `pages.contactsAccess` | `requireContactsAccess` | `{ workspaceId }` | `{ canViewEmailAndPhone }` (`superAdmin \|\| emailAndPhone`); `404 "Page not found"` without `superAdmin`, `contacts` or `onlyAssignedContacts` |
 | `pages.folder` | `getCurrentFolder` (`folderService.getWithParents`) | `{ id, workspaceId }` | `{ folder \| null, parents[] }` |
 | `pages.deletedWorkspaces` | `features/workspaces/deleted-workspaces.tsx` | `{ page, perPage }` | `{ data: [] }` (deletion records not ported) |
-| `pages.flow` | `app/(no-sidebar)/space/[workspaceId]/flows/[id]/page.tsx` | `{ workspaceId, id }` | the `FlowDetail` props: `{ flow (with flowVersions), flowVersion (draft), hasPublishedVersion, canRevertToPublished, isTemplateLocked, openaiCompatibleIntegrations: [], workspaceTargetCountry }`. Needs the `flows` permission; no flow / no draft = 404. |
+| `pages.flow` | `app/(no-sidebar)/space/[workspaceId]/flows/[id]/page.tsx` | `{ workspaceId, id }` | the `FlowDetail` props: `{ flow (with flowVersions), flowVersion (draft), hasPublishedVersion, canRevertToPublished, isTemplateLocked, openaiCompatibleIntegrations, workspaceTargetCountry }`. Needs the `flows` permission; no flow / no draft = 404. |
+| `pages.aiAgents` | the inline options of `(ai)/ai-agents/page.tsx` | `{ workspaceId }` | `AIAgentActionOptions`: `{ flows, tags, customFields (with type), admins, inboxTeams }` as `{ label, value }`. Needs `flows` (else 404). |
+| `pages.settingsChannels` | `resolveChannelPolicy` | `{ workspaceId }` | `{ creatable: ["webchat", "api", "telegram"], connected: [channels with a connected inbox] }`; the SPA builds `visibleChannels` / `canCreate` from it as the builder did. Needs `superAdmin` (else 404). |
 | `pages.channelsCreate` | `app/(no-sidebar)/channels/create/page.tsx` | `{ workspaceId? }` | `{ offeredChannels: ["webchat", "api"], configuredChannels: [] }`; with `workspaceId` the caller must be its super admin (else 401). |
 
 Workspace loaders answer `401` when the caller is not a member.
@@ -165,7 +186,7 @@ Workspace loaders answer `401` when the caller is not a member.
 session check, then the workspace check when `input.workspaceId` is set,
 then `crates/api/src/rpc_procedures::action`. Private procedures that are not
 in the generated `PORTED` table go to `rpc_procedures::procedure`. One file
-per domain: `rpc_procedures/{contacts,flows,lists,workspaces}.rs`. Each
+per domain: `rpc_procedures/{contacts,conversations,flows,inboxes,integrations,lists,media_library,pipelines,products,tools,workspaces}.rs`. Each
 handler is thin: it parses the builder input, calls the `crates/business`
 function, and returns the builder JSON. Two shared helpers:
 
@@ -194,14 +215,26 @@ ported yet"`; the UI shows its error or an empty option list. Full lists:
 |---|---|---|
 | sign-in, sign-up, password pages (`/auth/*`) | works | OAuth providers (`pages.authOptions` lists none) |
 | workspace list (`/`) | works; the first workspace is created on first load | `pages.deletedWorkspaces` is empty (deletion records); `updateWorkspaceStatusAction`, `reconcileTenantEntitlementAction` |
-| new workspace (`/channels/create`) | works for webchat and API (`createWebchatAction`, `createApiAction` create the workspace) | the other channels: tenant channel visibility and platform credentials (`platformCredentialService`, `tenantService.resolveVisibleChannels`), Telegram / WhatsApp / Messenger / Instagram / Threads / Zalo / TikTok connect; `clearTemplateInstallIntentAction`, `rememberTemplateInstallIntentAction` |
-| workspace shell (`/space/$id`) | works | quota, support session, token refresh errors and call-capable channel are fixed defaults (`pages.workspace`); `refreshAllChannelTokensAction` |
-| contacts list (`/space/$id/contacts`) | works: list, count, filters, tag / custom field / bot field / member options, bulk tag, sequence, custom field, delete, create, export | filter options: `inboxesAPI.listAllInboxesAuthenticatedAPI`, `inboxTeamsAPI.listInboxTeamsAuthenticatedAPI`, `sequencesAPI.listSequencesWorkspaceAuthAPI`, `emailTopicsAPI.privateListWorkspaceEmailTopicsAPI`, `workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI`; `createCustomFieldAction`, `peekImportHeadersAction` (import); the table avatar is not hydrated from the inbox |
-| contact detail (sheet) | partial: contact, tags, custom fields, notes list, sequences list, ad referrals | `countContactInboxesAuthenticatedAPI`, `couponsAPI.listContactCouponsAPI`, `appointmentsAPI.listContactAppointmentsAPI`; note create / edit / delete actions; `enableBotAction`, `disableBotAction` |
+| new workspace (`/channels/create`) | works for webchat and API (`createWebchatAction`, `createApiAction` create the workspace). The API form keeps Create disabled while the optional Callback URL is empty: the builder does the same | the other channels: tenant channel visibility and platform credentials (`platformCredentialService`, `tenantService.resolveVisibleChannels`), Telegram / WhatsApp / Messenger / Instagram / Threads / Zalo / TikTok connect; `clearTemplateInstallIntentAction`, `rememberTemplateInstallIntentAction` |
+| workspace shell (`/space/$id`) | works; realtime token 200 and the workspace socket connects when `REALTIME_BROADCAST_SECRET` is set (§7) | quota, support session, token refresh errors and call-capable channel are fixed defaults (`pages.workspace`); `refreshAllChannelTokensAction` |
+| contacts list (`/space/$id/contacts`) | works: list, count, filters, tag / custom field / bot field / member / inbox / team / sequence options, bulk tag, sequence, custom field, delete, create (needs a connected inbox), export, import header peek, create custom field | filter options `emailTopicsAPI.privateListWorkspaceEmailTopicsAPI`, `workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI` (no Rust domain); the table avatar is not hydrated from the inbox |
+| contact detail (sheet) | works: contact, tags, custom fields (edit, reset), notes (list, create, edit, delete), sequences, block / unblock, bot on / off, ad referrals | `contactsAPIs.countContactInboxesAuthenticatedAPI` (broadcast audience count: no broadcast domain), `couponsAPI.listContactCouponsAPI`, `appointmentsAPI.listContactAppointmentsAPI`, `refreshContactProfileAction` (channel profile fetch) |
+| inbox (`/space/$id/inbox`) | works: conversation list (filters, search, PII rule), conversation, messages, archive / unarchive, assign, read / unread, follow, bot on / off, send (webchat: stored, `sendChannelMessage` job completed, live update over the workspace socket; API channel: needs a public callback URL, the SSRF guard blocks private hosts), edit / delete / attributes of a message | `threadControlAction`, `syncThreadOwnerAction` (501 in Rust), `conversationsAPI.getPostDetailsAuthenticatedAPI` (Graph API), calls (`*Voip*`, `getCall*`), saved replies (`savedRepliesAPI.*`, 3 actions), appointments, `couponsAPI.listContactCouponsAPI`, the contact panel pipelines (`pipelinesAPI.privateListContactItemsAPI`, item / comment / attachment actions), `responseSlaAPI.*`, `whatsappMessageTemplateAPIs.*`, `messagesAPI.getWhatsappFlowResponseAuthenticatedAPI`, inbox team CRUD (enterprise) |
 | flows list + folders (`/space/$id/flows`) | works: list, folders (create, rename, delete, move), create, rename, duplicate, import, delete | `templatesAPI.listLockedIdsAPI` (lock badges) |
-| flow editor (`/space/$id/flows/$flowId`) | works: open (`pages.flow`), save draft, publish, revert, restore, versions | step option lists: `sequencesAPI.*`, `inboxesAPI.listAllInboxesAuthenticatedAPI`, `whatsappMessageTemplateAPIs.*`, `whatsappFlowAPIs.*`, `messengerMessageTemplateAPIs.*`, `aiAgentsAPI.*`, `aiFilesAPI.*`, `aiFunctionsAPI.*`, `aiMcpServerAPIs.*`, `pipelinesAPI.*`, `productsAPI.*`, `couponsAPI.listCouponTopicOptionsAPI`, `leaderboardsAPI.*`, `miniAppsAPI.*`, `refLinksAPI.*`, `broadcastAPIs.*`, `decisionProfilesAPI.*`, `appointmentCalendarsAPI.*`, `spreadsheetsAPI.*`, `personasAPIs.*`, `userPersistentMenusAPI.*`, `dynamicImagesAPI.*`, `googleAdsAPI.getIntegration`, `platformCredentialsAPI.getGiphyApiKeyAPI`, the email / CRM integrations (`integration{ActiveCampaign,Drip,FacebookAds,GetResponse,Klaviyo,Mailchimp,MailerLite,Moosend,SendGrid}API.*`), media library (`mediaLibraryAPI.*` and 8 actions), `flowsAPI.privateGetFlowStatsAPI`, `flowsAPI.privateGetMessengerAdsJsonAPI`, `testExternalRequestAction`; OpenAI-compatible integrations (`pages.flow` sends `[]`) |
-| inbox / conversations | blocked | no SPA route yet. D3 ported `/v1/conversations` and messages for workspace tokens only; the private procedures (`conversationsAPI.*`, `messagesAPI.*`), the member scope and `archiveConversationAction` / `assignConversationAction` need a D3 follow-up; calls (`*Voip*`, `getCall*`) need the calling unit |
-| settings pages | blocked | no SPA routes yet; each settings page needs its domain procedures (workspace general, members, channels, API tokens) |
+| tags (`/space/$id/tags`) | works: list, folders, create (name error under the field), rename, delete | – |
+| custom fields + bot fields (`/space/$id/custom-fields`) | works: custom field list / update / delete, bot field list / create / update / delete / reset | – |
+| sequences (`/space/$id/sequences`) | list works (needs `broadcast`) | `updateSequenceAction`, `deleteSequenceAction` and the step editor (Rust has list + create only) |
+| flow editor (`/space/$id/flows/$flowId`) | works: open (`pages.flow`), save draft, publish, revert, restore, versions; option lists for tags, custom / bot fields, sequences, inboxes, pipelines (member grants), reflinks, questionnaires, place categories, sendable products, media library (lists + 8 actions) | `couponsAPI.listCouponTopicOptionsAPI`, `leaderboardsAPI.*`, `miniAppsAPI.*` (no Rust domain); `whatsappMessageTemplateAPIs.*`, `whatsappFlowAPIs.*`, `messengerMessageTemplateAPIs.*`, `broadcastAPIs.*`, `decisionProfilesAPI.*`, `appointmentCalendarsAPI.*`, `spreadsheetsAPI.*`, `personasAPIs.*`, `userPersistentMenusAPI.*`, `dynamicImagesAPI.*`, `googleAdsAPI.getIntegration`, `platformCredentialsAPI.getGiphyApiKeyAPI`, the email / CRM integrations (`integration{ActiveCampaign,Drip,FacebookAds,GetResponse,Klaviyo,Mailchimp,MailerLite,Moosend,SendGrid}API.*`), `flowsAPI.privateGetFlowStatsAPI`, `flowsAPI.privateGetMessengerAdsJsonAPI`, `testExternalRequestAction`. AI option lists (agents, files, functions, MCP servers, OpenAI-compatible integrations) work |
+| AI (`/space/$id/ai-agents`, `ai-files`, `ai-files/$id`, `ai-files/test-query`, `ai-functions`, `ai-mcp-servers`) | works: guard (`flows` permission, else 404), "no AI integration" page (`hasAIIntegration`), lists, create / update / delete of agents, files, functions, MCP servers; agent action options (`pages.aiAgents`) | `templatesAPI.listLockedIdsAPI` (lock badges) |
+| settings shell (`/space/$id/settings/*`) | works: guard (super admin, else 404), tabs, `general` (form shown with the workspace data), `admins` (members list) | general / advanced / smart delay / mark-read saves, invite / update / remove member, support access, deletion: workspace / members domain (`feat/conversion-d11`); API tokens, email topics, working hours: no Rust domain |
+| settings channels (`/space/$id/settings/channels/$channel`) | works for `api` (list, rotate token, delete; `updateApiAction` is ported, but no builder screen calls it), `telegram` (list, connect for an existing workspace, disconnect), `webchat` (list, delete); channel policy from `pages.settingsChannels` | Telegram webhook registration; the other channels render an empty panel (tenant channel visibility, platform credentials) |
+| settings integrations (`/space/$id/settings/integrations/$slug`) | works for openai, claude, deepseek, gemini, muse, openrouter (connect with key check, update, disconnect) and openai-compatible (connect, update, enable, disconnect). A real key needs `ENCRYPTION_KEY` (not checked: no key in the QA) | the other integrations (email / CRM / ads / Google, Shopify, ...) render an empty panel |
+| dashboard (`/space/$id/dashboard`, `contacts`, `conversations`) | routed: guard (`analytics`, else 404), inbox cards, channel filter and ads nav from `inboxesAPI.listAllInboxesAuthenticatedAPI`; the chart panels show their error state | all chart data: `analyticsRoutes.<name>AnalyticsAPI` for contactCountsPerDay, newContactCountsPerDay, blockedContactsPerDay, contactsCount, newContactsCount, activeContactsCount, contactsByDimension, messagesByAdmin, humanAgentStats, agentResponseSeries, conversationHandoffs, conversationFollowUps, conversationArchived, conversationAssigned, conversationAssignedByAdmin, uniqueConversationsByAdmin, botMessagesByResult, messagesBySender (analytics unit); `dashboard/ads/*`, `ads/google`, `conversion-events` not routed (ads / Google Ads domains) |
+| e-commerce products (`/space/$id/products`, `products/create`, `products/$id/edit`) | works: guard (`ecommerce`, else 404), list with category sidebar, create, edit, delete, active toggle, import (start + history), meta catalog state / select / create / sync / disconnect, webshop links | `connectMetaCatalogAction` (OAuth redirect, platform credentials); Shopify / WooCommerce store links (`externalStoreLinks: null`); webshop public pages and tenant custom domains (links use the app URL); the orders, discount codes, settings and analytics tabs are not routed |
+| product categories, vendors (`/space/$id/product-categories`, `product-vendors`) | works: list, create, update, delete, visible / active toggle, open hours create / update / delete | – |
+| tools lists (`/space/$id/polls`, `questionnaires`, `reflinks`, `qr-codes`, `minigames`) | works: lists (search, sort, paging), questionnaire create / rename / duplicate / delete, reflink create / update / widget / delete, QR code delete, minigame delete / enable, poll procedures (`pollsAPI.*` → `polls.*`) | detail pages not routed: questionnaire create opens the editor (`questionnaires/$id/edit`) and shows the 404 page; poll create / edit / analytics, questionnaire edit / applicants, reflink analytics, QR code create / edit, minigame create / edit / history; leaderboards (no Rust domain) |
+| pipelines (`/space/$id/pipelines`) | works: guard (contacts access, else 404), list (`pipelinesAPI.privateListPipelinesAPI`, member scope), create, rename / settings, duplicate, delete | the board (`pipelines/$id`) is not routed: pipeline create opens it and shows the 404 page |
+| guest webchat (widget, `/bs/...`, `/webchat`) | not routed. The Rust socket accepts guest tokens (`crates/rt`), but nothing issues them | `POST /api/guest/realtime-token`, `GET/POST /api/guest/messages` (webchat access token, authorized domains, guest rate limits, `handleCreateWebchatMessage`): webchat widget unit |
 
 ## 7. Build and run
 
@@ -240,6 +273,88 @@ rendered) → Publish 200 ("A new version has been published");
 new workspace is in `pages.home`. Without `REALTIME_SECRET` the realtime
 token call answers 500 and the shell retries (no realtime in this check).
 Main entry chunk: 595 KB (was 5.4 MB); every route is its own chunk.
+
+Second browser check on the Dell (2026-11-17, release build at `ab7ce2209`
++ the two web fixes below, empty `DATA_DIR`). The T3 preview tab was hidden,
+so there are no screenshots; the QA drove the page with JavaScript and read
+the DOM text. Results: sign-up, sign-in, first workspace; `createApiAction`
+with `workspaceId` adds an API inbox; `inboxesAPI.listAllInboxesAuthenticatedAPI`
+200; Create Contact dialog opens with Source / Inbox and `createContactAction`
+(channel `api`, User ID) 200; contact note create 200; contacts list
+"1 contact"; inbox `/space/<id>/inbox` lists "Ada Lovelace — Hello from QA",
+opens the conversation (message, "Assigned to me", "Bot is active", contact
+panel with "Notes (1)"); `createMessageAction` 200 (stored, queued);
+archive / unarchive / assign 200; tags page lists `vip`; custom fields page
+shows Custom Fields and Bot Fields; sequences page renders. Two bugs found
+and fixed: (1) search params with an id above 2^53 were rounded (the router
+JSON-parsed them), so `/channels/create?workspaceId=<id>` answered 401 and
+rendered blank; the router now keeps search values as strings; (2) the
+sequences page re-created its list promise on each suspend (endless
+`listSequencesWorkspaceAuthAPI` calls); the table now has its own
+`<Suspense>`. Still 404 / 500 on these screens: `responseSlaAPI.*`,
+`getPendingIncomingVoipCallAction`, `resolveOutboundCallModeAction`,
+`templatesAPI.listLockedIdsAPI`, the realtime token (no `REALTIME_SECRET`).
+Select popups do not open in a hidden tab, so the dialog's own submit was
+checked through the same action call.
+
+Third browser check on the Dell (2026-11-17, release build at `50f0097be`,
+empty `DATA_DIR`). Environment:
+
+```sh
+BETTER_AUTH_SECRET=<32+ chars> BETTER_AUTH_URL=http://dell-5570:3456 \
+NEXT_PUBLIC_BUILDER_URL=http://dell-5570:3456 \
+REALTIME_BROADCAST_SECRET=<32+ chars> PORT=3456 DATA_DIR=<empty dir> \
+./target/release/chatbotx-server
+```
+
+`REALTIME_BROADCAST_SECRET` (not `REALTIME_SECRET`) turns the realtime
+gateway on; without it the server logs a warning at start and the token
+call answers 500. `ENCRYPTION_KEY` is needed to store real AI provider
+keys and flow variables (warning at start without it).
+
+The T3 preview tab was hidden (no screenshots); the QA drove the page with
+clicks and typing through the page's own handlers and read the DOM text,
+the network entries and the QA database. Results: webchat created for the
+existing workspace (`/channels/create?channel=webchat&workspaceId=`) and
+listed in settings; webchat contact; inbox send → `createMessageAction`
+200, the `sendChannelMessage` job completed, `ContactInbox.lastOutboundMessageAt`
+set, realtime token 200 and one workspace socket (gateway metrics:
+upgrade 1, events sent); API channel with a private callback URL → the
+SSRF guard rejects it (the builder shows the same generic message);
+Claude connect with a fake key → "Invalid API key" under the field;
+connected state (row added by hand) → Auto Reply switch saves
+(`updateIntegrationClaudeAction`), Disconnect → `disconnectClaudeAction`
+200 and the page shows Connect again; AI agents: no-integration page, then
+list, Create AI Agent dialog → `createAIAgentAction` 200 and the new row;
+Knowledge, test query, AI Functions, MCP Servers, settings general (form
+with the workspace data), admins (owner listed), channels telegram / api /
+webchat, integrations openai / openai-compatible / gemini: all `/rpc`
+calls 200 (only `getPendingIncomingVoipCallAction` 404). Not checked:
+API callback delivery (needs a public URL), the guest webchat socket
+(no guest token without the webchat widget unit), Telegram connect (needs
+a real bot token), real AI keys, webchat delete.
+
+Fourth browser check on the Dell (2026-11-17, release build at `e70fb5f11`,
+empty `DATA_DIR`, the environment above plus `ENCRYPTION_KEY`; hidden
+preview tab: DOM clicks and typing, DOM text and the network entries).
+Results: sign-up, sign-in (email verified by hand), first workspace opens
+`/dashboard` → redirect to `dashboard/contacts`; dashboard layout, nav and
+"Create Inbox" card render, `inboxesAPI.listAllInboxesAuthenticatedAPI`
+200, every chart panel "Error" (all `analyticsRoutes.*` 404, §6); products
+list (`productsPage` 200, share footer `ecommerceShareLinks` 200);
+categories: Add dialog → `createProductCategoryAction` 200, row "Drinks";
+vendors list 200; products/create (`productsAPI.listProductFormOptionsAPI`
+200) → Save → `createProductAction` 200, "Products created successfully",
+row "Lemonade $4.50"; products/$id/edit loads the form (`productEditPage`
+200) → Save → `updateProductAction` 200; polls, questionnaires, reflinks,
+QR codes, minigames lists 200; questionnaire Add → `createQuestionnaireAction`
+200 (then the editor 404, §6); pipelines list 200, Add pipeline →
+`createPipelineAction` 200 (then the board 404, §6); settings channels API:
+Rotate token → `rotateApiTokenAction` 200 and the token dialog, Delete →
+`deleteApiAction` 200 and "No data". Other 404s on these screens:
+`templatesAPI.listLockedIdsAPI`, `getPendingIncomingVoipCallAction`. Not
+checked: product import, Meta catalog, vendor / open hours writes, the
+other tool writes (reflink, QR code, minigame), the guest webchat (§6).
 
 Development: `CHATBOTX_SERVER_URL=http://localhost:3000 pnpm --filter web dev`
 (Vite on :3123, proxies `/rpc`, `/api`, `/files`, `/realtime` to the Rust

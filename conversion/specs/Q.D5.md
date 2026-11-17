@@ -19,8 +19,8 @@ Q.W1 runtime (`crates/worker`, `specs/Q.W1.md`).
 | 5b | Recurring broadcast jobs: `enqueueRecurringBroadcasts`, `materializeRecurringBroadcasts` (`materializeOccurrence`, `skipOccurrence`) | `broadcast/materialize.rs`; `crates/worker/src/schedule/recurring.rs`; `Enqueuer::backlog_count` | materialize part of `broadcast/recurrence.service.ts` | — | done |
 | 6 | Sequence scheduler in the worker (producer / consumer / reconcile, step executor) | | | | done |
 | 7 | Smart delay (service, workspace cleanup, `scanSmartDelay`, resume jobs) | | | | done |
-| 8 | Trigger worker | | | | todo |
-| 9 | Automated responses actions | | (`/v1/keywords` is D3) | create / update / delete / enable actions | todo |
+| 8 | Trigger worker: the queue, matcher, executor, actions and condition evaluator are Q.W2 (`crates/worker/src/trigger.rs`, `condition.rs`); Q.D5 adds the datetime-sweep execution surface of `triggerService` (`listActiveWithConditionsPage`, `listExecutedPairs`, `recordExecution`, `purgeExecutionsOlderThan`) for the Q.W2 datetime scanner | | | | done |
+| 9 | Automated responses actions | `automated_response.rs` (D3) | (`/v1/keywords` is D3) | create / update / delete / enable actions (`rpc_procedures/automated_responses.rs`) | done |
 
 ## 2. Test map
 

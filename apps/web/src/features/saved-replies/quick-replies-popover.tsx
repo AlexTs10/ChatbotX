@@ -1,0 +1,210 @@
+"use client"
+
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import { Popover, PopoverContent } from "@chatbotx.io/ui/components/ui/popover"
+import { useTranslations } from "next-intl"
+import {
+  type ReactElement,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import { useWorkspaceId } from "@/hooks/routing"
+import { useSavedReplies } from "./provider/saved-reply-hook"
+import { SavedReplyImagesSummary } from "./saved-reply-image-thumbnails"
+import type { SavedReplyResource } from "./schema/resource"
+
+type SavedReplySlashPopoverProps = {
+  inputValue: string
+  onSelect: (savedReply: SavedReplyResource) => void
+  /**
+   * Most images the current conversation can send. A reply carrying more
+   * shows a warning, since its extra images will be dropped on select.
+   */
+  imageLimit?: number
+  children: ReactElement
+}
+
+export const QuickRepliesPopover = ({
+  inputValue,
+  onSelect,
+  imageLimit,
+  children,
+}: SavedReplySlashPopoverProps) => {
+  const t = useTranslations()
+  const [open, setOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const workspaceId = useWorkspaceId()
+  const normalizedContent = (inputValue ?? "").trimStart()
+  const shouldShow = normalizedContent.startsWith("/")
+  const { data: savedReplies = [], isLoading } = useSavedReplies(workspaceId, {
+    enabled: shouldShow,
+  })
+  const keyword = shouldShow
+    ? normalizedContent.slice(1).trim().toLowerCase()
+    : ""
+
+  const filteredSavedReplies = useMemo(() => {
+    if (!keyword) {
+      return savedReplies
+    }
+
+    return savedReplies.filter((reply) => {
+      const shortcut = reply.shortcut.toLowerCase()
+      const text = reply.text.toLowerCase()
+      return shortcut.includes(keyword) || text.includes(keyword)
+    })
+  }, [keyword, savedReplies])
+
+  useEffect(() => {
+    if (!shouldShow) {
+      setOpen(false)
+      setActiveIndex(0)
+      return
+    }
+
+    setOpen(true)
+  }, [shouldShow])
+
+  useEffect(() => {
+    if (filteredSavedReplies.length === 0) {
+      setActiveIndex(0)
+      return
+    }
+
+    if (activeIndex >= filteredSavedReplies.length) {
+      setActiveIndex(0)
+    }
+  }, [activeIndex, filteredSavedReplies.length])
+
+  useEffect(() => {
+    if (!(open && shouldShow) || filteredSavedReplies.length === 0) {
+      return
+    }
+
+    const activeOption = optionRefs.current.at(activeIndex)
+    activeOption?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    })
+  }, [activeIndex, filteredSavedReplies.length, open, shouldShow])
+
+  const onKeyDownCapture = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (!(open && shouldShow)) {
+        return
+      }
+
+      if (event.nativeEvent.isComposing || event.key === "Process") {
+        return
+      }
+
+      if (filteredSavedReplies.length > 0) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault()
+          event.stopPropagation()
+          setActiveIndex((prev) => (prev + 1) % filteredSavedReplies.length)
+          return
+        }
+
+        if (event.key === "ArrowUp") {
+          event.preventDefault()
+          event.stopPropagation()
+          setActiveIndex(
+            (prev) =>
+              (prev - 1 + filteredSavedReplies.length) %
+              filteredSavedReplies.length,
+          )
+          return
+        }
+
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault()
+          event.stopPropagation()
+          onSelect(filteredSavedReplies[activeIndex])
+          setOpen(false)
+          setActiveIndex(0)
+          return
+        }
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+      }
+    },
+    [activeIndex, filteredSavedReplies, onSelect, open, shouldShow],
+  )
+
+  return (
+    // The popover is driven entirely by the input's value (a leading "/"), so
+    // it needs an anchor, not a trigger: `Popover.Trigger` would apply Base UI's
+    // non-native button keyboard handling to the textarea and swallow every
+    // Space keypress (and stamp it with `role="button"`).
+    <div onKeyDownCapture={onKeyDownCapture} ref={anchorRef}>
+      <Popover onOpenChange={setOpen} open={open && shouldShow}>
+        {children}
+        <PopoverContent
+          align="start"
+          anchor={anchorRef}
+          className="max-h-75 w-[min(100vw-2rem,25rem)] overflow-y-auto p-0"
+          initialFocus={false}
+          side="top"
+        >
+          {isLoading ? (
+            <div className="px-2 py-3 text-muted-foreground text-sm">
+              {t("messages.loadingData")}
+            </div>
+          ) : null}
+
+          {!isLoading && filteredSavedReplies.length === 0 ? (
+            <div className="px-2 py-3 text-muted-foreground text-sm">
+              {t("messages.noDataAvailable")}
+            </div>
+          ) : null}
+
+          {isLoading
+            ? null
+            : filteredSavedReplies.map((reply, index) => (
+                <Button
+                  className={`flex h-auto w-full flex-col items-start justify-between gap-3 rounded-none border-b px-4 py-3 text-start hover:bg-accent ${
+                    index === activeIndex ? "bg-accent" : "hover:bg-accent"
+                  }`}
+                  key={reply.id}
+                  onClick={() => {
+                    onSelect(reply)
+                    setOpen(false)
+                    setActiveIndex(0)
+                  }}
+                  ref={(element) => {
+                    optionRefs.current[index] = element
+                  }}
+                  type="button"
+                  variant="ghost"
+                >
+                  <p className="truncate font-semibold text-sm">
+                    {reply.shortcut}
+                  </p>
+                  <p className="wrap-break-word line-clamp-2 whitespace-normal text-muted-foreground text-xs">
+                    {reply.text}
+                  </p>
+                  <SavedReplyImagesSummary images={reply.images} />
+                  {imageLimit !== undefined &&
+                  reply.images.length > imageLimit ? (
+                    <p className="text-amber-700 text-xs dark:text-amber-500">
+                      {t("messages.savedReplyImagesNotSentHere")}
+                    </p>
+                  ) : null}
+                </Button>
+              ))}
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}

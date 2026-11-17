@@ -1,5 +1,7 @@
 //! `apps/worker/src/schedule/worker.ts`: the `schedule` queue processor.
-//! Q.D5 ports the broadcast and smart delay jobs; the other schedule jobs are Q.W2.
+//! Only the crons whose handlers are in Rust are registered, so an unported
+//! one never wakes the process. Q.D5: broadcast and smart delay jobs; Q.W2:
+//! AI hand-over scan and the retention purges.
 
 pub mod broadcast;
 pub mod recurring;
@@ -11,7 +13,20 @@ use chatbotx_jobs::schedules::{
 use chatbotx_jobs::{JobCtx, JobError, JobsError};
 use serde_json::Value;
 
-use crate::{Deps, str_of};
+use crate::{Deps, purge, str_of};
+
+/// The scheduler ids with a Rust handler (Q.W2, see [`handle`]).
+pub const PORTED: &[&str] = &[
+    "scanAiHandoverBulkRuns",
+    "purgeErrorLogs",
+    "purgeInboundWebhookRequests",
+    "purgeCommentAutomationEvents",
+    "purgeExpiredConnectSessions",
+    "purgeWhatsappSignupSessions",
+    "purgeCoexistStaging",
+    "purgeExpiredOAuthTokens",
+    "purgeAutomationThrottle",
+];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
 pub const BROADCAST_JOBS: &[&str] = &[
@@ -43,6 +58,42 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "purgeBroadcasts" => broadcast::purge_broadcasts(&deps).await?,
         "enqueueRecurringBroadcasts" => recurring::enqueue_recurring_broadcasts(&deps).await?,
         "scanSmartDelay" => crate::smart_delay::scan_smart_delay(&deps).await?,
+        "scanAiHandoverBulkRuns" => {
+            crate::ai_handover::scan(&deps).await?;
+            Value::Null
+        }
+        "purgeErrorLogs" => {
+            purge::purge_error_logs(&deps.db).await?;
+            Value::Null
+        }
+        "purgeInboundWebhookRequests" => {
+            purge::purge_inbound_webhook_requests(&deps.db).await?;
+            Value::Null
+        }
+        "purgeCommentAutomationEvents" => {
+            purge::purge_comment_automation_events(&deps.db).await?;
+            Value::Null
+        }
+        "purgeExpiredConnectSessions" => {
+            purge::purge_expired_connect_sessions(&deps.db).await?;
+            Value::Null
+        }
+        "purgeWhatsappSignupSessions" => {
+            purge::purge_whatsapp_signup_sessions(&deps.db).await?;
+            Value::Null
+        }
+        "purgeCoexistStaging" => {
+            purge::purge_coexist_staging(&deps.db).await?;
+            Value::Null
+        }
+        "purgeExpiredOAuthTokens" => {
+            purge::purge_expired_oauth_tokens(&deps.db).await?;
+            Value::Null
+        }
+        "purgeAutomationThrottle" => {
+            purge::purge_automation_throttle(&deps.db).await?;
+            Value::Null
+        }
         "materializeRecurringBroadcasts" => {
             let items = data["items"].as_array().cloned().unwrap_or_default();
             recurring::materialize_recurring_broadcasts(&deps, &items).await?
@@ -56,21 +107,17 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             )
             .await?
         }
-        // ponytail: the other schedule jobs are Q.W2. An unported job fails
-        // (kept in the failed set) instead of the original's silent
-        // completion, as the `default` queue does.
         other => {
-            return Err(JobError::unrecoverable(format!(
-                "ScheduleJobData type is not defined: {other}"
-            )));
+            tracing::warn!(job_type = other, "Unknown schedule job type");
+            Value::Null
         }
     };
     Ok(out)
 }
 
-/// `registerSchedules` for the ported jobs ([`BROADCAST_JOBS`]); Q.W2
-/// registers the rest. A registration error is logged, as the original.
-pub async fn register_schedules(store: &dyn SchedulerStore) {
+/// `registerSchedules()` for the ported jobs ([`PORTED`] ids and
+/// [`BROADCAST_JOBS`] names).
+pub async fn register(store: &dyn SchedulerStore) -> Result<(), JobsError> {
     let config = ScheduleConfig {
         edition: Edition::Community,
         quota_sync_interval_seconds: QUOTA_SYNC_INTERVAL_SECONDS,
@@ -78,19 +125,13 @@ pub async fn register_schedules(store: &dyn SchedulerStore) {
         purge_broadcasts_interval_minutes: PURGE_BROADCASTS_INTERVAL_MINUTES,
         license_refresh_minute: 0,
     };
-    let result: Result<(), JobsError> = async {
-        for def in schedules(&config) {
-            if BROADCAST_JOBS.contains(&def.template.name.as_str()) {
-                store
-                    .upsert_job_scheduler(&def.id, &def.repeat, &def.template)
-                    .await?;
-            }
+    for def in schedules(&config) {
+        if PORTED.contains(&def.id.as_str()) || BROADCAST_JOBS.contains(&def.template.name.as_str())
+        {
+            store
+                .upsert_job_scheduler(&def.id, &def.repeat, &def.template)
+                .await?;
         }
-        Ok(())
     }
-    .await;
-    match result {
-        Ok(()) => tracing::info!("Schedules registered"),
-        Err(err) => tracing::error!(err = %err, "Error registering schedules"),
-    }
+    Ok(())
 }

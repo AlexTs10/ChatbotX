@@ -1,0 +1,165 @@
+"use client"
+
+import type { AIFunctionModel } from "@chatbotx.io/database/types"
+import { DataTableColumnHeader } from "@chatbotx.io/ui/components/data-table/data-table-column-header"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import { Checkbox } from "@chatbotx.io/ui/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@chatbotx.io/ui/components/ui/dropdown-menu"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@chatbotx.io/ui/components/ui/tooltip"
+import { formatDate } from "@chatbotx.io/ui/lib/format"
+import type { ColumnDef, Row } from "@tanstack/react-table"
+import {
+  CopyIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  Trash2Icon,
+} from "lucide-react"
+import type { useTranslations } from "next-intl"
+import { LockBadge } from "@/features/templates/components/lock-badge"
+import {
+  LockedGuard,
+  UndeletableGuard,
+} from "@/features/templates/components/lock-context"
+
+export type AIFunctionRowAction = {
+  row: Row<AIFunctionModel>
+  variant: "edit" | "duplicate" | "delete"
+}
+
+export const getAIFunctionsColumns = (
+  t: ReturnType<typeof useTranslations>,
+  setRowAction: (action: AIFunctionRowAction | null) => void,
+  locale: string,
+): ColumnDef<AIFunctionModel>[] => [
+  {
+    id: "select",
+    header: ({ table: innerTable }) => (
+      <Checkbox
+        aria-label={t("actions.selectAll")}
+        checked={innerTable.getIsAllPageRowsSelected()}
+        indeterminate={innerTable.getIsSomePageRowsSelected()}
+        onCheckedChange={(value) =>
+          innerTable.toggleAllPageRowsSelected(Boolean(value))
+        }
+      />
+    ),
+    cell: ({ row }) => (
+      <Checkbox
+        aria-label={t("actions.selectRow")}
+        checked={row.getIsSelected()}
+        onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+      />
+    ),
+    size: 32,
+    enableSorting: false,
+    enableHiding: false,
+  },
+  {
+    id: "name",
+    accessorKey: "name",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title={t("fields.name.label")} />
+    ),
+    cell: ({ row }) => (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <div className="flex max-w-[400px] items-center">
+              <span className="truncate">{row.original.name}</span>
+              <LockBadge resourceId={row.original.id} />
+            </div>
+          }
+        />
+        <TooltipContent>
+          <p>{row.original.name}</p>
+        </TooltipContent>
+      </Tooltip>
+    ),
+    enableSorting: true,
+    enableHiding: false,
+  },
+  {
+    id: "createdAt",
+    accessorKey: "createdAt",
+    header: ({ column }) => (
+      <DataTableColumnHeader
+        column={column}
+        title={t("fields.createdAt.label")}
+      />
+    ),
+    cell: ({ row }) => (
+      <div className="flex items-center gap-2">
+        <span className="font-medium">
+          {formatDate(row.original.createdAt, { locale })}
+        </span>
+      </div>
+    ),
+    enableSorting: true,
+    enableHiding: false,
+  },
+  {
+    id: "actions",
+    header: t("actions.actions"),
+    cell: ({ row }) => (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button size="icon" variant="ghost">
+              <MoreHorizontalIcon className="h-4 w-4" />
+              <span className="sr-only">{t("actions.openMenu")}</span>
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onClick={() => {
+              setRowAction({ row, variant: "edit" })
+            }}
+          >
+            <PencilIcon className="me-2 h-4 w-4" />
+            {t("actions.edit")}
+          </DropdownMenuItem>
+          <LockedGuard resourceId={row.original.id}>
+            {(locked) => (
+              <DropdownMenuItem
+                disabled={locked}
+                onClick={() => {
+                  setRowAction({ row, variant: "duplicate" })
+                }}
+              >
+                <CopyIcon className="me-2 h-4 w-4" />
+                {t("actions.duplicate")}
+              </DropdownMenuItem>
+            )}
+          </LockedGuard>
+          <UndeletableGuard resourceId={row.original.id}>
+            {(disabled) => (
+              <DropdownMenuItem
+                className="text-destructive"
+                disabled={disabled}
+                onClick={() => {
+                  setRowAction({ row, variant: "delete" })
+                }}
+              >
+                <Trash2Icon className="me-2 h-4 w-4" />
+                {t("actions.delete")}
+              </DropdownMenuItem>
+            )}
+          </UndeletableGuard>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ),
+    size: 50,
+    enableSorting: false,
+    enableHiding: false,
+  },
+]

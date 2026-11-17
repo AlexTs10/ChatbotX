@@ -2,8 +2,11 @@
 //! self-serve part: `api` and `webchat` channels; P3.6-D2). The provider
 //! catalog, credential / OAuth connects and connect sessions come later.
 
+pub mod api_key;
 pub mod credentials;
+pub mod oauth;
 pub mod providers;
+pub mod state;
 
 use chatbotx_db::Db;
 use chatbotx_db::repo;
@@ -355,4 +358,59 @@ pub async fn reconnect(_db: &Db, connection: &ConnectionRow) -> Result<Connectio
     // `startReconnect`: a provider that is not OAuth has no OAuth credential
     // to resolve; the OAuth reconnect session is not ported yet.
     Err(not_configured(&connection.provider))
+}
+
+/// `connectionStateService.markUnhealthyByIdentifier` (`auth.revoked`,
+/// reason `token_revoked`) with the inbox mirror, or, when the workspace has
+/// no `Connection` row for `(provider, identifier)`,
+/// `markLegacyInboxUnhealthy` on `legacy_inbox_id`. Answers whether a
+/// `Connection` row matched.
+// ponytail: the `channels` quota release of the active→inactive edge is not
+// ported (no quota ledger in Rust yet); a non-active row is left unchanged.
+pub async fn mark_unhealthy_by_identifier(
+    db: &Db,
+    provider: &str,
+    identifier: &str,
+    workspace_id: i64,
+    legacy_inbox_id: i64,
+) -> Result<bool> {
+    let (provider, identifier) = (provider.to_owned(), identifier.to_owned());
+    tx::write(db, move |tx| {
+        let now = repo::now_ms();
+        let existing = tx
+            .query_row(
+                &format!(
+                    r#"SELECT {COLUMNS} FROM "Connection"
+                       WHERE "workspaceId" = ?1 AND "provider" = ?2 AND "sourceId" = ?3 LIMIT 1"#
+                ),
+                params![workspace_id, provider, identifier],
+                row,
+            )
+            .optional()
+            .map_err(repo_err)?;
+        let inbox_id = match &existing {
+            None => Some(legacy_inbox_id),
+            Some(current) if is_active(&current.status) => {
+                tx.execute(
+                    r#"UPDATE "Connection" SET "status" = 'needs_reauth', "statusReason" = 'token_revoked',
+                           "updatedAt" = ?2 WHERE "id" = ?1"#,
+                    params![current.id, now],
+                )
+                .map_err(repo_err)?;
+                current.inbox_id
+            }
+            Some(_) => None,
+        };
+        if let Some(inbox_id) = inbox_id {
+            tx.execute(
+                r#"UPDATE "Inbox" SET "status" = 'disconnected', "disconnectedAt" = ?3,
+                       "disconnectReason" = 'token_revoked', "updatedAt" = ?3
+                   WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+                params![inbox_id, workspace_id, now],
+            )
+            .map_err(repo_err)?;
+        }
+        Ok(existing.is_some())
+    })
+    .await
 }

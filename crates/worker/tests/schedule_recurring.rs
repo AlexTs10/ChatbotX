@@ -272,6 +272,11 @@ async fn fixture() -> Fixture {
         channels: chatbotx_worker::Channels::new(),
         app_url: "http://app.test".into(),
         variables: None,
+        ai: Arc::new(chatbotx_worker::ai::Ai::live()),
+        files: None,
+        webhook_http: Arc::new(chatbotx_worker::webhook::RecordingWebhookHttp::default()),
+        events: None,
+        push: None,
     };
     Fixture {
         db,

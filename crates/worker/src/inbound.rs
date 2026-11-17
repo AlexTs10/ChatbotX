@@ -1,0 +1,1151 @@
+//! The shared inbound pipeline every channel reuses
+//! (`apps/worker/src/integration/handlers/{incoming-message,received-message,
+//! message-status}.ts`): a channel webhook queues `incomingMessage` /
+//! `messageStatus` on the `integration` queue with `{ integrationType,
+//! integrationIdentifier, payload }`; this module resolves the integration,
+//! lets the channel parse the payload ([`Channel::receive_message`] /
+//! [`Channel::message_status`]), then finds or creates the contact, contact
+//! inbox and conversation, stores the message (deduplicated by `sourceId`),
+//! publishes `messageCreated` and routes the message (keywords → AI through
+//! the `ai-agent` queue, flow postbacks / quick replies, `ref`).
+
+use std::sync::Arc;
+
+use chatbotx_business::message::{contact_inbox_json, conversation_json, message_json};
+use chatbotx_db::repo::Model as _;
+use chatbotx_db::repo::message::{self as repo_message, CreateAttachmentInput, CreateMessageInput};
+use chatbotx_db::repo::models::{ContactInbox, Conversation};
+use chatbotx_db::repo::{new_id, now_ms};
+use chatbotx_db::rusqlite::{Connection, OptionalExtension as _, params};
+use chatbotx_jobs::options::Dedup;
+use chatbotx_jobs::{JobError, JobOptions, QueueName};
+use chatbotx_kv::SystemClock;
+use chatbotx_kv::durable::DurableKv;
+use chatbotx_rt::EventType;
+use serde_json::{Value, json};
+
+use crate::channel::{InboundInbox, IncomingContact, IncomingMessage, Received};
+use crate::{Deps, db_fail, fail, str_of};
+
+/// `IntegrationJobAction.incomingMessage`.
+pub const INCOMING_MESSAGE: &str = "incomingMessage";
+/// `IntegrationJobAction.messageStatus`.
+pub const MESSAGE_STATUS: &str = "messageStatus";
+/// `AIJobAction.processAutomatedResponse`.
+pub const PROCESS_AUTOMATED_RESPONSE: &str = "processAutomatedResponse";
+
+/// `AUTOMATED_RESPONSE_DELAY_SECONDS` / `AUTOMATED_RESPONSE_TTL_SECONDS`
+/// (default 2 s each).
+fn automated_response_timing() -> (u64, u64) {
+    let read = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(2)
+    };
+    (
+        read("AUTOMATED_RESPONSE_DELAY_SECONDS"),
+        read("AUTOMATED_RESPONSE_TTL_SECONDS"),
+    )
+}
+
+/// `getKey` of `@chatbotx.io/automated-response`.
+pub fn automated_response_key(conversation_id: i64, contact_inbox_id: i64) -> String {
+    format!("automated-response:{conversation_id}-{contact_inbox_id}:messages")
+}
+
+pub(crate) fn kv(deps: &Deps) -> DurableKv {
+    DurableKv::new(Arc::clone(&deps.db), Arc::new(SystemClock))
+}
+
+/// What `receiveMessage` stored and the routing inputs (`processIncomingMessage`).
+#[derive(Debug, Clone)]
+pub struct Stored {
+    pub inbox: InboundInbox,
+    pub conversation: Conversation,
+    pub contact_inbox: ContactInbox,
+    /// The new message row JSON (`None` = a redelivery or nothing stored).
+    pub message: Option<Value>,
+    pub message_id: Option<i64>,
+    pub received: Received,
+    pub is_new_contact: bool,
+}
+
+/// `IntegrationJobAction.incomingMessage`: [`receive_message`] then the
+/// routing of `processIncomingMessage`.
+pub async fn incoming_message(deps: &Deps, data: &Value) -> Result<(), JobError> {
+    let Some(stored) = receive_message(deps, data).await? else {
+        return Ok(());
+    };
+    route_incoming_message(deps, &stored).await
+}
+
+/// `receiveMessage` (received-message.ts): parse, find or create the
+/// contact and conversation, store and broadcast the message. `None` = the
+/// channel had nothing to store.
+pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>, JobError> {
+    let integration_type = str_of(data, "integrationType").unwrap_or("").to_owned();
+    let identifier = data
+        .get("integrationIdentifier")
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
+    let resolved = deps
+        .channels
+        .resolve_by_identifier(
+            &deps.db,
+            deps.realtime.as_ref(),
+            &integration_type,
+            &identifier,
+        )
+        .await
+        .map_err(|e| JobError::unrecoverable(e.to_string()))?;
+    let Some((channel, ctx, inbox)) = resolved else {
+        // `IntegrationNotFoundError`: the integration was disconnected.
+        return Err(JobError::unrecoverable(format!(
+            "Integration not found: {integration_type} {identifier}"
+        )));
+    };
+    let payload = data.get("payload").cloned().unwrap_or(Value::Null);
+    let received = channel
+        .receive_message(&ctx, payload)
+        .await
+        .map_err(|e| fail(e.to_string()))?;
+    let Some(received) = received else {
+        tracing::warn!(
+            integration_type,
+            inbox_id = inbox.inbox_id,
+            workspace_id = inbox.workspace_id,
+            "Received message has no storable content, skipping"
+        );
+        return Ok(None);
+    };
+    // ponytail: postback / quick-reply sanitizing (`sanitizeFlowAction`),
+    // step-input skip taps, contact hints, third-party echo drops, the
+    // appointment-cancel postback, profile lookups, Google click, commerce
+    // enrichment, thread-control recording and the leaderboard award are not
+    // ported; the plain contact message path is.
+    let source = contact_source(received.referral_source.as_deref());
+    let (contact_inbox, conversation, is_new_contact) =
+        detect_contact_and_conversation(deps, &inbox, &received.contact, source).await?;
+
+    let mut message = None;
+    let mut message_id = None;
+    if let Some(incoming) = &received.message {
+        if incoming.message_type != "outgoing" {
+            if let Some(text) = incoming.text.as_deref() {
+                update_contact_from_message(deps, &contact_inbox, inbox.workspace_id, text).await;
+            }
+            unblock_if_blocked(deps, contact_inbox.contact_id, inbox.workspace_id).await;
+        }
+        let (row, is_new) = save_message(
+            deps,
+            &inbox,
+            &contact_inbox,
+            &conversation,
+            incoming,
+            &received,
+            None,
+        )
+        .await?;
+        if is_new {
+            message_id = row["id"].as_str().and_then(|s| s.parse().ok());
+            message = Some(row);
+        }
+    }
+    Ok(Some(Stored {
+        inbox,
+        conversation,
+        contact_inbox,
+        message,
+        message_id,
+        received,
+        is_new_contact,
+    }))
+}
+
+/// `resolveContactSource` without the Google click (not ported):
+/// `metaReferralToContactSource(referralSource) ?? inboundMessage`.
+fn contact_source(referral_source: Option<&str>) -> &'static str {
+    match referral_source {
+        Some("ADS") => "ads",
+        Some("SHORTLINK") => "botLink",
+        Some("CUSTOMER_CHAT_PLUGIN") => "chatPlugin",
+        _ => "inboundMessage",
+    }
+}
+
+/// `resolveSourceScopedIdentityMatch` over `contactInboxRepository.findWithContact`:
+/// `sourceId`, then `sourceUserId`, then `sourceParentUserId`.
+fn find_existing_contact_inbox(
+    conn: &Connection,
+    inbox: &InboundInbox,
+    contact: &IncomingContact,
+) -> chatbotx_db::rusqlite::Result<Option<(ContactInbox, &'static str)>> {
+    let probes: [(&'static str, Option<&str>); 3] = [
+        ("sourceId", Some(contact.source_id.as_str())),
+        ("sourceUserId", contact.source_user_id.as_deref()),
+        (
+            "sourceParentUserId",
+            contact.source_parent_user_id.as_deref(),
+        ),
+    ];
+    for (column, value) in probes {
+        let Some(value) = value else { continue };
+        let found = conn
+            .query_row(
+                &format!(
+                    r#"{} WHERE "inboxId" = ?1 AND "channel" = ?2 AND "{column}" = ?3
+                       AND EXISTS (SELECT 1 FROM "Contact" c WHERE c."id" = "ContactInbox"."contactId")
+                       LIMIT 1"#,
+                    ContactInbox::select_sql()
+                ),
+                params![inbox.inbox_id, inbox.channel, value],
+                ContactInbox::from_row,
+            )
+            .optional()?;
+        if let Some(found) = found {
+            return Ok(Some((found, column)));
+        }
+    }
+    Ok(None)
+}
+
+/// `conversationService.findOrCreate` (inside the caller's transaction).
+pub(crate) fn find_or_create_conversation(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_id: i64,
+    source_id: Option<&str>,
+    channel_conversation_id: Option<&str>,
+) -> chatbotx_db::rusqlite::Result<Conversation> {
+    let find = |conn: &Connection| {
+        conn.query_row(
+            &format!(
+                r#"{} WHERE "workspaceId" = ?1 AND "contactId" = ?2 AND "sourceId" IS ?3 LIMIT 1"#,
+                Conversation::select_sql()
+            ),
+            params![workspace_id, contact_id, source_id],
+            Conversation::from_row,
+        )
+        .optional()
+    };
+    let channel_conversation_id = channel_conversation_id.filter(|id| !id.is_empty());
+    if let Some(existing) = find(conn)? {
+        // `syncChannelConversationId`.
+        let Some(channel_id) = channel_conversation_id else {
+            return Ok(existing);
+        };
+        let mut attributes = existing
+            .additional_attributes
+            .as_ref()
+            .map(|a| a.0.clone())
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
+        if attributes["channelConversationId"] == channel_id {
+            return Ok(existing);
+        }
+        attributes["channelConversationId"] = json!(channel_id);
+        conn.execute(
+            r#"UPDATE "Conversation" SET "additionalAttributes" = ?2 WHERE "id" = ?1"#,
+            params![existing.id, attributes.to_string()],
+        )?;
+        return find(conn)?.ok_or(chatbotx_db::rusqlite::Error::QueryReturnedNoRows);
+    }
+    let attributes =
+        channel_conversation_id.map(|id| json!({ "channelConversationId": id }).to_string());
+    conn.execute(
+        r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId", "sourceId", "additionalAttributes")
+           VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT DO NOTHING"#,
+        params![new_id(), workspace_id, contact_id, source_id, attributes],
+    )?;
+    find(conn)?.ok_or(chatbotx_db::rusqlite::Error::QueryReturnedNoRows)
+}
+
+/// `detectContactAndConversation`: the existing contact inbox (identity
+/// sync not ported) or a new contact + contact inbox + conversation in one
+/// transaction. Returns `(contactInbox, conversation, isNewContact)`.
+async fn detect_contact_and_conversation(
+    deps: &Deps,
+    inbox: &InboundInbox,
+    contact: &IncomingContact,
+    source: &'static str,
+) -> Result<(ContactInbox, Conversation, bool), JobError> {
+    let inbox = inbox.clone();
+    let contact = contact.clone();
+    deps.db
+        .write(move |tx| {
+            let source_conversation_id = contact.source_conversation_id.as_deref();
+            if let Some((existing, _matched_by)) = find_existing_contact_inbox(tx, &inbox, &contact)? {
+                // ponytail: `syncExistingContactIdentity` (BSUID / username
+                // learning) is not ported.
+                let conversation = find_or_create_conversation(
+                    tx,
+                    inbox.workspace_id,
+                    existing.contact_id,
+                    source_conversation_id,
+                    contact.channel_conversation_id.as_deref(),
+                )?;
+                return Ok((existing, conversation, false));
+            }
+            // ponytail: the MAC quota gate, `getProfile` lookups and the
+            // locale / timezone inference (`finalizeContactProfile`) are not
+            // ported; the contact row takes the webhook's fields.
+            let contact_id = new_id();
+            let now = now_ms();
+            let phone_number = contact.phone_number.clone().or_else(|| {
+                (inbox.channel == "whatsapp"
+                    && contact.source_user_id.as_deref() != Some(contact.source_id.as_str())
+                    && !contact.source_id.is_empty())
+                .then(|| format!("+{}", contact.source_id.trim_start_matches('+')))
+            });
+            tx.execute(
+                r#"INSERT INTO "Contact" ("id", "createdAt", "updatedAt", "workspaceId", "firstName",
+                     "lastName", "email", "phoneNumber", "avatar", "locale")
+                   VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+                params![
+                    contact_id,
+                    now,
+                    inbox.workspace_id,
+                    contact.first_name,
+                    contact.last_name,
+                    contact.email,
+                    phone_number,
+                    contact.avatar,
+                    contact.locale,
+                ],
+            )?;
+            let contact_inbox_id = new_id();
+            tx.execute(
+                r#"INSERT INTO "ContactInbox" ("id", "createdAt", "updatedAt", "inboxId", "contactId",
+                     "originalContactId", "source", "sourceId", "sourceUserId", "sourceParentUserId",
+                     "sourceUsername", "channel", "language")
+                   VALUES (?1, ?2, ?2, ?3, ?4, ?4, ?11, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+                params![
+                    contact_inbox_id,
+                    now,
+                    inbox.inbox_id,
+                    contact_id,
+                    contact.source_id,
+                    contact.source_user_id,
+                    contact.source_parent_user_id,
+                    contact.source_username,
+                    inbox.channel,
+                    contact.language,
+                    source,
+                ],
+            )?;
+            let contact_inbox = tx.query_row(
+                &format!(r#"{} WHERE "id" = ?1"#, ContactInbox::select_sql()),
+                params![contact_inbox_id],
+                ContactInbox::from_row,
+            )?;
+            let conversation = find_or_create_conversation(
+                tx,
+                inbox.workspace_id,
+                contact_id,
+                source_conversation_id,
+                contact.channel_conversation_id.as_deref(),
+            )?;
+            Ok((contact_inbox, conversation, true))
+        })
+        .await
+        .map_err(db_fail)
+}
+
+/// `updateContactFromMessage`: a phone / email the contact typed overwrites
+/// the contact's columns. Failures are logged.
+async fn update_contact_from_message(
+    deps: &Deps,
+    contact_inbox: &ContactInbox,
+    workspace_id: i64,
+    text: &str,
+) {
+    use chatbotx_business::contact::extract::{ExtractOptions, extract_contact_info};
+    let info = extract_contact_info(Some(text), None, ExtractOptions::default());
+    if info.phone_number.is_none() && info.email.is_none() {
+        return;
+    }
+    let contact_id = contact_inbox.contact_id;
+    let result = deps
+        .db
+        .write(move |tx| {
+            tx.execute(
+                r#"UPDATE "Contact" SET "phoneNumber" = COALESCE(?1, "phoneNumber"),
+                     "email" = COALESCE(?2, "email"), "updatedAt" = ?3
+                   WHERE "id" = ?4 AND "workspaceId" = ?5"#,
+                params![
+                    info.phone_number,
+                    info.email,
+                    now_ms(),
+                    contact_id,
+                    workspace_id
+                ],
+            )?;
+            Ok(())
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::warn!(err = %err, contact_id, "Contact update from message text failed");
+    }
+}
+
+/// `contactService.unblockIfBlocked`.
+pub(crate) async fn unblock_if_blocked(deps: &Deps, contact_id: i64, workspace_id: i64) {
+    let result = deps
+        .db
+        .write(move |tx| {
+            tx.execute(
+                r#"UPDATE "Contact" SET "blockedAt" = NULL, "updatedAt" = ?1
+                   WHERE "id" = ?2 AND "workspaceId" = ?3 AND "blockedAt" IS NOT NULL"#,
+                params![now_ms(), contact_id, workspace_id],
+            )?;
+            Ok(())
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::warn!(err = %err, contact_id, "Auto-unblock on inbound message failed");
+    }
+}
+
+/// `isInboundConversationMessage`.
+fn is_inbound_conversation_message(message: &IncomingMessage) -> bool {
+    message.message_type == "incoming" && message.kind.as_deref().unwrap_or("message") == "message"
+}
+
+/// `saveAndBroadcastMessage` / `persistMessage`: the deduplicated insert,
+/// the activity tracking of a new row, the realtime event. Returns the
+/// stored row JSON and whether it is new.
+pub(crate) async fn save_message(
+    deps: &Deps,
+    inbox: &InboundInbox,
+    contact_inbox: &ContactInbox,
+    conversation: &Conversation,
+    incoming: &IncomingMessage,
+    received: &Received,
+    client_id: Option<&str>,
+) -> Result<(Value, bool), JobError> {
+    let inbound = incoming.message_type != "outgoing";
+    let created_at = now_ms();
+    let input = CreateMessageInput {
+        id: Some(new_id()),
+        contact_inbox_id: contact_inbox.id,
+        conversation_id: conversation.id,
+        workspace_id: inbox.workspace_id,
+        content_attributes: incoming.content_attributes.clone(),
+        content_type: incoming.content_type.clone(),
+        message_type: incoming.message_type.clone(),
+        sender_type: if inbound { "contact" } else { "user" }.into(),
+        sender_id: inbound.then_some(contact_inbox.contact_id),
+        source_id: incoming.source_id.clone(),
+        parent_id: incoming.parent_id.clone(),
+        text: incoming.text.clone(),
+        r#type: Some(incoming.kind.clone().unwrap_or_else(|| "message".into())),
+        created_at: Some(created_at),
+        updated_at: None,
+    };
+    let attachments: Vec<CreateAttachmentInput> = incoming
+        .attachments
+        .iter()
+        .map(|a| CreateAttachmentInput {
+            id: None,
+            workspace_id: inbox.workspace_id,
+            conversation_id: conversation.id,
+            message_id: 0,
+            message_created_at: 0,
+            file_type: a.file_type.clone(),
+            mime_type: a.mime_type.clone(),
+            origin_path: a.origin_path.clone(),
+            created_at: None,
+            height: a.height,
+            width: a.width,
+            keep_original: Some(
+                !(a.is_photo_message && matches!(a.file_type.as_str(), "image" | "gif")),
+            ),
+            name: a.name.clone(),
+            size: a.size,
+            source_id: a.source_id.clone(),
+            thumbnail_path: None,
+        })
+        .collect();
+    let tracking_inbound = is_inbound_conversation_message(incoming);
+    let last_btn_title = received.button_title.clone();
+    let user_input = incoming.text.clone();
+    let user_input_type = (incoming.content_type == "location")
+        .then(|| "location".to_owned())
+        .or_else(|| incoming.text.is_some().then(|| "text".to_owned()));
+    let referral = received.referral.as_ref().map(Value::to_string);
+    let ci = contact_inbox.clone();
+    let conversation_id = conversation.id;
+    let workspace_id = inbox.workspace_id;
+    let (stored, is_new) = deps
+        .db
+        .write(move |tx| {
+            let (stored, is_new) = if attachments.is_empty() {
+                let r = repo_message::create_or_update(tx, &input).map_err(crate::repo_err)?;
+                (
+                    repo_message::MessageWithAttachments {
+                        message: r.message,
+                        attachment_count: None,
+                        attachments: Vec::new(),
+                    },
+                    r.is_new,
+                )
+            } else {
+                let r = repo_message::create_or_update_with_attachments(tx, &input, &attachments)
+                    .map_err(crate::repo_err)?;
+                (r.result, r.is_new)
+            };
+            if !is_new {
+                return Ok((stored, false));
+            }
+            let at = stored.message.created_at;
+            // `recordInboundActivity`: contact-inbox tracking + the
+            // conversation's activity and waiting window.
+            tx.execute(
+                r#"UPDATE "ContactInbox" SET
+                     "firstInteractionAt" = CASE WHEN "firstInteractionAt" IS NULL OR "firstInteractionAt" > ?1 THEN ?1 ELSE "firstInteractionAt" END,
+                     "lastMessageAt" = ?1,
+                     "lastIncomingMessageAt" = CASE WHEN ?2 THEN ?1 ELSE "lastIncomingMessageAt" END,
+                     "lastUserInput" = CASE WHEN ?2 AND ?3 IS NOT NULL THEN ?3 ELSE "lastUserInput" END,
+                     "lastUserInputType" = CASE WHEN ?2 AND ?4 IS NOT NULL THEN ?4 ELSE "lastUserInputType" END,
+                     "lastBtnTitle" = COALESCE(?5, "lastBtnTitle"),
+                     "referral" = CASE WHEN ?6 IS NULL THEN "referral"
+                                       ELSE json_patch(COALESCE("referral", '{}'), ?6) END,
+                     "updatedAt" = ?7
+                   WHERE "id" = ?8 AND "contactId" = ?9"#,
+                params![
+                    at,
+                    tracking_inbound,
+                    user_input,
+                    user_input_type,
+                    last_btn_title,
+                    referral,
+                    now_ms(),
+                    ci.id,
+                    ci.contact_id
+                ],
+            )?;
+            tx.execute(
+                r#"UPDATE "Conversation" SET
+                     "lastActivityAt" = ?1,
+                     "contactRepliedAt" = CASE WHEN ?2 THEN ?1 ELSE "contactRepliedAt" END,
+                     "awaitingHumanReplySince" = CASE WHEN ?2 THEN COALESCE("awaitingHumanReplySince", ?1)
+                                                      ELSE "awaitingHumanReplySince" END,
+                     "updatedAt" = ?3
+                   WHERE "id" = ?4 AND "workspaceId" = ?5"#,
+                params![at, inbound, now_ms(), conversation_id, workspace_id],
+            )?;
+            Ok((stored, true))
+        })
+        .await
+        .map_err(db_fail)?;
+    let row = message_json(&stored);
+    if is_new {
+        let mut event = row.clone();
+        if let Some(client_id) = client_id {
+            event["clientId"] = json!(client_id);
+        }
+        crate::chat::queue_event(
+            deps,
+            conversation,
+            inbox.inbox_id,
+            EventType::MessageCreated,
+            event,
+        )
+        .await;
+        // ponytail: the incoming notification job, the `message:received`
+        // event (flow triggers, Q.W2) and the photo re-encode are not ported.
+    }
+    Ok((row, is_new))
+}
+
+/// `processIncomingMessage`: route a new contact message to its automation.
+pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), JobError> {
+    let Some(message) = &stored.message else {
+        return Ok(());
+    };
+    let Some(message_id) = stored.message_id else {
+        return Ok(());
+    };
+    let received = &stored.received;
+    let conversation = &stored.conversation;
+    let workspace_active = workspace_is_active(deps, conversation.workspace_id).await?;
+    let suppress = received
+        .thread_control
+        .as_ref()
+        .and_then(|t| str_of(t, "delivery"))
+        == Some("standby");
+    let can_automate = workspace_active && !suppress;
+
+    // Flow postbacks / quick replies (`automatedResponseService.enqueueFlowAction`).
+    let action = received
+        .postback_action
+        .as_ref()
+        .map(|a| ("postback", a))
+        .or_else(|| {
+            received
+                .quick_reply_action
+                .as_ref()
+                .map(|a| ("quickReply", a))
+        });
+    if let Some((kind, action)) = action {
+        if can_automate {
+            enqueue_flow_action(deps, stored, kind, action, message_id).await?;
+        }
+        return Ok(());
+    }
+    if let Some(r#ref) = received.r#ref.as_ref().filter(|_| can_automate) {
+        // ponytail: `runRef` (ref links) has no Rust handler yet; queued so
+        // the job is visible.
+        add_job(
+            deps,
+            QueueName::Integration,
+            "runRef",
+            json!({ "type": "runRef", "data": {
+                "conversationId": conversation_json(conversation),
+                "contactInboxId": contact_inbox_json(&stored.contact_inbox),
+                "ref": r#ref,
+                "messageId": message_id.to_string(),
+                "isNewContact": stored.is_new_contact,
+            }}),
+            JobOptions::default(),
+        )
+        .await?;
+    }
+    if !can_automate {
+        return Ok(());
+    }
+    let from_contact = str_of(message, "senderType") == Some("contact");
+    let text = str_of(message, "text")
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned);
+    let attachment_types: Vec<String> = message["attachments"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| str_of(x, "fileType").map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let is_location = str_of(message, "contentType") == Some("location");
+    let has_keyword_media = attachment_types
+        .iter()
+        .any(|t| chatbotx_business::keyword_match::is_keyword_media_file_type(t));
+    let additional = conversation
+        .additional_attributes
+        .as_ref()
+        .map(|j| j.0.clone())
+        .unwrap_or(Value::Null);
+    let routing = crate::integration::resolve_incoming_text_routing(
+        &additional,
+        from_contact && (text.is_some() || !attachment_types.is_empty() || is_location),
+        from_contact && text.is_some(),
+        from_contact && has_keyword_media,
+        async || ensure_active(deps, conversation).await,
+    )
+    .await;
+    use crate::integration::IncomingRouting;
+    match routing {
+        IncomingRouting::AutomatedResponse => {
+            enqueue_automated_response(deps, stored, message_id, text, attachment_types).await?;
+        }
+        IncomingRouting::Challenge(challenge) => {
+            add_job(
+                deps,
+                QueueName::Integration,
+                "runChallenge",
+                json!({ "type": "runChallenge", "data": {
+                    "conversationId": conversation.id.to_string(),
+                    "contactInboxId": stored.contact_inbox.id.to_string(),
+                    "messageId": message_id.to_string(),
+                    "messageCreatedAt": message["createdAt"],
+                    "challenge": challenge,
+                }}),
+                JobOptions {
+                    job_id: Some(format!(
+                        "questionnaire-challenge-{}-{message_id}",
+                        conversation.id
+                    )),
+                    ..JobOptions::default()
+                },
+            )
+            .await?;
+        }
+        // ponytail: handoff re-entry needs the AI handover port (Q.D6).
+        IncomingRouting::HandoffReentry | IncomingRouting::None => {}
+    }
+    Ok(())
+}
+
+pub(crate) async fn add_job(
+    deps: &Deps,
+    queue: QueueName,
+    name: &str,
+    data: Value,
+    opts: JobOptions,
+) -> Result<(), JobError> {
+    deps.jobs
+        .add(queue, name, data, opts)
+        .await
+        .map(|_| ())
+        .map_err(|e| fail(e.to_string()))
+}
+
+/// `workspaceService.isActiveNow(workspace)`.
+pub(crate) async fn workspace_is_active(deps: &Deps, workspace_id: i64) -> Result<bool, JobError> {
+    let row = deps
+        .db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    r#"SELECT "isActive", "startTime", "endTime", "timezone" FROM "Workspace" WHERE "id" = ?1"#,
+                    params![workspace_id],
+                    |r| {
+                        Ok((
+                            r.get::<_, bool>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, Option<String>>(2)?,
+                            r.get::<_, String>(3)?,
+                        ))
+                    },
+                )
+                .optional()?)
+        })
+        .await
+        .map_err(db_fail)?;
+    Ok(row.is_some_and(|(active, start, end, tz)| {
+        chatbotx_business::workspace::is_active_now(
+            active,
+            start.as_deref(),
+            end.as_deref(),
+            &tz,
+            now_ms(),
+        )
+    }))
+}
+
+/// `conversationService.ensureActive`: bot on, or a passed `botResumeAt`
+/// turns it back on.
+pub(crate) async fn ensure_active(deps: &Deps, conversation: &Conversation) -> bool {
+    if conversation.bot_enabled {
+        return true;
+    }
+    let Some(resume_at) = conversation.bot_resume_at.filter(|at| *at <= now_ms()) else {
+        return false;
+    };
+    let _ = resume_at;
+    let (id, workspace_id) = (conversation.id, conversation.workspace_id);
+    let result = deps
+        .db
+        .write(move |tx| {
+            tx.execute(
+                r#"UPDATE "Conversation" SET "botEnabled" = 1, "botResumeAt" = NULL, "updatedAt" = ?1
+                   WHERE "id" = ?2 AND "workspaceId" = ?3"#,
+                params![now_ms(), id, workspace_id],
+            )?;
+            Ok(())
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::warn!(err = %err, conversation_id = id, "Bot auto-resume failed");
+    }
+    true
+}
+
+/// `automatedResponseService.enqueue` (`enqueueMessage`): the delayed,
+/// debounced `processAutomatedResponse` job plus the pending-message list.
+/// A media-only message is queued only when a keyword rule matches it.
+pub(crate) async fn enqueue_automated_response(
+    deps: &Deps,
+    stored: &Stored,
+    message_id: i64,
+    text: Option<String>,
+    attachment_file_types: Vec<String>,
+) -> Result<(), JobError> {
+    use chatbotx_business::keyword_match::{MatchInput, matches_any_keyword_rule};
+    let conversation_id = stored.conversation.id;
+    let contact_inbox_id = stored.contact_inbox.id;
+    let workspace_id = stored.conversation.workspace_id;
+    let has_input = text.is_some() || !attachment_file_types.is_empty();
+    if text.is_none() && has_input {
+        let rules = crate::ai_agent::inbound_rules(deps, workspace_id).await?;
+        let input = MatchInput {
+            text: None,
+            attachment_file_types,
+        };
+        if !matches_any_keyword_rule(
+            &input,
+            &rules.iter().map(|r| r.1.clone()).collect::<Vec<_>>(),
+        ) {
+            return Ok(());
+        }
+    }
+    // ponytail: Smart Delay (`smartResponseDelaySeconds`) only applies with
+    // an AI agent / Global Router (Q.D6); until then the default timing.
+    let (delay_secs, ttl_secs) = automated_response_timing();
+    let key = automated_response_key(conversation_id, contact_inbox_id);
+    let opts = JobOptions {
+        job_id: Some(format!("automated-response-{message_id}")),
+        delay_ms: Some(delay_secs * 1000),
+        dedup: Some(Dedup {
+            id: key.clone(),
+            ttl_ms: Some(ttl_secs * 1000),
+            extend: true,
+            replace: true,
+            keep_last_if_active: false,
+        }),
+        ..JobOptions::default()
+    };
+    let data = json!({ "type": PROCESS_AUTOMATED_RESPONSE, "data": {
+        "conversationId": conversation_id.to_string(),
+        "contactInboxId": contact_inbox_id.to_string(),
+        "messageId": message_id.to_string(),
+    }});
+    // The list is written first so the job always finds its message.
+    if let Err(err) = kv(deps)
+        .push(&key, &message_id.to_string(), ttl_secs * 5)
+        .await
+    {
+        tracing::error!(err = %err, "Unable to trigger automated response");
+        return Ok(());
+    }
+    if let Err(err) = deps
+        .jobs
+        .add(QueueName::AiAgent, PROCESS_AUTOMATED_RESPONSE, data, opts)
+        .await
+    {
+        tracing::error!(err = %err, "Unable to trigger automated response");
+    }
+    Ok(())
+}
+
+/// `automatedResponseService.enqueueFlowAction`: a button tap starts the
+/// flow node it names (`runFlowPostback` / `runFlowQuickReply`).
+pub(crate) async fn enqueue_flow_action(
+    deps: &Deps,
+    stored: &Stored,
+    kind: &str,
+    action: &str,
+    message_id: i64,
+) -> Result<(), JobError> {
+    let name = if kind == "postback" {
+        "runFlowPostback"
+    } else {
+        "runFlowQuickReply"
+    };
+    let mut payload = json!({});
+    if let Some(flow_response) = stored
+        .received
+        .message
+        .as_ref()
+        .and_then(|m| m.content_attributes.as_ref())
+        .and_then(|a| a.get("flowResponse"))
+    {
+        payload["waFlowResponse"] = flow_response.clone();
+    }
+    // ponytail: the per-action debounce key and the run handlers
+    // (`runFlowPostback` / `runFlowQuickReply`) are the flow-action unit's
+    // (Q.W3); the job is queued with the original payload.
+    add_job(
+        deps,
+        QueueName::Integration,
+        name,
+        json!({ "type": name, "data": {
+            "conversationId": conversation_json(&stored.conversation),
+            "contactInboxId": contact_inbox_json(&stored.contact_inbox),
+            "action": action,
+            "ref": stored.received.r#ref,
+            "messageId": message_id.to_string(),
+            "payload": payload,
+        }}),
+        JobOptions::default(),
+    )
+    .await
+}
+
+/// `IntegrationJobAction.messageStatus` (`message-status.ts`): the channel
+/// reads the status; a `failed` status stores the send error, `delivered` /
+/// `read` stamp the contact inbox.
+pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
+    let integration_type = str_of(data, "integrationType").unwrap_or("").to_owned();
+    let identifier = str_of(data, "integrationIdentifier")
+        .unwrap_or("")
+        .to_owned();
+    let Some((channel, ctx, inbox)) = deps
+        .channels
+        .resolve_by_identifier(
+            &deps.db,
+            deps.realtime.as_ref(),
+            &integration_type,
+            &identifier,
+        )
+        .await
+        .map_err(|e| JobError::unrecoverable(e.to_string()))?
+    else {
+        return Ok(());
+    };
+    let payload = data.get("payload").cloned().unwrap_or(Value::Null);
+    let Some(status) = channel
+        .message_status(&ctx, payload)
+        .await
+        .map_err(|e| fail(e.to_string()))?
+    else {
+        return Ok(());
+    };
+    let workspace_id = inbox.workspace_id;
+    let source_id = status.message_id.clone();
+    let found = deps
+        .db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    r#"SELECT m."id", m."createdAt", m."conversationId", m."contactInboxId"
+                       FROM "Message" m WHERE m."workspaceId" = ?1 AND m."sourceId" = ?2
+                       ORDER BY m."createdAt" DESC LIMIT 1"#,
+                    params![workspace_id, source_id],
+                    |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, i64>(2)?,
+                            r.get::<_, i64>(3)?,
+                        ))
+                    },
+                )
+                .optional()?)
+        })
+        .await
+        .map_err(db_fail)?;
+    let Some((message_id, created_at, conversation_id, contact_inbox_id)) = found else {
+        return Ok(());
+    };
+    let Some(conversation) = crate::load_conversation(&deps.db, conversation_id).await? else {
+        return Ok(());
+    };
+    match status.status.as_str() {
+        "failed" => {
+            crate::chat::persist_send_error(
+                deps,
+                &conversation,
+                inbox.inbox_id,
+                (message_id, created_at, None),
+                Some(status.error.unwrap_or_else(|| "Message failed".into())),
+                false,
+            )
+            .await;
+        }
+        "delivered" | "read" => {
+            // ponytail: message delivery / read state, the "Last Delivered"
+            // system field and the analytics events are Q.W2.
+            let at = status.timestamp.unwrap_or_else(now_ms);
+            let contact_id = conversation.contact_id;
+            let result = deps
+                .db
+                .write(move |tx| {
+                    chatbotx_db::repo::contact_activity::upsert_last_delivered(
+                        tx,
+                        workspace_id,
+                        &[(contact_id, at)],
+                    )
+                    .map_err(crate::repo_err)?;
+                    Ok(())
+                })
+                .await;
+            if let Err(err) = result {
+                tracing::warn!(err = %err, contact_inbox_id, "Recording the delivery failed");
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! The API channel through the shared pipeline: contact, conversation
+    //! and message rows, the redelivery dedup, the debounced keyword job and
+    //! its text reply (`41-keywords-trigger` in small).
+    use std::sync::Mutex;
+
+    use chatbotx_db::Db;
+    use chatbotx_jobs::{AddResult, Enqueuer, JobsError, NewJob};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Recording(Mutex<Vec<(QueueName, String, Value, JobOptions)>>);
+
+    impl Enqueuer for Recording {
+        fn add(
+            &self,
+            queue: QueueName,
+            name: &str,
+            data: Value,
+            opts: JobOptions,
+        ) -> chatbotx_jobs::BoxFuture<'_, Result<AddResult, JobsError>> {
+            self.0
+                .lock()
+                .unwrap()
+                .push((queue, name.into(), data, opts));
+            Box::pin(async {
+                Ok(AddResult {
+                    job_id: "1".into(),
+                    created: true,
+                })
+            })
+        }
+
+        fn add_bulk(
+            &self,
+            _: QueueName,
+            _: Vec<NewJob>,
+        ) -> chatbotx_jobs::BoxFuture<'_, Result<Vec<AddResult>, JobsError>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+    }
+
+    async fn setup() -> (Deps, Arc<Recording>) {
+        let dir = std::env::temp_dir().join(format!(
+            "chatbotx-worker-inbound-{}-{}",
+            std::process::id(),
+            new_id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Arc::new(Db::open(dir.join("t.db")).unwrap());
+        db.migrate().await.unwrap();
+        db.write(|tx| {
+            for sql in [
+                r#"INSERT INTO "User" ("id", "email") VALUES (1, 'u@example.test')"#,
+                r#"INSERT INTO "Workspace" ("id", "name", "ownerId") VALUES (2, 'WS', 1)"#,
+                r#"INSERT INTO "Inbox" ("id", "workspaceId", "name", "channel", "sourceId") VALUES (4, 2, 'Api', 'api', '4')"#,
+                r#"INSERT INTO "IntegrationApi" ("id", "auth", "name", "tokenHash", "tokenPrefix", "workspaceId", "inboxId") VALUES (5, '{}', 'Api', 'h', 'p', 2, 4)"#,
+                r#"INSERT INTO "AutomatedResponse" ("id", "workspaceId", "keywords", "status", "text", "type") VALUES (6, 2, '["hello"]', 1, 'Hi there', 'inbound')"#,
+            ] {
+                tx.execute(sql, [])?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let jobs = Arc::new(Recording::default());
+        let deps = Deps {
+            db,
+            jobs: jobs.clone(),
+            waiter: chatbotx_jobs::wait::CompletionRegistry::new(),
+            realtime: None,
+            channels: crate::Channels::builtin(),
+            app_url: "http://app.test".into(),
+            variables: None,
+            ai: Arc::new(crate::ai::Ai::live()),
+            files: None,
+            webhook_http: Arc::new(crate::webhook::RecordingWebhookHttp::default()),
+            events: None,
+            push: None,
+        };
+        (deps, jobs)
+    }
+
+    fn payload() -> Value {
+        json!({ "integrationType": "api", "integrationIdentifier": "4", "payload": {
+            "contact": { "sourceId": "c-1", "firstName": "Ada" },
+            "message": { "sourceId": "m-1", "text": "hello", "contentType": "text" },
+        }})
+    }
+
+    async fn count(deps: &Deps, sql: &'static str) -> i64 {
+        deps.db
+            .read(move |c| Ok(c.query_row(sql, [], |r| r.get(0))?))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn api_message_creates_rows_once_and_the_keyword_rule_replies() {
+        let (deps, jobs) = setup().await;
+        incoming_message(&deps, &payload()).await.unwrap();
+        incoming_message(&deps, &payload()).await.unwrap();
+
+        assert_eq!(
+            count(
+                &deps,
+                r#"SELECT count(*) FROM "Contact" WHERE "firstName" = 'Ada'"#
+            )
+            .await,
+            1
+        );
+        assert_eq!(
+            count(&deps, r#"SELECT count(*) FROM "ContactInbox" WHERE "sourceId" = 'c-1' AND "channel" = 'api' AND "lastIncomingMessageAt" IS NOT NULL"#).await,
+            1
+        );
+        assert_eq!(
+            count(&deps, r#"SELECT count(*) FROM "Conversation""#).await,
+            1
+        );
+        assert_eq!(
+            count(
+                &deps,
+                r#"SELECT count(*) FROM "Message" WHERE "sourceId" = 'm-1' AND "senderType" = 'contact' AND "messageType" = 'incoming'"#
+            )
+            .await,
+            1
+        );
+        let queued: Vec<_> = jobs.0.lock().unwrap().drain(..).collect();
+        assert_eq!(queued.len(), 1, "a redelivery queues nothing");
+        let (queue, name, data, opts) = &queued[0];
+        assert_eq!(
+            (*queue, name.as_str()),
+            (QueueName::AiAgent, PROCESS_AUTOMATED_RESPONSE)
+        );
+        assert_eq!(opts.delay_ms, Some(2000));
+        let dedup = opts.dedup.as_ref().unwrap();
+        assert!(dedup.id.starts_with("automated-response:") && dedup.extend && dedup.replace);
+        assert_eq!(
+            opts.job_id.as_deref(),
+            Some(
+                format!(
+                    "automated-response-{}",
+                    data["data"]["messageId"].as_str().unwrap()
+                )
+                .as_str()
+            )
+        );
+
+        crate::ai_agent::process_automated_response(&deps, &data["data"])
+            .await
+            .unwrap();
+        let replies: Vec<_> = jobs.0.lock().unwrap().drain(..).collect();
+        assert_eq!(replies.len(), 1);
+        let (queue, name, data, _) = &replies[0];
+        assert_eq!(
+            (*queue, name.as_str()),
+            (QueueName::Chat, "sendChatMessage")
+        );
+        assert_eq!(data["data"]["text"], "Hi there");
+        assert_eq!(
+            count(&deps, r#"SELECT count(*) FROM "ContactActivity" WHERE "activityType" = 'automatedResponseMatched' AND "referenceId" = 6"#).await,
+            1
+        );
+        // The pending list is cleared: a second run sends nothing.
+        crate::ai_agent::process_automated_response(
+            &deps,
+            &json!({
+                "conversationId": queued[0].2["data"]["conversationId"],
+                "contactInboxId": queued[0].2["data"]["contactInboxId"],
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(jobs.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unknown_identifier_is_an_unrecoverable_failure() {
+        let (deps, _) = setup().await;
+        let mut data = payload();
+        data["integrationIdentifier"] = json!("999");
+        assert!(incoming_message(&deps, &data).await.is_err());
+    }
+}
