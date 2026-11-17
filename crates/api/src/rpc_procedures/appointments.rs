@@ -74,7 +74,7 @@ async fn availability(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> 
     let contact_id = In(input).id("contactId")?;
     let (start, end) = (date_of(input, "startDate")?, date_of(input, "endDate")?);
     let span = end - start;
-    if span < 0 || span > SLOT_WINDOW_DAYS * 86_400_000 {
+    if !(0..=SLOT_WINDOW_DAYS * 86_400_000).contains(&span) {
         return Err(invalid());
     }
     require_contact_access(ctx, contact_id).await?;

@@ -245,7 +245,7 @@ fn user_ids_at(input: &mut Input, value: Option<&Value>) -> Vec<i64> {
         .enumerate()
         .filter_map(|(index, item)| {
             input.id_at(
-                &vec![Seg::Key("userIds".into()), Seg::Index(index)],
+                &[Seg::Key("userIds".into()), Seg::Index(index)],
                 Some(item),
                 true,
             )
