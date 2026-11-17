@@ -83,4 +83,4 @@ integrationIdentifier, payload } }`. The worker:
 ## Parity
 
 - p1-10 `41-keywords-trigger`: 8/8 on the Rust stack (2026-11-17, after c1925f064; was 0/8).
-- p1-11 `42-messages-whatsapp`: 0/7, waits for slice 4 (template / call permission / flow-response routes and the `createWhatsappChannel` / `createWhatsappTemplate` Rust fixtures).
+- p1-11 `42-messages-whatsapp`: 7/7 on the Rust stack (2026-11-17, after ae13467f7; was 0/7). p1-10 `41` stays 8/8 in the same run.
