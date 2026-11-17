@@ -7,8 +7,12 @@
 //! path, which is what the caggs summarize).
 
 pub mod bot_messages;
+pub mod campaigns;
+pub mod comment_automation;
 pub mod contacts;
 pub mod conversations;
+pub mod flows;
+pub mod links;
 pub mod messages;
 
 use chatbotx_db::functions::{from_wall_ms, tz_resolve, wall_ms};
@@ -103,7 +107,7 @@ impl TimeRange {
             workspace_id,
             from: from.map(|ms| ms.max(FROM_FLOOR_MS)),
             to,
-            tz: tz_resolve(Some(timezone)).parse().unwrap_or(Tz::UTC),
+            tz: zone(timezone),
             filter,
         }
     }
@@ -120,6 +124,11 @@ impl TimeRange {
             _ => Granularity::Day,
         }
     }
+}
+
+/// `resolvedTimezone(name)`: a zone the tz database knows, else UTC.
+pub fn zone(name: &str) -> Tz {
+    tz_resolve(Some(name)).parse().unwrap_or(Tz::UTC)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

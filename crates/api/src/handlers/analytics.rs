@@ -4,7 +4,8 @@
 
 use chatbotx_business::analytics::messages::ResponseAverages;
 use chatbotx_business::analytics::{
-    CountPoint, Filter, TimeRange, bot_messages, contacts, conversations, messages,
+    CountPoint, Filter, TimeRange, bot_messages, campaigns, comment_automation, contacts,
+    conversations, flows, links, messages,
 };
 use chatbotx_db::repo;
 use serde_json::{Value, json};
@@ -38,6 +39,20 @@ pub const ROUTES: &[&str] = &[
     "analytics.botMessagesNoResponse",
     "analytics.botMessagesAiProviders",
     "analytics.messagesBySender",
+    "analytics.magicLinkStats",
+    "analytics.magicLinkContacts",
+    "analytics.refLinkStats",
+    "analytics.refLinkContacts",
+    "analytics.flowStats",
+    "analytics.resetFlowStats",
+    "analytics.flowSmartDelayStats",
+    "analytics.broadcastStats",
+    "analytics.sequenceStepStats",
+    "analytics.commentAutomationReplyStats",
+    "analytics.commentAutomationUserComments",
+    "analytics.commentAutomationBotReplies",
+    "analytics.commentAutomationErrors",
+    "analytics.commentAutomationContacts",
 ];
 
 /// `MAX_ANALYTICS_FILTER_VALUES`.
@@ -110,6 +125,30 @@ fn time_range(input: &mut Input, call: &Call<'_>) -> Option<TimeRange> {
     ))
 }
 
+/// `withLegacyDateRangeAliases`: `startDate` / `endDate` stand in for a
+/// missing `from` / `to`.
+fn legacy_range(input: &mut Input) {
+    for (name, legacy) in [("from", "startDate"), ("to", "endDate")] {
+        if let Some(value) = input.obj.remove(legacy) {
+            input.obj.entry(name).or_insert(value);
+        }
+    }
+}
+
+/// A link id or date the original hands to Postgres as is: a value that
+/// does not cast fails the query (500).
+fn cast<T>(value: Option<T>) -> Result<T, crate::orpc::OrpcError> {
+    value.ok_or_else(|| internal_error("invalid input syntax"))
+}
+
+fn link_kind(route_id: &str) -> links::Link {
+    if route_id.starts_with("analytics.magicLink") {
+        links::Link::Magic
+    } else {
+        links::Link::Ref
+    }
+}
+
 fn series(points: Vec<CountPoint>) -> Value {
     json!({
         "data": points
@@ -128,6 +167,69 @@ async fn read<R: Send + 'static>(
         .read(move |conn| f(conn).map_err(|e| chatbotx_db::DbError::other(e.to_string())))
         .await
         .map_err(|e| internal_error(&e.to_string()))
+}
+
+/// `commentAutomationRangePublicRequest`: the automation id
+/// (`zodBigintAsString`), the `from` / `to` ISO datetimes and the IANA
+/// timezone. `None` once an issue is recorded.
+fn comment_range(input: &mut Input, ws: i64) -> Option<(TimeRange, i64)> {
+    let automation_id = automation_id(input);
+    let from = super::polls::datetime_at(input, "from", true);
+    let to = super::polls::datetime_at(input, "to", true);
+    let path = key("timezone");
+    let value = input.get("timezone").cloned();
+    let timezone = input.string_at(&path, value.as_ref(), Str::trimmed(1, 255), true);
+    if let Some(zone) = &timezone
+        && !chatbotx_core::utils::tz::is_intl_time_zone(zone)
+    {
+        input.issue(&path, "custom", "Invalid IANA timezone");
+    }
+    // `startDate` / `endDate` as given: no floor clamp on these reads.
+    Some((
+        TimeRange {
+            workspace_id: ws,
+            from: Some(from?),
+            to: Some(to?),
+            tz: chatbotx_business::analytics::zone(&timezone?),
+            filter: Filter::default(),
+        },
+        automation_id?,
+    ))
+}
+
+/// `zodBigintAsString()` at `automationId`: digits only. A value past `i64`
+/// is `None` with no issue: the original's bigint cast fails (500).
+fn automation_id(input: &mut Input) -> Option<i64> {
+    let path = key("automationId");
+    let value = input.get("automationId").cloned();
+    let text = input.string_at(&path, value.as_ref(), Str::default(), true)?;
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        input.issue(
+            &path,
+            "invalid_format",
+            "Invalid string: must match pattern /^\\d+$/",
+        );
+        return None;
+    }
+    text.parse().ok()
+}
+
+/// `commentAutomationListPublicRequest`.
+fn comment_list(input: &mut Input, ws: i64) -> Option<comment_automation::ListInput> {
+    let range = comment_range(input, ws);
+    let (page, per_page) = super::qr_codes::public_paging(input);
+    let keyword = input.opt_string("keyword", Str::default());
+    let (range, automation_id) = range?;
+    let (from, to) = range.bounds()?;
+    Some(comment_automation::ListInput {
+        workspace_id: ws,
+        automation_id,
+        from,
+        to,
+        page,
+        per_page,
+        keyword,
+    })
 }
 
 fn ok(body: Value) -> Reply {
@@ -203,6 +305,184 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .collect();
             ok(json!({ "data": data }))
         }
+        "analytics.broadcastStats" | "analytics.sequenceStepStats" => {
+            let ids: Vec<Option<String>> = if route_id == "analytics.broadcastStats" {
+                vec![input.string("broadcastId", Str::default())]
+            } else {
+                vec![
+                    input.string("sequenceId", Str::default()),
+                    input.string("stepId", Str::default()),
+                ]
+            };
+            input.finish()?;
+            let ids = ids
+                .into_iter()
+                .map(|id| cast(id.and_then(|id| id.parse::<i64>().ok())))
+                .collect::<Result<Vec<i64>, _>>()?;
+            let stats = read(state, move |conn| match ids[..] {
+                [broadcast] => campaigns::broadcast_stats(conn, ws, broadcast),
+                [sequence, step, ..] => campaigns::sequence_step_stats(conn, ws, sequence, step),
+                _ => Ok(campaigns::DeliveryStats::default()),
+            })
+            .await?;
+            ok(json!({
+                "message:sent": stats.sent(),
+                "message:delivered": stats.delivered,
+                "message:seen": stats.seen,
+                "flow:clicked": stats.clicked,
+                "message:failed": stats.failed,
+            }))
+        }
+        "analytics.flowStats" | "analytics.resetFlowStats" | "analytics.flowSmartDelayStats" => {
+            let flow_id = input.string("flowId", Str::default());
+            input.finish()?;
+            let flow_id = cast(flow_id.and_then(|id| id.parse::<i64>().ok()))?;
+            match route_id {
+                "analytics.flowStats" => {
+                    let nodes =
+                        read(state, move |conn| flows::flow_stats(conn, ws, flow_id)).await?;
+                    let mut out = serde_json::Map::new();
+                    for (id, n) in nodes {
+                        let buttons: serde_json::Map<String, Value> = n
+                            .buttons
+                            .into_iter()
+                            .map(|(b, clicks)| {
+                                (b.clone(), json!({ "buttonId": b, "clicks": clicks }))
+                            })
+                            .collect();
+                        out.insert(
+                            id,
+                            json!({
+                                "node": {
+                                    "message:sent": n.sent,
+                                    "message:seen": n.seen,
+                                    "message:delivered": n.delivered,
+                                    "flow:clicked": { "clicked": n.clicked, "totalUsers": n.delivered },
+                                    "message:failed": n.failed,
+                                },
+                                "buttons": buttons,
+                            }),
+                        );
+                    }
+                    ok(Value::Object(out))
+                }
+                "analytics.resetFlowStats" => {
+                    let now = repo::now_ms();
+                    let id = chatbotx_core::utils::id::create_id()
+                        .parse::<i64>()
+                        .unwrap_or_default();
+                    state
+                        .db
+                        .write(move |tx| {
+                            flows::reset_stats_session(tx, ws, flow_id, now, id)
+                                .map_err(|e| chatbotx_db::DbError::other(e.to_string()))
+                        })
+                        .await
+                        .map_err(|e| internal_error(&e.to_string()))?;
+                    Ok(super::no_content())
+                }
+                _ => {
+                    let flow = chatbotx_business::flow::find_by_id(&state.db, ws, flow_id)
+                        .await
+                        .map_err(|e| super::business_error(e, super::FINDING))?;
+                    let Some(draft) = flow.flow_versions.into_iter().find(|v| v.is_draft) else {
+                        return Err(super::business_error(
+                            chatbotx_business::BusinessError::not_found(
+                                "Flow has no draft version",
+                            ),
+                            super::FINDING,
+                        ));
+                    };
+                    let nodes = draft.nodes.0.as_array().cloned().unwrap_or_default();
+                    let rows = read(state, move |conn| {
+                        flows::smart_delay_stats(conn, ws, flow_id, &nodes)
+                    })
+                    .await?;
+                    let out: serde_json::Map<String, Value> = rows
+                        .into_iter()
+                        .map(|(id, c)| (id, json!({ "waiting": c.waiting, "sent": c.sent })))
+                        .collect();
+                    ok(Value::Object(out))
+                }
+            }
+        }
+        "analytics.magicLinkStats" | "analytics.refLinkStats" => {
+            legacy_range(&mut input);
+            let from = input.string("from", Str::default());
+            let to = input.string("to", Str::default());
+            let link_id = input.string("linkId", Str::default());
+            let timezone = input.string("timezone", Str::default());
+            input.finish()?;
+            let (Some(from), Some(to), Some(link_id), Some(timezone)) =
+                (from, to, link_id, timezone)
+            else {
+                return Err(internal_error("validated input missing"));
+            };
+            let bounds = (
+                cast(chatbotx_core::js::parse_date(&from))?,
+                cast(chatbotx_core::js::parse_date(&to))?,
+            );
+            let link_id = cast(link_id.parse::<i64>().ok())?;
+            let link = link_kind(route_id);
+            let rows = read(state, move |conn| {
+                links::stats_by_day(conn, link, ws, link_id, bounds, &timezone)
+            })
+            .await?;
+            let data: Vec<Value> = rows
+                .into_iter()
+                .map(|(day, count)| json!({ "dateReport": day, "count": count }))
+                .collect();
+            ok(json!({ "data": data }))
+        }
+        "analytics.magicLinkContacts" | "analytics.refLinkContacts" => {
+            legacy_range(&mut input);
+            let link_id = input.string("linkId", Str::default());
+            let from = input.opt_string("from", Str::default());
+            let to = input.opt_string("to", Str::default());
+            // Accepted for compatibility; the contact list does not use it.
+            input.opt_string("timezone", Str::default());
+            let (page, per_page) = super::qr_codes::public_paging(&mut input);
+            input.finish()?;
+            let Some(link_id) = link_id else {
+                return Err(internal_error("validated input missing"));
+            };
+            // `startDate && endDate`: the range needs both, non-empty.
+            let range = match (from.filter(|v| !v.is_empty()), to.filter(|v| !v.is_empty())) {
+                (Some(from), Some(to)) => Some((
+                    cast(chatbotx_core::js::parse_date(&from))?,
+                    cast(chatbotx_core::js::parse_date(&to))?,
+                )),
+                _ => None,
+            };
+            // `if (!linkId)`: an empty id is an empty first page.
+            let link_id = if link_id.is_empty() {
+                None
+            } else {
+                Some(cast(link_id.parse::<i64>().ok())?)
+            };
+            let link = link_kind(route_id);
+            let list = read(state, move |conn| {
+                links::contacts(conn, link, ws, link_id, page, per_page, range)
+            })
+            .await?;
+            let data: Vec<Value> = list
+                .data
+                .into_iter()
+                .map(|r| {
+                    json!({
+                        "contactId": r.contact_id,
+                        "contactInboxId": r.contact_inbox_id,
+                        "sourceId": r.source_id,
+                        "channel": r.channel,
+                        "conversationId": r.conversation_id,
+                        "occurredAt": r.occurred_at,
+                    })
+                })
+                .collect();
+            ok(
+                json!({ "data": data, "total": list.total, "page": list.page, "pageCount": list.page_count }),
+            )
+        }
         "analytics.botMessagesByResult"
         | "analytics.botMessagesWithResponse"
         | "analytics.botMessagesNoResponse"
@@ -264,6 +544,142 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 })
                 .collect();
             ok(json!({ "data": data }))
+        }
+        "analytics.commentAutomationReplyStats" => {
+            let range = comment_range(&mut input, ws);
+            input.finish()?;
+            let Some((range, automation_id)) = range else {
+                return Err(internal_error("validated input missing"));
+            };
+            let rows = read(state, move |conn| {
+                comment_automation::replies_by_date(conn, &range, automation_id)
+            })
+            .await?;
+            let data: Vec<Value> = rows
+                .into_iter()
+                .map(|(day, count)| json!({ "dateReport": day, "count": count }))
+                .collect();
+            ok(json!({ "data": data }))
+        }
+        "analytics.commentAutomationUserComments" | "analytics.commentAutomationBotReplies" => {
+            let list = comment_list(&mut input, ws);
+            input.finish()?;
+            let Some(list) = list else {
+                return Err(internal_error("validated input missing"));
+            };
+            let user = route_id == "analytics.commentAutomationUserComments";
+            let page = read(state, move |conn| {
+                if user {
+                    comment_automation::user_comments(conn, &list)
+                } else {
+                    comment_automation::bot_replies(conn, &list)
+                }
+            })
+            .await?;
+            let data: Vec<Value> = page
+                .data
+                .into_iter()
+                .map(|r| json!({ "text": r.text, "total": r.total }))
+                .collect();
+            ok(
+                json!({ "data": data, "total": page.total, "page": page.page, "pageCount": page.page_count }),
+            )
+        }
+        "analytics.commentAutomationErrors" => {
+            let list = comment_list(&mut input, ws);
+            input.finish()?;
+            let Some(list) = list else {
+                return Err(internal_error("validated input missing"));
+            };
+            let page = read(state, move |conn| comment_automation::errors(conn, &list)).await?;
+            let data: Vec<Value> = page
+                .data
+                .into_iter()
+                .map(|r| {
+                    json!({
+                        "id": r.id.to_string(),
+                        "replyChannel": r.reply_channel,
+                        "replyType": r.reply_type,
+                        "errorDetail": r.error_detail,
+                        "httpCode": r.http_code,
+                        "commentText": r.comment_text,
+                        "contact": r.contact.map(|(first, last, avatar)| {
+                            json!({ "firstName": first, "lastName": last, "avatar": avatar })
+                        }),
+                        "occurredAt": r.occurred_at,
+                    })
+                })
+                .collect();
+            ok(
+                json!({ "data": data, "total": page.total, "page": page.page, "pageCount": page.page_count }),
+            )
+        }
+        "analytics.commentAutomationContacts" => {
+            let automation_id = automation_id(&mut input);
+            let value = input.get("eventType").cloned();
+            let event_type = input.enum_at(
+                &key("eventType"),
+                value.as_ref(),
+                comment_automation::EVENT_TYPES,
+                true,
+            );
+            let (page, per_page) = super::qr_codes::public_paging(&mut input);
+            input.finish()?;
+            let (Some(automation_id), Some(event_type)) = (automation_id, event_type) else {
+                return Err(internal_error("validated input missing"));
+            };
+            let list = read(state, move |conn| {
+                let Some((kind, total)) =
+                    comment_automation::find(conn, ws, automation_id, &event_type)?
+                else {
+                    return Ok(None);
+                };
+                comment_automation::contacts(
+                    conn,
+                    ws,
+                    automation_id,
+                    &kind,
+                    &event_type,
+                    total,
+                    page,
+                    per_page,
+                )
+                .map(Some)
+            })
+            .await?;
+            // `commentAutomationService.findOrFail`: 404 for an unknown or
+            // foreign id.
+            let Some(list) = list else {
+                return Err(super::business_error(
+                    chatbotx_business::BusinessError::not_found("Comment Automation not found"),
+                    super::FINDING,
+                ));
+            };
+            let data: Vec<Value> = list
+                .data
+                .into_iter()
+                .map(|r| {
+                    json!({
+                        "rowKey": r.row_key,
+                        "contactId": r.contact_id,
+                        "contactInboxId": r.contact_inbox_id,
+                        "sourceId": r.source_id,
+                        "channel": r.channel,
+                        "conversationId": r.conversation_id,
+                        "errorContent": r.error_content,
+                        "occurredAt": r.occurred_at,
+                        "commentText": r.comment_text,
+                        "missReason": r.miss_reason,
+                    })
+                })
+                .collect();
+            ok(json!({
+                "data": data,
+                "total": list.total,
+                "contactTotal": list.contact_total,
+                "page": list.page,
+                "pageCount": list.page_count,
+            }))
         }
         _ => {
             let range = time_range(&mut input, &call);

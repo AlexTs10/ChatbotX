@@ -15,7 +15,7 @@ the tests, implement. Test map: `specs/Q.D11-test-map.tsv`.
 | 5 | Capabilities: `/v1/capabilities`, `/v1/schemas/flow-spec`, `getFlowAuthoringContext` (parity `p1-04/07-capabilities`) | code + tests, gate pending |
 | 6 | User quota + quota enforcement (rest) | code + tests, gate pending |
 | 7 | Platform credential (platform admins, branding, SMTP, email templates moved to slice 10: they are `enterprise/features`) | code + tests, gate pending |
-| 8 | Analytics: `/v1/analytics/*` + `analyticsRoutes.*` (parity `p1-03`) | 8a (contacts, conversations, messages, agents, bot messages) code + tests; 8b (broadcasts, sequences, flows, comment automation, magic / ref links, MAC tracking, test map) todo |
+| 8 | Analytics: `/v1/analytics/*` + `analyticsRoutes.*` (parity `p1-03`) | 8a (contacts, conversations, messages, agents, bot messages) code + tests; 8b (broadcasts, sequences, flows, comment automation, magic / ref links) code + tests; 8c (MAC tracking `claimNewActiveContact`, row-level test map, Rust parity ext p1-03) todo |
 | 9 | Workspace lifecycle (purge job) + jobs admin page (replaces Bull Board) | todo |
 | 10 | Enterprise: license, tenant, billing, custom domain, inbox teams, help items, platform admins, platform branding / SMTP / email templates | todo |
 | 11 | Admin workspace | todo |
@@ -145,6 +145,21 @@ Notes:
 - Repeated query keys (`channels=a&channels=b`) build the filter arrays from the raw query.
 - Tests: `crates/business/tests/analytics_{contacts,events}.rs` (the p1-03 seeds), `crates/api/tests/analytics_{contacts,events}_public_api.rs` (shapes, 422 paths). The row-level test map of `packages/analytics/__tests__` is written with slice 8b.
 - Gap: the dashboard event consumer that writes `contact_created` / conversation / message events is not in Rust, so the p1-03 test "contact analytics fed by the public API" can fail until the event writers are ported (owner: the event-bus port).
+
+## 6b. Slice 8b — campaign, flow, link and comment automation analytics
+
+| TS | Rust |
+| --- | --- |
+| `magicLinkAnalyticsService`, `refLinkAnalyticsService` (stats by day, contacts) | `analytics::links` |
+| `flowAnalyticsService.getFlowStats` / `resetStatsSession`, `buildSmartDelayNodeStats` | `analytics::flows` |
+| `broadcastAnalyticsService`, `sequenceAnalyticsService` (step stats) | `analytics::campaigns` |
+| `commentAutomationAnalyticsService` reads, `commentAutomationMissRepository.getMissContacts`, `listCommentAutomationContacts` | `analytics::comment_automation` |
+| 12 routes (`magicLink*`, `refLink*`, `flowStats`, `resetFlowStats`, `flowSmartDelayStats`, `broadcastStats`, `sequenceStepStats`, `commentAutomation*`) | `crates/api/src/handlers/analytics.rs` |
+
+Notes:
+- The comment automation range reads use `from` / `to` as given (no floor clamp). Unknown or foreign automation: `[]` or an empty page; the contacts drill-down is 404 (`findOrFail`) and its `total` is the automation's counter column.
+- The counted reply channel is `public` for `threads` only (no DM), else `private`.
+- Tests: `crates/business/tests/analytics_{links,flows,campaigns}.rs`, `crates/api/tests/analytics_comment_automation_public_api.rs` and `link_routes` in `analytics_events_public_api.rs` (the p1-03 seeds and 422 paths).
 
 ## Decisions (also in DECISIONS.md)
 

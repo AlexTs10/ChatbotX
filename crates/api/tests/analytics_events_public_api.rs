@@ -182,3 +182,97 @@ async fn input_validation_paths() {
         assert!(paths.contains(&path.to_string()), "{route} {path}: {body}");
     }
 }
+
+/// p1-03 `analytics-links.test.ts`: the legacy `startDate` / `endDate`
+/// names, the response shapes and the 422 paths of the link routes.
+#[tokio::test]
+async fn link_routes() {
+    let fx = fixture().await;
+    fx.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                r#"INSERT INTO "MagicLink" ("id", "workspaceId", "name", "url") VALUES (70, ?1, 'promo', 'https://x.test')"#,
+                [WS],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "MagicLinkStat" ("workspaceId", "linkId", "contactId", "contactInboxId", "occurredAt") VALUES (?1, 70, 5, 6, 1754042400000)"#,
+                [WS],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("seed");
+    let range = "from=2025-08-01T00:00:00Z&to=2025-08-03T23:59:59Z";
+    let legacy = "startDate=2025-08-01T00:00:00Z&endDate=2025-08-03T23:59:59Z";
+    for query in [range, legacy] {
+        let (status, body) = get(
+            &fx,
+            "analytics.magicLinkStats",
+            &format!("{query}&linkId=70&timezone=UTC"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            body,
+            json!({ "data": [{ "dateReport": "2025-08-01", "count": 1 }] })
+        );
+        let (_, body) = get(
+            &fx,
+            "analytics.magicLinkContacts",
+            &format!("{query}&linkId=70"),
+        )
+        .await;
+        assert_eq!(
+            body,
+            json!({
+                "data": [{ "contactId": "", "contactInboxId": "", "sourceId": null, "channel": null, "conversationId": "", "occurredAt": "2025-08-01T10:00:00.000Z" }],
+                "total": 1, "page": 1, "pageCount": 1,
+            })
+        );
+    }
+    let (_, body) = get(&fx, "analytics.refLinkContacts", "linkId=70&page=3").await;
+    assert_eq!(
+        body,
+        json!({ "data": [], "total": 0, "page": 1, "pageCount": 0 })
+    );
+    for (route, query, path) in [
+        (
+            "analytics.magicLinkStats",
+            format!("{range}&timezone=UTC"),
+            "linkId",
+        ),
+        (
+            "analytics.refLinkStats",
+            format!("{range}&linkId=1"),
+            "timezone",
+        ),
+        (
+            "analytics.magicLinkStats",
+            "to=2025-08-03T23:59:59Z&linkId=1&timezone=UTC".to_string(),
+            "from",
+        ),
+        ("analytics.refLinkContacts", range.to_string(), "linkId"),
+        (
+            "analytics.magicLinkContacts",
+            "linkId=1&perPage=51".to_string(),
+            "perPage",
+        ),
+        (
+            "analytics.refLinkContacts",
+            "linkId=1&page=0".to_string(),
+            "page",
+        ),
+    ] {
+        let (status, body) = get(&fx, route, &query).await;
+        assert_eq!(status, 422, "{route} {path}: {body}");
+        assert!(
+            body["data"]["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["path"] == json!([path])),
+            "{route} {path}: {body}"
+        );
+    }
+}
