@@ -19,6 +19,7 @@ pub mod events;
 pub mod flow;
 pub mod inbound;
 pub mod inbound_events;
+pub mod inbox_labels;
 pub mod integration;
 pub mod meta_catalog;
 pub mod notification;

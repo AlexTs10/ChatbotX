@@ -119,6 +119,13 @@ payload.
   Meta error except a revoked token. Local teardown: coexist runs, CAPI
   events, tags (Messenger), row, inbox / connection.
 
+## Label sync
+
+- `channelLabelChange` (Messenger `inbox_labels`): skipped when the page is
+  unknown or tag sync is off; `add` maps the label to a tag (same name, else
+  new) and tags the contact (new `imported` contact when the inbox never saw
+  the user); `remove` untags it; an unmapped label is skipped.
+
 ## Parity
 
 - 2026-11-17 after 5e715913b: p1-11 `60` 9/9; `50` 9/10; `51` 4/14; p1-10
@@ -129,14 +136,19 @@ payload.
 
 ## Left
 
+- p1-09 `igComments` / `igStories` and p1-16 `threadsComments`: routes of
+  Q.D10 (0/39 on Rust; p1-16 has no tests on this branch).
+
 - CAPI routes of both channels (Q.D7) and the coexist routes (need the
   history-sync worker): the CAPI / coexist cases of p1-11 `51` and p1-10
   `21` / `22`.
 - Conversation routing (`threadControlEvent`: handover, requests, app roles,
-  standby): dropped with a log until thread control (Q.D12 / slice 5).
-- Worker jobs not ported yet (fail "IntegrationJobAction action is not
-  defined"): `incomingComment` (receiveComment + comment automation),
-  `channelLabelChange`, `processLeadgen`, `processMarketingMessageWebhook`.
+  standby): dropped with a log; one joint thread-control slice with Q.D12.
+- Worker jobs of other units (fail "IntegrationJobAction action is not
+  defined"): `incomingComment` (Q.D10), `processLeadgen` and
+  `processMarketingMessageWebhook` (Q.D7).
+- `channelLabelChange`: Zalo side, `tagApplied` / `tagRemoved` events and
+  the deleted-label tag-sync job.
 - Inbound profile lookup (`getProfile` for new contacts), reaction
   leaderboard award, `low` queue routing of echoes (no low worker in Rust).
 - Inbound attachments stay pending provider URLs (no download / re-host).

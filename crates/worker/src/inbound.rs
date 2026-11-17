@@ -244,7 +244,7 @@ pub(crate) fn find_or_create_conversation(
 /// `detectContactAndConversation`: the existing contact inbox (identity
 /// sync not ported) or a new contact + contact inbox + conversation in one
 /// transaction. Returns `(contactInbox, conversation, isNewContact)`.
-async fn detect_contact_and_conversation(
+pub(crate) async fn detect_contact_and_conversation(
     deps: &Deps,
     inbox: &InboundInbox,
     contact: &IncomingContact,

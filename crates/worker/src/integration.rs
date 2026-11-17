@@ -171,6 +171,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::inbound_events::UPDATE_INCOMING_COMMENT => {
             crate::inbound_events::update_incoming_comment(&deps, &job.data["data"]).await?
         }
+        crate::inbox_labels::CHANNEL_LABEL_CHANGE => {
+            crate::inbox_labels::handle(&deps, &job.data["data"]).await?
+        }
         crate::inbound::MESSAGE_STATUS => {
             crate::inbound::message_status(&deps, &job.data["data"]).await?
         }
