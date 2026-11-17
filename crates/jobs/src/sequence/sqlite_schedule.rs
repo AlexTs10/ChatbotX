@@ -37,6 +37,11 @@ impl SqliteDispatchSchedule {
         Ok(SqliteDispatchSchedule { db, observer })
     }
 
+    /// The schedule on an already migrated `db` (the server migrates at boot).
+    pub fn new(db: Arc<Db>, observer: Option<Arc<dyn TxObserver>>) -> SqliteDispatchSchedule {
+        SqliteDispatchSchedule { db, observer }
+    }
+
     /// One write transaction, reported to the observer.
     async fn write<R, F>(&self, f: F) -> Result<R, ScheduleError>
     where

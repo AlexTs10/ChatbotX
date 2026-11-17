@@ -1502,10 +1502,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/send-whatsapp-template.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/sendgrid-handler.test.ts` | C | tbd | todo | SendGrid integration |
 | `apps/worker/__tests__/sendgrid-step-registration.test.ts` | C | tbd | todo | SendGrid integration |
-| `apps/worker/__tests__/sequence-dispatch-processor.test.ts` | C | tbd | todo | Sequences |
-| `apps/worker/__tests__/sequence-flow.test.ts` | C | tbd | todo | Sequences |
+| `apps/worker/__tests__/sequence-dispatch-processor.test.ts` | C | `crates/worker/tests/sequence_worker.rs` | ported | Sequences |
+| `apps/worker/__tests__/sequence-flow.test.ts` | C | `crates/worker/tests/sequence_worker.rs` | ported | Sequences |
 | `apps/worker/__tests__/sequence-retry-scheduler.test.ts` | C | `crates/jobs/tests/sequence_retry_scheduler.rs` | passing | Sequences |
-| `apps/worker/__tests__/sequence-step-executor.test.ts` | C | tbd | todo | Sequences |
+| `apps/worker/__tests__/sequence-step-executor.test.ts` | C | `crates/worker/tests/sequence_worker.rs` | ported | Sequences |
 | `apps/worker/__tests__/sequence-worker-consumer.test.ts` | C | `crates/jobs/tests/sequence_worker_consumer.rs` | passing | Sequences |
 | `apps/worker/__tests__/sequence-worker-logging.test.ts` | C | `crates/jobs/tests/sequence_worker_logging.rs` | passing | Sequences |
 | `apps/worker/__tests__/sequence-worker-producer.test.ts` | C | `crates/jobs/tests/sequence_worker_producer.rs` | passing | Sequences |

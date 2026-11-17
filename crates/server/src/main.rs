@@ -370,6 +370,7 @@ fn start_workers(
         .map(Arc::new),
     };
     chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
+    chatbotx_worker::sequence::start(&runtime, &deps, &shutdown).map_err(std::io::Error::other)?;
     let store = Arc::clone(jobs);
     tokio::spawn(async move { chatbotx_worker::schedule::register_schedules(&*store).await });
     Ok((shutdown, exited))
