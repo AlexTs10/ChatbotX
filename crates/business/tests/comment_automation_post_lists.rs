@@ -43,7 +43,7 @@ impl Upstream for Fake {
 async fn lists_facebook_and_threads_posts_per_account() {
     let db = fresh_db().await;
     setup(&db, |tx| {
-        tx.execute_batch(
+        Ok(tx.execute_batch(
             r#"INSERT INTO "User" ("id", "email", "name", "emailVerified") VALUES (1, 'a@x.test', 'A', 1);
                INSERT INTO "Workspace" ("id", "name", "ownerId") VALUES (10, 'ws', 1);
                INSERT INTO "Inbox" ("id", "workspaceId", "name", "channel", "sourceId") VALUES
@@ -53,7 +53,7 @@ async fn lists_facebook_and_threads_posts_per_account() {
                  (2, '{"tokens":{"accessToken":"tok2"}}', 'p2', 'Page 2', '[]', '[]', '[]', 10, 31);
                INSERT INTO "IntegrationThreads" ("id", "auth", "threadsUserId", "username", "name", "workspaceId", "inboxId") VALUES
                  (1, '{"tokens":{"accessToken":"t&ok"},"metadata":{}}', 'u1', 'ann', 'Ann', 10, 32);"#,
-        )
+        )?)
     })
     .await;
     let fake = Fake(Mutex::new(Vec::new()));
