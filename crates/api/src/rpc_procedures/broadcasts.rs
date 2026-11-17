@@ -1,17 +1,16 @@
 //! Broadcasts: `features/broadcasts/api/private.ts` and
-//! `features/broadcasts/actions/*` (Q.D5). The stats and contacts reads need
-//! the delivery analytics (Q.D11); run groups, occurrences and
-//! `setBroadcastRunSkippedAction` the recurrence history (Q.D5 slice 4b).
+//! `features/broadcasts/actions/*` (Q.D5). The batch stats and contacts reads
+//! need the delivery analytics (Q.D11).
 
 use chatbotx_business::BusinessError;
-use chatbotx_business::broadcast::{self as service, recurrence, write};
+use chatbotx_business::broadcast::{self as service, history, recurrence, write};
 use chatbotx_db::repo::now_ms;
 use serde_json::{Value, json};
 
 use super::{Ctx, In, Outcome, action_fail, arg, fail, invalid};
 use crate::handlers::broadcasts::{
-    parse_action_payload, recurrence_rule, resolve_schedule_time, schedule_request, send_rate,
-    submitted_rate,
+    coerce_date, parse_action_payload, recurrence_rule, resolve_schedule_time, run_date,
+    schedule_request, send_rate, submitted_rate,
 };
 use crate::orpc::OrpcError;
 use chatbotx_core::flow_config::z;
@@ -26,6 +25,7 @@ pub const ACTIONS: &[&str] = &[
     "resendBroadcastAction",
     "resumeBroadcastAction",
     "scheduleBroadcastAction",
+    "setBroadcastRunSkippedAction",
     "stopBroadcastAction",
     "updateBroadcastAction",
     "updateDraftBroadcastAction",
@@ -85,12 +85,78 @@ fn preview(input: &Value) -> Result<Value, OrpcError> {
     recurrence::preview_upcoming(&data["recurrence"], count, now_ms()).map_err(fail)
 }
 
+fn opt_str(data: &Value, key: &str) -> Option<String> {
+    data[key].as_str().map(str::to_owned)
+}
+
+/// `listBroadcastRunGroupsPublicRequest`.
+async fn run_groups(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let data = parsed(
+        z::object(vec![
+            ("idOrName", z::string()),
+            ("groupBy", z::enum_(&["day", "week", "month"]).optional()),
+            ("timezone", z::string().optional()),
+            (
+                "limit",
+                z::number().coerce().int().gte(1.0).lte(31.0).optional(),
+            ),
+            ("cursor", z::string().optional()),
+        ]),
+        input,
+    )?;
+    let granularity =
+        history::granularity_of(data["groupBy"].as_str().unwrap_or("day")).ok_or_else(invalid)?;
+    history::list_run_groups(
+        &ctx.api.db,
+        ctx.workspace_id,
+        opt_str(&data, "idOrName").unwrap_or_default(),
+        granularity,
+        opt_str(&data, "timezone"),
+        data["limit"].as_i64().unwrap_or(31),
+        opt_str(&data, "cursor"),
+    )
+    .await
+    .map_err(fail)
+}
+
+/// `listBroadcastOccurrencesPublicRequest`.
+async fn occurrences(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let data = parsed(
+        z::object(vec![
+            ("idOrName", z::string()),
+            (
+                "limit",
+                z::number().coerce().int().gte(1.0).lte(100.0).optional(),
+            ),
+            ("cursor", z::string().optional()),
+        ]),
+        input,
+    )?;
+    let date = |key: &str| match input.get(key) {
+        None => Ok(None),
+        Some(value) => coerce_date(value).map(Some).ok_or_else(invalid),
+    };
+    history::list_occurrences(
+        &ctx.api.db,
+        ctx.workspace_id,
+        opt_str(&data, "idOrName").unwrap_or_default(),
+        date("from")?,
+        date("to")?,
+        opt_str(&data, "cursor"),
+        data["limit"].as_i64().unwrap_or(50),
+    )
+    .await
+    .map_err(fail)
+}
+
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
     let db = &ctx.api.db;
     let ws = ctx.workspace_id;
     let input_ref = In(input);
     Some(match path {
         "broadcastAPIs.privatePreviewBroadcastRecurrenceAPI" => preview(input),
+        "broadcastAPIs.privateListBroadcastRunGroupsAPI" => run_groups(ctx, input).await,
+        "broadcastAPIs.privateListBroadcastOccurrencesAPI" => occurrences(ctx, input).await,
         "broadcastAPIs.privateListBroadcastOptionsAPI" => {
             async {
                 let channel = input_ref
@@ -205,6 +271,23 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                                 )
                                 .await,
                             )
+                        }
+                        "setBroadcastRunSkippedAction" => {
+                            let data = parsed(
+                                z::object(vec![("date", run_date()), ("skipped", z::boolean())]),
+                                input,
+                            )?;
+                            history::set_occurrence_excluded(
+                                db,
+                                audit,
+                                ws,
+                                id.to_string(),
+                                vec![data["date"].as_str().unwrap_or_default().to_owned()],
+                                Vec::new(),
+                                data["skipped"].as_bool().unwrap_or_default(),
+                            )
+                            .await
+                            .map_err(action_fail)
                         }
                         "stopBroadcastAction" => service::stop_sending(db, audit, ws, id)
                             .await

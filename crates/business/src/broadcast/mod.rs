@@ -2,6 +2,7 @@
 //! public API part; the worker part comes with the broadcast jobs).
 
 pub mod audience;
+pub mod history;
 pub mod plan_policy;
 pub mod recurrence;
 pub mod write;

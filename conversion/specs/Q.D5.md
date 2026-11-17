@@ -14,7 +14,7 @@ Q.W1 runtime (`crates/worker`, `specs/Q.W1.md`).
 | 2 | Sequences + steps + folders, contact sequences | `sequence.rs` (CRUD, steps, contact-schedule recalculation), `contact_sequence.rs` (enroll writes the schedule row) | `sequences.*` except `listStepContacts` | `sequencesAPI.listSequencesWorkspaceAuthAPI`, 5 sequence actions, `updateContactSequenceAction` | done |
 | 3 | Triggers | `trigger.rs` (CRUD, 50 quota, conditions, settings), `automation_action.rs` (action reference check) | `triggers.*` (zod port schemas in `handlers/triggers.rs`) | create / delete / update / updateSettings actions | done |
 | 4 | Broadcasts (business + routes) | `broadcast/` (`mod` reads + transitions, `write` create / draft / schedule / clone / resend, `audience` count / preview / calendar, `recurrence` arm / disarm / ledger / preview, `plan_policy`), `template_params.rs` | `broadcasts.*` except `listContacts` and the 4 recurrence-history routes | `privatePreviewBroadcastRecurrenceAPI`, `privateListBroadcastOptionsAPI`, `privateListBroadcastTemplateDetailsAPI`; 11 actions (all but `setBroadcastRunSkippedAction`) | done |
-| 4b | Broadcast recurrence history | | `skipOccurrence`, `restoreOccurrence`, `listRunGroups`, `listOccurrences` | run groups, occurrences, `setBroadcastRunSkippedAction` | todo |
+| 4b | Broadcast recurrence history | `broadcast/history.rs` (skip / restore, run groups, occurrences, recipient stats) | `skipOccurrence`, `restoreOccurrence`, `listRunGroups`, `listOccurrences` | `privateListBroadcastRunGroupsAPI`, `privateListBroadcastOccurrencesAPI`, `setBroadcastRunSkippedAction` | done |
 | 5 | Broadcast worker jobs | | | | todo |
 | 6 | Sequence scheduler in the worker (producer / consumer / reconcile, step executor) | | | | todo |
 | 7 | Smart delay | | | | todo |
@@ -56,6 +56,8 @@ Per test case: `specs/Q.D5-test-map.tsv` (file, line, name, Rust test, status, n
   table of the same database; the purge job goes to the schedule queue.
 - `broadcasts.listContacts`, `privateGetBatchBroadcastStatsAPI` and
   `privateListBroadcastContactsAPI` read the delivery analytics: Q.D11.
+- Run-group and occurrence `stats` are `ContactOnBroadcast` counts in the
+  main database (`history::batch_stats`, `stats_by_occurrence_bucket`).
 - Audience preview avatar: resolved against the row's own contact inbox.
 - An invalid path id on `/api/v1` answers 422 `invalidRequestData` (the TS
   tests check only that the schema rejects it).

@@ -6,7 +6,7 @@
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::broadcast::audience::{self, AudienceInput};
-use chatbotx_business::broadcast::{self as service, recurrence, write};
+use chatbotx_business::broadcast::{self as service, history, recurrence, write};
 use chatbotx_business::contact::avatar::{AvatarInbox, resolve_contact_avatar_url};
 use chatbotx_business::contact_filter::{Surface, parse_criteria, to_filter_criteria};
 use chatbotx_business::count_mode::CountMode;
@@ -54,6 +54,10 @@ pub const ROUTES: &[&str] = &[
     "broadcasts.clone",
     "broadcasts.delete",
     "broadcasts.previewRecurrence",
+    "broadcasts.skipOccurrence",
+    "broadcasts.restoreOccurrence",
+    "broadcasts.listRunGroups",
+    "broadcasts.listOccurrences",
 ];
 
 /// `possibleErrorsOnCreatingBroadcast` / `possibleErrorsOnActivatingBroadcast`.
@@ -710,6 +714,102 @@ pub(crate) fn submitted_rate(data: &Value) -> Option<Option<i64>> {
     data.get("sendRatePerMinute").map(Value::as_i64)
 }
 
+/// `SKIP_RUNS_PER_CALL_MAX`.
+const SKIP_RUNS_PER_CALL_MAX: usize = 100;
+
+/// `z.coerce.date()`: `new Date(value)` must be valid.
+pub(crate) fn coerce_date(value: &Value) -> Option<i64> {
+    match value {
+        Value::String(text) => chatbotx_core::js::parse_date(text),
+        Value::Number(n) => n.as_f64().map(|n| n as i64),
+        Value::Null => Some(0),
+        Value::Bool(b) => Some(i64::from(*b)),
+        _ => None,
+    }
+}
+
+fn date_schema() -> Schema {
+    z::any().super_refine(|value, ctx| {
+        if coerce_date(value).is_none() {
+            ctx.issue(Vec::new(), "Invalid input: expected date, received Date");
+        }
+    })
+}
+
+/// `broadcastRunDateSchema`.
+pub(crate) fn run_date() -> Schema {
+    z::string().regex(r"^\d{4}-\d{2}-\d{2}$", "").refine(
+        |v| {
+            v.as_str()
+                .is_some_and(chatbotx_core::utils::datetime::is_real_calendar_date)
+        },
+        Some("Not a real calendar date."),
+        None,
+    )
+}
+
+/// `setBroadcastOccurrenceSkippedPublicRequest` (without `id`): `(dates, occurrenceAts)`.
+fn skip_request(input: &mut Input) -> (Vec<String>, Vec<i64>) {
+    let data = parse_with(
+        input,
+        z::object(vec![
+            (
+                "dates",
+                z::array(run_date()).max(SKIP_RUNS_PER_CALL_MAX).optional(),
+            ),
+            (
+                "occurrenceAts",
+                z::array(date_schema())
+                    .max(SKIP_RUNS_PER_CALL_MAX)
+                    .optional(),
+            ),
+        ])
+        .refine(
+            |d| {
+                let len = |k: &str| d.get(k).and_then(Value::as_array).map_or(0, Vec::len);
+                len("dates") + len("occurrenceAts") > 0
+            },
+            Some("Give at least one date or occurrenceAt."),
+            Some(&["dates"]),
+        ),
+    );
+    let dates = data["dates"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let ats = data["occurrenceAts"]
+        .as_array()
+        .map(|a| a.iter().filter_map(coerce_date).collect())
+        .unwrap_or_default();
+    (dates, ats)
+}
+
+/// An optional `z.coerce.date()` query key.
+fn opt_date(input: &mut Input, name: &str) -> Option<i64> {
+    let value = input.get(name)?.clone();
+    let parsed = coerce_date(&value);
+    if parsed.is_none() {
+        input.issue(
+            &key(name),
+            "invalid_type",
+            "Invalid input: expected date, received Date",
+        );
+    }
+    parsed
+}
+
+fn id_or_name_param(input: &Input) -> String {
+    input
+        .get("idOrName")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     let db = &state.db;
@@ -970,6 +1070,90 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let count = data["count"].as_u64().map_or(3, |c| c as usize);
             let out = recurrence::preview_upcoming(&data["recurrence"], count, now_ms())
                 .map_err(|e| business_error(e, FINDING))?;
+            Ok(json(200, out))
+        }
+        "broadcasts.skipOccurrence" | "broadcasts.restoreOccurrence" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let id = broadcast_id(&mut input);
+            let (dates, occurrence_ats) = skip_request(&mut input);
+            input.finish()?;
+            let excluded = route_id == "broadcasts.skipOccurrence";
+            let out = history::set_occurrence_excluded(
+                db,
+                audit,
+                ws,
+                id.to_string(),
+                dates,
+                occurrence_ats,
+                excluded,
+            )
+            .await
+            .map_err(|e| business_error(e, MUTATING))?;
+            Ok(json(200, out))
+        }
+        "broadcasts.listRunGroups" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id_or_name = id_or_name_param(&input);
+            let group_by = input
+                .enum_at(
+                    &key("groupBy"),
+                    input.get("groupBy").cloned().as_ref(),
+                    &["day", "week", "month"],
+                    false,
+                )
+                .unwrap_or_else(|| "day".to_owned());
+            let timezone = input.opt_string("timezone", Str::default());
+            let limit = input.opt_coerce_int(
+                "limit",
+                Num {
+                    int: true,
+                    min: Some(1.0),
+                    max: Some(31.0),
+                },
+            );
+            let cursor = input.opt_string("cursor", Str::default());
+            input.finish()?;
+            let granularity = history::granularity_of(&group_by)
+                .unwrap_or(chatbotx_db::repo::queries::date_bucket::Granularity::Day);
+            let out = history::list_run_groups(
+                db,
+                ws,
+                id_or_name,
+                granularity,
+                timezone,
+                limit.unwrap_or(31),
+                cursor,
+            )
+            .await
+            .map_err(|e| business_error(e, FINDING))?;
+            Ok(json(200, out))
+        }
+        "broadcasts.listOccurrences" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id_or_name = id_or_name_param(&input);
+            let from = opt_date(&mut input, "from");
+            let to = opt_date(&mut input, "to");
+            let limit = input.opt_coerce_int(
+                "limit",
+                Num {
+                    int: true,
+                    min: Some(1.0),
+                    max: Some(100.0),
+                },
+            );
+            let cursor = input.opt_string("cursor", Str::default());
+            input.finish()?;
+            let out = history::list_occurrences(
+                db,
+                ws,
+                id_or_name,
+                from,
+                to,
+                cursor,
+                limit.unwrap_or(50),
+            )
+            .await
+            .map_err(|e| business_error(e, FINDING))?;
             Ok(json(200, out))
         }
         _ => unreachable!("not a broadcast route: {route_id}"),
