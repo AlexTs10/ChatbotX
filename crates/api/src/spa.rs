@@ -255,6 +255,28 @@ async fn page(
             Ok(session) => channels_create_page(&state, session.user_id, &input).await,
             Err(response) => *response,
         },
+        "invitation" => invitation_page(&state, &headers, &input).await,
+        // `app/admin/layout.tsx`: a platform admin only (else 404).
+        "admin" => match require_session(&state, &headers).await {
+            Ok(session) if platform_admin(&state, session.user_id).await => {
+                let enterprise = chatbotx_business::license::has_enterprise_features(
+                    &state.db,
+                    chatbotx_business::keys::Edition::from_env(),
+                )
+                .await;
+                // `isSupportConsentRequired()`.
+                let consent = std::env::var("SUPPORT_ACCESS_REQUIRE_CONSENT").ok();
+                let consent_required = consent.is_none()
+                    || chatbotx_core::utils::env::parse_env_bool_str(consent.as_deref())
+                    || !enterprise;
+                ok(json!({
+                    "showEnterpriseItems": enterprise,
+                    "consentRequired": consent_required,
+                }))
+            }
+            Ok(_) => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
+            Err(response) => *response,
+        },
         "workspace" | "contactsAccess" | "folder" | "flow" | "aiAgents" | "settingsChannels" => {
             let session = match require_session(&state, &headers).await {
                 Ok(session) => session,
@@ -264,6 +286,53 @@ async fn page(
         }
         _ => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
     }
+}
+
+/// `app/(no-sidebar)/invitations/[code]/page.tsx`: `findInvitation` (null
+/// for a rejected code) and whether a user is signed in. No session needed.
+async fn invitation_page(state: &AuthState, headers: &HeaderMap, input: &Value) -> Response {
+    let signed_in = match find_rpc_session(state, headers).await {
+        Ok(session) => session.is_some(),
+        Err(err) => return internal(err),
+    };
+    let code = input
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    match chatbotx_business::invitation::details(&state.db, code).await {
+        Ok(found) => ok(json!({
+            "invitation": found.map(|i| json!({
+                "code": i.code,
+                "expiresAt": iso8601::format_millis(u64::try_from(i.expires_at).unwrap_or_default()),
+                "workspace": {
+                    "name": i.workspace_name,
+                    "logo": i.workspace_logo,
+                    "scheduledDeletionAt": i
+                        .scheduled_deletion_at
+                        .map(|at| iso8601::format_millis(u64::try_from(at).unwrap_or_default())),
+                },
+                "inviter": { "name": i.inviter_name, "image": i.inviter_image },
+            })),
+            "isAuthenticated": signed_in,
+        })),
+        Err(err) => internal(err),
+    }
+}
+
+/// `isSuperAdmin(user)`: an uncached `PlatformAdmin` row (any role). A
+/// failed read counts as "no" (fail closed).
+async fn platform_admin(state: &AuthState, user_id: i64) -> bool {
+    state
+        .db
+        .read(move |conn| {
+            repo::platform_admin::find_for_auth(conn, user_id)
+                .map_err(|e| DbError::other(e.message()))
+        })
+        .await
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 /// `pages.session`: the user (or null). The tenant settings are the SPA
@@ -333,6 +402,7 @@ async fn home_page(state: &AuthState, user_id: i64) -> Response {
     let super_admin_ids = ids_where(&|m| flag(&m.permissions, "superAdmin"));
     // `COMMUNITY_MAX_WORKSPACES = 1`.
     let is_at_limit = is_community() && !owner_ids.is_empty();
+    let is_super_admin = platform_admin(state, user_id).await;
     ok(json!({
         "user": user,
         "createdWorkspaceId": created.map(|id| id.to_string()),
@@ -344,7 +414,7 @@ async fn home_page(state: &AuthState, user_id: i64) -> Response {
         "isAtLimit": is_at_limit,
         "canAccessManage": false,
         "isPlatformContext": false,
-        "isSuperAdmin": false,
+        "isSuperAdmin": is_super_admin,
         "metrics": [],
         "planName": null,
         "planStatus": null,
@@ -436,7 +506,7 @@ async fn workspace_page(state: &AuthState, name: &str, user_id: i64, input: Valu
             "supportAccessUntil": current.workspace["supportAccessUntil"],
             "consentRequired": false,
             "canAccessManage": false,
-            "isSuperAdmin": false,
+            "isSuperAdmin": platform_admin(state, user_id).await,
             "blocked": false,
             "blockReason": null,
             "quota": empty_quota(),

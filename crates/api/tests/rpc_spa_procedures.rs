@@ -668,14 +668,6 @@ async fn flow_step_option_lists_answer_for_a_member() {
     for (path, data) in [
         ("pipelinesAPI/privateListPipelineOptionsAPI", "/data"),
         ("refLinksAPI/listRefLinkOptionsAuthenticatedAPI", "/data"),
-        (
-            "personasAPIs/listMessengerPersonasAuthenticatedAPI",
-            "/data",
-        ),
-        (
-            "userPersistentMenusAPI/listUserPersistentMenusAuthenticatedAPI",
-            "/data",
-        ),
         ("placesNearMeAPI/listPlaceCategoryOptionsAPI", "/data"),
         ("questionnairesAPI/listQuestionnairesForFlowAPI", ""),
     ] {
@@ -1505,4 +1497,326 @@ async fn delete_automated_response_action_scopes_the_bulk_delete_by_the_callers_
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(count().await.as_deref(), Some("0"));
+}
+
+#[tokio::test]
+async fn pipeline_board_stages_items_and_member_scope() {
+    let (router, _) = router().await;
+    let (_, out) = act(
+        &router,
+        "admintoken",
+        "createPipelineAction",
+        json!([ws(), { "type": "opportunity", "name": "Sales" }]),
+    )
+    .await;
+    let pipeline_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createStageAction",
+        json!([ws(), { "id": pipeline_id, "name": "Won soon" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let stage_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createItemAction",
+        json!([ws(), {
+            "id": pipeline_id,
+            "contactId": CONTACT_ID.to_string(),
+            "title": "Deal",
+            "value": 12.5,
+            "stageId": stage_id,
+        }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let item_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "addCommentAction",
+        json!([ws(), { "id": pipeline_id, "itemId": item_id, "text": "hi" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    let (status, board, _) = post(
+        &router,
+        "pipelinesAPI/privateGetBoardAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "filter": { "search": "deal" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{board}");
+    let column = board["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["stage"]["id"] == stage_id)
+        .unwrap();
+    assert_eq!(column["count"], 1);
+    assert_eq!(column["totalValue"], 12.5);
+    assert_eq!(column["items"][0]["item"]["title"], "Deal");
+    assert_eq!(column["items"][0]["commentCount"], 1);
+    assert_eq!(column["items"][0]["contact"]["fullName"], "Ada Lovelace");
+
+    let (status, page, _) = post(
+        &router,
+        "pipelinesAPI/privateListStagePageAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "stageId": stage_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    let (status, item, _) = post(
+        &router,
+        "pipelinesAPI/privateGetItemAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "itemId": item_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{item}");
+    assert_eq!(item["conversationId"], Value::Null);
+    let (status, activity, _) = post(
+        &router,
+        "pipelinesAPI/privateListItemActivityAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "itemId": item_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{activity}");
+    assert!(!activity["items"].as_array().unwrap().is_empty());
+
+    // A plain member without a grant does not see the pipeline.
+    let (status, _, _) = post(
+        &router,
+        "pipelinesAPI/privateGetBoardAPI",
+        "assignedtoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = act(
+        &router,
+        "assignedtoken",
+        "deleteItemAction",
+        json!([ws(), { "id": pipeline_id, "itemId": item_id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteStageMovingItemsAction",
+        json!([ws(), { "id": pipeline_id, "stageId": stage_id, "moveItemsToStageId": board["stages"][0]["stage"]["id"] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["queued"], false);
+}
+
+#[tokio::test]
+async fn settings_admin_and_invitation_actions_check_the_caller() {
+    const GUEST_ID: i64 = 103;
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "WorkspaceApiToken" ("id", "workspaceId", "name", "permission", "tokenHash", "tokenPrefix")
+               VALUES (901, ?1, 'ci', 'full', 'secret-hash', 'cbx_ab')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "ErrorLog" ("id", "workspaceId", "action", "detail", "contactId")
+               VALUES (902, ?1, 'telegram', 'boom', ?2)"#,
+            params![WS, CONTACT_ID],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "User" ("id", "email", "name", "emailVerified") VALUES (?1, 'guest@spa.test', 'Gus', 1)"#,
+            params![GUEST_ID],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Session" ("id", "token", "userId", "expiresAt") VALUES (?1, 'guesttoken', ?1, ?2)"#,
+            params![GUEST_ID, NOW_MS + 60_000],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Invitation" ("id", "code", "permissions", "expiresAt", "workspaceId", "invitedBy")
+               VALUES (903, 'invite-code', '{"contacts":true}', 4000000000000, ?1, ?2)"#,
+            params![WS, ADMIN_ID],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed");
+
+    // The token DTO never carries the hash.
+    let (status, tokens) = act(
+        &router,
+        "admintoken",
+        "listWorkspaceTokens",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tokens}");
+    assert_eq!(tokens[0]["tokenPrefix"], "cbx_ab");
+    assert!(tokens[0].get("tokenHash").is_none());
+
+    let (status, logs) = act(
+        &router,
+        "admintoken",
+        "listErrorLogs",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{logs}");
+    assert_eq!(logs["data"][0]["detail"], "boom");
+    assert_eq!(logs["data"][0]["contact"]["firstName"], "Ada");
+
+    // Audit logs: enterprise + workspace super admin.
+    let (status, _) = act(
+        &router,
+        "assignedtoken",
+        "listAuditLogs",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+
+    // Platform admin reads: no `PlatformAdmin` row = 404.
+    let (status, _, _) = post(
+        &router,
+        "actions/listPlatformAdmins",
+        "admintoken",
+        json!({ "args": [1] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Invitations: a member cannot accept again; a new user joins as an agent.
+    let accept = |token: &'static str| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                "actions/acceptInvitationAction",
+                token,
+                json!({ "args": [{ "code": "invite-code" }] }),
+            )
+            .await
+        }
+    };
+    let (status, error, _) = accept("assignedtoken").await;
+    assert_ne!(status, StatusCode::OK);
+    assert_eq!(
+        error["message"],
+        "You are already a member of this workspace"
+    );
+    let (status, out, _) = accept("guesttoken").await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let role: String = db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                r#"SELECT "role" FROM "WorkspaceMember" WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+                params![WS, GUEST_ID],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .expect("member");
+    assert_eq!(role, "agent");
+    let (status, error, _) = post(
+        &router,
+        "actions/acceptInvitationAction",
+        "guesttoken",
+        json!({ "args": [{ "code": "nope" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
+}
+
+#[tokio::test]
+async fn user_persistent_menus_crud() {
+    let (router, _db) = router().await;
+    let menu = json!({ "label": "Docs", "type": "url", "url": "https://example.com" });
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createUserPersistentMenuAction",
+        json!([ws(), { "name": " Main ", "persistentMenus": [menu] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    // `messengerPersistentMenuSchema`: a bad URL is a field validation error.
+    let bad = json!({ "label": "x", "type": "url", "url": "nope" });
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createUserPersistentMenuAction",
+        json!([ws(), { "name": "B", "persistentMenus": [bad] }]),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(
+        out["data"]["validationErrors"]["persistentMenus"].is_object(),
+        "{out}"
+    );
+
+    let (status, list) = act(
+        &router,
+        "admintoken",
+        "listUserPersistentMenus",
+        json!([{ "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["data"][0]["name"], "Main");
+    let id = list["data"][0]["id"].as_str().expect("id").to_string();
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "updateUserPersistentMenuAction",
+        json!([ws(), id, { "name": "Renamed", "persistentMenus": [] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, found) = act(
+        &router,
+        "admintoken",
+        "findUserPersistentMenu",
+        json!([{ "id": id, "workspaceId": ws() }]),
+    )
+    .await;
+    assert_eq!(found["name"], "Renamed");
+
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "deleteUserPersistentMenuAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // A one-id delete of a missing menu is a 404.
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteUserPersistentMenuAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{out}");
+    let (_, found) = act(
+        &router,
+        "admintoken",
+        "findUserPersistentMenu",
+        json!([{ "id": id, "workspaceId": ws() }]),
+    )
+    .await;
+    assert!(found.is_null());
 }

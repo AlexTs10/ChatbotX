@@ -8,6 +8,7 @@
 //! returns the same JSON as a ported public `/v1` route, the handler runs that
 //! route ([`public`]) after the member checks, so both stay one code path.
 
+mod admin;
 mod analytics;
 mod automated_responses;
 mod broadcasts;
@@ -19,12 +20,15 @@ mod inboxes;
 pub(crate) mod integrations;
 mod lists;
 mod media_library;
+mod pipeline_board;
 mod pipelines;
 mod products;
 mod sequences;
+mod settings;
 mod templates;
 mod tools;
 mod triggers;
+mod user_persistent_menus;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -156,6 +160,9 @@ pub async fn procedure(
     if let Some(outcome) = templates::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = user_persistent_menus::procedure(ctx, path).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 
@@ -179,6 +186,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = workspaces::action(ctx, name, &args).await {
         return Some(outcome);
     }
+    if let Some(outcome) = admin::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = integrations::auth_action(ctx, name, &args).await {
         return Some(outcome);
     }
@@ -194,12 +204,15 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || media_library::ACTIONS.contains(&n)
                 || products::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
+                || pipeline_board::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n)
                 || email_topics::ACTIONS.contains(&n)
                 || sequences::ACTIONS.contains(&n)
                 || triggers::ACTIONS.contains(&n)
-                || automated_responses::ACTIONS.contains(&n) =>
+                || automated_responses::ACTIONS.contains(&n)
+                || settings::ACTIONS.contains(&n)
+                || user_persistent_menus::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -246,6 +259,12 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = automated_responses::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = settings::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = user_persistent_menus::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");
@@ -433,6 +452,28 @@ pub(crate) fn arg(args: &[Value], index: usize) -> &Value {
 /// `{ data, pageCount }` of a paged list.
 pub(crate) fn page(data: impl IntoIterator<Item = Value>, page_count: i64) -> Value {
     json!({ "data": data.into_iter().collect::<Vec<_>>(), "pageCount": page_count })
+}
+
+/// `conversationService.findDMByContact`: the contact's conversation
+/// without a source (not a comment thread), oldest first.
+pub(crate) async fn dm_conversation_id(
+    ctx: &Ctx<'_>,
+    contact_id: i64,
+) -> Result<Option<i64>, OrpcError> {
+    use chatbotx_db::rusqlite::OptionalExtension;
+    let ws = ctx.workspace_id;
+    chatbotx_business::tx::read(&ctx.api.db, move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT "id" FROM "Conversation" WHERE "workspaceId" = ?1 AND "contactId" = ?2 AND "sourceId" IS NULL ORDER BY "id" LIMIT 1"#,
+                [ws, contact_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(chatbotx_db::repo::Error::from)?)
+    })
+    .await
+    .map_err(fail)
 }
 
 // ---- public route bridge --------------------------------------------------
