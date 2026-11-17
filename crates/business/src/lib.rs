@@ -3,6 +3,7 @@
 //! (`crates/api`) maps their results and [`errors::BusinessError`]s to the
 //! original JSON shapes.
 
+pub mod ads;
 pub mod ai;
 pub mod ai_agent;
 pub mod ai_file;
@@ -47,6 +48,7 @@ pub mod error_log;
 pub mod errors;
 pub mod events;
 pub mod external_webhook;
+pub mod facebook_lead_ads;
 pub mod flow;
 pub mod flow_version;
 pub mod folder;
@@ -72,8 +74,6 @@ pub mod member_scope;
 pub mod message;
 pub mod message_actions;
 pub mod messenger_menu;
-pub mod ads;
-pub mod facebook_lead_ads;
 pub mod meta_capi;
 pub mod meta_catalog;
 pub mod minigame;

@@ -2,6 +2,7 @@
 //! one module per builder router. [`dispatch`] runs the handler of a route after
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
+pub mod ads;
 pub mod ai_agents;
 pub mod ai_files;
 pub mod ai_functions;
@@ -12,9 +13,7 @@ pub mod appointments;
 pub mod bot_fields;
 pub mod broadcasts;
 pub mod capabilities;
-pub mod ads;
 pub mod capi;
-pub mod facebook_lead_ads;
 pub mod channel_integrations;
 pub mod channel_settings;
 pub mod channels;
@@ -41,6 +40,7 @@ pub mod ecommerce_settings;
 pub mod email_topics;
 pub mod error_logs;
 pub mod external_webhooks;
+pub mod facebook_lead_ads;
 pub mod flows;
 pub mod folders;
 pub mod google_ads;
