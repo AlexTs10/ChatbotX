@@ -1011,6 +1011,9 @@ mod tests {
             variables: None,
             ai: Arc::new(crate::ai::Ai::live()),
             files: None,
+            webhook_http: Arc::new(crate::webhook::RecordingWebhookHttp::default()),
+            events: None,
+            push: None,
         };
         (deps, jobs)
     }
