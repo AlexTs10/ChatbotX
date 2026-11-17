@@ -53,7 +53,7 @@ async fn magic_link_redirects_with_interpolated_params() {
     let (status, _) = get(&fx, &format!("/r/{WS}/promo?code=1000000000001:")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     // An unknown contact inbox: redirect without recording.
-    let (status, _) = get(&fx, &format!("/r/{WS}/promo?code=1000000000001::::::99")).await;
+    let (status, _) = get(&fx, &format!("/r/{WS}/promo?code=1000000000001:::::99")).await;
     assert_eq!(status, StatusCode::FOUND);
 
     // A workspace with a scheduled deletion answers 410.
