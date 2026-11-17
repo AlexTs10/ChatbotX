@@ -45,7 +45,7 @@ pub fn tag_json(tag: &Tag) -> Value {
 
 /// `zodBigintAsString()` at `path` (digits, any length; beyond `i64` = `-1`,
 /// which matches no row).
-fn digits_at(
+pub(crate) fn digits_at(
     input: &mut Input,
     path: &[Seg],
     value: Option<&Value>,
@@ -77,7 +77,7 @@ fn nullish_digits(input: &mut Input, name: &str) -> Option<Option<i64>> {
 }
 
 /// `z.array(element).min(min).max(max)` at a top-level key.
-fn array<T>(
+pub(crate) fn array<T>(
     input: &mut Input,
     name: &str,
     min: usize,

@@ -125,3 +125,162 @@ pub async fn find_by_id_with_user(
     })
     .await
 }
+
+// ---- writes (Q.D11 slice 2) ----------------------------------------------
+
+use chatbotx_db::repo::models::WorkspaceMember;
+use chatbotx_db::repo::{find_one, now_ms};
+use serde_json::Value;
+
+use crate::BusinessError;
+use crate::workspace_usage::{self, WorkspaceUsageMetric};
+
+/// `FULL_WORKSPACE_MEMBER_PERMISSIONS` / `getSuperAdminPermissions`.
+pub fn full_permissions() -> Value {
+    crate::workspace::full_permissions()
+}
+
+/// `hasWorkspacePermission`: `superAdmin` grants every key; a missing key
+/// fails closed.
+pub fn has_permission(permissions: &Value, key: &str) -> bool {
+    permissions.get("superAdmin") == Some(&Value::Bool(true))
+        || permissions.get(key) == Some(&Value::Bool(true))
+}
+
+/// `hasContactsAccess`: `contacts` or `onlyAssignedContacts`.
+pub fn has_contacts_access(permissions: &Value) -> bool {
+    has_permission(permissions, "contacts") || has_permission(permissions, "onlyAssignedContacts")
+}
+
+/// `isWorkspaceAdminMember`: the owner, or a member whose stored
+/// permissions parse with `superAdmin: true` (a malformed value is not).
+pub fn is_workspace_admin_member(role: &str, permissions: &Value) -> bool {
+    if role == "owner" {
+        return true;
+    }
+    let Some(object) = permissions.as_object() else {
+        return false;
+    };
+    // `workspaceMemberPermissionsSchema.partial()`: each known key that is
+    // present is a boolean (unknown keys are stripped, not refused).
+    crate::workspace::PERMISSION_KEYS
+        .iter()
+        .all(|key| object.get(*key).is_none_or(Value::is_boolean))
+        && object.get("superAdmin") == Some(&Value::Bool(true))
+}
+
+/// `isSupportAccessEnabled`: `supportAccessUntil` set and in the future.
+pub fn is_support_access_enabled(support_access_until: Option<i64>, now_ms: i64) -> bool {
+    support_access_until.is_some_and(|until| until > now_ms)
+}
+
+/// `normalizeContactsPermissions`: full contacts access clears
+/// `onlyAssignedContacts` (a new value; the input is not changed).
+pub fn normalize_contacts_permissions(permissions: &Value) -> Value {
+    let mut out = permissions.clone();
+    if permissions.get("contacts") == Some(&Value::Bool(true))
+        && let Some(object) = out.as_object_mut()
+    {
+        object.insert("onlyAssignedContacts".into(), Value::Bool(false));
+    }
+    out
+}
+
+/// `findByIdOrFail` (404 "Workspace member not found").
+pub async fn find_by_id_or_fail(db: &Db, workspace_id: i64, id: i64) -> Result<WorkspaceMember> {
+    tx::read(db, move |conn| {
+        Ok(find_one::<WorkspaceMember>(
+            conn,
+            r#""id" = ?1 AND "workspaceId" = ?2"#,
+            &[&id, &workspace_id],
+        )?)
+    })
+    .await?
+    .ok_or_else(|| BusinessError::not_found("Workspace member not found"))
+}
+
+/// The JSON fields of `update` (`updateWorkspaceMemberRequest`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemberUpdate {
+    pub permissions: Value,
+    pub notification_types: Value,
+    pub notification_channels: Value,
+}
+
+/// `update`: writes the member row of the workspace; `None` when no row
+/// matched (a concurrent delete). Returns the member's user id; the caller
+/// revokes realtime connections (`revokeRealtime`).
+pub async fn update(
+    db: &Db,
+    workspace_id: i64,
+    id: i64,
+    data: MemberUpdate,
+) -> Result<Option<i64>> {
+    tx::write(db, move |tx| {
+        use chatbotx_db::rusqlite::OptionalExtension as _;
+        Ok(tx
+            .query_row(
+                r#"UPDATE "WorkspaceMember" SET "permissions" = ?3, "notificationTypes" = ?4,
+                     "notificationChannels" = ?5, "updatedAt" = ?6
+                   WHERE "id" = ?1 AND "workspaceId" = ?2 RETURNING "userId""#,
+                chatbotx_db::rusqlite::params![
+                    id,
+                    workspace_id,
+                    data.permissions.to_string(),
+                    data.notification_types.to_string(),
+                    data.notification_channels.to_string(),
+                    now_ms()
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(chatbotx_db::repo::Error::from)?)
+    })
+    .await
+}
+
+/// A removed member: its user and the audit label (`name ?? email`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemovedMember {
+    pub user_id: i64,
+    pub label: String,
+}
+
+/// `delete`: in one transaction removes the member row, the user's
+/// working-hours schedule rows of the workspace and one `teamMembers` usage
+/// unit. `None` when there was no such member (nothing else is written).
+/// The caller audits `delete` "removed <label> from workspace" and revokes
+/// the user's realtime connections (`deleted`).
+pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<Option<RemovedMember>> {
+    tx::write(db, move |tx| {
+        use chatbotx_db::rusqlite::OptionalExtension as _;
+        let member: Option<(i64, Option<String>, String)> = tx
+            .query_row(
+                r#"SELECT m."userId", u."name", u."email" FROM "WorkspaceMember" m
+                   JOIN "User" u ON u."id" = m."userId" WHERE m."id" = ?1 AND m."workspaceId" = ?2"#,
+                [id, workspace_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(chatbotx_db::repo::Error::from)?;
+        tx.execute(
+            r#"DELETE FROM "WorkspaceMember" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+            [id, workspace_id],
+        )
+        .map_err(chatbotx_db::repo::Error::from)?;
+        let Some((user_id, name, email)) = member else {
+            return Ok(None);
+        };
+        tx.execute(
+            r#"DELETE FROM "WorkingHoursMember" WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+            [workspace_id, user_id],
+        )
+        .map_err(chatbotx_db::repo::Error::from)?;
+        workspace_usage::adjust(tx, workspace_id, WorkspaceUsageMetric::TeamMembers, -1)?;
+        Ok(Some(RemovedMember {
+            user_id,
+            label: name.unwrap_or(email),
+        }))
+    })
+    .await
+}

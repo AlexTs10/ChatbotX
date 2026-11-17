@@ -239,6 +239,14 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         mailer: mailer(),
         now_ms,
     });
+    // `assertLicenseAtStartup`: enterprise / cloud need a valid or lapsed license.
+    let edition_now = chatbotx_business::keys::Edition::from_env();
+    let license = chatbotx_business::license::license_status(&shared.db, edition_now).await;
+    if let chatbotx_business::license::StartupCheck::Refuse { .. } =
+        chatbotx_business::license::startup_check(edition_now, &license)
+    {
+        std::process::exit(1);
+    }
     chatbotx_api::session::bootstrap_platform_admin_at_startup(&shared.db).await;
     // The events worker (SQLite event bus): the error-log writer and the
     // `message:failed` listeners.
@@ -250,6 +258,11 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         }
     };
     let (shutdown, exited) = start_workers(&shared, &jobs, realtime.as_ref(), buses)?;
+    let jobs_admin =
+        chatbotx_api::jobs_admin::router(Arc::new(chatbotx_api::jobs_admin::JobsAdminState {
+            auth: Arc::clone(&sessions),
+            store: Arc::clone(&jobs),
+        }));
     let api = Arc::new(api_state(&shared, Arc::clone(&jobs), realtime.as_ref()));
     let mut app = chatbotx_api::router()
         .merge(chatbotx_api::spa::spa_router(Arc::clone(&sessions)))
@@ -263,6 +276,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         .merge(chatbotx_api::session::oauth_router(Arc::new(
             chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,
         )))
+        .merge(jobs_admin)
         .merge(chatbotx_api::presigned_upload::router(
             chatbotx_api::presigned_upload::UploadState {
                 auth: Arc::clone(&sessions),

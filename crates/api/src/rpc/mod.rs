@@ -9,8 +9,17 @@
 //! other answers the RPC-encoded `NOT_FOUND "Operation not ported yet"` after
 //! auth.
 
+pub mod actions;
+pub mod admin_workspaces;
+pub mod help_items;
+pub mod inbox_teams;
+pub mod platform_admins;
+pub mod platform_credentials;
+pub mod platform_settings;
 pub mod procedures;
 mod table;
+pub mod workspace;
+pub mod workspace_members;
 
 use std::sync::Arc;
 
@@ -368,6 +377,21 @@ fn rpc_output(output: Value) -> Response {
         .into_response()
 }
 
+/// A procedure output with its meta (`[1, ...path]` per Date).
+fn rpc_output_with_meta(output: Value, meta: Vec<Value>) -> Response {
+    let body = if meta.is_empty() {
+        json!({ "json": output })
+    } else {
+        json!({ "json": output, "meta": meta })
+    };
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
 /// `[1, ...path]` (oRPC `DATE`) for every ISO string under a timestamp key
 /// (`chatbotx_db::repo::is_date_column`).
 // ponytail: dates are found by key name + ISO shape (the builder's zod
@@ -453,6 +477,9 @@ async fn handle(
     if rest.trim_end_matches('/') == FORCE_CHANGE_PASSWORD_PATH {
         return force_change_password_action(&state, &method, &uri, &headers, &body).await;
     }
+    if let Some(response) = actions::handle(&state, rest, &method, &uri, &headers, &body).await {
+        return response;
+    }
     let key = rest.split('/').next().unwrap_or_default();
     let is_action = key == "actions";
     if !is_action && !RPC_ROUTER_KEYS.contains(&key) {
@@ -528,6 +555,24 @@ async fn handle(
             Ok(output) => rpc_output(output),
             Err(error) => procedures::error_response(&error),
         };
+    }
+    if let Some(api) = state.api.as_ref() {
+        let outcome = match workspace::call(api, &path, &context, &input).await {
+            Some(outcome) => Some(outcome),
+            None => match workspace_members::call(api, &path, &context, &input).await {
+                Some(outcome) => Some(outcome),
+                None => match platform_credentials::call(api, &path, &context).await {
+                    Some(outcome) => Some(outcome),
+                    None => inbox_teams::call(api, &path, &context).await,
+                },
+            },
+        };
+        if let Some(outcome) = outcome {
+            return match outcome {
+                Ok((output, meta)) => rpc_output_with_meta(output, meta),
+                Err(error) => procedures::error_response(&error),
+            };
+        }
     }
     rpc_error(
         StatusCode::NOT_FOUND,

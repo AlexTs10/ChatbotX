@@ -309,6 +309,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "flate2",
+ "futures",
  "http",
  "phonenumber",
  "quick-xml",

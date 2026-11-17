@@ -1,13 +1,13 @@
 //! `flow/service.ts` (`createDraft`, `createPublished`,
 //! `createPublishedDefault`), `flow-version/assert-publishable.ts`,
-//! `capabilities/service.ts` `getFlowAuthoringContext` (flows and custom
-//! fields) and the builder's `lib/resolve-flow-graph-input.ts` /
+//! `capabilities/service.ts` `getFlowAuthoringContext` and the builder's `lib/resolve-flow-graph-input.ts` /
 //! `lib/compile-spec-to-graph.ts` (P3.6-D2: the create path).
 
 use std::collections::BTreeMap;
 
 use chatbotx_core::flow_config::authoring::{
-    AuthoringCustomField, AuthoringFlowRef, FlowAuthoringContext, FlowAuthoringException,
+    AuthoringCustomField, AuthoringFlowRef, AuthoringTemplate, FlowAuthoringContext,
+    FlowAuthoringException, FlowAuthoringPipeline, PipelineFieldRef, PipelineStageRef,
     compile_flow_spec, format_zod_path_segment, normalize_authored_graph,
     zod_error_to_flow_authoring_errors,
 };
@@ -47,9 +47,10 @@ fn new_id() -> i64 {
         .unwrap_or_default()
 }
 
-/// `getFlowAuthoringContext` (flows and custom fields of the workspace;
-/// templates and pipelines are not loaded yet).
-fn authoring_context(conn: &Connection, workspace_id: i64) -> Result<FlowAuthoringContext> {
+/// `getFlowAuthoringContext`: the by-name maps of the workspace's templates
+/// (an `APPROVED` variant wins a name collision), custom fields, flows and
+/// pipelines (by `referenceName`, with stages and fields).
+pub fn authoring_context(conn: &Connection, workspace_id: i64) -> Result<FlowAuthoringContext> {
     let mut flows = BTreeMap::new();
     let mut statement = conn
         .prepare(r#"SELECT "id", "name" FROM "Flow" WHERE "workspaceId" = ?1 ORDER BY "id""#)
@@ -87,11 +88,110 @@ fn authoring_context(conn: &Connection, workspace_id: i64) -> Result<FlowAuthori
         );
     }
     Ok(FlowAuthoringContext {
-        templates_by_name: BTreeMap::new(),
+        templates_by_name: authoring_templates(conn, workspace_id)?,
         custom_fields_by_name: fields,
         flows_by_name: flows,
-        pipelines_by_reference_name: Some(BTreeMap::new()),
+        pipelines_by_reference_name: Some(authoring_pipelines(conn, workspace_id)?),
     })
+}
+
+/// `listAllTemplates` (createdAt asc) folded by name: a later variant
+/// replaces an earlier one unless the earlier one is `APPROVED`.
+fn authoring_templates(
+    conn: &Connection,
+    workspace_id: i64,
+) -> Result<BTreeMap<String, AuthoringTemplate>> {
+    let mut statement = conn
+        .prepare(
+            r#"SELECT t."id", t."name", t."language", t."status" FROM "WhatsappMessageTemplate" t JOIN "IntegrationWhatsapp" i ON i."id" = t."integrationWhatsappId" WHERE i."workspaceId" = ?1 ORDER BY t."createdAt", t."id""#,
+        )
+        .map_err(repo_err)?;
+    let rows = statement
+        .query_map([workspace_id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(repo_err)?;
+    let mut out: BTreeMap<String, AuthoringTemplate> = BTreeMap::new();
+    for row in rows {
+        let (id, name, language, status) = row.map_err(repo_err)?;
+        if out.get(&name).is_none_or(|t| t.status != "APPROVED") {
+            out.insert(
+                name,
+                AuthoringTemplate {
+                    id: id.to_string(),
+                    language,
+                    status,
+                },
+            );
+        }
+    }
+    Ok(out)
+}
+
+/// `(parent id, id, name, referenceName)` of one authoring catalog row.
+type CatalogRow = (i64, i64, String, Option<String>);
+
+/// `pipelineService.listAuthoringCatalog`: pipelines (createdAt asc) with
+/// their stages (position) and fields (position, id), by `referenceName`.
+fn authoring_pipelines(
+    conn: &Connection,
+    workspace_id: i64,
+) -> Result<BTreeMap<String, FlowAuthoringPipeline>> {
+    let triples = |sql: &str| -> Result<Vec<CatalogRow>> {
+        let mut statement = conn.prepare(sql).map_err(repo_err)?;
+        let rows = statement
+            .query_map([workspace_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .map_err(repo_err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(repo_err)?;
+        Ok(rows)
+    };
+    let pipelines = triples(
+        r#"SELECT "id", "id", "name", "referenceName" FROM "Pipeline" WHERE "workspaceId" = ?1 ORDER BY "createdAt", "id""#,
+    )?;
+    let stages = triples(
+        r#"SELECT "pipelineId", "id", "name", NULL FROM "PipelineStage" WHERE "workspaceId" = ?1 ORDER BY "pipelineId", "position""#,
+    )?;
+    let fields = triples(
+        r#"SELECT "pipelineId", "id", "name", "referenceName" FROM "PipelineField" WHERE "workspaceId" = ?1 ORDER BY "position", "id""#,
+    )?;
+    let mut out = BTreeMap::new();
+    for (id, _, name, reference_name) in pipelines {
+        let reference_name = reference_name.unwrap_or_default();
+        out.insert(
+            reference_name.clone(),
+            FlowAuthoringPipeline {
+                id: id.to_string(),
+                name,
+                reference_name,
+                stages: stages
+                    .iter()
+                    .filter(|s| s.0 == id)
+                    .map(|s| PipelineStageRef {
+                        id: s.1.to_string(),
+                        name: s.2.clone(),
+                    })
+                    .collect(),
+                fields: fields
+                    .iter()
+                    .filter(|f| f.0 == id)
+                    .map(|f| PipelineFieldRef {
+                        id: f.1.to_string(),
+                        name: f.2.clone(),
+                        reference_name: f.3.clone().unwrap_or_default(),
+                    })
+                    .collect(),
+            },
+        );
+    }
+    Ok(out)
 }
 
 /// `assertFlowGraphPublishable` (`invalidGraph` authoring errors).
