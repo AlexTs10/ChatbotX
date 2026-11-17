@@ -8,6 +8,7 @@
 
 pub mod codes;
 pub mod deletion_schedule;
+pub mod lifecycle;
 
 use chatbotx_db::repo::models::Workspace;
 use chatbotx_db::repo::platform_admin::ROOT_TENANT_ID;

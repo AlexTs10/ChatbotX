@@ -10,6 +10,8 @@
 //! auth.
 
 pub mod actions;
+pub mod help_items;
+pub mod inbox_teams;
 pub mod platform_credentials;
 pub mod procedures;
 mod table;
@@ -488,7 +490,10 @@ async fn handle(
             Some(outcome) => Some(outcome),
             None => match workspace_members::call(api, &path, &context, &input).await {
                 Some(outcome) => Some(outcome),
-                None => platform_credentials::call(api, &path, &context).await,
+                None => match platform_credentials::call(api, &path, &context).await {
+                    Some(outcome) => Some(outcome),
+                    None => inbox_teams::call(api, &path, &context).await,
+                },
             },
         };
         if let Some(outcome) = outcome {

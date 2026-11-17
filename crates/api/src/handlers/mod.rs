@@ -21,6 +21,7 @@ pub mod ecommerce_settings;
 pub mod error_logs;
 pub mod flows;
 pub mod folders;
+pub mod inbox_teams;
 pub mod input;
 pub mod minigames;
 pub mod open_hours;
@@ -478,6 +479,8 @@ async fn route(
         workspace_settings::handle(state, route_id, call).await
     } else if error_logs::ROUTES.contains(&route_id) {
         error_logs::handle(state, route_id, call).await
+    } else if inbox_teams::ROUTES.contains(&route_id) {
+        inbox_teams::handle(state, route_id, call).await
     } else if capabilities::ROUTES.contains(&route_id) {
         capabilities::handle(state, route_id, call).await
     } else {

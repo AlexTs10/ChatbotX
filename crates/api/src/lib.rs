@@ -6,6 +6,7 @@ pub mod files;
 pub mod handlers;
 pub mod idempotency;
 pub mod iso8601;
+pub mod jobs_admin;
 pub mod mail;
 pub mod orpc;
 pub mod reflink_widget;

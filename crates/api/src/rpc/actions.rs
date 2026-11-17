@@ -32,6 +32,8 @@ pub const ACTION_KEYS: &[&str] = &[
     "workspaceActions",
     "workspaceMemberActions",
     "platformCredentialActions",
+    "inboxTeamActions",
+    "helpItemActions",
 ];
 
 /// next-safe-action `DEFAULT_SERVER_ERROR_MESSAGE`.
@@ -233,6 +235,8 @@ fn gate_of(key: &str, name: &str) -> Option<Gate> {
     match key {
         "workspaceActions" => super::workspace::action_gate(name),
         "workspaceMemberActions" => super::workspace_members::action_gate(name),
+        "inboxTeamActions" => super::inbox_teams::action_gate(name),
+        "helpItemActions" => super::help_items::action_gate(name),
         "platformCredentialActions" => super::platform_credentials::action_gate(name),
         _ => None,
     }
@@ -253,6 +257,8 @@ async fn run(
         "platformCredentialActions" => {
             super::platform_credentials::run_action(api, name, context, input).await
         }
+        "inboxTeamActions" => super::inbox_teams::run_action(api, name, context, input).await,
+        "helpItemActions" => super::help_items::run_action(api, name, context, input).await,
         _ => Err(ActionError::Internal(format!("unknown action key {key}"))),
     }
 }

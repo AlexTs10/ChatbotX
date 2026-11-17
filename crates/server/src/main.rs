@@ -220,7 +220,13 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         now_ms,
     });
     chatbotx_api::session::bootstrap_platform_admin_at_startup(&shared.db).await;
-    let api = Arc::new(api_state(&shared, realtime.as_ref()).await?);
+    let (api, job_store) = api_state(&shared, realtime.as_ref()).await?;
+    let api = Arc::new(api);
+    let jobs_admin =
+        chatbotx_api::jobs_admin::router(Arc::new(chatbotx_api::jobs_admin::JobsAdminState {
+            auth: Arc::clone(&sessions),
+            store: job_store,
+        }));
     let mut app = chatbotx_api::router()
         .merge(chatbotx_api::rpc::rpc_router_with(
             chatbotx_api::rpc::RpcState {
@@ -232,6 +238,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         .merge(chatbotx_api::session::oauth_router(Arc::new(
             chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,
         )))
+        .merge(jobs_admin)
         .merge(chatbotx_api::session::auth_router(sessions))
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
         .merge(chatbotx_api::routes::public_api_router_with(auth, api));
@@ -259,15 +266,19 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
 async fn api_state(
     shared: &Shared,
     realtime: Option<&Realtime>,
-) -> std::io::Result<chatbotx_api::handlers::ApiState> {
-    let jobs =
+) -> std::io::Result<(
+    chatbotx_api::handlers::ApiState,
+    Arc<chatbotx_jobs::JobStore>,
+)> {
+    let store = Arc::new(
         chatbotx_jobs::JobStore::open(Arc::clone(&shared.db), Arc::new(chatbotx_jobs::SystemClock))
             .await
-            .map_err(std::io::Error::other)?;
+            .map_err(std::io::Error::other)?,
+    );
     let app_url = env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
         .trim_end_matches('/')
         .to_string();
-    let jobs: Arc<dyn chatbotx_jobs::Enqueuer> = Arc::new(jobs);
+    let jobs: Arc<dyn chatbotx_jobs::Enqueuer> = store.clone();
     // The flow-trigger and webhook emitters queue `evaluate-triggers` /
     // `evaluate-webhooks` jobs for the (later) trigger and webhook workers.
     let events = chatbotx_business::events::EventBus::new();
@@ -291,7 +302,7 @@ async fn api_state(
     if let Some(realtime) = realtime {
         state = state.with_realtime(realtime.clone());
     }
-    Ok(state)
+    Ok((state, store))
 }
 
 /// Resolve on SIGINT (Ctrl-C) or SIGTERM, after the realtime drain

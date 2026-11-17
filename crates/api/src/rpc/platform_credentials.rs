@@ -62,7 +62,7 @@ pub fn action_gate(name: &str) -> Option<Gate> {
     known.then_some(Gate::Auth)
 }
 
-fn unauthorized() -> ActionError {
+pub(super) fn unauthorized() -> ActionError {
     ActionError::Exception(BusinessError::exception(
         "Unauthorized",
         "unauthorized",

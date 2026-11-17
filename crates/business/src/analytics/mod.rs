@@ -13,6 +13,7 @@ pub mod contacts;
 pub mod conversations;
 pub mod flows;
 pub mod links;
+pub mod mac;
 pub mod messages;
 
 use chatbotx_db::functions::{from_wall_ms, tz_resolve, wall_ms};
