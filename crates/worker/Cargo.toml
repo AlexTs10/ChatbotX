@@ -12,6 +12,7 @@ chatbotx-business = { workspace = true }
 chatbotx-core = { workspace = true }
 chatbotx-db = { workspace = true }
 chatbotx-jobs = { workspace = true }
+chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
 # API channel callback POST (same client as chatbotx-business).
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }

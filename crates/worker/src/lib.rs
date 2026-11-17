@@ -14,6 +14,7 @@ pub mod flow;
 pub mod integration;
 pub mod meta_catalog;
 pub mod send_flow_step;
+pub mod variables;
 
 use std::sync::Arc;
 
@@ -39,6 +40,8 @@ pub struct Deps {
     pub channels: Channels,
     /// `NEXT_PUBLIC_BUILDER_URL` without a trailing `/`.
     pub app_url: String,
+    /// `{{variable}}` resolution; `None` = spintax only.
+    pub variables: Option<Arc<variables::VariableDeps>>,
 }
 
 /// A handler failure that BullMQ would retry (`throw new Error(..)`).

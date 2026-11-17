@@ -313,7 +313,29 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         tracing::debug!(conversation_id, step_type = %step_type, "Skipping non-deliverable flow step");
         return Ok(());
     }
-    let resolved = spin(&step);
+    let resolved = match &deps.variables {
+        Some(variables) => {
+            let resolved = variables
+                .resolve_step(
+                    &conversation,
+                    &contact_inbox,
+                    &step,
+                    str_of(data, "appointmentId").map(str::to_owned),
+                    data.get("sentByUserId")
+                        .filter(|v| !v.is_null())
+                        .map(js_string),
+                )
+                .await;
+            match resolved {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    // The original's variable pass throws before its try block.
+                    return Err(fail(format!("sendFlowStep variables: {error}")));
+                }
+            }
+        }
+        None => spin(&step),
+    };
     // ponytail: `resolveCollectionStep` (shop-token card links, ecommerce
     // settings) comes with the webshop unit Q.D8; a collection is skipped.
     if step_type == "sendCollection" {

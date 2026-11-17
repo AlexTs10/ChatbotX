@@ -343,6 +343,11 @@ fn start_workers(
         realtime: realtime.cloned(),
         channels: chatbotx_worker::Channels::builtin(),
         app_url: app_url(),
+        variables: chatbotx_worker::variables::VariableDeps::from_env(
+            Arc::clone(&shared.db),
+            app_url(),
+        )
+        .map(Arc::new),
     };
     chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
     Ok((shutdown, exited))

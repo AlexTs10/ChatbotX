@@ -457,6 +457,7 @@ dependencies = [
  "chatbotx-core",
  "chatbotx-db",
  "chatbotx-jobs",
+ "chatbotx-kv",
  "chatbotx-rt",
  "regex",
  "reqwest",
