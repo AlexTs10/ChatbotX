@@ -33,7 +33,7 @@ fn valid_from(text: &str) -> bool {
 }
 
 /// `createSmtpRequest` (`create`) / `updateSmtpRequest`.
-fn parse(input: &mut Input, create: bool) -> Option<smtp::SmtpInput> {
+pub(crate) fn parse(input: &mut Input, create: bool) -> Option<smtp::SmtpInput> {
     let provider = input.get("provider").cloned();
     let provider = input.enum_at(&key("provider"), provider.as_ref(), PROVIDERS, true);
     let host = input.string("host", Str::default());

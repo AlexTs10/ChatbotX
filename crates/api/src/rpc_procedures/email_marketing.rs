@@ -92,6 +92,10 @@ fn data(items: Vec<Value>) -> Value {
 }
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> super::Outcome {
+    if path == "integrationSmtpAPI.listIntegrationSmtps" {
+        let rows = em::smtp_service::list_by_workspace(&ctx.api.db, ctx.workspace_id).await;
+        return Some(rows.map(data).map_err(|e| internal_error(&e.to_string())));
+    }
     let (router, name) = path.split_once('.')?;
     let provider = PROVIDERS.iter().find(|(key, _)| *key == router)?.1;
     let input = In(input);
@@ -210,6 +214,108 @@ async fn run(
     }
     .await;
     Some(Ok(outcome))
+}
+
+/// `features/integration-smtp/actions/*`.
+pub(super) const ACTIONS: &[&str] = &["createSmtpAction", "updateSmtpAction", "deleteSmtpAction"];
+
+/// `zodBigintAsString` bind argument.
+fn bind_id(args: &[Value], index: usize) -> Result<i64, OrpcError> {
+    match super::arg(args, index) {
+        Value::String(t) if !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()) => {
+            Ok(t.parse().unwrap_or(-1))
+        }
+        _ => Err(invalid()),
+    }
+}
+
+/// `createSmtpRequest` / `updateSmtpRequest` of the action input.
+fn smtp_input(value: &Value, create: bool) -> Result<em::smtp_service::SmtpInput, OrpcError> {
+    let body = serde_json::to_vec(value).unwrap_or_default();
+    let mut input = crate::handlers::input::Input::from_body(&[], &body);
+    let parsed = crate::handlers::smtp_integrations::parse(&mut input, create);
+    input.finish().map_err(|_| invalid())?;
+    parsed.ok_or_else(invalid)
+}
+
+async fn audit(ctx: &Ctx<'_>, action: &str, detail: String) {
+    ctx.api
+        .audit
+        .record(chatbotx_business::audit::AuditRecordInput {
+            user_id: Some(ctx.user_id.to_string()),
+            workspace_id: Some(ctx.workspace_id.to_string()),
+            ..chatbotx_business::audit::AuditRecordInput::new(action, detail)
+        })
+        .await;
+}
+
+pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> super::Outcome {
+    use em::smtp_service as smtp;
+    if !ACTIONS.contains(&name) {
+        return None;
+    }
+    let (db, ws) = (&ctx.api.db, ctx.workspace_id);
+    let fail = super::action_fail;
+    Some(
+        async {
+            match name {
+                "createSmtpAction" => {
+                    let data = smtp_input(super::arg(args, 1), true)?;
+                    let (host, port) = smtp::prepare_auth(&data).await.map_err(fail)?;
+                    let id = smtp::connect(db, ws, Some(ctx.user_id), &data, &host, port)
+                        .await
+                        .map_err(fail)?;
+                    audit(
+                        ctx,
+                        "connect",
+                        format!("connected a new SMTP channel (#{id})"),
+                    )
+                    .await;
+                    Ok(json!({ "id": id.to_string() }))
+                }
+                "updateSmtpAction" => {
+                    let id = bind_id(args, 1)?;
+                    let data = smtp_input(super::arg(args, 2), false)?;
+                    let (host, port) = smtp::prepare_auth(&data).await.map_err(fail)?;
+                    let changed = smtp::update(db, ws, id, &data, &host, port)
+                        .await
+                        .map_err(fail)?;
+                    if changed {
+                        audit(
+                            ctx,
+                            "update",
+                            "updated the SMTP channel configuration".into(),
+                        )
+                        .await;
+                    }
+                    let row = smtp::find_by_id_for_workspace(db, id, ws)
+                        .await
+                        .map_err(fail)?;
+                    // ponytail: the original returns the whole row; the `auth`
+                    // blob (password) stays on the server.
+                    Ok(json!({
+                        "id": row.id.to_string(),
+                        "workspaceId": ws.to_string(),
+                        "inboxId": row.inbox_id.to_string(),
+                        "name": row.name,
+                        "fromAddress": row.from_address,
+                    }))
+                }
+                _ => {
+                    let id = bind_id(args, 1)?;
+                    smtp::disconnect(db, ws, id).await.map_err(fail)?;
+                    audit(
+                        ctx,
+                        "disconnect",
+                        format!("disconnected the SMTP channel (#{id})"),
+                    )
+                    .await;
+                    Ok(Value::Null)
+                }
+            }
+        }
+        .await,
+    )
 }
 
 #[cfg(test)]

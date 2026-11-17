@@ -184,7 +184,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || products::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
-                || integrations::ACTIONS.contains(&n) =>
+                || integrations::ACTIONS.contains(&n)
+                || email_marketing::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -207,6 +208,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = integrations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_marketing::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = products::action(ctx, name, &args).await {
