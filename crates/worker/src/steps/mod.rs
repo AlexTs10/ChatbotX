@@ -8,6 +8,8 @@ mod contact;
 mod conversation;
 pub mod delay;
 mod pipeline;
+mod places;
+mod reply;
 mod tools;
 pub(crate) mod working_hours;
 
@@ -137,9 +139,13 @@ pub(crate) async fn run(
     if let Some(status) = tools::run(&ctx, step_type).await? {
         return Ok(status);
     }
+    if let Some(status) = reply::run(&ctx, step_type).await? {
+        return Ok(status);
+    }
     match step_type {
         "condition" => condition::handle(&ctx).await,
         "pipeline" => pipeline::handle(&ctx).await,
+        "findPlacesNearMe" => places::handle(&ctx).await,
         // The dropped Execute JavaScript step (DECISIONS 2026-11-11) has no
         // handler: like any unknown step type it is an implicit success.
         "executeJavascript" => {

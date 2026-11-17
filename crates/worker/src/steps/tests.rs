@@ -1038,20 +1038,36 @@ mod start_and_split_steps {
                        "triggerMessageId": "m1", "startedByContactMessage": true, "appointmentId": "77" }))
             .await
             .unwrap();
-        let job = &fx.jobs.send_flows()[0];
-        assert_eq!(job["flowId"], "44");
-        assert!(job.get("nodeId").is_none());
-        for key in [
-            "metadata",
-            "sendFrom",
-            "sentByUserId",
-            "triggerMessageId",
-            "startedByContactMessage",
-            "appointmentId",
-            "nodeVisits",
-        ] {
-            assert!(job.get(key).is_some(), "{key}");
-        }
+        // `send-flow-job.test.ts`: the core, the origin and the carried
+        // fields only (no node id, no flow version of the running flow).
+        let job = fx.jobs.send_flows().remove(0);
+        let mut keys: Vec<&str> = job
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "appointmentId",
+                "contactInboxId",
+                "conversationId",
+                "flowId",
+                "metadata",
+                "nodeVisits",
+                "origin",
+                "sendFrom",
+                "sentByUserId",
+                "startedByContactMessage",
+                "triggerMessageId"
+            ]
+        );
+        assert_eq!(
+            (job["flowId"].clone(), job["origin"].clone()),
+            (json!("44"), json!("webhook"))
+        );
     }
 
     #[tokio::test]
@@ -1329,6 +1345,156 @@ mod tool_steps {
             )
             .await;
             assert_eq!(fx.jobs.send_flows()[0]["nodeId"], "n3", "{bio:?}");
+        }
+    }
+}
+
+/// `copy-text-handler.test.ts` and `call-phone-number-handler.test.ts`: the
+/// reply is the `chat` `sendFlowMessage` job's step.
+mod reply_steps {
+    use super::*;
+
+    async fn reply(fx: &Fixture, step: Value) -> Vec<Value> {
+        let mut step = step;
+        step["id"] = json!("60");
+        fx.node(json!([step]), json!([])).await;
+        fx.run(json!({})).await.unwrap();
+        fx.jobs
+            .named("sendFlowMessage")
+            .into_iter()
+            .map(|j| j.data["data"]["step"].clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn copy_text_replies_with_the_trimmed_text_as_a_text_step() {
+        let fx = Fixture::new().await;
+        let long = "x".repeat(5000);
+        assert_eq!(
+            reply(&fx, json!({ "stepType": "copyText", "text": "  SAVE10  " })).await,
+            vec![
+                json!({ "id": "60", "nodeId": "n1", "stepType": "sendText", "text": "SAVE10", "buttons": [] })
+            ]
+        );
+        // Still replies with a text too long for a native copy button.
+        assert_eq!(
+            reply(&fx, json!({ "stepType": "copyText", "text": long })).await[1]["text"],
+            json!("x".repeat(5000))
+        );
+    }
+
+    #[tokio::test]
+    async fn copy_text_sends_nothing_when_the_text_resolves_to_nothing() {
+        let fx = Fixture::new().await;
+        assert!(
+            reply(&fx, json!({ "stepType": "copyText", "text": "   " }))
+                .await
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn call_phone_number_replies_with_the_normalised_number() {
+        let fx = Fixture::new().await;
+        assert_eq!(
+            reply(
+                &fx,
+                json!({ "stepType": "callPhoneNumber", "phoneNumber": "+1 415 555 2671" })
+            )
+            .await,
+            vec![
+                json!({ "id": "60", "nodeId": "n1", "stepType": "sendText", "text": "+14155552671", "buttons": [] })
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn call_phone_number_sends_nothing_for_an_invalid_number() {
+        let fx = Fixture::new().await;
+        assert!(
+            reply(
+                &fx,
+                json!({ "stepType": "callPhoneNumber", "phoneNumber": "call me" })
+            )
+            .await
+            .is_empty()
+        );
+    }
+}
+
+/// `find-places-near-me-step.test.ts`: a Get User Data (location) step
+/// before the find step stores the location in custom field 30.
+mod find_places_near_me_step {
+    use super::*;
+
+    async fn setup(
+        fx: &Fixture,
+        channel: &'static str,
+        location: Option<&'static str>,
+        place: bool,
+    ) {
+        fx.sql(move |tx| {
+            tx.execute(r#"UPDATE "ContactInbox" SET "channel" = ?1 WHERE "id" = 5"#, chatbotx_db::rusqlite::params![channel])?;
+            tx.execute(r#"INSERT INTO "CustomField" ("id", "name", "type", "workspaceId") VALUES (30, 'where', 'shortText', 2)"#, [])?;
+            if let Some(location) = location {
+                tx.execute(
+                    r#"INSERT INTO "ContactCustomField" ("value", "contactId", "customFieldId") VALUES (?1, 3, 30)"#,
+                    chatbotx_db::rusqlite::params![location],
+                )?;
+            }
+            if place {
+                tx.execute_batch(
+                    r#"INSERT INTO "PlaceLocation" ("id", "workspaceId", "name", "latitude", "longitude") VALUES
+                         (80, 2, 'Far', 48.13, 11.58), (81, 2, 'Near', 52.51, 13.39);"#,
+                )?;
+            }
+            Ok(())
+        })
+        .await;
+    }
+
+    async fn run(fx: &Fixture, with_source: bool) -> Vec<Value> {
+        let mut steps = vec![json!({ "id": "1", "stepType": "findPlacesNearMe", "nodeId": "n1" })];
+        if with_source {
+            steps.insert(0, json!({ "id": "g", "stepType": "getUserData", "replyFormat": "RF08", "outputFieldId": "30" }));
+        }
+        fx.node(json!(steps), json!([])).await;
+        fx.run(json!({ "startFromStepId": "1", "commentAnchor": { "postId": "p" } }))
+            .await
+            .unwrap();
+        fx.jobs
+            .named("sendFlowMessage")
+            .into_iter()
+            .map(|j| j.data["data"].clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn sends_the_nearest_place_as_a_whatsapp_location_without_the_comment_anchor() {
+        let fx = Fixture::new().await;
+        setup(&fx, "whatsapp", Some("52.52,13.40"), true).await;
+        let sent = run(&fx, true).await;
+        assert_eq!(
+            sent[0]["step"],
+            json!({ "id": "1", "nodeId": "n1", "stepType": "whatsappLocation", "latitude": 52.51, "longitude": 13.39, "name": "Near" })
+        );
+        assert!(sent[0].get("commentAnchor").is_none());
+    }
+
+    #[tokio::test]
+    async fn every_cannot_send_case_is_a_silent_skip() {
+        for (channel, location, place, source) in [
+            ("webchat", Some("52.52,13.40"), true, true),
+            ("whatsapp", Some("52.52,13.40"), true, false),
+            ("whatsapp", Some("not a place"), true, true),
+            ("whatsapp", Some("52.52,13.40"), false, true),
+        ] {
+            let fx = Fixture::new().await;
+            setup(&fx, channel, location, place).await;
+            assert!(
+                run(&fx, source).await.is_empty(),
+                "{channel} {location:?} {place} {source}"
+            );
         }
     }
 }

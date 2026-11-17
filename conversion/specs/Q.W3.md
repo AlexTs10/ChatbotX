@@ -8,9 +8,9 @@ handle to `steps::run`. One step per `sendFlow` job, as in Q.W1.
 
 | # | Slice | State |
 |---|-------|-------|
-| 1 | Basic-bot steps: `condition`; contact (tags, custom field set / clear, notes, email flags, delete, block, sequences, broadcast subscription); conversation (archive, assign, auto assign with the on-shift check, unassign, read / unread with the channel receipt, follow, bot on / off, typing, thread control); smart delays (`wait`, `followUp`, `splitTraffic`, the `resumeWait` / `resumeFollowUp` integration jobs). Worker DB fixtures (`steps/test_support.rs`) | in progress |
+| 1 | Basic-bot steps: `condition`; contact (tags, custom field set / clear, notes, email flags, delete, block, sequences, broadcast subscription); conversation (archive, assign, auto assign with the on-shift check, unassign, read / unread with the channel receipt, follow, bot on / off, typing, thread control); smart delays (`wait`, `followUp`, `splitTraffic`, the `resumeWait` / `resumeFollowUp` integration jobs). Worker DB fixtures (`steps/test_support.rs`) | done |
 | 2a | `pipeline` step (`runPipelineFlowAction`, realtime `pipelineItemChanged`); tool steps `countCharacters`, `formatDate`, `generateCode`, `getDataFromJson` (`steps/tools.rs`) | done |
-| 2b | Small steps: copy text, call phone number, find places, challenge, handover response, messenger user menu | todo |
+| 2b | `copyText` / `callPhoneNumber` tap replies (`steps/reply.rs`), `findPlacesNearMe` (`steps/places.rs`) | done |
 | 3 | Steps of domains that are not in Rust: interface + test double, or skip (list below) | todo |
 | 4 | The mock-call tests of `send-flow-step` (81), `send-message-handler` (52), `default-worker` (16) on the fixtures | todo |
 
@@ -30,7 +30,10 @@ handle to `steps::run`. One step per `sendFlow` job, as in Q.W1.
 | `resume-wait.test.ts` | 6 | `smart_delay_steps` | done |
 | `smart-delay-resume-job.test.ts` | 9 | `smart_delay_steps` (the scanner cases wait for Q.W2) | partial |
 | `start-external-step-handlers.test.ts` | 2 | `start_and_split_steps` | done |
-| `send-flow-job.test.ts` | 3 | — | todo |
+| `send-flow-job.test.ts` | 3 | `start_and_split_steps` (exact `sendFlow` key set of the start-external steps) | done |
+| `copy-text-handler.test.ts` | 5 | `reply_steps` (2; the variable-context case is `variables.rs`) | done |
+| `call-phone-number-handler.test.ts` | 5 | `reply_steps` (2; the variable-context cases are `variables.rs`) | done |
+| `find-places-near-me-step.test.ts` | 6 | `find_places_near_me_step` (2: one sends, one loops over the 4 skips) | done |
 | `pipeline-step.test.ts` | 6 (19 with `each`) | `pipeline_step` (2: real rows; the action rules are `crates/business/tests/pipeline_flow_actions.rs`; the mock-call `each` cases and the "variables load once" case are n-a) | done |
 | `count-characters-step.test.ts` | 5 | `tool_steps` (3) | done |
 | `format-date-step.test.ts` | 9 | `tool_steps` (1 test, 5 cases) | done |
@@ -68,7 +71,7 @@ Mock-call assertions become assertions on DB rows and recorded jobs
 
 ## State
 
-Slices 1 and 2a: 134 worker tests pass (Dell; 94 before Q.W3); fmt, clippy -D warnings clean.
+Slices 1, 2a, 2b: 140 worker tests pass (Dell; 94 before Q.W3); fmt, clippy -D warnings clean.
 
 ## Steps that wait for other units
 
@@ -82,3 +85,14 @@ Slices 1 and 2a: 134 worker tests pass (Dell; 94 before Q.W3); fmt, clippy -D wa
 | ecommerce (Shopify, WooCommerce, coupons, order payment) | Q.D8 |
 | thread control channel calls | Q.D12 |
 | `changeGamificationScore` | Q.D13 |
+| messenger user menu, composer and persona steps (`messenger-user-menu.ts`: Graph `custom_user_settings`) | Q.I1b |
+| `callApi` (external request service), `evaluateDecision` (decision service) | their domain units |
+| `questionnaires`, `getUserData` (input capture with `step-input-resolution`) | Q.W2 |
+
+Not step handlers (inbound or job handlers in `integration/handlers`):
+`handover-response.ts`, `thread-control-inbound.ts` (Q.D12), `challenge.ts`
+(`runChallenge` job, minigames), `capture-contact-profile-snapshot.ts`,
+`contact-profile-refresh.ts` (Q.I1), `google-click-lookup.ts` (ads),
+`heavy-step-resume.ts` / `heavy-step-runner.ts` (heavy worker, Q.W2 / Q.D6),
+`conversation.ts` (`contactMarkAsRead`) and `flow-action.ts` (channel
+inbound, Q.I*).
