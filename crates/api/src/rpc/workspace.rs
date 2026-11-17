@@ -34,6 +34,8 @@ pub const PORTED: &[&str] = &[
 pub type RpcOut = (Value, Vec<Value>);
 
 /// `errors.superAdminRequired` (en).
+/// `SUPPORT_ACCESS_WINDOW_DAYS` (7 days).
+const SUPPORT_ACCESS_WINDOW_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 const SUPER_ADMIN_REQUIRED: &str = "You need to be a workspace super admin to do this.";
 /// `workspace.deletion.alreadyStarted` (en).
 const DELETION_ALREADY_STARTED: &str = "Workspace deletion has already started.";
@@ -183,7 +185,9 @@ pub async fn call(
 /// The actions of the `workspaceActions` key and their clients.
 pub fn action_gate(name: &str) -> Option<Gate> {
     Some(match name {
-        "updateWorkspaceBasic" | "updateWorkspaceAdvanced" => Gate::AllowScheduledDeletion,
+        "updateWorkspaceBasic" | "updateWorkspaceAdvanced" | "toggleSupportAccess" => {
+            Gate::AllowScheduledDeletion
+        }
         "updateSmartResponseDelay"
         | "updateWorkspaceStatus"
         | "createWorkspaceToken"
@@ -490,6 +494,60 @@ pub async fn run_action(
             workspace::schedule_deletion(db, context.user_id, ws, chatbotx_db::repo::now_ms())
                 .await?;
             api.record_audit("schedule_deletion", "scheduled the workspace for deletion")
+                .await;
+            Ok(None)
+        }
+        // `toggleSupportAccessAction` + `workspaceSupportAccessService.enable /
+        // disable`: a real super admin member only; one audit row each.
+        "toggleSupportAccess" => {
+            let mut input = input_of(raw);
+            let enabled = input.bool("enabled");
+            input.finish()?;
+            if !context.has_permission("superAdmin") {
+                return Err(exception(
+                    "You need to be a super admin to change platform support access",
+                ));
+            }
+            if context.is_support_session {
+                return Err(exception(
+                    "Platform support access cannot be changed from within a support session",
+                ));
+            }
+            let until = enabled
+                .unwrap_or(false)
+                .then(|| chatbotx_db::repo::now_ms() + SUPPORT_ACCESS_WINDOW_MS);
+            let updated = chatbotx_business::tx::write(db, move |conn| {
+                Ok(conn
+                    .execute(
+                        r#"UPDATE "Workspace" SET "supportAccessUntil" = ?1 WHERE "id" = ?2"#,
+                        chatbotx_db::rusqlite::params![until, ws],
+                    )
+                    .map_err(chatbotx_db::repo::Error::from)?)
+            })
+            .await?;
+            if updated == 0 {
+                return Err(BusinessError::not_found("Workspace not found").into());
+            }
+            let (action, detail) = match until {
+                Some(until) => (
+                    "support_access_enabled",
+                    format!(
+                        "enabled platform support access for workspace {ws} until {}",
+                        chatbotx_db::repo::iso(until)
+                    ),
+                ),
+                None => (
+                    "support_access_disabled",
+                    format!("disabled platform support access for workspace {ws}"),
+                ),
+            };
+            tracing::info!(action, user_id = context.user_id, workspace_id = ws, "{detail}");
+            api.audit
+                .record(chatbotx_business::audit::AuditRecordInput {
+                    user_id: Some(context.user_id.to_string()),
+                    workspace_id: Some(ws.to_string()),
+                    ..chatbotx_business::audit::AuditRecordInput::new(action, detail)
+                })
                 .await;
             Ok(None)
         }
