@@ -16,6 +16,7 @@ mod inboxes;
 pub(crate) mod integrations;
 mod lists;
 mod media_library;
+mod pipeline_board;
 mod pipelines;
 mod products;
 mod templates;
@@ -176,6 +177,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || media_library::ACTIONS.contains(&n)
                 || products::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
+                || pipeline_board::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n) =>
             {

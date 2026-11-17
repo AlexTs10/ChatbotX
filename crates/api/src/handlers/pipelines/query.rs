@@ -59,7 +59,7 @@ const FIELD_OPERATORS: &[&str] = &[
 ];
 const SORT_KEYS: &[&str] = &["createdAt", "updatedAt", "value", "dueDate", "priority"];
 
-fn parse_value_operator(name: &str) -> Option<PipelineValueOperator> {
+pub(crate) fn parse_value_operator(name: &str) -> Option<PipelineValueOperator> {
     Some(match name {
         "eq" => PipelineValueOperator::Eq,
         "gt" => PipelineValueOperator::Gt,
@@ -70,7 +70,7 @@ fn parse_value_operator(name: &str) -> Option<PipelineValueOperator> {
     })
 }
 
-fn parse_field_operator(name: &str) -> Option<PipelineFieldOperator> {
+pub(crate) fn parse_field_operator(name: &str) -> Option<PipelineFieldOperator> {
     use PipelineFieldOperator::*;
     Some(match name {
         "is" => Is,
@@ -88,7 +88,7 @@ fn parse_field_operator(name: &str) -> Option<PipelineFieldOperator> {
     })
 }
 
-fn sort_key(name: &str) -> PipelineItemSortKey {
+pub(crate) fn sort_key(name: &str) -> PipelineItemSortKey {
     match name {
         "updatedAt" => PipelineItemSortKey::UpdatedAt,
         "value" => PipelineItemSortKey::Value,

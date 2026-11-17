@@ -1072,3 +1072,124 @@ async fn questionnaire_editor_loads_through_the_public_route() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
     assert!(out["data"]["validationErrors"].is_object(), "{out}");
 }
+
+#[tokio::test]
+async fn pipeline_board_stages_items_and_member_scope() {
+    let (router, _) = router().await;
+    let (_, out) = act(
+        &router,
+        "admintoken",
+        "createPipelineAction",
+        json!([ws(), { "type": "opportunity", "name": "Sales" }]),
+    )
+    .await;
+    let pipeline_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createStageAction",
+        json!([ws(), { "id": pipeline_id, "name": "Won soon" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let stage_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "createItemAction",
+        json!([ws(), {
+            "id": pipeline_id,
+            "contactId": CONTACT_ID.to_string(),
+            "title": "Deal",
+            "value": 12.5,
+            "stageId": stage_id,
+        }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let item_id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "addCommentAction",
+        json!([ws(), { "id": pipeline_id, "itemId": item_id, "text": "hi" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    let (status, board, _) = post(
+        &router,
+        "pipelinesAPI/privateGetBoardAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "filter": { "search": "deal" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{board}");
+    let column = board["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["stage"]["id"] == stage_id)
+        .unwrap();
+    assert_eq!(column["count"], 1);
+    assert_eq!(column["totalValue"], 12.5);
+    assert_eq!(column["items"][0]["item"]["title"], "Deal");
+    assert_eq!(column["items"][0]["commentCount"], 1);
+    assert_eq!(column["items"][0]["contact"]["fullName"], "Ada Lovelace");
+
+    let (status, page, _) = post(
+        &router,
+        "pipelinesAPI/privateListStagePageAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "stageId": stage_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    let (status, item, _) = post(
+        &router,
+        "pipelinesAPI/privateGetItemAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "itemId": item_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{item}");
+    assert_eq!(item["conversationId"], Value::Null);
+    let (status, activity, _) = post(
+        &router,
+        "pipelinesAPI/privateListItemActivityAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id, "itemId": item_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{activity}");
+    assert!(!activity["items"].as_array().unwrap().is_empty());
+
+    // A plain member without a grant does not see the pipeline.
+    let (status, _, _) = post(
+        &router,
+        "pipelinesAPI/privateGetBoardAPI",
+        "assignedtoken",
+        json!({ "workspaceId": ws(), "pipelineId": pipeline_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = act(
+        &router,
+        "assignedtoken",
+        "deleteItemAction",
+        json!([ws(), { "id": pipeline_id, "itemId": item_id }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, out) = act(
+        &router,
+        "admintoken",
+        "deleteStageMovingItemsAction",
+        json!([ws(), { "id": pipeline_id, "stageId": stage_id, "moveItemsToStageId": board["stages"][0]["stage"]["id"] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["queued"], false);
+}

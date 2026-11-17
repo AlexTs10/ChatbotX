@@ -17,11 +17,13 @@ import { useParams } from "@tanstack/react-router"
 import { useTranslations } from "next-intl"
 import type { ReactNode } from "react"
 import { AppBreadcrumb } from "@/components/app-breadcrumb"
+import { PipelineBoard } from "@/features/pipelines/components/board/pipeline-board"
 import { PollAnalytics } from "@/features/polls/components/poll-analytics"
 import { PollForm } from "@/features/polls/components/poll-form"
 import type { PollResource } from "@/features/polls/schema/resource"
 import { EditQuestionnaireForm } from "@/features/questionnaires/components/edit-questionnaire-form"
 import { getQuestionnaire } from "@/features/questionnaires/queries/get-questionnaire.query"
+import { LockedIdsProvider } from "@/features/templates/components/lock-context"
 import { LockedEditorGuard } from "@/features/templates/components/locked-editor-guard"
 import { client } from "@/lib/orpc/orpc"
 import { NotAvailablePage, NotFoundPage } from "@/routes/root"
@@ -204,11 +206,32 @@ export const ReflinkAnalyticsPage = notAvailable(
   "Reflink analytics",
 )
 
+/** `canViewPipeline`: the pipeline query answers 404 when it is hidden. */
 export function PipelineBoardPage() {
   const t = useTranslations()
-  const { workspaceId } = useIds()
+  const { workspaceId, id: pipelineId = "" } = useIds()
+  const canView = useSuspenseQuery({
+    queryKey: ["spa", "canViewPipeline", workspaceId, pipelineId],
+    queryFn: async () => {
+      try {
+        await client.pipelinesAPI.privateGetPipelineAPI({
+          workspaceId,
+          pipelineId,
+        })
+        return true
+      } catch (error) {
+        if (error instanceof ORPCError && error.status === 404) {
+          return false
+        }
+        throw error
+      }
+    },
+  }).data
+  if (!canView) {
+    return <NotFoundPage />
+  }
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       <AppBreadcrumb
         items={[
           {
@@ -218,10 +241,13 @@ export function PipelineBoardPage() {
           { label: t("pipelines.board.title"), href: "" },
         ]}
       />
-      <NotAvailablePage
-        detail="The pipeline board is not available yet in this version (its board query is not in the Rust server). The pipeline list and settings work."
-        title={t("pipelines.board.title")}
-      />
+      <LockedIdsProvider
+        resourceIds={[pipelineId]}
+        resourceKind="pipeline"
+        workspaceId={workspaceId}
+      >
+        <PipelineBoard pipelineId={pipelineId} workspaceId={workspaceId} />
+      </LockedIdsProvider>
     </div>
   )
 }
