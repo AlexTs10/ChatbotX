@@ -182,7 +182,10 @@ async fn list_meta_templates(graph_url: &str, auth: &Value) -> Result<Vec<Value>
     .await
     .map_err(|e| match e {
         GraphPaginationError::Get(fail) => fail,
-        other => Fail::Sdk(other.to_string(), 400),
+        GraphPaginationError::MaxPagesReached { pages_fetched } => Fail::Sdk(
+            format!("Graph pagination exceeded {pages_fetched} pages"),
+            400,
+        ),
     })
 }
 

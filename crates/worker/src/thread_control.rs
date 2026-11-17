@@ -257,6 +257,7 @@ pub fn parse_handover_event(value: &Value, now: i64) -> Option<HandoverEvent> {
             None
         },
         occurred_at: meta_seconds(value.get("timestamp"), now),
+        only_if_owned_by_app_id: None,
     })
 }
 

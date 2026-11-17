@@ -795,6 +795,7 @@ async fn conversation_contact_inbox(
 }
 
 /// `requestConversationThreadControl`: refuses a contact inbox of another contact (404).
+#[allow(clippy::too_many_arguments)]
 pub async fn request_conversation_action(
     db: &Db,
     rt: Option<&Realtime>,
