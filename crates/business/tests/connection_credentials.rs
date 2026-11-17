@@ -311,3 +311,34 @@ async fn a_rejected_key_is_400_and_writes_nothing() {
         KeyValidation::Unknown
     );
 }
+
+#[tokio::test]
+async fn a_needs_reauth_connection_is_inactive_for_verify_and_refresh() {
+    let db = two_workspaces().await;
+    let provider = ai_key_provider("deepseek").expect("provider");
+    let upstream = Script::with(vec![ok(), Ok((401, "{}".into()))]);
+    let row = connect_ai_key(
+        &db,
+        &upstream,
+        WS,
+        provider,
+        &config(json!({ "apiKey": "sk-1" })),
+        None,
+    )
+    .await
+    .expect("connect");
+    let revoked = verify_ai_key_connection(&db, &upstream, provider, row)
+        .await
+        .expect("verify");
+    assert_eq!(revoked.status, "needs_reauth");
+    // `ACTIVE_CONNECTION_STATUSES` is `connected | degraded` only.
+    for result in [
+        chatbotx_business::connection::verify(&db, revoked.id, WS).await,
+        chatbotx_business::connection::refresh(&db, revoked.id, WS).await,
+    ] {
+        assert_eq!(
+            result.expect_err("inactive").code(),
+            Some("connectionInactive")
+        );
+    }
+}

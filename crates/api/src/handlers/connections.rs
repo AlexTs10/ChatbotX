@@ -244,7 +244,7 @@ pub async fn handle(
                         connection::disconnect(&state.db, row.id, ws).await
                     }
                     ("connections.refresh", _) => connection::refresh(&state.db, row.id, ws).await,
-                    (_, Some(provider)) if is_live(&row.status) => {
+                    (_, Some(provider)) if connection::is_active(&row.status) => {
                         credentials::verify_ai_key_connection(
                             &state.db,
                             &HttpUpstream,
@@ -253,7 +253,9 @@ pub async fn handle(
                         )
                         .await
                     }
-                    (_, None) if row.provider == "telegram" && is_live(&row.status) => {
+                    (_, None)
+                        if row.provider == "telegram" && connection::is_active(&row.status) =>
+                    {
                         credentials::verify_telegram(&state.db, &HttpUpstream, row).await
                     }
                     _ => connection::verify(&state.db, row.id, ws).await,
@@ -506,11 +508,6 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
 fn enum_key_required(input: &mut Input, name: &str, options: &[&str]) -> Option<String> {
     let value = input.obj.get(name).cloned();
     input.enum_at(&key(name), value.as_ref(), options, true)
-}
-
-/// `isActiveConnectionStatus`.
-fn is_live(status: &str) -> bool {
-    matches!(status, "connected" | "degraded" | "needs_reauth")
 }
 
 /// The 422 of a catalog that includes the channel-kind providers: the
