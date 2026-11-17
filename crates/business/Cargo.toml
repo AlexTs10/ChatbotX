@@ -21,6 +21,8 @@ chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
 # Concurrent error-log emits (`Promise.allSettled`, Q.D11).
 futures = { workspace = true }
+# Q.I3 Mailchimp subscriber hash (`md5(email.toLowerCase())`).
+md-5 = "0.11"
 # Q.D1i product imports: XLSX (a ZIP of XML parts) read / template write; same versions as the lockfile.
 flate2 = "1.1"
 quick-xml = "0.41"

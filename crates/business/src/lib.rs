@@ -36,6 +36,7 @@ pub mod custom_field;
 pub mod discount_code;
 pub mod ecommerce_open_hours;
 pub mod ecommerce_settings;
+pub mod email_marketing;
 pub mod error_log;
 pub mod errors;
 pub mod events;

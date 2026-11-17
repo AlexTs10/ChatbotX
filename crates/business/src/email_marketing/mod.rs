@@ -7,14 +7,7 @@
 //! read the satellite auth with [`load_auth`] and call the provider through
 //! an [`Http`] (production: [`SafeHttp`], SSRF-checked on every hop).
 
-pub mod active_campaign;
-pub mod drip;
-pub mod get_response;
-pub mod klaviyo;
 pub mod mailchimp;
-pub mod mailer_lite;
-pub mod moosend;
-pub mod sendgrid;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -184,6 +177,11 @@ impl Http for SafeHttp {
     }
 }
 
+/// Sends `request`; a transport failure is a [`ProviderError`].
+pub(crate) async fn call(http: &dyn Http, request: Request) -> Outcome<Reply> {
+    http.send(request).await.map_err(ProviderError::new)
+}
+
 /// The process-wide [`SafeHttp`].
 pub fn safe_http() -> &'static SafeHttp {
     static HTTP: OnceLock<SafeHttp> = OnceLock::new();
@@ -247,7 +245,7 @@ pub(crate) fn retry_after(value: Option<&str>) -> Option<u64> {
         return Some(seconds);
     }
     let date = chrono::DateTime::parse_from_rfc2822(value).ok()?;
-    let millis = date.timestamp_millis() - crate::repo_now_ms();
+    let millis = date.timestamp_millis() - chrono::Utc::now().timestamp_millis();
     Some(u64::try_from(millis.max(0)).unwrap_or(0).div_ceil(1000))
 }
 
@@ -523,7 +521,10 @@ mod tests {
         assert_eq!(retry_after(Some("7")), Some(7));
         assert_eq!(retry_after(Some("Thu, 01 Jan 1970 00:00:00 GMT")), Some(0));
         assert_eq!(retry_after(Some("soon")), None);
-        assert_eq!(split_full_name("  Ada  King Lovelace "), ("Ada".into(), "King Lovelace".into()));
+        assert_eq!(
+            split_full_name("  Ada  King Lovelace "),
+            ("Ada".into(), "King Lovelace".into())
+        );
         assert!(is_email("ada@example.com"));
         assert!(!is_email("ada@example"));
         assert!(!is_email("not an email"));

@@ -355,6 +355,7 @@ dependencies = [
  "flate2",
  "futures",
  "http",
+ "md-5 0.11.0",
  "phonenumber",
  "quick-xml",
  "regex",
