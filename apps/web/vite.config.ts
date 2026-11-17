@@ -7,6 +7,7 @@ const src = (path: string) =>
   fileURLToPath(new URL(`./src/${path}`, import.meta.url))
 
 // Large editor libraries in their own chunks (`manualChunks`).
+const SIDE_EFFECT_FREE = /\/packages\/(ai|imports)\/src\//
 const TIPTAP = /node_modules\/.*(@tiptap|prosemirror-)/
 const XYFLOW = /node_modules\/.*(@xyflow|\/d3-)/
 const LIBPHONENUMBER = /node_modules\/.*libphonenumber-js/
@@ -59,6 +60,13 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 4096,
     rollupOptions: {
+      // `@chatbotx.io/ai` and `@chatbotx.io/imports` re-export server code
+      // (AI SDK providers, the exceljs product template) next to the
+      // constants the UI imports. Their modules have no import-time side
+      // effects, so an unused one is dropped with its dependencies.
+      treeshake: {
+        moduleSideEffects: (id) => !SIDE_EFFECT_FREE.test(id),
+      },
       output: {
         // Large editor libraries in their own chunks, so the shared form
         // chunk and the flow editor chunk stay small. Lazy loading is kept:
