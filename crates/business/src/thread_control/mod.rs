@@ -80,6 +80,24 @@ impl ThreadControlError {
 
 type Result<T> = std::result::Result<T, ThreadControlError>;
 
+/// The English copy of `mapThreadControlError`'s translations.
+pub struct ErrorCopy {
+    pub unsupported: &'static str,
+    pub action_failed: &'static str,
+}
+
+/// `THREAD_CONTROL_ERROR_COPY` of the public API.
+pub const PUBLIC_COPY: ErrorCopy = ErrorCopy {
+    unsupported: "This channel does not support thread control.",
+    action_failed: "The channel could not apply the thread-control action.",
+};
+
+/// `conversationRouting.errors.*` of `messages/en.json` (the inbox action).
+pub const INBOX_COPY: ErrorCopy = ErrorCopy {
+    unsupported: "Conversation routing is not available on this channel",
+    action_failed: "Couldn't update conversation routing. Please try again.",
+};
+
 /// `THREAD_CONTROL_NOT_ESCALATION`.
 pub const NOT_ESCALATION: &str = "notEscalation";
 
@@ -89,10 +107,11 @@ pub const NOT_ESCALATION: &str = "notEscalation";
 pub fn map_error(
     error: ThreadControlError,
     action: &str,
+    copy: &ErrorCopy,
 ) -> std::result::Result<&'static str, BusinessError> {
     match error {
         ThreadControlError::Unsupported(_) => Err(BusinessError::exception(
-            "This channel does not support thread control.",
+            copy.unsupported,
             "threadControlUnsupported",
             400,
         )),
@@ -101,14 +120,14 @@ pub fn map_error(
             Ok(NOT_ESCALATION)
         }
         ThreadControlError::Channel(failure) => {
-            const FALLBACK: &str = "The channel could not apply the thread-control action.";
+            let fallback = copy.action_failed;
             let message =
                 if failure.message.is_empty() || crate::errors::is_query_dump(&failure.message) {
-                    FALLBACK.to_owned()
+                    fallback.to_owned()
                 } else {
                     Some(crate::errors::sanitize_public_text(&failure.message))
                         .filter(|m| !m.is_empty())
-                        .unwrap_or_else(|| FALLBACK.to_owned())
+                        .unwrap_or_else(|| fallback.to_owned())
                 };
             Err(BusinessError::exception(
                 message,

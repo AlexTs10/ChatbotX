@@ -561,18 +561,20 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     }
 }
 
-/// `conversations.threadControl` (take / release / pass / sync).
-async fn thread_control(state: &ApiState, call: Call<'_>) -> Reply {
+/// The `contactInboxId` / `action` / handover fields of a thread-control request
+/// (`threadControlHandoverFields` + `refineThreadControlHandover`).
+pub(crate) struct ThreadControlRequest {
+    pub contact_inbox: Option<i64>,
+    pub action: Option<String>,
+    pub target_role: Option<String>,
+    pub metadata: Option<String>,
+}
+
+pub(crate) fn thread_control_request(input: &mut Input, actions: &[&str]) -> ThreadControlRequest {
     use chatbotx_business::thread_control as tc;
-    let mut input = Input::from_body(call.params, call.body);
     let contact_inbox = input.digits_id("contactInboxId");
     let value = input.get("action").cloned();
-    let action = input.enum_at(
-        &key("action"),
-        value.as_ref(),
-        &["take", "release", "pass", "sync"],
-        true,
-    );
+    let action = input.enum_at(&key("action"), value.as_ref(), actions, true);
     let value = input.get("targetRole").cloned();
     let target_role = input.enum_at(&key("targetRole"), value.as_ref(), tc::roles::ALL, false);
     let metadata = input.opt_string(
@@ -599,6 +601,24 @@ async fn thread_control(state: &ApiState, call: Call<'_>) -> Reply {
             );
         }
     }
+    ThreadControlRequest {
+        contact_inbox,
+        action,
+        target_role,
+        metadata,
+    }
+}
+
+/// `conversations.threadControl` (take / release / pass / sync).
+async fn thread_control(state: &ApiState, call: Call<'_>) -> Reply {
+    use chatbotx_business::thread_control as tc;
+    let mut input = Input::from_body(call.params, call.body);
+    let ThreadControlRequest {
+        contact_inbox,
+        action,
+        target_role,
+        metadata,
+    } = thread_control_request(&mut input, &["take", "release", "pass", "sync"]);
     let conversation = input.digits_id("id");
     input.finish()?;
     let (action, ws) = (action.unwrap_or_default(), call.workspace_id);
@@ -630,7 +650,7 @@ async fn thread_control(state: &ApiState, call: Call<'_>) -> Reply {
             json!({ "status": "applied", "snapshot": tc::snapshot_json(&row) }),
         )),
         Err(error) => {
-            let status = tc::map_error(error, &action).map_err(errors)?;
+            let status = tc::map_error(error, &action, &tc::PUBLIC_COPY).map_err(errors)?;
             Ok(json(200, json!({ "status": status })))
         }
     }
