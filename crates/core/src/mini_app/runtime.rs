@@ -36,10 +36,15 @@ pub fn collect_custom_field_mappings(definition: &Definition) -> BTreeMap<String
 
 /// `applyCustomFieldMappings`: `None` (or "") removes a mapping; names not
 /// listed keep theirs.
-pub fn apply_custom_field_mappings(definition: &mut Definition, mappings: &BTreeMap<String, Option<String>>) {
+pub fn apply_custom_field_mappings(
+    definition: &mut Definition,
+    mappings: &BTreeMap<String, Option<String>>,
+) {
     for screen in &mut definition.screens {
         walk_mut(&mut screen.children, &mut |node: &mut Node| {
-            let Some(name) = input_name(node).map(str::to_owned) else { return };
+            let Some(name) = input_name(node).map(str::to_owned) else {
+                return;
+            };
             if let Some(id) = mappings.get(&name) {
                 node.custom_field_id = id.clone().filter(|id| !id.is_empty());
             }
@@ -61,7 +66,13 @@ pub fn format_answer_for_custom_field(value: &Value) -> Option<String> {
                 .join(", "),
         ),
         Value::Array(items) if items.is_empty() => None,
-        Value::Array(items) => Some(items.iter().map(crate::js::string_of).collect::<Vec<_>>().join(", ")),
+        Value::Array(items) => Some(
+            items
+                .iter()
+                .map(crate::js::string_of)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
         Value::Object(_) => crate::utils::form_answer_format::format_date_range(value),
         other => Some(crate::js::string_of(other)),
     }
@@ -73,9 +84,10 @@ pub fn format_answer_for_custom_field(value: &Value) -> Option<String> {
 pub fn is_file_answer(value: &Value) -> bool {
     value.as_array().is_some_and(|items| {
         !items.is_empty()
-            && items
-                .iter()
-                .all(|i| i.as_object().is_some_and(|o| o.contains_key("url") && o.contains_key("uploadId")))
+            && items.iter().all(|i| {
+                i.as_object()
+                    .is_some_and(|o| o.contains_key("url") && o.contains_key("uploadId"))
+            })
     })
 }
 
@@ -89,12 +101,18 @@ fn answer_value(value: &Value) -> Option<Value> {
         Value::Number(_) | Value::Bool(_) => Some(value.clone()),
         Value::Array(items)
             if items.len() <= MAX_SELECTED_IDS
-                && items.iter().all(|i| i.as_str().is_some_and(|s| short(s, MAX_SELECTED_ID_LENGTH))) =>
+                && items
+                    .iter()
+                    .all(|i| i.as_str().is_some_and(|s| short(s, MAX_SELECTED_ID_LENGTH))) =>
         {
             Some(value.clone())
         }
         Value::Object(o) => {
-            let date = |key: &str| o.get(key).and_then(Value::as_str).filter(|s| short(s, DATE_LENGTH));
+            let date = |key: &str| {
+                o.get(key)
+                    .and_then(Value::as_str)
+                    .filter(|s| short(s, DATE_LENGTH))
+            };
             let (start, end) = (date("start-date")?, date("end-date")?);
             Some(serde_json::json!({ "start-date": start, "end-date": end }))
         }
@@ -116,14 +134,22 @@ pub fn sanitize_answers(definition: &Definition, input: &Value) -> Option<Map<St
     if crate::js::utf16_len(&crate::js::json_stringify(input)) > MAX_ANSWERS_BYTES {
         return None;
     }
-    let names: HashSet<String> = definition.screens.iter().flat_map(collect_input_names).collect();
+    let names: HashSet<String> = definition
+        .screens
+        .iter()
+        .flat_map(collect_input_names)
+        .collect();
     let file_names = collect_file_input_names(definition);
     let mut answers = Map::new();
     for (name, value) in object {
         if !names.contains(name) {
             continue;
         }
-        let parsed = if file_names.contains(name) { upload_ids(value) } else { answer_value(value) };
+        let parsed = if file_names.contains(name) {
+            upload_ids(value)
+        } else {
+            answer_value(value)
+        };
         if let Some(parsed) = parsed {
             answers.insert(name.clone(), parsed);
         }
@@ -135,16 +161,29 @@ pub fn sanitize_answers(definition: &Definition, input: &Value) -> Option<Map<St
 
 /// `MINI_APP_UPLOAD_ID_PATTERN`.
 pub fn is_upload_id(text: &str) -> bool {
-    text.len() == 22 && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    text.len() == 22
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-pub const PHOTO_MIME_TYPES: &[&str] = &["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+pub const PHOTO_MIME_TYPES: &[&str] = &[
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+];
 const OOXML_MIME_TYPES: &[&str] = &[
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ];
-const OLE_MIME_TYPES: &[&str] = &["application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint"];
+const OLE_MIME_TYPES: &[&str] = &[
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+];
 const TEXT_MIME_TYPES: &[&str] = &["text/plain", "text/csv"];
 
 fn default_document_mime_types() -> Vec<String> {
@@ -159,7 +198,12 @@ fn default_document_mime_types() -> Vec<String> {
 }
 
 fn ascii_at(bytes: &[u8], offset: usize, len: usize) -> String {
-    bytes.iter().skip(offset).take(len).map(|b| *b as char).collect()
+    bytes
+        .iter()
+        .skip(offset)
+        .take(len)
+        .map(|b| *b as char)
+        .collect()
 }
 
 /// `sniffMimeType`: the type the first bytes prove, or `None`.
@@ -173,7 +217,9 @@ pub fn sniff_mime_type(head: &[u8], declared: &str) -> Option<String> {
     if ascii_at(head, 0, 4) == "RIFF" && ascii_at(head, 8, 4) == "WEBP" {
         return Some("image/webp".into());
     }
-    const HEIC: &[&str] = &["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"];
+    const HEIC: &[&str] = &[
+        "heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1",
+    ];
     if ascii_at(head, 4, 4) == "ftyp" && HEIC.contains(&ascii_at(head, 8, 4).as_str()) {
         return Some("image/heic".into());
     }
@@ -182,14 +228,20 @@ pub fn sniff_mime_type(head: &[u8], declared: &str) -> Option<String> {
     }
     let declared = declared.to_lowercase();
     if head.starts_with(&[0x50, 0x4b, 0x03, 0x04]) {
-        return OOXML_MIME_TYPES.contains(&declared.as_str()).then_some(declared);
+        return OOXML_MIME_TYPES
+            .contains(&declared.as_str())
+            .then_some(declared);
     }
     if head.starts_with(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) {
-        return OLE_MIME_TYPES.contains(&declared.as_str()).then_some(declared);
+        return OLE_MIME_TYPES
+            .contains(&declared.as_str())
+            .then_some(declared);
     }
     if TEXT_MIME_TYPES.contains(&declared.as_str()) {
         static MARKUP: OnceLock<Regex> = OnceLock::new();
-        let markup = MARKUP.get_or_init(|| Regex::new(r"(?i)<\s*(!doctype|html|script|svg|iframe|\?xml)").expect("regex"));
+        let markup = MARKUP.get_or_init(|| {
+            Regex::new(r"(?i)<\s*(!doctype|html|script|svg|iframe|\?xml)").expect("regex")
+        });
         let binary = head.contains(&0);
         return (!binary && !markup.is_match(&String::from_utf8_lossy(head))).then_some(declared);
     }
@@ -218,23 +270,36 @@ fn file_pickers(definition: &Definition) -> Vec<&Node> {
 }
 
 fn read_number(value: Option<&Value>, fallback: f64) -> f64 {
-    value.and_then(Value::as_f64).filter(|n| n.is_finite()).unwrap_or(fallback)
+    value
+        .and_then(Value::as_f64)
+        .filter(|n| n.is_finite())
+        .unwrap_or(fallback)
 }
 
 /// `resolveUploadRules`: the rules of the file picker named `input_name`.
 pub fn resolve_upload_rules(definition: &Definition, input_name: &str) -> Option<UploadRules> {
-    let node = file_pickers(definition).into_iter().find(|n| node_name(n) == Some(input_name))?;
+    let node = file_pickers(definition)
+        .into_iter()
+        .find(|n| node_name(n) == Some(input_name))?;
     let is_photo = node.kind == "PhotoPicker";
-    let size_kb = read_number(node.props.get("max-file-size-kb"), (MAX_UPLOAD_BYTES / 1024) as f64);
-    let files_key = if is_photo { "max-uploaded-photos" } else { "max-uploaded-documents" };
+    let size_kb = read_number(
+        node.props.get("max-file-size-kb"),
+        (MAX_UPLOAD_BYTES / 1024) as f64,
+    );
+    let files_key = if is_photo {
+        "max-uploaded-photos"
+    } else {
+        "max-uploaded-documents"
+    };
     let max_files = read_number(node.props.get(files_key), MAX_UPLOADS_PER_INPUT as f64);
     let allowed_mime_types = if is_photo {
         PHOTO_MIME_TYPES.iter().map(|s| (*s).to_owned()).collect()
     } else {
         match node.props.get("allowed-mime-types") {
-            Some(Value::Array(types)) if !types.is_empty() => {
-                types.iter().map(|t| crate::js::string_of(t).to_lowercase()).collect()
-            }
+            Some(Value::Array(types)) if !types.is_empty() => types
+                .iter()
+                .map(|t| crate::js::string_of(t).to_lowercase())
+                .collect(),
             _ => default_document_mime_types(),
         }
     };
@@ -248,7 +313,12 @@ pub fn resolve_upload_rules(definition: &Definition, input_name: &str) -> Option
 
 /// `verifyUpload`: the sniffed MIME type, or the rejection reason
 /// (`empty`, `too_large`, `type_not_allowed`).
-pub fn verify_upload(rules: &UploadRules, size: usize, head: &[u8], declared: &str) -> Result<String, &'static str> {
+pub fn verify_upload(
+    rules: &UploadRules,
+    size: usize,
+    head: &[u8],
+    declared: &str,
+) -> Result<String, &'static str> {
     if size == 0 {
         return Err("empty");
     }
@@ -257,7 +327,8 @@ pub fn verify_upload(rules: &UploadRules, size: usize, head: &[u8], declared: &s
     }
     static BLOCKED: OnceLock<Regex> = OnceLock::new();
     let blocked = BLOCKED.get_or_init(|| {
-        Regex::new("(?i)(html|svg|xml|javascript|ecmascript|x-sh|x-php|x-msdownload|x-executable)").expect("regex")
+        Regex::new("(?i)(html|svg|xml|javascript|ecmascript|x-sh|x-php|x-msdownload|x-executable)")
+            .expect("regex")
     });
     let Some(mime) = sniff_mime_type(head, declared) else {
         return Err("type_not_allowed");
@@ -279,12 +350,20 @@ pub fn build_upload_path(
     file_name: &str,
 ) -> String {
     match contact_id {
-        Some(contact) => format!("public/space/{workspace_id}/contacts/{contact}/mini-apps/{random_key}/{file_name}"),
-        None => format!("public/space/{workspace_id}/mini-apps/{mini_app_id}/anonymous/{random_key}/{file_name}"),
+        Some(contact) => format!(
+            "public/space/{workspace_id}/contacts/{contact}/mini-apps/{random_key}/{file_name}"
+        ),
+        None => format!(
+            "public/space/{workspace_id}/mini-apps/{mini_app_id}/anonymous/{random_key}/{file_name}"
+        ),
     }
 }
 
 /// `collectFileInputNames`.
 pub fn collect_file_input_names(definition: &Definition) -> HashSet<String> {
-    file_pickers(definition).into_iter().filter_map(node_name).map(str::to_owned).collect()
+    file_pickers(definition)
+        .into_iter()
+        .filter_map(node_name)
+        .map(str::to_owned)
+        .collect()
 }

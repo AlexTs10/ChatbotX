@@ -19,8 +19,8 @@ pub use catalog::{Component, component, needs_name};
 pub use runtime::*;
 pub use serialize::{ImportError, from_flow_json, to_flow_json, to_nested_expression};
 pub use validate::{
-    LocatedIssue, ValidationIssue, ValidationResult, escape_contact_value, has_contact_variable, locate_issues,
-    map_display_text, strip_contact_variables, validate,
+    LocatedIssue, ValidationIssue, ValidationResult, escape_contact_value, has_contact_variable,
+    locate_issues, map_display_text, strip_contact_variables, validate,
 };
 
 /// `MINI_APP_FLOW_JSON_VERSION`.
@@ -100,7 +100,10 @@ fn id_ok(text: &str) -> bool {
 fn node_ok(node: &Node) -> bool {
     id_ok(&node.id)
         && catalog::component(&node.kind).is_some()
-        && node.custom_field_id.as_deref().is_none_or(|id| utf16_len(id) <= MAX_ID_LENGTH)
+        && node
+            .custom_field_id
+            .as_deref()
+            .is_none_or(|id| utf16_len(id) <= MAX_ID_LENGTH)
         && node
             .slots
             .iter()
@@ -163,10 +166,17 @@ pub fn slot_entries(node: &Node) -> Vec<(&str, &Vec<Node>)> {
     let Some(slots) = &node.slots else {
         return Vec::new();
     };
-    let defaults: &[&str] = if node.kind == "If" { &["then", "else"] } else { &[] };
+    let defaults: &[&str] = if node.kind == "If" {
+        &["then", "else"]
+    } else {
+        &[]
+    };
     let mut seen = Vec::<&str>::new();
     let order = node.slot_order.iter().flatten().map(String::as_str);
-    for key in order.chain(defaults.iter().copied()).chain(slots.keys().map(String::as_str)) {
+    for key in order
+        .chain(defaults.iter().copied())
+        .chain(slots.keys().map(String::as_str))
+    {
         if let Some((k, _)) = slots.get_key_value(key)
             && !seen.contains(&k.as_str())
         {
@@ -185,11 +195,25 @@ fn walk_inner<'a>(
     visit: &mut dyn FnMut(Visit<'a>),
 ) {
     for (index, node) in nodes.iter().enumerate() {
-        visit(Visit { node, parent, slot, index, if_depth, in_conditional });
+        visit(Visit {
+            node,
+            parent,
+            slot,
+            index,
+            if_depth,
+            in_conditional,
+        });
         let is_if = node.kind == "If";
         let conditional = in_conditional || is_if || node.kind == "Switch";
         for (key, children) in slot_entries(node) {
-            walk_inner(children, Some(node), Some(key), if_depth + usize::from(is_if), conditional, visit);
+            walk_inner(
+                children,
+                Some(node),
+                Some(key),
+                if_depth + usize::from(is_if),
+                conditional,
+                visit,
+            );
         }
     }
 }
@@ -231,23 +255,34 @@ pub fn screen_actions(screen: &Screen) -> Vec<Action> {
 
 /// `isTerminalScreen`.
 pub fn is_terminal_screen(screen: &Screen) -> bool {
-    screen_actions(screen).iter().any(|a| *a == Action::Complete)
+    screen_actions(screen)
+        .iter()
+        .any(|a| *a == Action::Complete)
 }
 
 /// `nodeName`.
 pub fn node_name(node: &Node) -> Option<&str> {
-    node.props.get("name").and_then(Value::as_str).filter(|n| !n.is_empty())
+    node.props
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|n| !n.is_empty())
 }
 
 /// `inputName`.
 pub fn input_name(node: &Node) -> Option<&str> {
-    if catalog::component(&node.kind)?.is_input { node_name(node) } else { None }
+    if catalog::component(&node.kind)?.is_input {
+        node_name(node)
+    } else {
+        None
+    }
 }
 
 /// `collectInputNames`: input names of a screen, in document order.
 pub fn collect_input_names(screen: &Screen) -> Vec<String> {
     let mut names = Vec::new();
-    walk(&screen.children, &mut |visit| names.extend(input_name(visit.node).map(str::to_owned)));
+    walk(&screen.children, &mut |visit| {
+        names.extend(input_name(visit.node).map(str::to_owned))
+    });
     names
 }
 

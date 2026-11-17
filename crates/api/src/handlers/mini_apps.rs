@@ -5,12 +5,14 @@
 use std::collections::BTreeMap;
 
 use chatbotx_business::mini_app::{self as service, DefinitionInput};
-use chatbotx_core::mini_app::{self as app, collect_custom_field_mappings, locate_issues, validate};
+use chatbotx_core::mini_app::{
+    self as app, collect_custom_field_mappings, locate_issues, validate,
+};
 use chatbotx_db::repo::mini_app::MiniAppListRow;
 use chatbotx_db::repo::models::{MiniApp, MiniAppPublication};
 use serde_json::{Map, Value, json};
 
-use super::input::{Input, Str, Seg, key};
+use super::input::{Input, Seg, Str, key};
 use super::qr_codes::public_paging;
 use super::{ApiState, Call, Reply, business_error, date, id, json, opt_id};
 
@@ -37,7 +39,10 @@ pub const FLOW_REMOVAL_UNAVAILABLE: &str = "WhatsApp Flow removal is not availab
 
 /// `buildMiniAppPublicUrl`.
 pub fn public_url(app_url: &str, mini_app_id: i64) -> String {
-    format!("{}/mini-apps?id={mini_app_id}&token={{{{mini_app_token}}}}", super::messenger_templates::broker_origin(app_url))
+    format!(
+        "{}/mini-apps?id={mini_app_id}&token={{{{mini_app_token}}}}",
+        super::messenger_templates::broker_origin(app_url)
+    )
 }
 
 struct Summary<'a> {
@@ -102,7 +107,9 @@ pub fn validation_json(definition: &Value) -> Value {
 /// `toDetail`.
 pub fn detail_json(app_url: &str, row: &MiniApp, publications: &[MiniAppPublication]) -> Value {
     let definition = &row.definition.0;
-    let mappings = app::parse_definition(definition).map(|d| collect_custom_field_mappings(&d)).unwrap_or_default();
+    let mappings = app::parse_definition(definition)
+        .map(|d| collect_custom_field_mappings(&d))
+        .unwrap_or_default();
     let mut out = summary_of(app_url, row);
     out.insert("flowJson".into(), row.flow_json.0.clone());
     out.insert("customFieldMappings".into(), json!(mappings));
@@ -129,8 +136,20 @@ fn flow_json(input: &mut Input, name: &str, required: bool) -> Option<Value> {
         None if !required => None,
         Some(v) if app::serialize::is_flow_json(&v) => Some(v),
         other => {
-            let message = if other.is_none() { "Invalid input: expected object, received undefined" } else { "Invalid input" };
-            input.issue(&key(name), if other.is_none() { "invalid_type" } else { "custom" }, message);
+            let message = if other.is_none() {
+                "Invalid input: expected object, received undefined"
+            } else {
+                "Invalid input"
+            };
+            input.issue(
+                &key(name),
+                if other.is_none() {
+                    "invalid_type"
+                } else {
+                    "custom"
+                },
+                message,
+            );
             None
         }
     }
@@ -140,7 +159,11 @@ fn flow_json(input: &mut Input, name: &str, required: bool) -> Option<Value> {
 fn mappings(input: &mut Input) -> Option<BTreeMap<String, Option<String>>> {
     let value = input.get("customFieldMappings").cloned()?;
     let Value::Object(map) = value else {
-        input.issue(&key("customFieldMappings"), "invalid_type", "Invalid input: expected record, received other");
+        input.issue(
+            &key("customFieldMappings"),
+            "invalid_type",
+            "Invalid input: expected record, received other",
+        );
         return None;
     };
     let mut out = BTreeMap::new();
@@ -153,7 +176,10 @@ fn mappings(input: &mut Input) -> Option<BTreeMap<String, Option<String>>> {
                 out.insert(name, Some(s));
             }
             _ => input.issue(
-                &[Seg::Key("customFieldMappings".into()), Seg::Key(name.clone())],
+                &[
+                    Seg::Key("customFieldMappings".into()),
+                    Seg::Key(name.clone()),
+                ],
                 "custom",
                 "Invalid input",
             ),
@@ -164,9 +190,17 @@ fn mappings(input: &mut Input) -> Option<BTreeMap<String, Option<String>>> {
 
 /// `deleteMiniApps`: deletes the rows; with `deleteWhatsappFlows`, each
 /// publication reports `failed` (the WhatsApp Flows Graph port is missing).
-pub async fn delete_mini_apps(state: &ApiState, ws: i64, ids: Vec<i64>, delete_flows: bool) -> Result<Value, chatbotx_business::errors::BusinessError> {
-    let publications =
-        if delete_flows { service::list_publications(&state.db, ws, ids.clone()).await? } else { Vec::new() };
+pub async fn delete_mini_apps(
+    state: &ApiState,
+    ws: i64,
+    ids: Vec<i64>,
+    delete_flows: bool,
+) -> Result<Value, chatbotx_business::errors::BusinessError> {
+    let publications = if delete_flows {
+        service::list_publications(&state.db, ws, ids.clone()).await?
+    } else {
+        Vec::new()
+    };
     let deleted = service::delete_many(&state.db, ws, ids).await?;
     let flows: Vec<Value> = publications
         .iter()
@@ -188,8 +222,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let (page, per_page) = public_paging(&mut input);
             let name = input.opt_string("name", Str::trimmed(1, usize::MAX));
             input.finish()?;
-            let (rows, page_count) =
-                service::list(db, ws, name, page, per_page, None).await.map_err(|e| business_error(e, super::LISTING))?;
+            let (rows, page_count) = service::list(db, ws, name, page, per_page, None)
+                .await
+                .map_err(|e| business_error(e, super::LISTING))?;
             let data: Vec<Value> = rows.iter().map(|r| list_row_json(app_url, r)).collect();
             Ok(json(200, json!({ "data": data, "pageCount": page_count })))
         }
@@ -200,14 +235,17 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let found = service::find_or_fail(db, ws, app_id.unwrap_or_default())
                 .await
                 .map_err(|e| business_error(e, super::FINDING))?;
-            Ok(json(200, detail_json(app_url, &found.mini_app, &found.publications)))
+            Ok(json(
+                200,
+                detail_json(app_url, &found.mini_app, &found.publications),
+            ))
         }
         "miniApps.validate" => {
             let mut input = Input::from_body(call.params, call.body);
             let flow = flow_json(&mut input, "flowJson", true);
             input.finish()?;
-            let definition =
-                service::import_flow_json(&flow.unwrap_or_default()).map_err(|e| business_error(e, super::LISTING))?;
+            let definition = service::import_flow_json(&flow.unwrap_or_default())
+                .map_err(|e| business_error(e, super::LISTING))?;
             Ok(json(200, validation_json(&definition.to_value())))
         }
         "miniApps.create" => {
@@ -217,7 +255,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let custom_field_mappings = mappings(&mut input);
             input.finish()?;
             let definition = flow.is_none().then(|| app::starter_definition().to_value());
-            let data = DefinitionInput { definition, flow_json: flow, custom_field_mappings };
+            let data = DefinitionInput {
+                definition,
+                flow_json: flow,
+                custom_field_mappings,
+            };
             let created = service::create(db, ws, name.unwrap_or_default(), data)
                 .await
                 .map_err(|e| business_error(e, super::CREATING))?;
@@ -239,17 +281,32 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let flow = flow_json(&mut input, "flowJson", false);
             let custom_field_mappings = mappings(&mut input);
             input.finish()?;
-            let data = DefinitionInput { definition: None, flow_json: flow, custom_field_mappings };
-            service::update(db, ws, app_id, name, None, data).await.map_err(|e| business_error(e, super::MUTATING))?;
-            let found = service::find_or_fail(db, ws, app_id).await.map_err(|e| business_error(e, super::MUTATING))?;
-            Ok(json(200, detail_json(app_url, &found.mini_app, &found.publications)))
+            let data = DefinitionInput {
+                definition: None,
+                flow_json: flow,
+                custom_field_mappings,
+            };
+            service::update(db, ws, app_id, name, None, data)
+                .await
+                .map_err(|e| business_error(e, super::MUTATING))?;
+            let found = service::find_or_fail(db, ws, app_id)
+                .await
+                .map_err(|e| business_error(e, super::MUTATING))?;
+            Ok(json(
+                200,
+                detail_json(app_url, &found.mini_app, &found.publications),
+            ))
         }
         "miniApps.delete" => {
             let mut input = Input::from_query(call.params, call.query);
             let app_id = input.id("id").unwrap_or_default();
-            let delete_flows = input.opt_coerced_bool("deleteWhatsappFlows").unwrap_or(false);
+            let delete_flows = input
+                .opt_coerced_bool("deleteWhatsappFlows")
+                .unwrap_or(false);
             input.finish()?;
-            service::find_or_fail(db, ws, app_id).await.map_err(|e| business_error(e, super::MUTATING))?;
+            service::find_or_fail(db, ws, app_id)
+                .await
+                .map_err(|e| business_error(e, super::MUTATING))?;
             let out = delete_mini_apps(state, ws, vec![app_id], delete_flows)
                 .await
                 .map_err(|e| business_error(e, super::MUTATING))?;
@@ -279,7 +336,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let app_id = input.id("id").unwrap_or_default();
             let (page, per_page) = public_paging(&mut input);
             input.finish()?;
-            service::find_or_fail(db, ws, app_id).await.map_err(|e| business_error(e, super::FINDING))?;
+            service::find_or_fail(db, ws, app_id)
+                .await
+                .map_err(|e| business_error(e, super::FINDING))?;
             let (rows, page_count, _) = service::list_submissions(db, ws, app_id, page, per_page)
                 .await
                 .map_err(|e| business_error(e, super::LISTING))?;

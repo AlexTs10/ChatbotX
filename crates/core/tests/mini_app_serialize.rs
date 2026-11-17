@@ -56,10 +56,17 @@ fn from_flow_json_round_trips_flow_json_produced_by_to_flow_json() {
 fn from_flow_json_rejects_endpoint_powered_flows_and_unsupported_actions() {
     let mut endpoint = two_screen_flow_json();
     endpoint["data_api_version"] = json!("3.0");
-    assert_eq!(from_flow_json(&endpoint).unwrap_err().code, "unsupported_endpoint");
+    assert_eq!(
+        from_flow_json(&endpoint).unwrap_err().code,
+        "unsupported_endpoint"
+    );
     let mut exchange = two_screen_flow_json();
-    exchange["screens"][0]["layout"]["children"][2]["on-click-action"] = json!({ "name": "data_exchange", "payload": {} });
-    assert_eq!(from_flow_json(&exchange).unwrap_err().code, "unsupported_action");
+    exchange["screens"][0]["layout"]["children"][2]["on-click-action"] =
+        json!({ "name": "data_exchange", "payload": {} });
+    assert_eq!(
+        from_flow_json(&exchange).unwrap_err().code,
+        "unsupported_action"
+    );
 }
 
 #[test]
@@ -69,13 +76,17 @@ fn from_flow_json_rejects_navigation_to_unknown_screens() {
         json!({ "name": "navigate", "next": { "type": "screen", "name": "NOPE" } });
     let error = from_flow_json(&broken).unwrap_err();
     assert_eq!(error.code, "unknown_screen");
-    assert_eq!(error.path, "screens[0].layout.children[2].on-click-action.next.name");
+    assert_eq!(
+        error.path,
+        "screens[0].layout.children[2].on-click-action.next.name"
+    );
 }
 
 #[test]
 fn locate_issues_maps_editor_ids_to_flow_json_paths() {
     let mut definition = from_flow_json(&two_screen_flow_json()).expect("import");
-    definition["screens"][0]["children"][1]["props"]["label"] = json!("This label is far too long for Meta");
+    definition["screens"][0]["children"][1]["props"]["label"] =
+        json!("This label is far too long for Meta");
     let issues = locate_issues(&definition, &validate(&definition).issues);
     let issue = &issues[0];
     assert_eq!(issue["code"], "property_too_long");

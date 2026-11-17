@@ -68,9 +68,15 @@ fn option_schema() -> Schema {
         ("description", optional_text(300)),
         ("metadata", optional_text(20)),
         ("enabled", boolean()),
-        ("image", base64_image(MAX_OPTION_IMAGE_BASE64_LENGTH).optional()),
+        (
+            "image",
+            base64_image(MAX_OPTION_IMAGE_BASE64_LENGTH).optional(),
+        ),
         ("alt-text", optional_text(100)),
-        ("color", z::string().regex("^#[0-9A-Fa-f]{6}$", "").optional()),
+        (
+            "color",
+            z::string().regex("^#[0-9A-Fa-f]{6}$", "").optional(),
+        ),
     ])
 }
 
@@ -84,7 +90,8 @@ fn data_source(max: usize, min: usize) -> Schema {
                 .flatten()
                 .map(|item| item.get("id").unwrap_or(&Value::Null))
                 .collect();
-            let unique: std::collections::HashSet<String> = ids.iter().map(|v| v.to_string()).collect();
+            let unique: std::collections::HashSet<String> =
+                ids.iter().map(|v| v.to_string()).collect();
             unique.len() == ids.len()
         },
         Some("duplicate_option_id"),
@@ -149,7 +156,10 @@ fn with(mut base: Shape, rest: Shape) -> Schema {
 fn text_props(max: usize) -> Schema {
     z::strict_object(vec![
         ("text", required_text(max)),
-        ("font-weight", z::enum_(&["bold", "italic", "bold_italic", "normal"]).optional()),
+        (
+            "font-weight",
+            z::enum_(&["bold", "italic", "bold_italic", "normal"]).optional(),
+        ),
         ("strikethrough", boolean()),
         ("markdown", boolean()),
         ("visible", boolean()),
@@ -158,8 +168,14 @@ fn text_props(max: usize) -> Schema {
 
 fn selected_items() -> Shape {
     vec![
-        ("min-selected-items", int(0.0, Some(MAX_OPTIONS as f64)).optional()),
-        ("max-selected-items", int(1.0, Some(MAX_OPTIONS as f64)).optional()),
+        (
+            "min-selected-items",
+            int(0.0, Some(MAX_OPTIONS as f64)).optional(),
+        ),
+        (
+            "max-selected-items",
+            int(1.0, Some(MAX_OPTIONS as f64)).optional(),
+        ),
     ]
 }
 
@@ -172,10 +188,20 @@ fn max_file_size_kb() -> Schema {
 }
 
 fn plain(kind: &'static str, props: Schema) -> Component {
-    Component { kind, is_input: false, max_per_screen: None, actions: &[], action_required: false, props }
+    Component {
+        kind,
+        is_input: false,
+        max_per_screen: None,
+        actions: &[],
+        action_required: false,
+        props,
+    }
 }
 fn input(kind: &'static str, props: Schema) -> Component {
-    Component { is_input: true, ..plain(kind, props) }
+    Component {
+        is_input: true,
+        ..plain(kind, props)
+    }
 }
 
 fn build() -> Vec<Component> {
@@ -186,17 +212,29 @@ fn build() -> Vec<Component> {
             ("helper-text", optional_text(80)),
             ("min-date", iso_date().optional()),
             ("max-date", iso_date().optional()),
-            ("unavailable-dates", z::array(iso_date()).max(366).optional()),
+            (
+                "unavailable-dates",
+                z::array(iso_date()).max(366).optional(),
+            ),
             ("init-value", iso_date().optional()),
             ("error-message", optional_text(err)),
         ]
     };
     vec![
-        plain("TextHeading", z::strict_object(vec![("text", required_text(80)), visible()])),
-        plain("TextSubheading", z::strict_object(vec![("text", required_text(80)), visible()])),
+        plain(
+            "TextHeading",
+            z::strict_object(vec![("text", required_text(80)), visible()]),
+        ),
+        plain(
+            "TextSubheading",
+            z::strict_object(vec![("text", required_text(80)), visible()]),
+        ),
         plain("TextBody", text_props(4096)),
         plain("TextCaption", text_props(409)),
-        plain("RichText", z::strict_object(vec![("text", required_text(10_000)), visible()])),
+        plain(
+            "RichText",
+            z::strict_object(vec![("text", required_text(10_000)), visible()]),
+        ),
         input(
             "TextInput",
             with(
@@ -206,8 +244,11 @@ fn build() -> Vec<Component> {
                     ("label-variant", z::enum_(&["large"]).optional()),
                     (
                         "input-type",
-                        z::enum_(&["text", "number", "email", "password", "passcode", "phone", "date", "datetime"])
-                            .optional(),
+                        z::enum_(&[
+                            "text", "number", "email", "password", "passcode", "phone", "date",
+                            "datetime",
+                        ])
+                        .optional(),
                     ),
                     ("pattern", optional_text(500)),
                     ("min-chars", int(0.0, Some(80.0)).optional()),
@@ -298,10 +339,14 @@ fn build() -> Vec<Component> {
                     ("mode", z::enum_(&["single", "range"]).optional()),
                     ("min-date", iso_date().optional()),
                     ("max-date", iso_date().optional()),
-                    ("unavailable-dates", z::array(iso_date()).max(366).optional()),
+                    (
+                        "unavailable-dates",
+                        z::array(iso_date()).max(366).optional(),
+                    ),
                     (
                         "include-days",
-                        z::array(z::enum_(&["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])).optional(),
+                        z::array(z::enum_(&["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]))
+                            .optional(),
                     ),
                     ("min-days", int(1.0, None).optional()),
                     ("max-days", int(1.0, None).optional()),
@@ -329,7 +374,10 @@ fn build() -> Vec<Component> {
                     vec![
                         ("label", required_text(80)),
                         ("description", optional_text(300)),
-                        ("photo-source", z::enum_(&["camera_gallery", "camera", "gallery"]).optional()),
+                        (
+                            "photo-source",
+                            z::enum_(&["camera_gallery", "camera", "gallery"]).optional(),
+                        ),
                         ("max-file-size-kb", max_file_size_kb()),
                         ("min-uploaded-photos", uploaded(0.0)),
                         ("max-uploaded-photos", uploaded(1.0)),
@@ -350,7 +398,10 @@ fn build() -> Vec<Component> {
                         ("max-file-size-kb", max_file_size_kb()),
                         ("min-uploaded-documents", uploaded(0.0)),
                         ("max-uploaded-documents", uploaded(1.0)),
-                        ("allowed-mime-types", z::array(required_text(120)).max(30).optional()),
+                        (
+                            "allowed-mime-types",
+                            z::array(required_text(120)).max(30).optional(),
+                        ),
                         ("error-message", optional_text(80)),
                     ],
                 ),
@@ -395,7 +446,10 @@ fn build() -> Vec<Component> {
             max_per_screen: Some(2),
             actions: &["navigate", "open_url"],
             action_required: true,
-            ..plain("EmbeddedLink", z::strict_object(vec![("text", required_text(25)), visible()]))
+            ..plain(
+                "EmbeddedLink",
+                z::strict_object(vec![("text", required_text(25)), visible()]),
+            )
         },
         Component {
             max_per_screen: Some(2),
@@ -403,7 +457,12 @@ fn build() -> Vec<Component> {
                 "NavigationList",
                 z::strict_object(vec![
                     ("name", z::string()),
-                    ("list-items", z::array(navigation_item_schema()).min(1).max(MAX_NAVIGATION_ITEMS)),
+                    (
+                        "list-items",
+                        z::array(navigation_item_schema())
+                            .min(1)
+                            .max(MAX_NAVIGATION_ITEMS),
+                    ),
                     ("media-size", media_size()),
                     visible(),
                 ]),
@@ -425,8 +484,14 @@ fn build() -> Vec<Component> {
             )
         },
         plain("Form", z::strict_object(vec![("name", z::string())])),
-        plain("If", z::strict_object(vec![("condition", required_text(500))])),
-        plain("Switch", z::strict_object(vec![("value", required_text(200))])),
+        plain(
+            "If",
+            z::strict_object(vec![("condition", required_text(500))]),
+        ),
+        plain(
+            "Switch",
+            z::strict_object(vec![("value", required_text(200))]),
+        ),
     ]
 }
 
@@ -446,14 +511,40 @@ pub fn needs_name(kind: &str) -> bool {
 }
 
 const IF_ALLOWED: &[&str] = &[
-    "TextHeading", "TextSubheading", "TextBody", "TextCaption", "CheckboxGroup", "ChipsSelector",
-    "DatePicker", "Dropdown", "EmbeddedLink", "Footer", "Image", "OptIn", "RadioButtonsGroup",
-    "Switch", "TextArea", "TextInput", "If",
+    "TextHeading",
+    "TextSubheading",
+    "TextBody",
+    "TextCaption",
+    "CheckboxGroup",
+    "ChipsSelector",
+    "DatePicker",
+    "Dropdown",
+    "EmbeddedLink",
+    "Footer",
+    "Image",
+    "OptIn",
+    "RadioButtonsGroup",
+    "Switch",
+    "TextArea",
+    "TextInput",
+    "If",
 ];
 const SWITCH_ALLOWED: &[&str] = &[
-    "TextHeading", "TextSubheading", "TextBody", "TextCaption", "CheckboxGroup", "ChipsSelector",
-    "DatePicker", "Dropdown", "EmbeddedLink", "Footer", "Image", "OptIn", "RadioButtonsGroup",
-    "TextArea", "TextInput",
+    "TextHeading",
+    "TextSubheading",
+    "TextBody",
+    "TextCaption",
+    "CheckboxGroup",
+    "ChipsSelector",
+    "DatePicker",
+    "Dropdown",
+    "EmbeddedLink",
+    "Footer",
+    "Image",
+    "OptIn",
+    "RadioButtonsGroup",
+    "TextArea",
+    "TextInput",
 ];
 
 /// `canPlaceInSlot`.
@@ -469,7 +560,10 @@ pub fn can_place_in_slot(parent: &str, child: &str) -> bool {
 /// `TEXT_INPUT_DATE_FORMATS`: (pattern, helper text).
 pub fn text_input_date_format(input_type: &str) -> Option<(&'static str, &'static str)> {
     match input_type {
-        "date" => Some((r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$", "YYYY-MM-DD")),
+        "date" => Some((
+            r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$",
+            "YYYY-MM-DD",
+        )),
         "datetime" => Some((
             r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])[ T]([01]\d|2[0-3]):[0-5]\d$",
             "YYYY-MM-DD HH:mm",

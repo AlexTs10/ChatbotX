@@ -2,7 +2,9 @@
 //! parts: `mapDisplayText`, `displayTexts`, `escapeContactValue`; the rest is
 //! in the test map).
 
-use chatbotx_core::mini_app::{Definition, escape_contact_value, map_display_text, parse_definition};
+use chatbotx_core::mini_app::{
+    Definition, escape_contact_value, map_display_text, parse_definition,
+};
 use serde_json::json;
 
 fn with_variables() -> Definition {
@@ -31,7 +33,10 @@ fn map_display_text_visits_screen_titles_labels_options_and_navigation_items_but
     assert_eq!(screen.title, "Hi An");
     assert_eq!(screen.children[0].props["name"], "phone");
     assert_eq!(screen.children[0].props["label"], "SĐT An");
-    assert_eq!(screen.children[1].props["data-source"], json!([{ "id": "a", "title": "Gói Le", "description": "x" }]));
+    assert_eq!(
+        screen.children[1].props["data-source"],
+        json!([{ "id": "a", "title": "Gói Le", "description": "x" }])
+    );
     assert_eq!(
         screen.children[2].props["list-items"],
         json!([{ "id": "i", "main-content": { "title": "Go HN" }, "badge": "VIP" }])
@@ -43,7 +48,9 @@ fn display_texts_marks_only_markdown_texts_as_markdown() {
     let mut value = with_variables().to_value();
     let children = value["screens"][0]["children"].as_array_mut().unwrap();
     children.push(json!({ "id": "r", "type": "RichText", "props": { "text": "rich" } }));
-    children.push(json!({ "id": "b", "type": "TextBody", "props": { "text": "md", "markdown": true } }));
+    children.push(
+        json!({ "id": "b", "type": "TextBody", "props": { "text": "md", "markdown": true } }),
+    );
     children.push(json!({ "id": "p", "type": "TextBody", "props": { "text": "plain" } }));
     let mut definition = parse_definition(&value).unwrap();
     let mut markdown = Vec::new();
@@ -73,5 +80,8 @@ fn escape_contact_value_escapes_markdown_characters_only_in_markdown_text() {
 
 #[test]
 fn escape_contact_value_escapes_quotes_inside_a_nested_expression() {
-    assert_eq!(escape_contact_value("O'Neil", "`'Hi ' {{name}}`", false), "O\\'Neil");
+    assert_eq!(
+        escape_contact_value("O'Neil", "`'Hi ' {{name}}`", false),
+        "O\\'Neil"
+    );
 }

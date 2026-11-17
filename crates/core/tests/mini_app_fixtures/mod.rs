@@ -40,5 +40,7 @@ pub fn two_screen_flow_json() -> Value {
 }
 
 pub fn children(definition: &mut Value, screen: usize) -> &mut Vec<Value> {
-    definition["screens"][screen]["children"].as_array_mut().expect("children")
+    definition["screens"][screen]["children"]
+        .as_array_mut()
+        .expect("children")
 }

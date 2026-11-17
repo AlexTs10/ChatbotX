@@ -83,11 +83,24 @@ pub fn check_guest_rate_limit(
     guest_conversation_id: Option<&str>,
     now_ms: i64,
 ) -> GuestRateLimit {
-    check_guest_rate_limit_with(state, webchat_id, client_ip, guest_conversation_id, IP_LIMIT, now_ms)
+    check_guest_rate_limit_with(
+        state,
+        webchat_id,
+        client_ip,
+        guest_conversation_id,
+        IP_LIMIT,
+        now_ms,
+    )
 }
 
 /// `checkGuestRateLimit({ webchatId, clientIp, ipLimit })`: no session key.
-pub fn check_guest_ip_limit(state: &ApiState, webchat_id: &str, client_ip: &str, ip_limit: i64, now_ms: i64) -> GuestRateLimit {
+pub fn check_guest_ip_limit(
+    state: &ApiState,
+    webchat_id: &str,
+    client_ip: &str,
+    ip_limit: i64,
+    now_ms: i64,
+) -> GuestRateLimit {
     check_guest_rate_limit_with(state, webchat_id, client_ip, None, ip_limit, now_ms)
 }
 

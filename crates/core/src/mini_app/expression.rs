@@ -16,7 +16,11 @@ pub fn is_nested_expression(text: &str) -> bool {
 /// `unwrapNestedExpression`.
 pub fn unwrap_nested_expression(text: &str) -> &str {
     let t = trim(text);
-    if is_nested_expression(t) { &t[1..t.len() - 1] } else { t }
+    if is_nested_expression(t) {
+        &t[1..t.len() - 1]
+    } else {
+        t
+    }
 }
 
 /// `MiniAppReference`.
@@ -31,7 +35,10 @@ pub struct Reference {
 
 fn screen_reference() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^screen\.([A-Za-z_][A-Za-z0-9_]*)\.(form|data)\.([A-Za-z0-9_]+)$").expect("regex"))
+    RE.get_or_init(|| {
+        Regex::new(r"^screen\.([A-Za-z_][A-Za-z0-9_]*)\.(form|data)\.([A-Za-z0-9_]+)$")
+            .expect("regex")
+    })
 }
 fn local_reference() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -54,7 +61,12 @@ pub fn parse_reference(raw: &str) -> Option<Reference> {
         });
     }
     let c = local_reference().captures(raw)?;
-    Some(Reference { raw: raw.to_owned(), screen_id: None, source: c[1].to_owned(), name: c[2].to_owned() })
+    Some(Reference {
+        raw: raw.to_owned(),
+        screen_id: None,
+        source: c[1].to_owned(),
+        name: c[2].to_owned(),
+    })
 }
 
 /// `extractReferences`: every `${...}` (raw inside, parsed reference).
@@ -133,7 +145,8 @@ fn tokenize(input: &str) -> Option<Vec<Token>> {
             }
             _ => {}
         }
-        let expects_operand = matches!(tokens.last(), None | Some(Token::Operator(_) | Token::Open));
+        let expects_operand =
+            matches!(tokens.last(), None | Some(Token::Operator(_) | Token::Open));
         if let Some(len) = number_len(rest)
             && (c != '-' || expects_operand)
         {
@@ -146,7 +159,10 @@ fn tokenize(input: &str) -> Option<Vec<Token>> {
             i += op.len();
             continue;
         }
-        let word: String = rest.chars().take_while(|ch| ch.is_ascii_alphabetic() || *ch == '_').collect();
+        let word: String = rest
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphabetic() || *ch == '_')
+            .collect();
         if word == "true" || word == "false" {
             tokens.push(Token::Operand);
             i += word.len();
@@ -201,7 +217,10 @@ pub fn is_valid_expression(expression: &str) -> bool {
     let Some(tokens) = tokenize(unwrap_nested_expression(expression)) else {
         return false;
     };
-    let mut parser = Parser { tokens, position: 0 };
+    let mut parser = Parser {
+        tokens,
+        position: 0,
+    };
     parser.level(0).is_some() && parser.position == parser.tokens.len()
 }
 

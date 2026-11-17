@@ -14,7 +14,9 @@ use chatbotx_core::mini_app::{
 use chatbotx_core::utils::sanitize_file_name::sanitize_file_name;
 use chatbotx_core::utils::storage::get_public_file_url;
 use chatbotx_db::Db;
-use chatbotx_db::repo::mini_app::{self as repo, MiniAppListInput, MiniAppListRow, MiniAppWithPublications};
+use chatbotx_db::repo::mini_app::{
+    self as repo, MiniAppListInput, MiniAppListRow, MiniAppWithPublications,
+};
 use chatbotx_db::repo::models::{MiniApp, MiniAppPublication, MiniAppSubmission};
 use chatbotx_db::repo::{Json, Model as _, SortItem, is_unique_violation_error, new_id, now_ms};
 use chatbotx_db::rusqlite::{Connection, OptionalExtension as _, params};
@@ -22,12 +24,17 @@ use chatbotx_files::{PutOptions, Uploader};
 use serde_json::{Value, json};
 
 use crate::contact_custom_field::{FieldChange, SetValuesInput, set_values_in_transaction};
-use crate::copy_name::{CopyNameOptions, CopyNameStyle, copy_name_prefix, insert_with_free_copy_name};
+use crate::copy_name::{
+    CopyNameOptions, CopyNameStyle, copy_name_prefix, insert_with_free_copy_name,
+};
 use crate::errors::{BusinessError, Result};
 use crate::tx;
 
 pub const NAME_TAKEN: &str = "Name is already taken";
-const COPY_NAME: CopyNameOptions = CopyNameOptions { style: CopyNameStyle::Dash, max_length: app::NAME_MAX_LENGTH };
+const COPY_NAME: CopyNameOptions = CopyNameOptions {
+    style: CopyNameStyle::Dash,
+    max_length: app::NAME_MAX_LENGTH,
+};
 
 fn db_error(error: chatbotx_db::rusqlite::Error) -> BusinessError {
     BusinessError::Repo(error.into())
@@ -60,7 +67,8 @@ pub struct DefinitionInput {
 
 /// `parseDefinition`.
 pub fn parse_definition(value: &Value) -> Result<Definition> {
-    app::parse_definition(value).ok_or_else(|| BusinessError::validation("definition", "Invalid Mini App definition"))
+    app::parse_definition(value)
+        .ok_or_else(|| BusinessError::validation("definition", "Invalid Mini App definition"))
 }
 
 /// `importMiniAppFlowJson`: errors carry `{ code, path }` on `flowJson`.
@@ -90,13 +98,19 @@ pub fn build_new_definition(input: &DefinitionInput) -> Result<Definition> {
         Some(definition) => definition,
         None => parse_definition(&Value::Null)?,
     };
-    apply_custom_field_mappings(&mut definition, &input.custom_field_mappings.clone().unwrap_or_default());
+    apply_custom_field_mappings(
+        &mut definition,
+        &input.custom_field_mappings.clone().unwrap_or_default(),
+    );
     Ok(definition)
 }
 
 /// `buildUpdatedDefinition`: `None` when the update brings no screens and
 /// no mappings. A new Flow JSON keeps the current mappings by input name.
-pub fn build_updated_definition(current: &Value, input: &DefinitionInput) -> Result<Option<Definition>> {
+pub fn build_updated_definition(
+    current: &Value,
+    input: &DefinitionInput,
+) -> Result<Option<Definition>> {
     let incoming = incoming(input)?;
     if incoming.is_none() && input.custom_field_mappings.is_none() {
         return Ok(None);
@@ -106,11 +120,18 @@ pub fn build_updated_definition(current: &Value, input: &DefinitionInput) -> Res
     if input.flow_json.is_some()
         && let Some(current) = &current
     {
-        mappings.extend(collect_custom_field_mappings(current).into_iter().map(|(k, v)| (k, Some(v))));
+        mappings.extend(
+            collect_custom_field_mappings(current)
+                .into_iter()
+                .map(|(k, v)| (k, Some(v))),
+        );
     }
     mappings.extend(input.custom_field_mappings.clone().unwrap_or_default());
     let Some(mut definition) = incoming.or(current) else {
-        return Err(BusinessError::validation("definition", "Invalid Mini App definition"));
+        return Err(BusinessError::validation(
+            "definition",
+            "Invalid Mini App definition",
+        ));
     };
     apply_custom_field_mappings(&mut definition, &mappings);
     Ok(Some(definition))
@@ -131,7 +152,12 @@ pub async fn list(
             keyword: keyword.clone(),
             page,
             per_page,
-            sort: Some(sort.clone().unwrap_or_else(|| vec![SortItem { id: "createdAt".into(), desc: true }])),
+            sort: Some(sort.clone().unwrap_or_else(|| {
+                vec![SortItem {
+                    id: "createdAt".into(),
+                    desc: true,
+                }]
+            })),
         };
         let rows = repo::list_paginated(conn, &input)?;
         let total = repo::count(conn, workspace_id, keyword.as_deref())?;
@@ -142,7 +168,10 @@ pub async fn list(
 
 /// `miniAppService.findOrFail` (with the publications).
 pub async fn find_or_fail(db: &Db, workspace_id: i64, id: i64) -> Result<MiniAppWithPublications> {
-    tx::read(db, move |conn| repo::find_by_id_and_workspace(conn, workspace_id, id)?.ok_or_else(not_found)).await
+    tx::read(db, move |conn| {
+        repo::find_by_id_and_workspace(conn, workspace_id, id)?.ok_or_else(not_found)
+    })
+    .await
 }
 
 /// `miniAppService.findUnscoped`.
@@ -150,7 +179,13 @@ pub async fn find_unscoped(db: &Db, id: i64) -> Result<Option<MiniApp>> {
     tx::read(db, move |conn| Ok(repo::find_by_id(conn, id)?)).await
 }
 
-fn insert(conn: &Connection, workspace_id: i64, name: &str, enabled: bool, definition: &Definition) -> std::result::Result<MiniApp, chatbotx_db::rusqlite::Error> {
+fn insert(
+    conn: &Connection,
+    workspace_id: i64,
+    name: &str,
+    enabled: bool,
+    definition: &Definition,
+) -> std::result::Result<MiniApp, chatbotx_db::rusqlite::Error> {
     let id = new_id();
     let now = now_ms();
     conn.execute(
@@ -169,18 +204,32 @@ fn insert(conn: &Connection, workspace_id: i64, name: &str, enabled: bool, defin
     find_row(conn, id)
 }
 
-fn find_row(conn: &Connection, id: i64) -> std::result::Result<MiniApp, chatbotx_db::rusqlite::Error> {
+fn find_row(
+    conn: &Connection,
+    id: i64,
+) -> std::result::Result<MiniApp, chatbotx_db::rusqlite::Error> {
     conn.query_row(
-        &format!(r#"SELECT {} FROM "MiniApp" WHERE "id" = ?1"#, MiniApp::columns_sql(None)),
+        &format!(
+            r#"SELECT {} FROM "MiniApp" WHERE "id" = ?1"#,
+            MiniApp::columns_sql(None)
+        ),
         params![id],
         MiniApp::from_row,
     )
 }
 
 /// `miniAppService.create`.
-pub async fn create(db: &Db, workspace_id: i64, name: String, input: DefinitionInput) -> Result<MiniApp> {
+pub async fn create(
+    db: &Db,
+    workspace_id: i64,
+    name: String,
+    input: DefinitionInput,
+) -> Result<MiniApp> {
     let definition = build_new_definition(&input)?;
-    tx::write(db, move |tx| insert(tx, workspace_id, &name, true, &definition).map_err(name_taken)).await
+    tx::write(db, move |tx| {
+        insert(tx, workspace_id, &name, true, &definition).map_err(name_taken)
+    })
+    .await
 }
 
 /// `miniAppService.duplicate`: `<name> - Copy` (then ` - Copy 2`, …);
@@ -189,7 +238,9 @@ pub async fn duplicate(db: &Db, workspace_id: i64, id: i64) -> Result<MiniApp> {
     let source = find_or_fail(db, workspace_id, id).await?.mini_app;
     tx::write(db, move |tx| {
         let prefix = copy_name_prefix(&source.name, COPY_NAME);
-        let taken: HashSet<String> = repo::list_names_with_prefix(tx, workspace_id, &prefix)?.into_iter().collect();
+        let taken: HashSet<String> = repo::list_names_with_prefix(tx, workspace_id, &prefix)?
+            .into_iter()
+            .collect();
         let definition = parse_definition(&source.definition.0)?;
         let copy = insert_with_free_copy_name(
             &source.name,
@@ -248,7 +299,10 @@ pub async fn delete_many(db: &Db, workspace_id: i64, ids: Vec<i64>) -> Result<us
         let mut deleted = 0;
         for id in &ids {
             deleted += tx
-                .execute(r#"DELETE FROM "MiniApp" WHERE "id" = ?1 AND "workspaceId" = ?2"#, params![id, workspace_id])
+                .execute(
+                    r#"DELETE FROM "MiniApp" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+                    params![id, workspace_id],
+                )
                 .map_err(db_error)?;
         }
         Ok(deleted)
@@ -275,8 +329,14 @@ pub async fn list_submissions(
 }
 
 /// `findVisitorContactId`: the token's contact, if it still exists.
-fn visitor_contact(conn: &Connection, workspace_id: i64, contact_id: Option<i64>) -> Result<Option<i64>> {
-    let Some(contact_id) = contact_id else { return Ok(None) };
+fn visitor_contact(
+    conn: &Connection,
+    workspace_id: i64,
+    contact_id: Option<i64>,
+) -> Result<Option<i64>> {
+    let Some(contact_id) = contact_id else {
+        return Ok(None);
+    };
     conn.query_row(
         r#"SELECT "id" FROM "Contact" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
         params![contact_id, workspace_id],
@@ -286,7 +346,10 @@ fn visitor_contact(conn: &Connection, workspace_id: i64, contact_id: Option<i64>
     .map_err(db_error)
 }
 
-fn custom_field_values(definition: &Definition, answers: &serde_json::Map<String, Value>) -> Vec<(i64, String)> {
+fn custom_field_values(
+    definition: &Definition,
+    answers: &serde_json::Map<String, Value>,
+) -> Vec<(i64, String)> {
     collect_custom_field_mappings(definition)
         .into_iter()
         .filter_map(|(name, field_id)| {
@@ -309,7 +372,8 @@ fn write_custom_fields(
         return Ok(Vec::new());
     }
     let write = |fields: Vec<(i64, String)>| -> Result<Vec<FieldChange>> {
-        tx.execute_batch("SAVEPOINT mini_app_fields").map_err(db_error)?;
+        tx.execute_batch("SAVEPOINT mini_app_fields")
+            .map_err(db_error)?;
         let input = SetValuesInput {
             workspace_id,
             contact_id,
@@ -319,11 +383,13 @@ fn write_custom_fields(
         };
         match set_values_in_transaction(tx, &input, now_ms()) {
             Ok(changes) => {
-                tx.execute_batch("RELEASE mini_app_fields").map_err(db_error)?;
+                tx.execute_batch("RELEASE mini_app_fields")
+                    .map_err(db_error)?;
                 Ok(changes)
             }
             Err(error) => {
-                tx.execute_batch("ROLLBACK TO mini_app_fields; RELEASE mini_app_fields").map_err(db_error)?;
+                tx.execute_batch("ROLLBACK TO mini_app_fields; RELEASE mini_app_fields")
+                    .map_err(db_error)?;
                 Err(error)
             }
         }
@@ -365,7 +431,8 @@ pub async fn create_submission(
 ) -> Result<Submitted> {
     let definition = parse_definition(&mini_app.definition.0)?;
     let answers = sanitize_answers(&definition, &answers).filter(|a| !a.is_empty());
-    let mut answers = answers.ok_or_else(|| BusinessError::validation("answers", "No valid answers"))?;
+    let mut answers =
+        answers.ok_or_else(|| BusinessError::validation("answers", "No valid answers"))?;
     let (workspace_id, mini_app_id) = (mini_app.workspace_id, mini_app.id);
     let storage_url = storage_url.to_owned();
     tx::write(db, move |tx| {
@@ -434,8 +501,12 @@ pub async fn save_screen_answers(
     let definition = parse_definition(&mini_app.definition.0)?;
     let workspace_id = mini_app.workspace_id;
     tx::write(db, move |tx| {
-        let Some(screen) = find_screen(&definition, &screen_key) else { return Ok(None) };
-        let Some(contact_id) = visitor_contact(tx, workspace_id, contact_id)? else { return Ok(None) };
+        let Some(screen) = find_screen(&definition, &screen_key) else {
+            return Ok(None);
+        };
+        let Some(contact_id) = visitor_contact(tx, workspace_id, contact_id)? else {
+            return Ok(None);
+        };
         let screen_names: HashSet<String> = collect_input_names(screen).into_iter().collect();
         let file_names = collect_file_input_names(&definition);
         let mut screen_answers = sanitize_answers(&definition, &answers).unwrap_or_default();
@@ -494,12 +565,16 @@ pub async fn create_upload(
     file: UploadedFile,
 ) -> Result<Value> {
     let definition = parse_definition(&mini_app.definition.0)?;
-    let rules = resolve_upload_rules(&definition, &input_name).ok_or_else(|| upload_error("unknown_input"))?;
+    let rules = resolve_upload_rules(&definition, &input_name)
+        .ok_or_else(|| upload_error("unknown_input"))?;
     let size = file.bytes.len();
     let head = &file.bytes[..size.min(UPLOAD_SNIFF_BYTES)];
     let mime_type = verify_upload(&rules, size, head, &file.mime_type).map_err(upload_error)?;
     let workspace_id = mini_app.workspace_id;
-    let contact_id = tx::read(db, move |conn| visitor_contact(conn, workspace_id, contact_id)).await?;
+    let contact_id = tx::read(db, move |conn| {
+        visitor_contact(conn, workspace_id, contact_id)
+    })
+    .await?;
     let file_name = sanitize_file_name(&file.name);
     let path = build_upload_path(
         &workspace_id.to_string(),
@@ -512,7 +587,8 @@ pub async fn create_upload(
         acl: Some(chatbotx_files::DEFAULT_ACL),
         content_type: Some(mime_type.clone()),
         content_length: Some(size as u64),
-        content_disposition: (!mime_type.starts_with("image/")).then(|| format!("attachment; filename=\"{file_name}\"")),
+        content_disposition: (!mime_type.starts_with("image/"))
+            .then(|| format!("attachment; filename=\"{file_name}\"")),
         ..PutOptions::default()
     };
     uploader
@@ -521,9 +597,18 @@ pub async fn create_upload(
         .map_err(|e| BusinessError::Repo(chatbotx_db::repo::Error::msg(e.to_string())))?;
     let upload_token = random_token();
     let original: String = file.name.chars().take(MAX_ORIGINAL_NAME_LENGTH).collect();
-    let original = if original.is_empty() { file_name } else { original };
-    let (mini_app_id, row_path, row_name, row_mime, token) =
-        (mini_app.id, path.clone(), original.clone(), mime_type.clone(), upload_token.clone());
+    let original = if original.is_empty() {
+        file_name
+    } else {
+        original
+    };
+    let (mini_app_id, row_path, row_name, row_mime, token) = (
+        mini_app.id,
+        path.clone(),
+        original.clone(),
+        mime_type.clone(),
+        upload_token.clone(),
+    );
     tx::write(db, move |tx| {
         tx.execute(
             r#"INSERT INTO "MiniAppUpload" ("id", "createdAt", "updatedAt", "workspaceId", "miniAppId", "contactId", "submissionId",
@@ -594,7 +679,11 @@ fn claim_uploads(
 // ------------------------------------------------------ publications
 
 /// `miniAppPublicationService.listForMiniApps`.
-pub async fn list_publications(db: &Db, workspace_id: i64, mini_app_ids: Vec<i64>) -> Result<Vec<MiniAppPublication>> {
+pub async fn list_publications(
+    db: &Db,
+    workspace_id: i64,
+    mini_app_ids: Vec<i64>,
+) -> Result<Vec<MiniAppPublication>> {
     tx::read(db, move |conn| {
         let mut out = Vec::new();
         for id in mini_app_ids {

@@ -9,8 +9,9 @@ use serde_json::{Map, Value, json};
 use super::catalog::text_input_date_format;
 use super::expression::is_nested_expression;
 use super::{
-    ACTION_KEY, Action, Definition, FLOW_JSON_VERSION, LIST_ITEMS_KEY, Node, Screen, collect_input_names,
-    collect_path_screens, create_id, is_terminal_screen, read_action, slot_entries,
+    ACTION_KEY, Action, Definition, FLOW_JSON_VERSION, LIST_ITEMS_KEY, Node, Screen,
+    collect_input_names, collect_path_screens, create_id, is_terminal_screen, read_action,
+    slot_entries,
 };
 
 fn is_empty_value(value: &Value) -> bool {
@@ -60,7 +61,11 @@ pub fn clean_object(value: &Map<String, Value>) -> Map<String, Value> {
 pub fn build_complete_payload(definition: &Definition, screen_key: &str) -> Map<String, Value> {
     let on_path = collect_path_screens(definition, screen_key);
     let mut payload = Map::new();
-    for screen in definition.screens.iter().filter(|s| on_path.contains(&s.key)) {
+    for screen in definition
+        .screens
+        .iter()
+        .filter(|s| on_path.contains(&s.key))
+    {
         for name in collect_input_names(screen) {
             let value = if screen.key == screen_key {
                 format!("${{form.{name}}}")
@@ -83,7 +88,9 @@ fn serialize_action(value: Option<&Value>, context: &Context) -> Option<Value> {
     match read_action(value)? {
         Action::Navigate(next) => {
             let target = context.screen_ids.get(next.as_str())?;
-            Some(json!({ "name": "navigate", "next": { "type": "screen", "name": target }, "payload": {} }))
+            Some(
+                json!({ "name": "navigate", "next": { "type": "screen", "name": target }, "payload": {} }),
+            )
         }
         Action::Complete => Some(json!({
             "name": "complete",
@@ -104,13 +111,19 @@ fn reference_split() -> &'static Regex {
 }
 
 fn quote_literal(text: &str) -> String {
-    format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'").replace('`', "'"))
+    format!(
+        "'{}'",
+        text.replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('`', "'")
+    )
 }
 
 /// `toNestedExpression`: "Hello ${form.name}" → "`'Hello ' ${form.name}`".
 pub fn to_nested_expression(text: &str) -> String {
     let trimmed = js_trim(text);
-    if !text.contains("${") || whole_reference().is_match(trimmed) || is_nested_expression(trimmed) {
+    if !text.contains("${") || whole_reference().is_match(trimmed) || is_nested_expression(trimmed)
+    {
         return text.to_owned();
     }
     // `text.split(/(\$\{[^}]*\})/)` keeping the separators, without empty parts.
@@ -133,7 +146,12 @@ fn to_nested_expressions(value: &Value, key: Option<&str>) -> Value {
     match value {
         Value::String(s) if matches!(key, Some("condition" | "value")) => Value::String(s.clone()),
         Value::String(s) => Value::String(to_nested_expression(s)),
-        Value::Array(items) => Value::Array(items.iter().map(|i| to_nested_expressions(i, None)).collect()),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|i| to_nested_expressions(i, None))
+                .collect(),
+        ),
         Value::Object(map) => Value::Object(
             map.iter()
                 .map(|(k, v)| (k.clone(), to_nested_expressions(v, Some(k))))
@@ -158,7 +176,10 @@ fn serialize_node(node: &Node, context: &Context) -> Value {
     output.insert("type".into(), Value::String(node.kind.clone()));
     output.extend(nested_props(&rest));
     if node.kind == "TextInput"
-        && let Some((pattern, helper)) = rest.get("input-type").and_then(Value::as_str).and_then(text_input_date_format)
+        && let Some((pattern, helper)) = rest
+            .get("input-type")
+            .and_then(Value::as_str)
+            .and_then(text_input_date_format)
     {
         output.insert("input-type".into(), json!("text"));
         output.entry("pattern").or_insert_with(|| json!(pattern));
@@ -183,7 +204,13 @@ fn serialize_node(node: &Node, context: &Context) -> Value {
         output.insert(ACTION_KEY.into(), action);
     }
     let list = |nodes: Option<&Vec<Node>>| -> Value {
-        Value::Array(nodes.into_iter().flatten().map(|n| serialize_node(n, context)).collect())
+        Value::Array(
+            nodes
+                .into_iter()
+                .flatten()
+                .map(|n| serialize_node(n, context))
+                .collect(),
+        )
     };
     let slot = |key: &str| node.slots.as_ref().and_then(|s| s.get(key));
     match node.kind.as_str() {
@@ -211,8 +238,16 @@ fn serialize_node(node: &Node, context: &Context) -> Value {
 
 /// `toFlowJson`: the editor definition as Meta's Flow JSON 7.3.
 pub fn to_flow_json(definition: &Definition) -> Value {
-    let screen_ids = definition.screens.iter().map(|s| (s.key.as_str(), s.id.as_str())).collect();
-    let mut context = Context { definition, screen: &definition.screens[0], screen_ids };
+    let screen_ids = definition
+        .screens
+        .iter()
+        .map(|s| (s.key.as_str(), s.id.as_str()))
+        .collect();
+    let mut context = Context {
+        definition,
+        screen: &definition.screens[0],
+        screen_ids,
+    };
     let screens: Vec<Value> = definition
         .screens
         .iter()
@@ -228,8 +263,15 @@ pub fn to_flow_json(definition: &Definition) -> Value {
                 out.insert("terminal".into(), json!(true));
                 out.insert("success".into(), json!(true));
             }
-            let children: Vec<Value> = screen.children.iter().map(|n| serialize_node(n, &context)).collect();
-            out.insert("layout".into(), json!({ "type": "SingleColumnLayout", "children": children }));
+            let children: Vec<Value> = screen
+                .children
+                .iter()
+                .map(|n| serialize_node(n, &context))
+                .collect();
+            out.insert(
+                "layout".into(),
+                json!({ "type": "SingleColumnLayout", "children": children }),
+            );
             Value::Object(out)
         })
         .collect();
@@ -244,10 +286,17 @@ pub struct ImportError {
 }
 
 fn import_error(code: &'static str, path: impl Into<String>) -> ImportError {
-    ImportError { code, path: path.into() }
+    ImportError {
+        code,
+        path: path.into(),
+    }
 }
 
-fn import_action(value: &Value, path: &str, keys: &HashMap<String, String>) -> Result<Value, ImportError> {
+fn import_action(
+    value: &Value,
+    path: &str,
+    keys: &HashMap<String, String>,
+) -> Result<Value, ImportError> {
     let name = value.get("name").and_then(Value::as_str);
     match name {
         Some("navigate") => {
@@ -257,7 +306,9 @@ fn import_action(value: &Value, path: &str, keys: &HashMap<String, String>) -> R
                 None | Some(Value::Null) => String::new(),
                 Some(other) => crate::js::string_of(other),
             };
-            let key = keys.get(&next).ok_or_else(|| import_error("unknown_screen", format!("{path}.next.name")))?;
+            let key = keys
+                .get(&next)
+                .ok_or_else(|| import_error("unknown_screen", format!("{path}.next.name")))?;
             Ok(json!({ "name": "navigate", "next": key }))
         }
         Some("complete") => Ok(json!({ "name": "complete" })),
@@ -269,7 +320,11 @@ fn import_action(value: &Value, path: &str, keys: &HashMap<String, String>) -> R
     }
 }
 
-fn import_list(value: Option<&Value>, path: &str, keys: &HashMap<String, String>) -> Result<Vec<Node>, ImportError> {
+fn import_list(
+    value: Option<&Value>,
+    path: &str,
+    keys: &HashMap<String, String>,
+) -> Result<Vec<Node>, ImportError> {
     match value {
         None => Ok(Vec::new()),
         Some(Value::Array(items)) => items
@@ -281,14 +336,26 @@ fn import_list(value: Option<&Value>, path: &str, keys: &HashMap<String, String>
     }
 }
 
-fn import_node(component: &Value, path: &str, keys: &HashMap<String, String>) -> Result<Node, ImportError> {
+fn import_node(
+    component: &Value,
+    path: &str,
+    keys: &HashMap<String, String>,
+) -> Result<Node, ImportError> {
     let empty = Map::new();
     let object = component.as_object().unwrap_or(&empty);
-    let kind = object.get("type").and_then(Value::as_str).filter(|k| super::component(k).is_some());
-    let kind = kind.ok_or_else(|| import_error("unknown_component", format!("{path}.type")))?.to_owned();
+    let kind = object
+        .get("type")
+        .and_then(Value::as_str)
+        .filter(|k| super::component(k).is_some());
+    let kind = kind
+        .ok_or_else(|| import_error("unknown_component", format!("{path}.type")))?
+        .to_owned();
     for key in ["on-select-action", "on-unselect-action"] {
         if object.contains_key(key) {
-            return Err(import_error("unsupported_property", format!("{path}.{key}")));
+            return Err(import_error(
+                "unsupported_property",
+                format!("{path}.{key}"),
+            ));
         }
     }
     let mut props = object.clone();
@@ -296,7 +363,10 @@ fn import_node(component: &Value, path: &str, keys: &HashMap<String, String>) ->
         props.remove(key);
     }
     if let Some(action) = props.remove(ACTION_KEY) {
-        props.insert(ACTION_KEY.into(), import_action(&action, &format!("{path}.{ACTION_KEY}"), keys)?);
+        props.insert(
+            ACTION_KEY.into(),
+            import_action(&action, &format!("{path}.{ACTION_KEY}"), keys)?,
+        );
     }
     if let Some(Value::Array(items)) = props.remove(LIST_ITEMS_KEY) {
         let mut out = Vec::new();
@@ -304,13 +374,23 @@ fn import_node(component: &Value, path: &str, keys: &HashMap<String, String>) ->
             let mut item = item.as_object().cloned().unwrap_or_default();
             if let Some(action) = item.remove(ACTION_KEY) {
                 let action_path = format!("{path}.{LIST_ITEMS_KEY}[{i}].{ACTION_KEY}");
-                item.insert(ACTION_KEY.into(), import_action(&action, &action_path, keys)?);
+                item.insert(
+                    ACTION_KEY.into(),
+                    import_action(&action, &action_path, keys)?,
+                );
             }
             out.push(Value::Object(item));
         }
         props.insert(LIST_ITEMS_KEY.into(), Value::Array(out));
     }
-    let mut node = Node { id: create_id("n"), kind, props, slots: None, slot_order: None, custom_field_id: None };
+    let mut node = Node {
+        id: create_id("n"),
+        kind,
+        props,
+        slots: None,
+        slot_order: None,
+        custom_field_id: None,
+    };
     match node.kind.as_str() {
         "Form" => {
             let children = import_list(object.get("children"), &format!("{path}.children"), keys)?;
@@ -327,7 +407,10 @@ fn import_node(component: &Value, path: &str, keys: &HashMap<String, String>) ->
             };
             let mut slots = std::collections::BTreeMap::new();
             for (key, nodes) in cases {
-                slots.insert(key.clone(), import_list(Some(nodes), &format!("{path}.cases.{key}"), keys)?);
+                slots.insert(
+                    key.clone(),
+                    import_list(Some(nodes), &format!("{path}.cases.{key}"), keys)?,
+                );
             }
             node.slot_order = Some(cases.keys().cloned().collect());
             node.slots = Some(slots);
@@ -339,8 +422,12 @@ fn import_node(component: &Value, path: &str, keys: &HashMap<String, String>) ->
 
 /// `flowJsonSchema.safeParse`: a loose Flow JSON object with 1–100 screens.
 pub fn is_flow_json(value: &Value) -> bool {
-    let Some(object) = value.as_object() else { return false };
-    let Some(Value::Array(screens)) = object.get("screens") else { return false };
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    let Some(Value::Array(screens)) = object.get("screens") else {
+        return false;
+    };
     object.get("version").is_some_and(Value::is_string)
         && (1..=super::MAX_SCREENS).contains(&screens.len())
         && screens.iter().all(|screen| {
@@ -348,11 +435,15 @@ pub fn is_flow_json(value: &Value) -> bool {
             screen.get("id").is_some_and(Value::is_string)
                 && screen.get("title").is_none_or(Value::is_string)
                 && screen.get("terminal").is_none_or(Value::is_boolean)
-                && layout.and_then(|l| l.get("type")).and_then(Value::as_str) == Some("SingleColumnLayout")
+                && layout.and_then(|l| l.get("type")).and_then(Value::as_str)
+                    == Some("SingleColumnLayout")
                 && layout
                     .and_then(|l| l.get("children"))
                     .and_then(Value::as_array)
-                    .is_some_and(|c| c.iter().all(|c| c.get("type").is_some_and(Value::is_string)))
+                    .is_some_and(|c| {
+                        c.iter()
+                            .all(|c| c.get("type").is_some_and(Value::is_string))
+                    })
         })
 }
 
@@ -363,10 +454,18 @@ pub fn from_flow_json(flow_json: &Value) -> Result<Value, ImportError> {
     if flow_json.get("data_api_version").is_some() || flow_json.get("data_channel_uri").is_some() {
         return Err(import_error("unsupported_endpoint", "data_api_version"));
     }
-    let screens = flow_json.get("screens").and_then(Value::as_array).cloned().unwrap_or_default();
+    let screens = flow_json
+        .get("screens")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let mut keys = HashMap::new();
     for screen in &screens {
-        let id = screen.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let id = screen
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
         keys.insert(id, create_id("s"));
     }
     let mut out = Vec::new();
@@ -381,7 +480,9 @@ pub fn from_flow_json(flow_json: &Value) -> Result<Value, ImportError> {
         let mut nodes = Vec::new();
         for (index, component) in children.iter().enumerate() {
             let path = format!("screens[{screen_index}].layout.children[{index}]");
-            nodes.push(serde_json::to_value(import_node(component, &path, &keys)?).unwrap_or(Value::Null));
+            nodes.push(
+                serde_json::to_value(import_node(component, &path, &keys)?).unwrap_or(Value::Null),
+            );
         }
         out.push(json!({
             "key": keys[id],
