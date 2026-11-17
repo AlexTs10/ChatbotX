@@ -1,8 +1,6 @@
 //! The `notification` queue (`notification/worker.ts`): Expo push for a new
 //! message or an assigned conversation.
-//!
-//! ponytail: `notifyNewOrder` waits for the e-commerce order domain (no Rust
-//! producer yet); the job is logged and skipped.
+//! Also `notifyNewOrder` (`handlers/notify-new-order.ts`).
 
 use std::sync::Mutex;
 
@@ -143,7 +141,6 @@ struct Strings {
     sent_attachment: &'static str,
     sent_attachments: &'static str,
     assigned_conversation: &'static str,
-    #[allow(dead_code)] // notifyNewOrder
     new_order: &'static str,
 }
 
@@ -441,7 +438,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         return Ok(Value::Null);
     }
     if str_of(&job.data, "type") == Some("notifyNewOrder") {
-        tracing::warn!("notifyNewOrder: the order domain is not ported, skipping");
+        notify_new_order(&deps, &job.data["data"]).await?;
         return Ok(Value::Null);
     }
     send_push_for_notification_job(&deps, &job.data).await?;
@@ -505,6 +502,82 @@ pub async fn send_push_for_notification_job(deps: &Deps, job: &Value) -> Result<
         "conversationId": data["conversationId"],
         "messageId": data.get("messageId").cloned().unwrap_or(json!("")),
     });
+    deliver_push_to_users(deps, push.as_ref(), users, &title, &body, payload).await
+}
+
+/// `notifyNewOrder`: "New order #N" with the customer and total, to the
+/// members who turned on "New order" and may see orders (the `ecommerce`
+/// permission). An order deleted before the push has nothing to announce.
+pub async fn notify_new_order(deps: &Deps, data: &Value) -> Result<(), JobError> {
+    let Some(push) = deps.push.clone() else {
+        return Ok(());
+    };
+    let id = |k: &str| str_of(data, k).and_then(|v| v.parse::<i64>().ok());
+    let (Some(workspace), Some(order_id)) = (id("workspaceId"), id("orderId")) else {
+        return Ok(());
+    };
+    let order = chatbotx_business::order::get_detail(&deps.db, workspace, order_id).await;
+    let order = match order {
+        Ok(detail) => detail.order,
+        Err(error) if error.code() == Some("notFound") => return Ok(()),
+        Err(error) => return Err(fail(error.message())),
+    };
+    let users = deps
+        .db
+        .read(move |c| {
+            let mut stmt = c.prepare(
+                r#"SELECT "userId", "notificationTypes", "permissions" FROM "WorkspaceMember" WHERE "workspaceId" = ?1"#,
+            )?;
+            let rows = stmt
+                .query_map([workspace], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .map_err(db_fail)?
+        .into_iter()
+        .filter(|(_, types, permissions)| {
+            let parse = |t: &Option<String>| t.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()).unwrap_or(Value::Null);
+            parse(types)["newOrder"] == Value::Bool(true)
+                && chatbotx_business::workspace_member::has_permission(&parse(permissions), "ecommerce")
+        })
+        .map(|(user, _, _)| user)
+        .collect::<Vec<_>>();
+    if users.is_empty() {
+        return Ok(());
+    }
+    let settings = chatbotx_business::ecommerce_settings::get(&deps.db, workspace)
+        .await
+        .map_err(|e| fail(e.message()))?;
+    let language: Option<String> = deps
+        .db
+        .read(move |c| {
+            Ok(c.query_row(
+                r#"SELECT "language" FROM "Workspace" WHERE "id" = ?1"#,
+                [workspace],
+                |r| r.get(0),
+            )
+            .optional()?)
+        })
+        .await
+        .map_err(db_fail)?;
+    let payments = chatbotx_business::order::messages::Payments::of(&settings["payments"]);
+    let total = chatbotx_business::order::messages::money(
+        chatbotx_business::order::major(order.total),
+        &order.currency,
+        &payments,
+    );
+    let title = strings(language.as_deref())
+        .new_order
+        .replace("{}", &order.number.to_string());
+    let body = [order.customer_name.filter(|n| !n.is_empty()), Some(total)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let payload = json!({ "workspaceId": workspace.to_string(), "orderId": order_id.to_string() });
     deliver_push_to_users(deps, push.as_ref(), users, &title, &body, payload).await
 }
 

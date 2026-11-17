@@ -288,7 +288,8 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         ))
         .merge(chatbotx_api::session::auth_router(sessions))
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
-        .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)));
+        .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)))
+        .merge(chatbotx_api::payment_webhooks::router(Arc::clone(&api)));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }

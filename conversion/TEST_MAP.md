@@ -611,7 +611,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/openai-compatible-model-options.test.ts` | B | - | todo | OpenAI-compatible integration; builder jsdom |
 | `apps/builder/__tests__/openai-compatible-provider-verify.test.ts` | C | tbd | todo | OpenAI-compatible integration; builder server code |
 | `apps/builder/__tests__/optional-field-marker.test.tsx` | C | tbd | todo | Builder app shell and shared components; builder server code |
-| `apps/builder/__tests__/orders-public-api.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers; builder server code |
+| `apps/builder/__tests__/orders-public-api.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; builder server code; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `apps/builder/__tests__/orpc-client-error.test.ts` | C | tbd | todo | Error logs; builder server code |
 | `apps/builder/__tests__/orpc-default-error-code.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/orpc-error-mapping.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
@@ -1301,7 +1301,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/evaluate-template-sent.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/events-worker-shutdown.test.ts` | C | `crates/jobs/tests/events_worker_shutdown.rs` | passing | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/execute-javascript-handler.test.ts` | - | - | dropped | Execute JavaScript flow step; feature dropped (DECISIONS 2026-11-11) |
-| `apps/worker/__tests__/expire-unpaid-orders.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
+| `apps/worker/__tests__/expire-unpaid-orders.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `apps/worker/__tests__/export-contacts-csv.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/export-contacts-datetime.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/export-contacts-fields.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -1400,7 +1400,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/muse-image-handlers.test.ts` | C | tbd | todo | Muse integration |
 | `apps/worker/__tests__/normalize-epoch-timestamp.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/notification/expo-push-enabled-env.test.ts` | C | tbd | todo | Mobile API and push notifications |
-| `apps/worker/__tests__/notification/notify-new-order.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
+| `apps/worker/__tests__/notification/notify-new-order.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `apps/worker/__tests__/notification/push-notification-content.test.ts` | C | tbd | todo | Mobile API and push notifications |
 | `apps/worker/__tests__/notification/send-push-expo.test.ts` | C | tbd | todo | Mobile API and push notifications |
 | `apps/worker/__tests__/operator-handler.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -2615,12 +2615,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/messaging-ads/__tests__/service.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/business/src/meta-conversions/__tests__/event-input.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `packages/business/src/meta-conversions/__tests__/hash-user-data.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
-| `packages/business/src/order-payment/__tests__/order-payment-service.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
-| `packages/business/src/order-payment/__tests__/settle.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
-| `packages/business/src/order-payment/__tests__/webhooks.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
-| `packages/business/src/order/__tests__/order-service.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
+| `packages/business/src/order-payment/__tests__/order-payment-service.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
+| `packages/business/src/order-payment/__tests__/settle.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
+| `packages/business/src/order-payment/__tests__/webhooks.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
+| `packages/business/src/order/__tests__/order-service.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `packages/business/src/order/__tests__/order-sync-external.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
-| `packages/business/src/payment-provider/__tests__/payment-provider-service.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
+| `packages/business/src/payment-provider/__tests__/payment-provider-service.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `packages/business/src/payment-provider/__tests__/platform-stripe.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
 | `packages/business/src/place-near-me/__tests__/category-service.test.ts` | C | tbd | todo | Places near me |
 | `packages/business/src/place-near-me/__tests__/contact-location.test.ts` | C | tbd | todo | Places near me |
@@ -2964,9 +2964,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/mini-app/__tests__/uploads.test.ts` | C | tbd | todo | Mini-apps |
 | `packages/mini-app/__tests__/validate-issue-codes.test.ts` | C | tbd | todo | Mini-apps |
 | `packages/mini-app/__tests__/validate.test.ts` | C | tbd | todo | Mini-apps |
-| `packages/payments/__tests__/minor-units.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `packages/payments/__tests__/paypal.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `packages/payments/__tests__/stripe.test.ts` | C | tbd | todo | Licensing, billing and quotas |
+| `packages/payments/__tests__/minor-units.test.ts` | C | `crates/business/src/payments/mod.rs` (unit) | ported | Licensing, billing and quotas; P3.6-D1o |
+| `packages/payments/__tests__/paypal.test.ts` | C | `crates/business/src/payments/paypal.rs` (unit) | ported | Licensing, billing and quotas; P3.6-D1o |
+| `packages/payments/__tests__/stripe.test.ts` | C | `crates/business/src/payments/stripe.rs` (unit) + parity p1-12 20/31 | ported | Licensing, billing and quotas; P3.6-D1o |
 | `packages/realtime-protocol/__tests__/auth.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
 | `packages/realtime-protocol/__tests__/frame-reader.test.ts` | B | - | todo | Realtime (WebSocket gateway); browser client, class B by user decision 2026-11-12 (P2.8) |
 | `packages/realtime-protocol/__tests__/presence.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |

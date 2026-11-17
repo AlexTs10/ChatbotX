@@ -803,7 +803,7 @@ const COUNTING: ErrorMap = &[("businessError", 400), ("countTimeout", 503)];
 /// The query string as one object; oRPC bracket keys (`key[]=a`,
 /// `key[0]=a`) become arrays, every other key is a string (the last value
 /// of a repeated key wins).
-fn bracket_query(params: &[(&'static str, String)], query: Option<&str>) -> Input {
+pub(crate) fn bracket_query(params: &[(&'static str, String)], query: Option<&str>) -> Input {
     let mut obj = Map::new();
     let mut indexed: Vec<(String, usize, String)> = Vec::new();
     for (name, value) in url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()) {

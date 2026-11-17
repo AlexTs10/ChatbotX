@@ -160,6 +160,21 @@ pub fn order_status(
     )
 }
 
+/// `productOrdered`: the order metadata (filtered by product in the evaluator).
+pub fn product_ordered(
+    workspace_id: &str,
+    contact_id: &str,
+    metadata: Map<String, Value>,
+    contact_inbox_id: Option<&str>,
+) -> TriggerEvent {
+    event(
+        "productOrdered",
+        workspace_id,
+        contact_id,
+        with_inbox(metadata, contact_inbox_id),
+    )
+}
+
 /// `pipelineItem(eventType, ...)`: one of `PIPELINE_EVENT_TYPES`; the
 /// metadata carries `sourceId` (the pipeline id).
 pub fn pipeline_item(

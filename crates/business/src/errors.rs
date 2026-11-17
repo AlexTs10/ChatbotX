@@ -58,6 +58,14 @@ impl BusinessError {
         }
     }
 
+    /// The exception with `error.data = data` (shown as ` (k=v, …)`).
+    pub fn with_data(mut self, value: Value) -> BusinessError {
+        if let BusinessError::Exception { data, .. } = &mut self {
+            *data = Some(value);
+        }
+        self
+    }
+
     /// `conflictException(message, code)` (409).
     pub fn conflict(message: impl Into<String>, code: &str) -> BusinessError {
         BusinessError::exception(message, code, 409)

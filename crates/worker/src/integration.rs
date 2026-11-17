@@ -181,6 +181,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::inbound::MESSAGE_STATUS => {
             crate::inbound::message_status(&deps, &job.data["data"]).await?
         }
+        crate::order_payment::CONFIRM_ORDER_PAYMENT => {
+            crate::order_payment::confirm_order_payment(&deps, &job.data["data"]).await?
+        }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }

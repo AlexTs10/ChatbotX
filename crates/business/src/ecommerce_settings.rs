@@ -920,6 +920,11 @@ pub async fn get(db: &Db, workspace_id: i64) -> Result<Value> {
     .await
 }
 
+/// As [`get`], inside a transaction.
+pub fn get_in(conn: &Connection, workspace_id: i64) -> Result<Value> {
+    Ok(find(conn, workspace_id)?.unwrap_or_else(defaults))
+}
+
 /// `ecommerceSettingsService.update`: in one transaction, insert the default
 /// row when missing, merge the patch groups, check the merged settings
 /// (schema, external store, coherence, online payment methods) and write

@@ -10,6 +10,7 @@ pub mod iso8601;
 pub mod jobs_admin;
 pub mod mail;
 pub mod orpc;
+pub mod payment_webhooks;
 pub mod presigned_upload;
 pub mod reflink_widget;
 pub mod routes;

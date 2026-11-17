@@ -31,6 +31,7 @@ pub const PORTED: &[&str] = &[
     "purgeCoexistStaging",
     "purgeExpiredOAuthTokens",
     "purgeAutomationThrottle",
+    "expireUnpaidOrders",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -115,6 +116,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             purge::purge_expired_oauth_tokens(&deps.db).await?;
             Value::Null
         }
+        "expireUnpaidOrders" => crate::order_payment::expire_unpaid_orders(&deps).await?,
         "purgeAutomationThrottle" => {
             purge::purge_automation_throttle(&deps.db).await?;
             Value::Null

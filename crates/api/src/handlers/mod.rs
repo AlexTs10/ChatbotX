@@ -46,6 +46,8 @@ pub mod messenger_templates;
 pub mod meta_catalog;
 pub mod minigames;
 pub mod open_hours;
+pub mod orders;
+pub mod payment_providers;
 pub mod pipelines;
 pub mod places;
 pub mod polls;
@@ -602,6 +604,10 @@ async fn route(
         contacts::handle(state, route_id, call).await
     } else if custom_fields::ROUTES.contains(&route_id) {
         custom_fields::handle(state, route_id, call).await
+    } else if orders::ROUTES.contains(&route_id) {
+        orders::handle(state, route_id, call).await
+    } else if payment_providers::ROUTES.contains(&route_id) {
+        payment_providers::handle(state, route_id, call).await
     } else if ecommerce_settings::ROUTES.contains(&route_id) {
         ecommerce_settings::handle(state, route_id, call).await
     } else if folders::ROUTES.contains(&route_id) {
