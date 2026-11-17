@@ -21,7 +21,55 @@ const PATHS: &[&str] = &[
     "workspaceMembersAPI.listWorkspaceMembersAuthenticatedAPI",
 ];
 
+/// The `{ id, name }` option lists of the flow editor steps.
+async fn flow_options(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
+    let db = &ctx.api.db;
+    let ws = ctx.workspace_id;
+    let pairs = |rows: Vec<(i64, String)>| -> Vec<Value> {
+        rows.into_iter()
+            .map(|(id, name)| json!({ "id": id.to_string(), "name": name }))
+            .collect()
+    };
+    Some(match path {
+        // `reflinkService.listOptions`: `refLink` rows, newest first, 500 max.
+        "refLinksAPI.listRefLinkOptionsAuthenticatedAPI" => {
+            chatbotx_business::tx::read(db, move |conn| {
+                let rows: Vec<chatbotx_db::repo::models::Reflink> = chatbotx_db::repo::find_many(
+                    conn,
+                    r#"WHERE "workspaceId" = ?1 AND "type" = 'refLink' ORDER BY "createdAt" DESC LIMIT 500"#,
+                    &[&ws],
+                )?;
+                Ok(rows.into_iter().map(|r| (r.id, r.name)).collect())
+            })
+            .await
+            .map(|rows| json!({ "data": pairs(rows) }))
+            .map_err(fail)
+        }
+        "questionnairesAPI.listQuestionnairesForFlowAPI" => match In(input).opt_str("keyword") {
+            Ok(keyword) => chatbotx_business::questionnaire::list_for_flow(db, ws, keyword)
+                .await
+                .map(|rows| Value::Array(pairs(rows)))
+                .map_err(fail),
+            Err(error) => Err(error),
+        },
+        "placesNearMeAPI.listPlaceCategoryOptionsAPI" => {
+            chatbotx_business::place_near_me::category::list(db, ws)
+                .await
+                .map(|rows| json!({ "data": pairs(rows.into_iter().map(|c| (c.id, c.name)).collect()) }))
+                .map_err(fail)
+        }
+        "productsAPI.listSendableProductsAuthorizedAPI" => {
+            let query = super::query_of(input, &["channel", "keyword", "page", "perPage"]);
+            public(ctx, "products.listSendable", &[], Some(&query), None).await
+        }
+        _ => return None,
+    })
+}
+
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
+    if let Some(outcome) = flow_options(ctx, path, input).await {
+        return Some(outcome);
+    }
     if !PATHS.contains(&path) {
         return None;
     }

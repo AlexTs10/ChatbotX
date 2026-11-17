@@ -623,3 +623,27 @@ async fn media_library_folders_round_trip_through_the_actions() {
     let (status, _, _) = act("deleteMediaLibraryFolderAction", json!(id)).await;
     assert_eq!(status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn flow_step_option_lists_answer_for_a_member() {
+    let (router, _) = router().await;
+    for (path, data) in [
+        ("pipelinesAPI/privateListPipelineOptionsAPI", "/data"),
+        ("refLinksAPI/listRefLinkOptionsAuthenticatedAPI", "/data"),
+        ("placesNearMeAPI/listPlaceCategoryOptionsAPI", "/data"),
+        ("questionnairesAPI/listQuestionnairesForFlowAPI", ""),
+    ] {
+        let (status, json, _) =
+            post(&router, path, "admintoken", json!({ "workspaceId": ws() })).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {json}");
+        assert!(json.pointer(data).unwrap().is_array(), "{path}: {json}");
+    }
+    let (status, json, _) = post(
+        &router,
+        "pipelinesAPI/privateGetPipelineAPI",
+        "assignedtoken",
+        json!({ "workspaceId": ws(), "pipelineId": "999" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+}

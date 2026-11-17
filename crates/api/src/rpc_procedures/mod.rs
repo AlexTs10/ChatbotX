@@ -14,6 +14,7 @@ mod flows;
 mod inboxes;
 mod lists;
 mod media_library;
+mod pipelines;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -107,6 +108,9 @@ pub async fn procedure(
         return Some(outcome);
     }
     if let Some(outcome) = inboxes::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = pipelines::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     if let Some(outcome) = media_library::procedure(ctx, path, input).await {
