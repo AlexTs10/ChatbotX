@@ -73,7 +73,10 @@ export function SequencesPage() {
           folderType={folderTypes.enum.sequence}
           workspaceId={workspaceId}
         />
-        <SequencesTable promises={promises} workspaceId={workspaceId} />
+        {/* The table suspends here, so the page keeps its memoized promise. */}
+        <Suspense>
+          <SequencesTable promises={promises} workspaceId={workspaceId} />
+        </Suspense>
       </CardContent>
     </Card>
   )

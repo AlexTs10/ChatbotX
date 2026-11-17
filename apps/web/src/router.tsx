@@ -7,7 +7,9 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
+  parseSearchWith,
   redirect,
+  stringifySearchWith,
 } from "@tanstack/react-router"
 import { sessionQuery } from "@/lib/session"
 import { DefaultErrorPage, NotFoundPage, RootLayout } from "@/routes/root"
@@ -209,6 +211,11 @@ export function createAppRouter(queryClient: QueryClient) {
     context: { queryClient },
     defaultPreload: false,
     scrollRestoration: true,
+    // Next.js search params are plain strings. The default JSON parse turns
+    // an id above 2^53 into a rounded number (`useSearchParams` then reads
+    // `…683` as `…684`); values that round-trip exactly still become numbers.
+    parseSearch: parseSearchWith((value) => value),
+    stringifySearch: stringifySearchWith(JSON.stringify),
   })
 }
 
