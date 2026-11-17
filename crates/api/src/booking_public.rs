@@ -28,7 +28,7 @@ use chatbotx_core::encryption::{
     AppointmentClaims, AppointmentWebviewClaims, AppointmentWebviewMode,
 };
 use chatbotx_db::repo::{iso, now_ms};
-use chatbotx_jobs::{Enqueuer as _, JobOptions, QueueName};
+use chatbotx_jobs::{JobOptions, QueueName};
 use serde_json::{Value, json};
 
 use crate::handlers::ApiState;
