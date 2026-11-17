@@ -76,6 +76,7 @@ pub mod response_sla;
 pub mod reflink;
 pub mod saved_reply;
 pub mod sequence;
+pub mod spreadsheet;
 pub mod store_source;
 pub mod tag;
 pub mod template;

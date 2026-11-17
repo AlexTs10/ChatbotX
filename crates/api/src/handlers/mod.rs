@@ -58,6 +58,7 @@ pub mod reflinks;
 pub mod response_sla;
 pub mod saved_replies;
 pub mod sequences;
+pub mod spreadsheets;
 pub mod tags;
 pub mod templates;
 pub mod webchats;
@@ -662,6 +663,8 @@ async fn route(
         response_sla::handle(state, route_id, call).await
     } else if webhooks::ROUTES.contains(&route_id) {
         webhooks::handle(state, route_id, call).await
+    } else if spreadsheets::ROUTES.contains(&route_id) {
+        spreadsheets::handle(state, route_id, call).await
     } else if working_hours::ROUTES.contains(&route_id) {
         working_hours::handle(state, route_id, call).await
     } else {

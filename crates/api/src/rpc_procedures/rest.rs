@@ -37,9 +37,12 @@ pub(super) const ACTIONS: &[&str] = &[
     "createHolidayAction",
     "updateHolidayAction",
     "deleteHolidayAction",
+    "createSpreadsheetAction",
+    "updateSpreadsheetAction",
+    "deleteSpreadsheetAction",
 ];
 
-pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, _input: &Value) -> Outcome {
+pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
     let api = ctx.api;
     let ws = ctx.workspace_id;
     Some(match path {
@@ -51,6 +54,18 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, _input: &Value) -> Outc
             .await
             .map(|enabled| json!({ "enabled": enabled }))
             .map_err(fail),
+        "spreadsheetsAPI.listSpreadsheetsAuthenticatedAPI" => {
+            let page = input["page"].as_f64().map_or(1, |n| n as i64);
+            let per_page = input["perPage"].as_f64().map(|n| n as i64);
+            let name = input["name"].as_str().map(str::to_owned);
+            chatbotx_business::spreadsheet::list(&api.db, ws, name, page, per_page)
+                .await
+                .map(|(rows, page_count)| {
+                    let data: Vec<Value> = rows.iter().map(|r| r.to_json()).collect();
+                    json!({ "data": data, "pageCount": page_count })
+                })
+                .map_err(fail)
+        }
         "workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI" => {
             wh::options(api, ws).await.map_err(fail)
         }
@@ -309,6 +324,32 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
                 .await
                 .map(|d| ((), d));
             audited(api, "delete", outcome)
+                .await
+                .map(|()| Value::Null)
+                .map_err(action_fail)
+        }
+        "createSpreadsheetAction" => {
+            let mut input = input_at(args, 1);
+            let (name, url) = crate::handlers::spreadsheets::request(&mut input);
+            checked(input)?;
+            chatbotx_business::spreadsheet::create(&api.db, ws, name, url)
+                .await
+                .map(|id| json!({ "id": id.to_string() }))
+                .map_err(action_fail)
+        }
+        "updateSpreadsheetAction" => {
+            let id = bound(args, 1)?;
+            let mut input = input_at(args, 2);
+            let (name, url) = crate::handlers::spreadsheets::request(&mut input);
+            checked(input)?;
+            chatbotx_business::spreadsheet::update(&api.db, ws, id, name, url)
+                .await
+                .map(|row| row.to_json())
+                .map_err(action_fail)
+        }
+        "deleteSpreadsheetAction" => {
+            let ids = In(arg(args, 1)).ids("ids")?;
+            chatbotx_business::spreadsheet::delete_many(&api.db, ws, ids)
                 .await
                 .map(|()| Value::Null)
                 .map_err(action_fail)
