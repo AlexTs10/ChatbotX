@@ -69,6 +69,9 @@ pub struct Stored {
     pub message_id: Option<i64>,
     pub received: Received,
     pub is_new_contact: bool,
+    /// A step's Skip tap: resolved by its own `resolveStepInput` job, never
+    /// routed as a typed reply.
+    pub step_input_skip: bool,
 }
 
 /// `IntegrationJobAction.incomingMessage`: [`receive_message`] then the
@@ -113,7 +116,7 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         .receive_message(&ctx, payload)
         .await
         .map_err(|e| fail(e.to_string()))?;
-    let Some(received) = received else {
+    let Some(mut received) = received else {
         tracing::warn!(
             integration_type,
             inbox_id = inbox.inbox_id,
@@ -122,11 +125,39 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         );
         return Ok(None);
     };
-    // ponytail: postback / quick-reply sanitizing (`sanitizeFlowAction`),
-    // step-input skip taps, contact hints, third-party echo drops, the
-    // appointment-cancel postback, profile lookups, Google click, commerce
-    // enrichment, thread-control recording and the leaderboard award are not
-    // ported; the plain contact message path is.
+    let suppress = received
+        .thread_control
+        .as_ref()
+        .and_then(|t| str_of(t, "delivery"))
+        == Some("standby");
+    // Q.D9 hook: `parseAppointmentCancelPostback(rawPostbackAction)` (skipped
+    // on a standby delivery) and its `cancelAppointmentByToken` run go here.
+    let skip_challenge_id = step_input_skip_challenge_id(&received);
+    sanitize_actions(
+        &mut received,
+        &integration_type,
+        skip_challenge_id.is_some(),
+    );
+    if is_third_party_echo(&received) {
+        let (probe_inbox, contact) = (inbox.clone(), received.contact.clone());
+        let known = deps
+            .db
+            .read(move |conn| Ok(find_existing_contact_inbox(conn, &probe_inbox, &contact)?))
+            .await
+            .map_err(db_fail)?;
+        if known.is_none() {
+            tracing::debug!(
+                inbox_id = inbox.inbox_id,
+                source_id = received.contact.source_id,
+                "Skipping third-party echo for an unknown contact"
+            );
+            return Ok(None);
+        }
+    }
+    // ponytail: the Zalo / Telegram tap label (`resolvePostbackButtonLabel`,
+    // `resolveStepInputSkipLabel`), profile lookups, Google click, commerce
+    // enrichment and thread-control recording are not ported: they need the
+    // channel profile fetcher / ads / commerce units.
     let source = contact_source(received.referral_source.as_deref());
     // Orchestrator decision (DECISIONS 2026-11-17): the contact lookup /
     // creation, the contact updates and the message insert are one write
@@ -168,12 +199,32 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
     let mut message_id = None;
     if let Some((stored, is_new)) = saved {
         let row = broadcast_saved(deps, &inbox, &conversation, &stored, is_new, None).await;
+        // Also on a redelivery: the job is deduplicated and the challenge
+        // claim settles it once.
+        if let Some(challenge_id) = &skip_challenge_id
+            && !suppress
+            && workspace_is_active(deps, inbox.workspace_id).await?
+        {
+            let job = chatbotx_jobs::queues::resolve_step_input::build_resolve_step_input_job(
+                &chatbotx_jobs::queues::resolve_step_input::ResolveStepInput {
+                    conversation_id: conversation.id.to_string(),
+                    contact_inbox_id: contact_inbox.id.to_string(),
+                    challenge_id: challenge_id.clone(),
+                    reason: chatbotx_jobs::queues::resolve_step_input::ResolveStepInputReason::UserSkipped,
+                    message_id: Some(stored.message.id.to_string()),
+                    message_created_at: Some(chatbotx_db::repo::iso(stored.message.created_at)),
+                },
+            );
+            add_job(deps, QueueName::Integration, &job.name, job.data, job.opts).await?;
+        }
         if is_new {
+            // Q.D13 hook: `awardInboundMessageLeaderboard` goes here.
             message_id = row["id"].as_str().and_then(|s| s.parse().ok());
             message = Some(row);
         }
     }
     Ok(Some(Stored {
+        step_input_skip: skip_challenge_id.is_some(),
         inbox,
         conversation,
         contact_inbox,
@@ -182,6 +233,65 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         received,
         is_new_contact,
     }))
+}
+
+/// The Skip tap's challenge id (`decodeStepInputSkipPostback` of the raw
+/// postback, then of the raw quick reply).
+fn step_input_skip_challenge_id(received: &Received) -> Option<String> {
+    use chatbotx_core::flow_config::step_input_resolution::decode_step_input_skip_postback;
+    decode_step_input_skip_postback(received.postback_action.as_deref())
+        .or_else(|| decode_step_input_skip_postback(received.quick_reply_action.as_deref()))
+}
+
+/// `sanitizeFlowAction` of both taps, the contact-hint quick reply (its full
+/// value becomes the text) and the value quick replies (a payload equal to
+/// the text is a typed reply). Only Messenger accepts a bare flow id.
+fn sanitize_actions(received: &mut Received, integration_type: &str, skip_tap: bool) {
+    use chatbotx_core::flow_config::steps::decode_contact_hint_quick_reply_payload;
+    let allow_bare = integration_type == "messenger";
+    let keep = |raw: Option<String>, kind: &str| {
+        let raw = raw.filter(|r| !r.is_empty())?;
+        if chatbotx_core::flow_config::util::decode_button_payload(&raw, allow_bare).is_some() {
+            return Some(raw);
+        }
+        tracing::warn!(
+            kind,
+            integration_type,
+            action = raw,
+            "Dropping undecodable flow action from channel webhook"
+        );
+        None
+    };
+    let hint = decode_contact_hint_quick_reply_payload(received.quick_reply_action.as_deref());
+    let text = received.message.as_ref().and_then(|m| m.text.clone());
+    if let (Some(hint), Some(message)) = (&hint, received.message.as_mut()) {
+        message.text = Some(hint.clone());
+    }
+    let value_reply = hint.is_some()
+        || (received.quick_reply_action.is_some() && received.quick_reply_action == text);
+    let postback = received.postback_action.take().filter(|_| !skip_tap);
+    received.postback_action = keep(postback, "postback");
+    let quick_reply = received
+        .quick_reply_action
+        .take()
+        .filter(|_| !skip_tap && !value_reply);
+    received.quick_reply_action = keep(quick_reply, "quickReply");
+}
+
+/// `isThirdPartyEcho`: another app's send mirrored back (not a story reply).
+fn is_third_party_echo(received: &Received) -> bool {
+    received.echo_origin.as_deref() == Some("thirdParty")
+        && received.message.as_ref().is_some_and(|m| {
+            m.message_type == "outgoing"
+                && !m.content_attributes.as_ref().is_some_and(|a| {
+                    let story = if str_of(a, "type") == Some("story_reply") {
+                        a.get("story")
+                    } else {
+                        a.get("storyReply")
+                    };
+                    story.is_some_and(|s| !s.is_null())
+                })
+        })
 }
 
 /// `resolveContactSource` without the Google click (not ported):
@@ -640,6 +750,9 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
         .and_then(|t| str_of(t, "delivery"))
         == Some("standby");
     let can_automate = workspace_active && !suppress;
+    if stored.step_input_skip {
+        return Ok(());
+    }
 
     // Flow postbacks / quick replies (`automatedResponseService.enqueueFlowAction`).
     let action = received
@@ -1208,5 +1321,60 @@ mod tests {
         let mut data = payload();
         data["integrationIdentifier"] = json!("999");
         assert!(incoming_message(&deps, &data).await.is_err());
+    }
+
+    /// `sanitizeFlowAction`, the Skip tap, the contact hint, the value quick
+    /// reply and `isThirdPartyEcho`.
+    #[test]
+    fn taps_and_echoes() {
+        use chatbotx_core::flow_config::step_input_resolution::encode_step_input_skip_postback;
+        let tap = |postback: Option<&str>, quick: Option<&str>, text: &str| Received {
+            postback_action: postback.map(str::to_owned),
+            quick_reply_action: quick.map(str::to_owned),
+            message: Some(IncomingMessage {
+                text: Some(text.to_owned()),
+                ..IncomingMessage::default()
+            }),
+            ..Received::default()
+        };
+        let mut r = tap(Some("123"), Some("junk"), "hi");
+        sanitize_actions(&mut r, "messenger", false);
+        assert_eq!(
+            (r.postback_action.as_deref(), r.quick_reply_action),
+            (Some("123"), None)
+        );
+        let mut r = tap(Some("123"), None, "hi");
+        sanitize_actions(&mut r, "telegram", false);
+        assert_eq!(r.postback_action, None);
+
+        let skip = encode_step_input_skip_postback("11612473309626368");
+        let mut r = tap(Some(&skip), None, "Skip");
+        assert_eq!(
+            step_input_skip_challenge_id(&r).as_deref(),
+            Some("11612473309626368")
+        );
+        sanitize_actions(&mut r, "messenger", true);
+        assert_eq!(r.postback_action, None);
+
+        let mut r = tap(
+            None,
+            Some("GET_USER_DATA_CONTACT_HINT|+84901234567"),
+            "+849012…",
+        );
+        sanitize_actions(&mut r, "messenger", false);
+        assert_eq!(r.quick_reply_action, None);
+        assert_eq!(r.message.unwrap().text.as_deref(), Some("+84901234567"));
+        let mut r = tap(None, Some("84901234567"), "84901234567");
+        sanitize_actions(&mut r, "messenger", false);
+        assert_eq!(r.quick_reply_action, None);
+
+        let mut echo = tap(None, None, "hello");
+        echo.echo_origin = Some("thirdParty".into());
+        assert!(!is_third_party_echo(&echo));
+        echo.message.as_mut().unwrap().message_type = "outgoing".into();
+        assert!(is_third_party_echo(&echo));
+        echo.message.as_mut().unwrap().content_attributes =
+            Some(json!({ "type": "story_reply", "story": { "id": "s1" } }));
+        assert!(!is_third_party_echo(&echo));
     }
 }
