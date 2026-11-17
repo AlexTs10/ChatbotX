@@ -103,8 +103,8 @@ async fn seed(f: &Fixture) {
                 params![WS],
             )?;
             tx.execute(
-                r#"INSERT INTO "IntegrationMessenger" ("id", "auth", "pageId", "name", "workspaceId", "inboxId")
-                   VALUES (102, '{"tokens":{"accessToken":"t"},"clientId":"own-app"}', 'page-1', 'Fb', ?1, 7)"#,
+                r#"INSERT INTO "IntegrationMessenger" ("id", "auth", "pageId", "name", "conversationStarters", "persistentMenus", "personas", "workspaceId", "inboxId")
+                   VALUES (102, '{"tokens":{"accessToken":"t"},"clientId":"own-app"}', 'page-1', 'Fb', '[]', '[]', '[]', ?1, 7)"#,
                 params![WS],
             )?;
             Ok(())
