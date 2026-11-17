@@ -15,6 +15,7 @@ mod broadcasts;
 mod comments;
 mod contacts;
 mod conversations;
+mod email_marketing;
 mod email_topics;
 mod flows;
 mod inboxes;
@@ -161,6 +162,9 @@ pub async fn procedure(
     if let Some(outcome) = comments::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = email_marketing::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = templates::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -217,7 +221,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || triggers::ACTIONS.contains(&n)
                 || automated_responses::ACTIONS.contains(&n)
                 || settings::ACTIONS.contains(&n)
-                || user_persistent_menus::ACTIONS.contains(&n) =>
+                || user_persistent_menus::ACTIONS.contains(&n)
+                || email_marketing::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -243,6 +248,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = integrations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_marketing::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = products::action(ctx, name, &args).await {

@@ -18,6 +18,7 @@ pub mod rpc_ai;
 pub mod rpc_procedures;
 pub mod session;
 pub mod spa;
+pub mod store_webhooks;
 
 use axum::Router;
 use axum::http::header;

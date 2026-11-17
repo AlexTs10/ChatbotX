@@ -59,6 +59,7 @@ pub mod qr_codes;
 pub mod questionnaires;
 pub mod reflinks;
 pub mod sequences;
+pub mod smtp_integrations;
 pub mod tags;
 pub mod templates;
 pub mod triggers;
@@ -614,6 +615,8 @@ async fn route(
         folders::handle(state, route_id, call).await
     } else if flows::ROUTES.contains(&route_id) {
         flows::handle(state, route_id, call).await
+    } else if smtp_integrations::ROUTES.contains(&route_id) {
+        smtp_integrations::handle(state, route_id, call).await
     } else if webchats::ROUTES.contains(&route_id) {
         webchats::handle(state, route_id, call).await
     } else if channel_integrations::ROUTES.contains(&route_id) {

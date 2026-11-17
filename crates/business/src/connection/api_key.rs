@@ -299,7 +299,8 @@ pub async fn connect(
         db,
         workspace_id,
         target,
-        auth.to_string(),
+        // `encryptUtils.encryptObject(auth)`: the satellite auth is sealed.
+        crate::email_marketing::seal_auth(&auth)?,
         Vec::new(),
         actor_user_id,
         false,
@@ -330,7 +331,7 @@ pub async fn verify(
     })
     .await?;
     let auth: Value = auth
-        .and_then(|auth| serde_json::from_str(&auth).ok())
+        .and_then(|auth| crate::email_marketing::open_auth(&auth))
         .unwrap_or(Value::Null);
     let (status, reason) = match probe(upstream, &provider, &auth).await {
         Ok(()) => ("connected", None),
