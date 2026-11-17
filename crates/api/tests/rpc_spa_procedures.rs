@@ -1027,21 +1027,45 @@ async fn spa_stub_path_runs_the_workspace_actions_with_their_gates() {
 }
 
 #[tokio::test]
-async fn locked_template_ids_answer_for_a_member() {
-    let (router, _) = router().await;
+async fn template_locked_ids_answer_the_lock_badges() {
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "Template" ("id", "workspaceId", "tenantId", "name", "selection", "payload",
+                 "categoryCounts", "formatVersion", "shareToken", "defaultPermissions")
+               VALUES (601, ?1, (SELECT "tenantId" FROM "Workspace" WHERE "id" = ?1), 'T', '{}', '{}',
+                 '{}', 1, 'tok', '{}')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "TemplateInstallation" ("id", "workspaceId", "templateId", "templateName",
+                 "sourceWorkspaceId", "formatVersion", "status", "permissions", "sourceTemplateId")
+               VALUES (602, ?1, 601, 'T', ?1, 1, 'completed', '{}', 601)"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "TemplateInstalledResource" ("id", "installationId", "workspaceId", "category",
+                 "resourceKind", "resourceId", "sourceResourceId", "allowEdit", "allowDelete")
+               VALUES (603, 602, ?1, 'flows', 'flow', 77, 's', 0, 1)"#,
+            params![WS],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed template");
     let (status, json, _) = post(
         &router,
         "templatesAPI/listLockedIdsAPI",
         "assignedtoken",
-        json!({ "workspaceId": ws(), "resourceKind": "flow", "resourceIds": ["1", "2"] }),
+        json!({ "workspaceId": ws(), "resourceKind": "flow", "resourceIds": ["77", "78"] }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(json, json!({ "lockedIds": [], "undeletableIds": [] }));
+    assert_eq!(json, json!({ "lockedIds": ["77"], "undeletableIds": [] }));
     let (status, _, _) = post(
         &router,
         "templatesAPI/listLockedIdsAPI",
-        "admintoken",
+        "assignedtoken",
         json!({ "workspaceId": ws(), "resourceKind": "nope", "resourceIds": [] }),
     )
     .await;

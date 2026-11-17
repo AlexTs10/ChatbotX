@@ -56,6 +56,7 @@ pub mod questionnaires;
 pub mod reflinks;
 pub mod sequences;
 pub mod tags;
+pub mod templates;
 pub mod webchats;
 pub mod workspace_members;
 pub mod workspace_settings;
@@ -363,6 +364,8 @@ pub struct Principal {
     pub token_id: Option<i64>,
     /// `context.apiToken.scopes` (`None` = unrestricted).
     pub scopes: Option<Vec<String>>,
+    /// `context.apiToken.permission === "read_only"` (default: a `full` token).
+    pub read_only: bool,
 }
 
 /// A handler outcome.
@@ -580,6 +583,8 @@ async fn route(
         messages::handle(state, route_id, call).await
     } else if keywords::ROUTES.contains(&route_id) {
         keywords::handle(state, route_id, call).await
+    } else if templates::ROUTES.contains(&route_id) {
+        templates::handle(state, route_id, call, principal).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
     } else if contacts_bulk::ROUTES.contains(&route_id) {

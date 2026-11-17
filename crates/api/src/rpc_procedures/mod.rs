@@ -139,6 +139,9 @@ pub async fn procedure(
     if let Some(outcome) = tools::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = templates::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 

@@ -255,6 +255,7 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                 let principal = Principal {
                     token_id: context.api_token.id.parse().ok(),
                     scopes: context.api_token.scopes.clone(),
+                    read_only: context.api_token.permission == "read_only",
                 };
                 // `withAuditContext` of `workspaceTokenAuthMiddleware`.
                 let actor = AuditActor {
