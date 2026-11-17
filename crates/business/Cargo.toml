@@ -32,13 +32,17 @@ phonenumber = { workspace = true }
 # Flow import token rewrites (`VARIABLE_PLACEHOLDER_SOURCE` replace).
 regex = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# Q.I3 SMTP sendMail: implicit TLS / STARTTLS (same rustls stack as reqwest).
+rustls = { version = "0.23", default-features = false }
+rustls-platform-verifier = "0.7"
+tokio-rustls = { version = "0.26", default-features = false }
 # Random token bytes (`crypto.getRandomValues`).
 ring = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 # Task-local audit actor (`withAuditContext`, P3.6-X1).
-tokio = { workspace = true, features = ["rt", "time"] }
+tokio = { workspace = true, features = ["rt", "time", "net", "io-util"] }
 tracing = { workspace = true }
 # Chat links of inboxes (`new URL` + `searchParams.set`).
 url = { workspace = true }

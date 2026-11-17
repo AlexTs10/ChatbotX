@@ -15,6 +15,7 @@ pub mod mailchimp;
 pub mod mailer_lite;
 pub mod moosend;
 pub mod sendgrid;
+pub mod smtp;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
