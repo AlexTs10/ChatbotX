@@ -8,6 +8,7 @@ mod condition;
 mod contact;
 mod conversation;
 pub mod delay;
+mod email_marketing;
 mod messenger;
 mod pipeline;
 mod places;
@@ -148,6 +149,9 @@ pub(crate) async fn run(
         return Ok(status);
     }
     if let Some(status) = messenger::run(&ctx, step_type).await? {
+        return Ok(status);
+    }
+    if let Some(status) = email_marketing::run(&ctx, step_type).await? {
         return Ok(status);
     }
     match step_type {

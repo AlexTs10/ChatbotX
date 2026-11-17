@@ -11,6 +11,7 @@
 mod analytics;
 mod contacts;
 mod conversations;
+mod email_marketing;
 mod flows;
 mod inboxes;
 pub(crate) mod integrations;
@@ -137,6 +138,9 @@ pub async fn procedure(
         return Some(outcome);
     }
     if let Some(outcome) = tools::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_marketing::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     if let Some(outcome) = templates::procedure(ctx, path, input).await {

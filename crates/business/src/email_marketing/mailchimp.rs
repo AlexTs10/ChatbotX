@@ -243,6 +243,109 @@ pub fn format_merge_field_value(tag: &str, field_type: Option<&str>, raw: &str) 
     }
 }
 
+const MAX_RETRIES: u32 = 3;
+
+/// `addMailchimpMember`: merge fields formatted by their (live) type, the
+/// upsert retried up to 3 times (1 s, 2 s, 4 s) unless a non-429 4xx.
+pub async fn add_member_step(
+    db: &chatbotx_db::Db,
+    http: &dyn Http,
+    workspace_id: i64,
+    contact_id: i64,
+    step: &Value,
+) -> Outcome<()> {
+    add_member_step_with(
+        db,
+        http,
+        workspace_id,
+        contact_id,
+        step,
+        std::time::Duration::from_secs(1),
+    )
+    .await
+}
+
+pub(crate) async fn add_member_step_with(
+    db: &chatbotx_db::Db,
+    http: &dyn Http,
+    workspace_id: i64,
+    contact_id: i64,
+    step: &Value,
+    backoff: std::time::Duration,
+) -> Outcome<()> {
+    let auth = super::load_auth(db, "mailchimp", workspace_id).await?;
+    let fields = super::contact_field_map(db, workspace_id, contact_id).await?;
+    let email = super::step_str(step, "email")
+        .and_then(|key| fields.get(key))
+        .filter(|e| !e.is_empty())
+        .cloned()
+        .ok_or_else(|| ProviderError::new("Mailchimp member email is empty"))?;
+    let list_id = super::step_str(step, "listId").unwrap_or_default();
+    let mappings: Vec<&Value> = step
+        .get("mergeFields")
+        .and_then(Value::as_array)
+        .map(|m| m.iter().collect())
+        .unwrap_or_default();
+    let value_of = |m: &Value| {
+        m.get("customFieldId")
+            .and_then(Value::as_str)
+            .and_then(|id| fields.get(id))
+            .filter(|v| !v.trim().is_empty())
+            .cloned()
+    };
+    let needs_types = mappings
+        .iter()
+        .any(|m| m.get("type").and_then(Value::as_str).is_none() && value_of(m).is_some());
+    let live: Vec<Value> = if needs_types {
+        list_merge_fields(http, &auth, list_id).await?
+    } else {
+        Vec::new()
+    };
+    let mut merge_fields = Map::new();
+    for mapping in mappings {
+        let (Some(tag), Some(value)) = (
+            mapping.get("tag").and_then(Value::as_str),
+            value_of(mapping),
+        ) else {
+            continue;
+        };
+        let live_type = live
+            .iter()
+            .find(|f| f["tag"].as_str() == Some(tag))
+            .and_then(|f| f["type"].as_str());
+        let kind = mapping.get("type").and_then(Value::as_str).or(live_type);
+        if let Some(formatted) = format_merge_field_value(tag, kind, &value) {
+            merge_fields.insert(tag.to_owned(), formatted);
+        }
+    }
+    let double_opt_in = step
+        .get("doubleOptIn")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let tags = super::step_strings(step, "tags");
+    let mut attempt = 0;
+    loop {
+        match add_member(
+            http,
+            &auth,
+            list_id,
+            &email,
+            double_opt_in,
+            &tags,
+            merge_fields.clone(),
+        )
+        .await
+        {
+            Ok(_) => return Ok(()),
+            Err(err) if !should_retry(&err) || attempt == MAX_RETRIES => return Err(err),
+            Err(_) => {
+                tokio::time::sleep(backoff * 2u32.pow(attempt)).await;
+                attempt += 1;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::test_http::FakeHttp;
