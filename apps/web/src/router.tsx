@@ -16,6 +16,8 @@ import { DefaultErrorPage, NotFoundPage, RootLayout } from "@/routes/root"
 const auth = () => import("@/routes/auth")
 const workspace = () => import("@/routes/workspace")
 const flows = () => import("@/routes/flows")
+const fields = () => import("@/routes/fields")
+const sequences = () => import("@/routes/sequences")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -137,6 +139,36 @@ const flowsPages = [
     component: lazyRouteComponent(flows, "FlowsPage"),
   }),
 ]
+// A layout route with one index page (`<name>/layout.tsx` + `page.tsx`).
+function sectionRoute<T extends Record<string, unknown>>(
+  path: string,
+  load: () => Promise<T>,
+  layout: keyof T & string,
+  page: keyof T & string,
+) {
+  const section = createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(load, layout),
+  })
+  return section.addChildren([
+    createRoute({
+      getParentRoute: () => section,
+      path: "/",
+      component: lazyRouteComponent(load, page),
+    }),
+  ])
+}
+const sectionRoutes = [
+  sectionRoute("tags", fields, "TagsLayout", "TagsPage"),
+  sectionRoute(
+    "custom-fields",
+    fields,
+    "CustomFieldsLayout",
+    "CustomFieldsPage",
+  ),
+  sectionRoute("sequences", sequences, "SequencesLayout", "SequencesPage"),
+]
 
 // `(no-sidebar)`: the flow editor is outside the workspace sidebar layout.
 const flowDetailRoute = createRoute({
@@ -166,6 +198,7 @@ const routeTree = rootRoute.addChildren([
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
+      ...sectionRoutes,
     ]),
   ]),
 ])
