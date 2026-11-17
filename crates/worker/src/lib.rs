@@ -7,6 +7,7 @@
 //! ([`start`]).
 
 pub mod ai;
+pub mod ai_agent;
 pub mod ai_file;
 pub mod ai_handover;
 pub mod channel;
@@ -14,6 +15,7 @@ pub mod channels;
 pub mod chat;
 pub mod default_queue;
 pub mod flow;
+pub mod inbound;
 pub mod integration;
 pub mod meta_catalog;
 pub mod schedule;
@@ -147,7 +149,7 @@ fn handler(deps: &Deps, run: QueueHandler) -> Handler {
     Arc::new(move |job| run(deps.clone(), job))
 }
 
-/// Starts the `chat`, `integration` and `default` workers (`runWorker` +
+/// Starts the `chat`, `integration`, `ai-agent` and `default` workers (`runWorker` +
 /// `createQueueWorker`) with the original concurrency envs.
 pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     let specs = chatbotx_jobs::runtime::worker_specs();
@@ -169,6 +171,14 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
             200,
         )),
         handler(deps, |deps, job| Box::pin(integration::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::AiAgent).concurrency(concurrency_env(
+            "AI_AGENT_WORKER_CONCURRENCY",
+            5,
+            200,
+        )),
+        handler(deps, |deps, job| Box::pin(ai_agent::handle(deps, job))),
     )?;
     runtime.spawn_worker(
         spec_of(QueueName::Default),

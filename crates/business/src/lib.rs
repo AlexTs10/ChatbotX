@@ -40,6 +40,7 @@ pub mod integration_ai_provider;
 pub mod integration_api;
 pub mod integration_openai_compatible;
 pub mod integration_webchat;
+pub mod keyword_match;
 pub mod media_library;
 pub mod message;
 pub mod message_actions;
@@ -61,6 +62,7 @@ pub mod store_source;
 pub mod tag;
 pub mod tx;
 pub mod vendor;
+pub mod workspace;
 pub mod workspace_api_token;
 pub mod workspace_member;
 

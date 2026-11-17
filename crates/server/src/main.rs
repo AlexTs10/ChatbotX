@@ -2,6 +2,7 @@
 
 mod config;
 mod web;
+mod whatsapp;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -261,6 +262,10 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
     app = app.merge(chatbotx_api::files::router(Arc::clone(&shared.files)));
+    app = app.merge(whatsapp::router(
+        Arc::clone(&shared.db),
+        Arc::clone(&jobs) as _,
+    ));
     // The public API and the SPA (`apps/web/dist`, P4) answer every path no
     // route matched: the SPA takes the GETs outside the API paths.
     let public_api = chatbotx_api::routes::public_api_router_with(auth, api);

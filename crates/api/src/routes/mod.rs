@@ -324,7 +324,7 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                         &store,
                         idempotency_call(headers, route, &credential_id, &input),
                         || async {
-                            channels::handle(state, route.id, call)
+                            channels::handle(state, route.id, call, body)
                                 .await
                                 .map(|reply| reply.unwrap_or_else(IntoResponse::into_response))
                         },

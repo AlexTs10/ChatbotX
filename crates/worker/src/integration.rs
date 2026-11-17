@@ -152,6 +152,12 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "aiHandoverBulkToggle" => {
             crate::ai_handover::run_bulk_toggle(&deps, &job.data["data"]).await?;
         }
+        crate::inbound::INCOMING_MESSAGE => {
+            crate::inbound::incoming_message(&deps, &job.data["data"]).await?
+        }
+        crate::inbound::MESSAGE_STATUS => {
+            crate::inbound::message_status(&deps, &job.data["data"]).await?
+        }
         other => {
             // ponytail: every other integration action is a later unit
             // (inbound channels Q.I*, steps, sequences, ...).
