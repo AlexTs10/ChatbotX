@@ -13,7 +13,7 @@ domain is in Rust.
 | # | Slice | State |
 |---|-------|-------|
 | 1 | LLM runtime (`crates/worker/src/ai/`): provider wire formats (OpenAI chat for OpenAI / DeepSeek / OpenRouter / Muse / OpenAI-compatible, Anthropic messages, Gemini `generateContent`) with the tool-step loop, model factory (`normalizeAIModelId`, Muse transform, `nearai` reasoning strip), toolset (knowledge-file search, AI functions, MCP tools), prompt guards, channel length instruction, AI context summary + summarizer; steps `aiGenerateText`, `aiGenerateTextAgent`, `aiDeleteMessageHistory` | 1a done |
-| 2 | Heavy queue: `processAIFile` (text extraction, chunkers, embeddings), AI handover bulk run (toggle engine, sweeper, chunk refund) | 2a done (text formats; binary formats left) |
+| 2 | Heavy queue: `processAIFile` (text extraction, chunkers, embeddings), AI handover bulk run (toggle engine, sweeper, chunk refund) | 2a done (text formats; binary formats left); parity ai-handover 34/34 |
 | 3 | Events (analytics, error log, flow, message incl. `message:failed`), webhook, notification, schedule crons, leaderboard, questionnaires + Get User Data, marketing message, low | todo |
 | 4 | `default-worker` tests (16) and the default / template handlers of Rust domains | todo |
 
@@ -94,6 +94,13 @@ domain is in Rust.
 ## State
 
 Slice 1a (LLM runtime + 3 AI steps): 196 worker tests pass (Dell; 168 before); fmt, clippy -D warnings clean.
-Slice 2a (AI hand-over bulk engine + sweeper, schedule worker, `processAIFile` for text formats, `processPendingEmbedding`): 263 worker + 7 server tests pass (Dell; 196 before); fmt, clippy -D warnings clean. Parity p1-03 ai-handover / p1-02 ai-files not run yet (end of the big slices).
+Slice 2a (AI hand-over bulk engine + sweeper, schedule worker, `processAIFile` for text formats, `processPendingEmbedding`): 263 worker + 7 server tests pass (Dell; 196 before); fmt, clippy -D warnings clean. Parity (Rust stack, e4d85bcc3): p1-03 ai-handover 34/34 (30/34 before); p1-02 ai-files 1/16: each failing case stops in its setup at `PUT /v1/integrations/ai/openai` ("Operation not ported yet", AI key connect P3.6-D2, not in `conversion` at 1da18811c), so the worker part is not reached; rerun after the P3.6-D2 merge.
 Left in slice 2: PDF / DOCX / XLSX / PPTX / PPT / EPUB / e-mail extraction (parser crates), the other heavy actions (image edit / generate / segment, speech, analyze image, extract text, optimize stored image), the bulk thread-control batches (Q.D12 / Q.I1b).
 Left in slice 1: `aiAnalyzeImage`, `aiEditImage` / `aiGenerateImage` / `aiSegmentImage` / text to speech (heavy queue), `aiExtractData`, the automated response (`processAutomatedResponse`, rich replies, system tools, global router), AI agent actions / handoff re-entry, comment AI reply / moderation, story automations, the `aiAgent` queue jobs (`processPendingEmbedding`, `summarizeConversation`, conversation sources).
+
+## Left (next runs, brief order)
+
+1. Slice 1 rest: `aiAnalyzeImage`, `aiExtractData`, heavy image / speech steps, the automated response (`processAutomatedResponse`, system tools, global router), AI agent actions / handoff re-entry, comment AI reply / moderation, story automations, `summarizeConversation`, conversation sources.
+2. Slice 2 rest: PDF / DOCX / XLSX / PPTX / PPT / EPUB / e-mail extraction (parser crates, Cargo.lock on the Mac), the other heavy actions, the bulk thread-control batches (with Q.D12 / Q.I1b). Parity p1-02 ai-files after the P3.6-D2 merge.
+3. Slice 3: events (analytics, error log incl. `logProviderError`, flow, message incl. `message:failed`) on the SQLite event bus, webhook (outgoing; Rust already enqueues these jobs), trigger, notification, schedule crons (add each to `schedule::PORTED`), leaderboard, questionnaires + Get User Data, marketing message, low.
+4. Slice 4: `default-worker` tests (16) and the default / template handlers of Rust domains.
