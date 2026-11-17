@@ -109,6 +109,8 @@ pub struct HandoverEvent {
     pub handover_note: Option<String>,
     pub context: Option<Value>,
     pub occurred_at: i64,
+    /// `onlyIfOwnedByAppId`: an inferred hand-back applies only to a thread that app holds.
+    pub only_if_owned_by_app_id: Option<String>,
 }
 
 fn as_text(value: Option<&Value>) -> Option<String> {
@@ -258,17 +260,114 @@ pub fn parse_handover_event(value: &Value, now: i64) -> Option<HandoverEvent> {
     })
 }
 
-/// `receiveThreadControlEvent` for a WhatsApp handover: resolves (or, for
+/// `messengerTimestampToOccurredAt`: Meta milliseconds, floored to whole seconds.
+fn messenger_ms(value: Option<&Value>, now: i64) -> i64 {
+    let ms = match timestamp_text(value).and_then(|t| t.parse::<f64>().ok()) {
+        Some(ms) if ms.is_finite() && ms > 0.0 => ms as i64,
+        _ => now,
+    };
+    chatbotx_db::repo::partials::thread_control::to_thread_control_timestamp(ms)
+}
+
+/// `isAiHandbackNotice` of a `messaging[]` item.
+fn is_ai_handback_notice(item: &Value) -> bool {
+    crate::channels::messenger_webhook::is_ai_handback_notice(item)
+        && item.get("pass_thread_control").is_none()
+        && item.get("take_thread_control").is_none()
+}
+
+/// Messenger `parseHandoverEvent` (`pass_thread_control` / `take_thread_control` /
+/// the Business-AI hand-back notice). The owner is an app id, never a role.
+pub fn parse_messenger_handover_event(
+    item: &Value,
+    now: i64,
+    own_app_id: Option<&str>,
+) -> Option<HandoverEvent> {
+    let Some(sender) = item
+        .pointer("/sender/id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        tracing::warn!("Messenger handover skipped: malformed payload");
+        return None;
+    };
+    let occurred_at = messenger_ms(item.get("timestamp"), now);
+    let passed = item.get("pass_thread_control").filter(|p| p.is_object());
+    let Some(payload) =
+        passed.or_else(|| item.get("take_thread_control").filter(|p| p.is_object()))
+    else {
+        if is_ai_handback_notice(item) {
+            let ai = tc::channel::business_ai_app_id();
+            return Some(HandoverEvent {
+                source_id: sender.to_owned(),
+                event: "controlPassed",
+                previous_owner_app_id: Some(ai.clone()),
+                only_if_owned_by_app_id: Some(ai),
+                new_owner_app_id: own_app_id.map(str::to_owned),
+                occurred_at,
+                ..HandoverEvent::default()
+            });
+        }
+        tracing::warn!("Messenger handover skipped: no pass/take payload");
+        return None;
+    };
+    let note = payload
+        .pointer("/thread_control_metadata/text")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("metadata").and_then(Value::as_str))
+        .filter(|n| !n.trim().is_empty())
+        .map(str::to_owned);
+    Some(HandoverEvent {
+        source_id: sender.to_owned(),
+        event: if passed.is_some() {
+            "controlPassed"
+        } else {
+            "controlTaken"
+        },
+        previous_owner_app_id: app_id(payload.get("previous_owner_app_id")),
+        new_owner_app_id: app_id(payload.get("new_owner_app_id")),
+        handover_note: note,
+        occurred_at,
+        ..HandoverEvent::default()
+    })
+}
+
+/// `withHandoverDecisions`: the direction follows the app ids (a pass to another
+/// app is a take from us; a take naming us is ours), and the Business-AI app is
+/// the `ai_agent` role on either side.
+pub fn with_messenger_decisions(
+    mut event: HandoverEvent,
+    own_app_id: Option<&str>,
+) -> HandoverEvent {
+    if let (Some(own), Some(new_owner)) = (own_app_id, event.new_owner_app_id.as_deref()) {
+        let is_us = new_owner == own;
+        if event.event == "controlPassed" && !is_us {
+            event.event = "controlTaken";
+        } else if event.event == "controlTaken" && is_us {
+            event.event = "controlPassed";
+        }
+    }
+    let ai = tc::channel::business_ai_app_id();
+    if event.new_owner_app_id.as_deref() == Some(ai.as_str()) {
+        event.new_owner_role = Some("ai_agent");
+    }
+    if event.previous_owner_app_id.as_deref() == Some(ai.as_str()) {
+        event.previous_owner_role = Some("ai_agent");
+    }
+    event
+}
+
+/// `receiveThreadControlEvent` for a WhatsApp or Messenger handover: resolves (or, for
 /// `controlPassed`, creates) the contact and records the event.
 ///
-/// ponytail: standby messages / echoes, the Messenger routing items, the hand-back
+/// ponytail: standby messages / echoes, Messenger requests / app roles, the hand-back
 /// response (resume flow / AI settings, `startHandoverResponse`) and the AI
 /// take-back are not ported; they are logged and acknowledged.
 pub async fn receive_event(deps: &Deps, data: &Value) -> Result<(), JobError> {
     let integration_type = str_of(data, "integrationType").unwrap_or("");
     let payload = &data["payload"];
     let kind = str_of(payload, "kind").unwrap_or("");
-    if integration_type != "whatsapp" || kind != "handover" {
+    if !matches!(integration_type, "whatsapp" | "messenger") || kind != "handover" {
         tracing::info!(
             integration_type,
             kind,
@@ -276,9 +375,6 @@ pub async fn receive_event(deps: &Deps, data: &Value) -> Result<(), JobError> {
         );
         return Ok(());
     }
-    let Some(event) = parse_handover_event(&payload["body"], chatbotx_db::repo::now_ms()) else {
-        return Ok(());
-    };
     let identifier = str_of(data, "integrationIdentifier").unwrap_or("");
     let resolved = deps
         .channels
@@ -290,10 +386,26 @@ pub async fn receive_event(deps: &Deps, data: &Value) -> Result<(), JobError> {
         )
         .await
         .map_err(|e| JobError::unrecoverable(e.to_string()))?;
-    let Some((_, _, inbox)) = resolved else {
+    let Some((_, channel_ctx, inbox)) = resolved else {
         return Err(JobError::unrecoverable(format!(
             "Integration not found: {integration_type} {identifier}"
         )));
+    };
+    let now = chatbotx_db::repo::now_ms();
+    let event = if integration_type == "messenger" {
+        let own = channel_ctx
+            .auth
+            .get("clientId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        parse_messenger_handover_event(&payload["body"], now, own)
+            .map(|e| with_messenger_decisions(e, own))
+    } else {
+        parse_handover_event(&payload["body"], now)
+    };
+    let Some(event) = event else {
+        return Ok(());
     };
     let contact = crate::channel::IncomingContact {
         source_id: event.source_id.clone(),
@@ -345,6 +457,17 @@ pub async fn receive_event(deps: &Deps, data: &Value) -> Result<(), JobError> {
             (ci, conversation)
         }
     };
+    // ponytail: `isOwnRetry` (a retry of our own applied hand-back) is not checked;
+    // a retried job after the row changed is dropped like a new one.
+    if let Some(only) = event.only_if_owned_by_app_id.as_deref()
+        && contact_inbox.thread_owner_app_id.as_deref() != Some(only)
+    {
+        tracing::debug!(
+            contact_inbox_id = contact_inbox.id,
+            "Dropping an inferred hand-back: the thread is not held by the app it names"
+        );
+        return Ok(());
+    }
     let (ws, inbox_id) = (inbox.workspace_id, inbox.inbox_id);
     let seen_at = deps
         .db
@@ -555,5 +678,64 @@ mod tests {
         assert!(webhook_jobs(&envelope(value.clone()), Some("phone-2")).is_empty());
         value.as_object_mut().unwrap().remove("recipient");
         assert!(webhook_jobs(&envelope(value), None).is_empty());
+    }
+
+    // integrations/messenger/__tests__/conversation-routing-parsers.test.ts
+
+    #[test]
+    fn messenger_pass_is_controlpassed_with_app_ids_note_and_floored_seconds() {
+        let item = json!({ "sender": { "id": "psid" }, "recipient": { "id": "page" },
+            "timestamp": 1_700_000_000_123_i64,
+            "pass_thread_control": { "new_owner_app_id": 42, "previous_owner_app_id": "9",
+                "thread_control_metadata": { "text": "note" }, "metadata": "flat" } });
+        let event = parse_messenger_handover_event(&item, 1, None).unwrap();
+        assert_eq!(event.event, "controlPassed");
+        assert_eq!(event.new_owner_app_id.as_deref(), Some("42"));
+        assert_eq!(event.previous_owner_app_id.as_deref(), Some("9"));
+        assert_eq!(event.handover_note.as_deref(), Some("note"));
+        assert_eq!(event.occurred_at, 1_700_000_000_000);
+        assert!(
+            parse_messenger_handover_event(&json!({ "pass_thread_control": {} }), 1, None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn messenger_direction_follows_the_app_ids_and_the_ai_app_is_the_ai_agent() {
+        let ai = tc::channel::business_ai_app_id();
+        let pass_to_ai = json!({ "sender": { "id": "psid" },
+            "pass_thread_control": { "new_owner_app_id": ai.clone() } });
+        let event = with_messenger_decisions(
+            parse_messenger_handover_event(&pass_to_ai, 1, Some("own")).unwrap(),
+            Some("own"),
+        );
+        assert_eq!(
+            (event.event, event.new_owner_role),
+            ("controlTaken", Some("ai_agent"))
+        );
+        let take_by_us = json!({ "sender": { "id": "psid" },
+            "take_thread_control": { "new_owner_app_id": "own", "previous_owner_app_id": ai } });
+        let event = with_messenger_decisions(
+            parse_messenger_handover_event(&take_by_us, 1, Some("own")).unwrap(),
+            Some("own"),
+        );
+        assert_eq!(
+            (event.event, event.previous_owner_role),
+            ("controlPassed", Some("ai_agent"))
+        );
+    }
+
+    #[test]
+    fn messenger_ai_handback_notice_is_a_pass_only_if_the_ai_holds_the_thread() {
+        let notice = json!({ "sender": { "id": "psid" }, "timestamp": 5000,
+            "message": { "admin_text": "The AI handed the chat back" } });
+        let event = parse_messenger_handover_event(&notice, 1, Some("own")).unwrap();
+        let ai = tc::channel::business_ai_app_id();
+        assert_eq!(event.event, "controlPassed");
+        assert_eq!(event.only_if_owned_by_app_id.as_deref(), Some(ai.as_str()));
+        assert_eq!(event.new_owner_app_id.as_deref(), Some("own"));
+        let vietnamese =
+            json!({ "sender": { "id": "psid" }, "message": { "admin_text": "ai đó" } });
+        assert!(parse_messenger_handover_event(&vietnamese, 1, None).is_none());
     }
 }

@@ -156,7 +156,7 @@ pub fn is_routing_item(item: &Value) -> bool {
 }
 
 /// `isAiHandbackNotice`: a `message` with only an `admin_text` naming the AI.
-fn is_ai_handback_notice(item: &Value) -> bool {
+pub(crate) fn is_ai_handback_notice(item: &Value) -> bool {
     static AI_WORD: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\bAI\b").expect("static regex"));
     let Some(message) = item.get("message").filter(|m| m.is_object()) else {
@@ -227,25 +227,48 @@ pub fn webhook_jobs(body: &str) -> Result<Vec<WebhookJob>, String> {
             .into_iter()
             .flatten()
             .collect();
-        // ponytail: Conversation Routing items (`threadControlEvent`:
-        // handover, requests, app roles, standby) wait for the thread
-        // control port (Q.D12); they are dropped with a log.
-        let routing = entry
+        // `extractConversationRoutingPayloads`: a handover (pass / take / the AI
+        // hand-back notice) is a `threadControlEvent` job.
+        // ponytail: requests, app roles and standby deliveries are dropped with a
+        // log (their handlers are not ported).
+        let messaging: Vec<&Value> = entry
             .get("messaging")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .filter(|i| is_routing_item(i))
-            .count()
-            + entry
-                .get("standby")
-                .and_then(Value::as_array)
-                .map_or(0, Vec::len);
-        if routing > 0 {
+            .collect();
+        let mut skipped = entry
+            .get("standby")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        for item in messaging {
+            if item.get("pass_thread_control").is_none()
+                && item.get("take_thread_control").is_none()
+                && !is_ai_handback_notice(item)
+            {
+                skipped += 1;
+                continue;
+            }
+            let hash = chatbotx_core::utils::crypto::sha256_hex(&item.to_string());
+            jobs.push(WebhookJob {
+                name: "threadControlEvent",
+                data: json!({ "type": "threadControlEvent", "data": {
+                    "integrationType": "messenger",
+                    "integrationIdentifier": page_id,
+                    "payload": { "kind": "handover", "body": item },
+                }}),
+                job_id: format!(
+                    "fb-tc-{}-{hash}",
+                    crate::channels::whatsapp_webhook::safe_id_segment(page_id)
+                ),
+            });
+        }
+        if skipped > 0 {
             tracing::info!(
                 page_id,
-                routing,
-                "Messenger conversation routing items not processed (thread control not ported)"
+                skipped,
+                "Messenger conversation routing items not processed (not ported)"
             );
         }
         if changes
@@ -576,6 +599,7 @@ mod tests {
         assert_eq!(
             names(&jobs),
             vec![
+                "threadControlEvent",
                 "incomingMessage",
                 "incomingMessage",
                 "contactMarkAsRead",
@@ -587,15 +611,16 @@ mod tests {
             ]
         );
         assert_eq!(
-            jobs[0].data["data"]["payload"]["entry"][0]["messaging"]
+            jobs[1].data["data"]["payload"]["entry"][0]["messaging"]
                 .as_array()
                 .unwrap()
                 .len(),
             1
         );
-        assert_eq!(jobs[5].data["data"]["action"], "P");
+        assert_eq!(jobs[6].data["data"]["action"], "P");
         // An echo is routed by its sender (the page).
-        assert_eq!(jobs[6].data["data"]["integrationIdentifier"], "page-1");
+        assert_eq!(jobs[7].data["data"]["integrationIdentifier"], "page-1");
+        assert!(jobs[0].job_id.starts_with("fb-tc-page-1-"));
     }
 
     #[test]
