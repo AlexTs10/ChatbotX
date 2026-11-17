@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use super::test_support::*;
 use crate::variables::{DbSources, VariableDeps};
 
-fn with_variables(fx: &mut Fixture) {
+pub(crate) fn with_variables(fx: &mut Fixture) {
     fx.deps.variables = Some(Arc::new(VariableDeps {
         sources: DbSources {
             db: fx.deps.db.clone(),

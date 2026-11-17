@@ -3,6 +3,7 @@
 //! each returns the routing status (`ExecuteStepResult.status`), `success`
 //! for the TypeScript `void` handlers.
 
+mod ai_step;
 mod condition;
 mod contact;
 mod conversation;
@@ -142,6 +143,9 @@ pub(crate) async fn run(
     if let Some(status) = reply::run(&ctx, step_type).await? {
         return Ok(status);
     }
+    if let Some(status) = ai_step::run(&ctx, step_type).await? {
+        return Ok(status);
+    }
     match step_type {
         "condition" => condition::handle(&ctx).await,
         "pipeline" => pipeline::handle(&ctx).await,
@@ -169,6 +173,8 @@ pub(crate) async fn run(
     }
 }
 
+#[cfg(test)]
+mod ai_tests;
 #[cfg(test)]
 mod send_flow_step_tests;
 #[cfg(test)]

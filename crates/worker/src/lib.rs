@@ -6,6 +6,9 @@
 //! Handlers run on the `chatbotx-jobs` runtime inside `chatbotx-server`
 //! ([`start`]).
 
+pub mod ai;
+pub mod ai_file;
+pub mod ai_handover;
 pub mod channel;
 pub mod channels;
 pub mod chat;
@@ -13,6 +16,7 @@ pub mod default_queue;
 pub mod flow;
 pub mod integration;
 pub mod meta_catalog;
+pub mod schedule;
 pub mod send_flow_step;
 pub mod steps;
 pub mod variables;
@@ -43,6 +47,10 @@ pub struct Deps {
     pub app_url: String,
     /// `{{variable}}` resolution; `None` = spintax only.
     pub variables: Option<Arc<variables::VariableDeps>>,
+    /// The AI provider transport and embedder.
+    pub ai: Arc<ai::Ai>,
+    /// The file store (AI file extraction); `None` = not configured.
+    pub files: Option<Arc<chatbotx_files::Uploader>>,
 }
 
 /// A handler failure that BullMQ would retry (`throw new Error(..)`).
@@ -165,6 +173,20 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     runtime.spawn_worker(
         spec_of(QueueName::Default),
         handler(deps, |deps, job| Box::pin(default_queue::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::Heavy),
+        handler(deps, |deps, job| Box::pin(ai_file::handle_heavy(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::AiAgent),
+        handler(deps, |deps, job| {
+            Box::pin(ai_file::handle_ai_agent(deps, job))
+        }),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::Schedule),
+        handler(deps, |deps, job| Box::pin(schedule::handle(deps, job))),
     )?;
     Ok(())
 }
