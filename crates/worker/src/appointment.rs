@@ -435,3 +435,108 @@ mod tests {
         assert_eq!(id, deterministic_event_id(42));
     }
 }
+
+/// `APPOINTMENT_CANCEL_FEEDBACK_COPY`: `(unavailable, workspaceInactive)`.
+fn cancel_feedback(language: Option<String>, inactive: bool) -> &'static str {
+    match (language.as_deref() == Some("vi"), inactive) {
+        (false, false) => "This cancellation link has expired or is no longer available.",
+        (false, true) => {
+            "This appointment cannot be cancelled because the workspace is currently inactive."
+        }
+        (true, false) => "Liên kết hủy lịch đã hết hạn hoặc không còn khả dụng.",
+        (true, true) => "Không thể hủy lịch vì workspace đang tạm ngưng.",
+    }
+}
+
+/// The appointment cancel postback of `processIncomingMessage`: verify,
+/// cancel (when the workspace is active), else a feedback message.
+pub(crate) async fn cancel_postback(
+    deps: &Deps,
+    stored: &crate::inbound::Stored,
+    payload: &str,
+    workspace_active: bool,
+) {
+    use chatbotx_business::contact::update_fields::normalize_language;
+    let ci = &stored.contact_inbox;
+    let contact = &stored.received.contact;
+    let language = normalize_language(ci.language.as_deref())
+        .or_else(|| normalize_language(contact.language.as_deref()))
+        .or_else(|| normalize_language(contact.locale.as_deref()));
+    let outcome = cancel_by_postback(deps, payload, workspace_active).await;
+    let feedback = match outcome {
+        Ok(true) => return,
+        Ok(false) => cancel_feedback(language, !workspace_active),
+        Err(error) => {
+            tracing::warn!(
+                conversation_id = stored.conversation.id,
+                contact_inbox_id = ci.id,
+                err = %error,
+                "Appointment cancel postback failed"
+            );
+            cancel_feedback(language, false)
+        }
+    };
+    let data = json!({
+        "type": chatbotx_jobs::chat_wait::SEND_CHAT_MESSAGE_ACTION,
+        "data": {
+            "conversationId": stored.conversation.id.to_string(),
+            "contactInboxId": ci.id.to_string(),
+            "text": feedback,
+        },
+    });
+    if let Err(error) = deps
+        .jobs
+        .add(
+            chatbotx_jobs::QueueName::Chat,
+            chatbotx_jobs::chat_wait::SEND_CHAT_MESSAGE_ACTION,
+            data,
+            chatbotx_jobs::JobOptions::default(),
+        )
+        .await
+    {
+        tracing::warn!(
+            conversation_id = stored.conversation.id,
+            err = %error,
+            action = "sendAppointmentCancelFeedback",
+            "Failed to send appointment cancel feedback"
+        );
+    }
+}
+
+/// `Ok(true)` = cancelled (no feedback); `Ok(false)` = the feedback case.
+async fn cancel_by_postback(
+    deps: &Deps,
+    payload: &str,
+    workspace_active: bool,
+) -> Result<bool, String> {
+    let encryption = crate::channels::meta_webhook::encryption_from_env()
+        .ok_or("ENCRYPTION_KEY is not configured")?;
+    let claims = encryption
+        .verify_appointment_cancel_postback(payload)
+        .map_err(|e| e.to_string())?
+        .claims;
+    if !workspace_active {
+        return Ok(false);
+    }
+    let id = |v: &str| v.parse::<i64>().map_err(|e| e.to_string());
+    let external = ExternalCalendars {
+        encryption: Some(encryption.clone()),
+        ..Default::default()
+    };
+    let deps = chatbotx_business::appointment::booking::Deps {
+        db: &deps.db,
+        jobs: Some(deps.jobs.as_ref()),
+        external: &external,
+    };
+    let contact_inbox_id = claims.contact_inbox_id.as_deref().map(id).transpose()?;
+    let (cancellable, _) = chatbotx_business::appointment::booking::cancel_by_token(
+        deps,
+        id(&claims.workspace_id)?,
+        id(&claims.appointment_id)?,
+        id(&claims.contact_id)?,
+        contact_inbox_id,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(cancellable)
+}
