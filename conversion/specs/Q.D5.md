@@ -85,7 +85,7 @@ Per test case: `specs/Q.D5-test-map.tsv` (file, line, name, Rust test, status, n
 
 ## 4. State
 
-Slices 1–3 done (`641f599f2`). Slice 4 done (`8b3cfe662`), 4b done (`e67dd7857`), 5a done (`59388ee17`), 5b done (`ff0bf948b`, gate: 2215 tests pass), 6 done (`c14e0fdeb`, gate: 683 jobs/worker/server tests pass), 7 done (gate: 2315 jobs/business/worker tests pass). Gate per commit: fmt, clippy `-D warnings`, `cargo test`
+Slices 1–9 done (8 and 9 in `17637b577`, gate: 3744 business/worker/api/server tests pass). Slices 1–3 done (`641f599f2`). Slice 4 done (`8b3cfe662`), 4b done (`e67dd7857`), 5a done (`59388ee17`), 5b done (`ff0bf948b`, gate: 2215 tests pass), 6 done (`c14e0fdeb`, gate: 683 jobs/worker/server tests pass), 7 done (gate: 2315 jobs/business/worker tests pass). Gate per commit: fmt, clippy `-D warnings`, `cargo test`
 for `chatbotx-business`, `chatbotx-api`, `chatbotx-jobs`, `chatbotx-worker` (Dell).
 
 Parity (Rust stack, Dell, 2026-11-17): `p1-04/11-broadcasts` and
@@ -94,3 +94,13 @@ Parity (Rust stack, Dell, 2026-11-17): `p1-04/11-broadcasts` and
 12 pass after 5b (the scheduler run is materialized by the worker).
 After 6: `p1-06/06-notes-sequences` 8 of 8 and `p1-04/12-broadcasts-recurrence`
 12 of 12 (the server boots with the sequence scheduler).
+Final run after the merge and slices 8–9 (Dell, 2026-11-17): 67 of 74.
+`p1-04/12-broadcasts-recurrence` 12/12, `p1-06/06-notes-sequences` 8/8,
+`p1-08/04-email-topics` 8/8, `p1-10/40-keywords-crud` 14/14. Failures:
+`p1-04/11-broadcasts` 2 (`listContacts`, Q.D11); `p1-04/13-broadcasts-worker`
+1 of 3: the broadcast reaches `sent` only after the 10-minute outcome grace,
+because no Rust code emits `message:sent` and the `broadcast-ops` listener
+(`broadcastAnalyticsService.onMessageSent` / `onFailed`, which set
+`ContactOnBroadcast.deliveredAt` / `failedAt`) is not ported (Q.W2 "Left":
+analytics listeners); `p1-10/41-keywords-trigger` 4 of 8 time out (the
+inbound reply pipeline `processAutomatedResponse`, Q.W2 "Left").
