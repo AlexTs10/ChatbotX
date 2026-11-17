@@ -1,8 +1,13 @@
 //! `features/integration-api/api/public.ts`: the channel-token routes
 //! (`channels.*`). `channels.me` (P3.6-D2) and `channels.sendMessage`
-//! (Q.I1a: the API channel inbound).
+//! (Q.I1a: the API channel inbound), `typing` / `markRead` /
+//! `deliveryStatus` (Q.D2c: queued for the worker's API `Channel`).
 
+use axum::response::IntoResponse as _;
 use chatbotx_business::BusinessError;
+use chatbotx_jobs::queues::integration::{
+    IntegrationJob, IntegrationJobAction, enqueue_integration_job,
+};
 use chatbotx_jobs::{JobOptions, QueueName};
 use serde_json::{Map, Value, json};
 
@@ -10,7 +15,13 @@ use super::input::{Input, Seg, Str, child, key};
 use super::{ApiState, Reply, business_error, internal_error, json};
 
 /// The routes of this module.
-pub const ROUTES: &[&str] = &["channels.me", "channels.sendMessage"];
+pub const ROUTES: &[&str] = &[
+    "channels.me",
+    "channels.sendMessage",
+    "channels.typing",
+    "channels.markRead",
+    "channels.deliveryStatus",
+];
 
 /// The authenticated channel (`context.inbox`, `context.workspace`).
 #[derive(Debug, Clone, Copy)]
@@ -29,6 +40,9 @@ pub async fn handle(
     match route_id {
         "channels.me" => Some(me(state, call).await),
         "channels.sendMessage" => Some(send_message(state, call, body).await),
+        "channels.typing" | "channels.markRead" | "channels.deliveryStatus" => {
+            Some(signal(state, route_id, call, body).await)
+        }
         _ => None,
     }
 }
@@ -146,7 +160,7 @@ fn parse_incoming_api_message(body: &[u8]) -> Result<Value, crate::orpc::OrpcErr
                     input.enum_at(
                         &child(&path, "fileType"),
                         item.get("fileType"),
-                        &["image", "video", "audio", "gif", "file"],
+                        &["image", "audio", "video", "file"],
                         true,
                     );
                     input.string_at(&child(&path, "mimeType"), item.get("mimeType"), any, true);
@@ -198,19 +212,8 @@ fn parse_incoming_api_message(body: &[u8]) -> Result<Value, crate::orpc::OrpcErr
 /// `channels.sendMessage`: queue the inbound message on the integration
 /// queue (`incomingMessage`), `202 { accepted, messageSourceId }`.
 async fn send_message(state: &ApiState, call: ChannelCall, body: &[u8]) -> Reply {
-    if let Some(kv) = &state.kv {
-        let inbox = call.inbox_id.to_string();
-        chatbotx_kv::rate_limit::assert_api_not_rate_limited(
-            chatbotx_kv::rate_limit::ApiRateLimitInput {
-                scope: "channel-api-rate-limit",
-                key: &inbox,
-                store: &kv.mem,
-                now_ms: chatbotx_db::repo::now_ms(),
-                limit: None,
-            },
-            None,
-        )
-        .map_err(|e| crate::auth::rate_limited_to_orpc(&e))?;
+    if let Some(limited) = rate_limited(state, call) {
+        return Ok(limited);
     }
     let payload = parse_incoming_api_message(body)?;
     let source_id = payload["message"]["sourceId"].clone();
@@ -234,4 +237,139 @@ async fn send_message(state: &ApiState, call: ChannelCall, body: &[u8]) -> Reply
         202,
         json!({ "accepted": true, "messageSourceId": source_id }),
     ))
+}
+
+/// `{ contact: { sourceId: z.string().min(1) } }`.
+fn contact_source_id(input: &mut Input) -> Option<String> {
+    let path = key("contact");
+    match input.get("contact").cloned() {
+        Some(Value::Object(contact)) => {
+            let value = contact.get("sourceId");
+            let spec = Str {
+                min: Some(1),
+                ..Str::default()
+            };
+            input.string_at(&child(&path, "sourceId"), value, spec, true)
+        }
+        None => {
+            input.issue(
+                &path,
+                "invalid_type",
+                "Invalid input: expected object, received undefined",
+            );
+            None
+        }
+        Some(_) => {
+            input.issue(&path, "invalid_type", "Invalid input: expected object");
+            None
+        }
+    }
+}
+
+/// `channels.typing` (accepted and logged only), `channels.markRead`
+/// (`contactMarkAsRead` job) and `channels.deliveryStatus` (`messageStatus`
+/// job): `204` with no body.
+async fn signal(state: &ApiState, route_id: &str, call: ChannelCall, body: &[u8]) -> Reply {
+    let mut input = Input::from_body(&[], body);
+    let job = match route_id {
+        "channels.typing" => {
+            let source_id = contact_source_id(&mut input);
+            let value = input.get("typing").cloned();
+            input.bool_at(&key("typing"), value.as_ref(), true);
+            input.finish()?;
+            if let Some(limited) = rate_limited(state, call) {
+                return Ok(limited);
+            }
+            tracing::debug!(inbox_id = call.inbox_id, source_id = ?source_id, "Received contact typing notification");
+            None
+        }
+        "channels.markRead" => {
+            let source_id = contact_source_id(&mut input);
+            input.finish()?;
+            if let Some(limited) = rate_limited(state, call) {
+                return Ok(limited);
+            }
+            let source_id = source_id.unwrap_or_default();
+            Some(IntegrationJob {
+                action: IntegrationJobAction::ContactMarkAsRead,
+                data: json!({
+                    "integrationType": "api",
+                    "integrationIdentifier": call.inbox_id.to_string(),
+                    "sourceConversationId": source_id,
+                    "payload": { "contact": { "sourceId": source_id } },
+                }),
+            })
+        }
+        _ => {
+            let message_id = input.string(
+                "messageId",
+                Str {
+                    min: Some(1),
+                    ..Str::default()
+                },
+            );
+            let value = input.get("status").cloned();
+            let status = input.enum_at(
+                &key("status"),
+                value.as_ref(),
+                &["delivered", "failed", "read"],
+                true,
+            );
+            let timestamp = input.string("timestamp", Str::default());
+            let error = input.get("error").cloned();
+            input.finish()?;
+            if let Some(limited) = rate_limited(state, call) {
+                return Ok(limited);
+            }
+            let mut payload = Map::new();
+            payload.insert("messageId".into(), json!(message_id));
+            payload.insert("status".into(), json!(status));
+            payload.insert("timestamp".into(), json!(timestamp));
+            if let Some(error) = error {
+                payload.insert("error".into(), error);
+            }
+            Some(IntegrationJob {
+                action: IntegrationJobAction::MessageStatus,
+                data: json!({
+                    "integrationType": "api",
+                    "integrationIdentifier": call.inbox_id.to_string(),
+                    "payload": payload,
+                }),
+            })
+        }
+    };
+    if let Some(job) = job {
+        let jobs = state
+            .jobs
+            .as_ref()
+            .ok_or_else(|| internal_error("job queue is off"))?;
+        enqueue_integration_job(jobs.as_ref(), job, None)
+            .await
+            .map_err(|e| internal_error(&e.to_string()))?;
+    }
+    Ok(super::no_content())
+}
+
+/// `assertNotRateLimited` (120 requests per inbox per 10 s): the 429 with
+/// `Retry-After`, `None` = allowed.
+fn rate_limited(state: &ApiState, call: ChannelCall) -> Option<axum::response::Response> {
+    let kv = state.kv.as_ref()?;
+    let inbox = call.inbox_id.to_string();
+    let limited = chatbotx_kv::rate_limit::assert_api_not_rate_limited(
+        chatbotx_kv::rate_limit::ApiRateLimitInput {
+            scope: "channel-api-rate-limit",
+            key: &inbox,
+            store: &kv.mem,
+            now_ms: chatbotx_db::repo::now_ms(),
+            limit: None,
+        },
+        None,
+    )
+    .err()?;
+    let mut response = crate::auth::rate_limited_to_orpc(&limited).into_response();
+    response.headers_mut().insert(
+        axum::http::header::RETRY_AFTER,
+        axum::http::HeaderValue::from(limited.retry_after),
+    );
+    Some(response)
 }
