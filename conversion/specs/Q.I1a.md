@@ -65,3 +65,8 @@ integrationIdentifier, payload } }`. The worker:
 - `api/*` management calls (WABA setup, phone numbers, Flows builder,
   calling settings, conversions, subscriptions).
 - AI agent / product search / Global Router after a keyword miss (Q.D6).
+
+## Parity
+
+- p1-10 `41-keywords-trigger`: 8/8 on the Rust stack (2026-11-17, after c1925f064; was 0/8).
+- p1-11 `42-messages-whatsapp`: 0/7, waits for slice 4 (template / call permission / flow-response routes and the `createWhatsappChannel` / `createWhatsappTemplate` Rust fixtures).
