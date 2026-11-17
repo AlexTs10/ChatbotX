@@ -121,6 +121,10 @@ payload.
 
 ## Parity
 
+- 2026-11-17 after 5e715913b: p1-11 `60` 9/9; `50` 9/10; `51` 4/14; p1-10
+  `20` 12/15; `22` 3/9. Every failed in-scope case stops at `GET /v1/inboxes`
+  (`inboxes.list` not ported, not this unit); the others are CAPI (Q.D7) and
+  coexist (left).
 - p1-11 `41-messages-messenger`: 4/5 on the Rust stack (2026-11-17, after dd4749b47; was 0/5). The left case (two `mediaFileIds` on a comment reply -> 422 `imagesNotSupportedOnChannel`) needs the media-library outgoing path (`mediaFileIds`, now 501 `notPorted` in `contact_messages.rs`), owned by the messages unit.
 
 ## Left
