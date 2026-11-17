@@ -282,6 +282,10 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         },
     )))
     .merge(chatbotx_api::session::auth_router(Arc::clone(&sessions)))
+    .merge(chatbotx_api::session::invitation_start_router(
+        Arc::clone(&sessions),
+        Arc::clone(&shared.kv),
+    ))
     .layer(axum::middleware::from_fn_with_state(
         chatbotx_api::session::AuthRateLimit {
             kv: Arc::clone(&shared.kv),
