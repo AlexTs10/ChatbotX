@@ -902,7 +902,7 @@ fn url_suffix_example(url: &str, vars: &[String]) -> String {
 }
 
 /// `getBrokerOrigin()`.
-fn broker_origin(app_url: &str) -> String {
+pub(crate) fn broker_origin(app_url: &str) -> String {
     let raw = std::env::var("NEXT_PUBLIC_BROKER_URL")
         .ok()
         .filter(|v| !v.is_empty())

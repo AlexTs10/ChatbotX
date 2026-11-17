@@ -55,6 +55,7 @@ pub mod product_categories;
 pub mod product_imports;
 pub mod product_vendors;
 pub mod products;
+pub mod mini_apps;
 pub mod qr_codes;
 pub mod questionnaires;
 pub mod reflinks;
@@ -635,6 +636,8 @@ async fn route(
         product_vendors::handle(state, route_id, call).await
     } else if products::ROUTES.contains(&route_id) {
         products::handle(state, route_id, call).await
+    } else if mini_apps::ROUTES.contains(&route_id) {
+        mini_apps::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
     } else if meta_catalog::ROUTES.contains(&route_id) {
