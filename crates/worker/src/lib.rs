@@ -16,6 +16,7 @@ pub mod meta_catalog;
 pub mod schedule;
 pub mod send_flow_step;
 pub mod sequence;
+pub mod smart_delay;
 pub mod variables;
 
 use std::sync::Arc;

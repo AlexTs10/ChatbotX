@@ -1784,6 +1784,14 @@ impl Enqueuer for JobStore {
             Ok(self.prioritized_count(queue).await? + self.delayed_count(queue).await?)
         })
     }
+
+    fn remove_job<'a>(
+        &'a self,
+        queue: QueueName,
+        job_id: &'a str,
+    ) -> BoxFuture<'a, Result<bool, JobsError>> {
+        JobInspector::remove(self, queue, job_id)
+    }
 }
 
 impl JobInspector for JobStore {

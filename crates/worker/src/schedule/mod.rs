@@ -1,5 +1,5 @@
 //! `apps/worker/src/schedule/worker.ts`: the `schedule` queue processor.
-//! Q.D5 ports the broadcast jobs; the other schedule jobs are Q.W2.
+//! Q.D5 ports the broadcast and smart delay jobs; the other schedule jobs are Q.W2.
 
 pub mod broadcast;
 pub mod recurring;
@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::{Deps, str_of};
 
-/// `ScheduleJobData` names of the broadcast jobs.
+/// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
 pub const BROADCAST_JOBS: &[&str] = &[
     "enqueueBroadcast",
     "prepareBroadcast",
@@ -24,6 +24,7 @@ pub const BROADCAST_JOBS: &[&str] = &[
     "purgeDraftBroadcastRecipients",
     "enqueueRecurringBroadcasts",
     "materializeRecurringBroadcasts",
+    "scanSmartDelay",
 ];
 
 /// The `createQueueWorker(schedule, ..)` switch.
@@ -41,6 +42,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "finalizeBroadcasts" => broadcast::finalize_broadcasts(&deps).await?,
         "purgeBroadcasts" => broadcast::purge_broadcasts(&deps).await?,
         "enqueueRecurringBroadcasts" => recurring::enqueue_recurring_broadcasts(&deps).await?,
+        "scanSmartDelay" => crate::smart_delay::scan_smart_delay(&deps).await?,
         "materializeRecurringBroadcasts" => {
             let items = data["items"].as_array().cloned().unwrap_or_default();
             recurring::materialize_recurring_broadcasts(&deps, &items).await?

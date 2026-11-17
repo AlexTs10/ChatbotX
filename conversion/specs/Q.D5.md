@@ -18,7 +18,7 @@ Q.W1 runtime (`crates/worker`, `specs/Q.W1.md`).
 | 5a | Broadcast worker jobs: enqueue, prepare, send, reconcile, finalize, purge, draft purge | `broadcast/send.rs`, `broadcast/audience.rs` (`AudienceWalk`); `crates/worker/src/schedule` (`schedule` queue worker, broadcast schedulers) | worker part of `broadcast/service.ts` | — | done |
 | 5b | Recurring broadcast jobs: `enqueueRecurringBroadcasts`, `materializeRecurringBroadcasts` (`materializeOccurrence`, `skipOccurrence`) | `broadcast/materialize.rs`; `crates/worker/src/schedule/recurring.rs`; `Enqueuer::backlog_count` | materialize part of `broadcast/recurrence.service.ts` | — | done |
 | 6 | Sequence scheduler in the worker (producer / consumer / reconcile, step executor) | | | | done |
-| 7 | Smart delay | | | | todo |
+| 7 | Smart delay (service, workspace cleanup, `scanSmartDelay`, resume jobs) | | | | done |
 | 8 | Trigger worker | | | | todo |
 | 9 | Automated responses actions | | (`/v1/keywords` is D3) | create / update / delete / enable actions | todo |
 
@@ -77,13 +77,20 @@ Per test case: `specs/Q.D5-test-map.tsv` (file, line, name, Rust test, status, n
   SQLite schedule, each stopped by the shutdown coordinator; the
   `integration` worker handles `sendSequenceFlow`. One `runFlowNode` per
   contact inbox at a time (one SQLite writer).
+- Smart delay (slice 7): `business::smart_delay` (rows, claims, CAS
+  resets, workspace cleanup) and `worker::smart_delay` (`scanSmartDelay` on
+  the `schedule` worker, resume-job builders, `scheduleSmartDelayResume`).
+  The resume handlers (`resumeWait`, `resumeFollowUp`, ...) are the flow-step
+  units.
 
 ## 4. State
 
-Slices 1–3 done (`641f599f2`). Slice 4 done (`8b3cfe662`), 4b done (`e67dd7857`), 5a done (`59388ee17`), 5b done (`ff0bf948b`, gate: 2215 tests pass), 6 done (gate: 683 jobs/worker/server tests pass). Gate per commit: fmt, clippy `-D warnings`, `cargo test`
+Slices 1–3 done (`641f599f2`). Slice 4 done (`8b3cfe662`), 4b done (`e67dd7857`), 5a done (`59388ee17`), 5b done (`ff0bf948b`, gate: 2215 tests pass), 6 done (`c14e0fdeb`, gate: 683 jobs/worker/server tests pass), 7 done (gate: 2315 jobs/business/worker tests pass). Gate per commit: fmt, clippy `-D warnings`, `cargo test`
 for `chatbotx-business`, `chatbotx-api`, `chatbotx-jobs`, `chatbotx-worker` (Dell).
 
 Parity (Rust stack, Dell, 2026-11-17): `p1-04/11-broadcasts` and
 `p1-08/04-email-topics` 27 of 29 pass — the 2 failures are `listContacts`
 ("Operation not ported yet", Q.D11). `p1-04/12-broadcasts-recurrence` 12 of
 12 pass after 5b (the scheduler run is materialized by the worker).
+After 6: `p1-06/06-notes-sequences` 8 of 8 and `p1-04/12-broadcasts-recurrence`
+12 of 12 (the server boots with the sequence scheduler).

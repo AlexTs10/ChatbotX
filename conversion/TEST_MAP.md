@@ -1474,7 +1474,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/scan-appointment-reminders.test.ts` | C | tbd | todo | Appointments and booking |
 | `apps/worker/__tests__/scan-coexist-runs.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/scan-contact-scans.test.ts` | C | tbd | todo | Contact scan |
-| `apps/worker/__tests__/scan-smart-delay.test.ts` | C | tbd | todo | Smart delay |
+| `apps/worker/__tests__/scan-smart-delay.test.ts` | C | `crates/worker/tests/smart_delay.rs` | ported | Smart delay |
 | `apps/worker/__tests__/schedule-worker-audit-context.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/schedule-worker-connect-session-purge.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `apps/worker/__tests__/schedule-worker-contact-export-purge.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -1511,7 +1511,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/sequence-worker-producer.test.ts` | C | `crates/jobs/tests/sequence_worker_producer.rs` | passing | Sequences |
 | `apps/worker/__tests__/set-custom-field-step.test.ts` | C | tbd | todo | Custom fields |
 | `apps/worker/__tests__/settle-and-log.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
-| `apps/worker/__tests__/smart-delay-resume-job.test.ts` | C | tbd | todo | Smart delay |
+| `apps/worker/__tests__/smart-delay-resume-job.test.ts` | C | `crates/worker/tests/smart_delay.rs` | ported | Smart delay |
 | `apps/worker/__tests__/speech-to-text-handler.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/spreadsheet-handler-bot-fields.test.ts` | C | tbd | todo | Google Sheets integration |
 | `apps/worker/__tests__/spreadsheet-handler-temporal.test.ts` | C | tbd | todo | Google Sheets integration |
@@ -2399,7 +2399,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/sequence-service-list-step-contacts.test.ts` | C | tbd | todo | Sequences |
 | `packages/business/__tests__/sequence-service.test.ts` | C | `crates/business/tests/sequence_service.rs` | ported | Sequences; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/sequence-step-payload.test.ts` | C | `crates/business/tests/sequence_service.rs` | ported | Sequences; Q.D5 (see specs/Q.D5-test-map.tsv) |
-| `packages/business/__tests__/smart-delay-service.test.ts` | C | tbd | todo | Smart delay |
+| `packages/business/__tests__/smart-delay-service.test.ts` | C | `crates/business/tests/smart_delay_service.rs` | ported | Smart delay |
 | `packages/business/__tests__/spreadsheet.service.test.ts` | C | tbd | todo | Google Sheets integration |
 | `packages/business/__tests__/support-consent.test.ts` | C | tbd | todo | Workspace support access |
 | `packages/business/__tests__/system-field-service.test.ts` | C | tbd | todo | System fields |
@@ -2559,7 +2559,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/workspace-lifecycle.channel-switch-exhaustive.test.ts` | C | tbd | todo | Workspaces |
 | `packages/business/__tests__/workspace-lifecycle.predicates.test.ts` | C | tbd | todo | Workspaces |
 | `packages/business/__tests__/workspace-lifecycle.service.test.ts` | C | tbd | todo | Workspaces |
-| `packages/business/__tests__/workspace-lifecycle.smart-delay-cleanup.test.ts` | C | tbd | todo | Smart delay |
+| `packages/business/__tests__/workspace-lifecycle.smart-delay-cleanup.test.ts` | C | `crates/business/tests/smart_delay_service.rs` | ported | Smart delay |
 | `packages/business/__tests__/workspace-member-permissions.test.ts` | C | tbd | todo | Workspace members, roles and invitations |
 | `packages/business/__tests__/workspace-member-predicates.test.ts` | C | tbd | todo | Workspace members, roles and invitations |
 | `packages/business/__tests__/workspace-member-synthetic.test.ts` | C | tbd | todo | Workspace members, roles and invitations |

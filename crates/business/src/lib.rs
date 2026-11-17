@@ -60,6 +60,7 @@ pub mod questionnaire;
 pub mod referral;
 pub mod reflink;
 pub mod sequence;
+pub mod smart_delay;
 pub mod store_source;
 pub mod tag;
 pub mod template_params;

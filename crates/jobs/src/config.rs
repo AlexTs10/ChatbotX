@@ -145,6 +145,17 @@ impl Enqueuer for LazyEnqueuer {
     fn backlog_count(&self, queue: QueueName) -> BoxFuture<'_, Result<u64, JobsError>> {
         Box::pin(async move { self.inner.started().await?.backlog_count(queue).await })
     }
+
+    fn remove_job<'a>(
+        &'a self,
+        queue: QueueName,
+        job_id: &'a str,
+    ) -> BoxFuture<'a, Result<bool, JobsError>> {
+        Box::pin(async move {
+            let store = self.inner.started().await?;
+            crate::store::JobInspector::remove(store.as_ref(), queue, job_id).await
+        })
+    }
 }
 
 impl Jobs {

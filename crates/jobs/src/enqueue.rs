@@ -68,6 +68,16 @@ pub trait Enqueuer: Send + Sync {
     fn backlog_count(&self, _queue: QueueName) -> BoxFuture<'_, Result<u64, JobsError>> {
         Box::pin(async { Ok(0) })
     }
+
+    /// `queue.remove(jobId)`: `Ok(false)` for an active (locked) or missing
+    /// job. A producer without a store (a test fake) removes nothing.
+    fn remove_job<'a>(
+        &'a self,
+        _queue: QueueName,
+        _job_id: &'a str,
+    ) -> BoxFuture<'a, Result<bool, JobsError>> {
+        Box::pin(async { Ok(false) })
+    }
 }
 
 impl From<chatbotx_db::DbError> for JobsError {
@@ -97,5 +107,13 @@ impl<T: Enqueuer + ?Sized> Enqueuer for std::sync::Arc<T> {
 
     fn backlog_count(&self, queue: QueueName) -> BoxFuture<'_, Result<u64, JobsError>> {
         (**self).backlog_count(queue)
+    }
+
+    fn remove_job<'a>(
+        &'a self,
+        queue: QueueName,
+        job_id: &'a str,
+    ) -> BoxFuture<'a, Result<bool, JobsError>> {
+        (**self).remove_job(queue, job_id)
     }
 }

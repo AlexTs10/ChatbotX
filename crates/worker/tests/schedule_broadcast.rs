@@ -1230,7 +1230,7 @@ async fn an_unported_schedule_job_is_refused() {
     let f = fixture().await;
     let out = chatbotx_worker::schedule::handle(
         f.deps.clone(),
-        job(json!({ "type": "scanSmartDelay", "data": {} })),
+        job(json!({ "type": "scanAppointmentReminders", "data": {} })),
     )
     .await;
     assert!(matches!(out, Err(JobError::Unrecoverable(_))));
