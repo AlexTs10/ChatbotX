@@ -124,7 +124,7 @@ pub fn tenant_urls(state: &ApiState) -> TenantUrls {
 
 // ---- output ---------------------------------------------------------------
 
-fn contact_json(contact: &Contact) -> Map<String, Value> {
+pub(super) fn contact_json(contact: &Contact) -> Map<String, Value> {
     let mut out = Map::new();
     out.insert("id".into(), id(contact.id));
     out.insert("createdAt".into(), date(contact.created_at));
@@ -902,7 +902,7 @@ fn sort_items(value: Option<&Value>) -> Option<Vec<SortItem>> {
 
 /// `listContactsPublicRequest` / `countContactsPublicRequest` keys shared
 /// by list and count.
-fn parse_list_input(input: &mut Input, workspace_id: i64) -> ListContactsInput {
+pub(crate) fn parse_list_input(input: &mut Input, workspace_id: i64) -> ListContactsInput {
     let page = positive_int(input, "page");
     let per_page = positive_int(input, "perPage");
     let sort = sort_items(input.get("sort"));

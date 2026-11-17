@@ -25,32 +25,20 @@ use chatbotx_files::{FilesError, PresignMethod, PutOptions, Uploader};
 /// The largest accepted upload body (64 MiB).
 pub const MAX_UPLOAD_BYTES: usize = 64 * 1024 * 1024;
 
-/// `X-Amz-Expires` of a presigned upload (`PRESIGNED_UPLOAD_EXPIRY`, 300 s).
-pub const PRESIGNED_UPLOAD_EXPIRES: u64 = 300;
-
-/// The `/files/{*key}` routes over `files` (the same store as
+/// The `/files/{*key}` routes and the public `/storage/{*key}` read (the
+/// tenant `storageUrl` `<appUrl>/storage/`) over `files` (the same store as
 /// `ApiState::files`). A store without a URL signer (S3) answers `404`.
 pub fn router(files: Arc<Uploader>) -> Router {
     Router::new()
         .route("/files/{*key}", get(download).put(upload))
+        .route("/storage/{*key}", get(public_download))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))
         .with_state(files)
 }
 
-/// `uploader.getPresignedUpload(path)`. A local URL also carries
-/// `X-Amz-Expires=300` (clients read the expiry from it, as on S3; the
-/// signature does not cover it).
-pub async fn presigned_upload_url(uploader: &Uploader, key: &str) -> Result<String, FilesError> {
-    let url = uploader.get_presigned_upload(key).await?;
-    if url.contains("X-Amz-Expires=") {
-        return Ok(url);
-    }
-    Ok(url.replacen(
-        '?',
-        &format!("?X-Amz-Expires={PRESIGNED_UPLOAD_EXPIRES}&"),
-        1,
-    ))
-}
+/// `uploader.getPresignedUpload(path)` with the `X-Amz-Expires=300` of a
+/// local URL (one rule, in the business crate).
+pub use chatbotx_business::import::presigned_upload_url;
 
 fn text(status: StatusCode, message: &str) -> Response {
     (
@@ -102,7 +90,9 @@ fn content_type_of(key: &str) -> &'static str {
         .map(|(_, ext)| ext.to_ascii_lowercase())
         .unwrap_or_default();
     match extension.as_str() {
-        "csv" => "text/csv",
+        // The CSV files this app writes are UTF-8 (`contacts.export` stores
+        // `text/csv; charset=utf-8` on S3).
+        "csv" => "text/csv; charset=utf-8",
         "json" => "application/json",
         "txt" => "text/plain",
         "png" => "image/png",
@@ -157,6 +147,25 @@ async fn download(
 ) -> Response {
     if let Some(response) = authorize(&uploader, PresignMethod::Get, &key, query.as_deref()) {
         return response;
+    }
+    match uploader.get_object(&key).await {
+        Ok(bytes) => {
+            let mime = content_type_of(&key);
+            (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response()
+        }
+        Err(error) => storage_error(&error),
+    }
+}
+
+/// `GET /storage/{*key}`: the public read of the storage URL (the original
+/// edge proxies `/storage/*` to the bucket). Only `public/` keys are served
+/// (the public-read ACL); anything else is `404`.
+async fn public_download(
+    State(uploader): State<Arc<Uploader>>,
+    Path(key): Path<String>,
+) -> Response {
+    if !key.starts_with("public/") {
+        return text(StatusCode::NOT_FOUND, "Not Found");
     }
     match uploader.get_object(&key).await {
         Ok(bytes) => {

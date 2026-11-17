@@ -1,0 +1,104 @@
+"use client"
+
+import type { ChannelType } from "@chatbotx.io/database/partials"
+import {
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@chatbotx.io/ui/components/ui/form"
+import { cn } from "@chatbotx.io/ui/lib/utils"
+import { useTranslations } from "next-intl"
+import { useEffect, useState } from "react"
+import { useFormContext } from "react-hook-form"
+import { PlainTextTiptapEditor } from "./plain-text-tiptap-editor"
+
+export type PlainTextEditorFieldProps = {
+  botFieldsOnly?: boolean
+  label?: string
+  name: string
+  required?: boolean
+  placeholder?: string
+  formItemClassName?: string
+  editorClassName?: string
+  showEmojiPicker?: boolean
+  channels?: ChannelType[]
+  includeCouponVariables?: boolean
+  includePipelineVariables?: boolean
+  includeRawCustomFieldVariables?: boolean
+  includeBotFieldVariables?: boolean
+  description?: string
+  /** Single-line layout with the variable picker inline (e.g. filter value inputs). */
+  inline?: boolean
+}
+
+export const PlainTextEditorField = ({
+  botFieldsOnly = false,
+  name,
+  description,
+  label,
+  required = false,
+  formItemClassName,
+  editorClassName,
+  placeholder,
+  channels,
+  includeCouponVariables = false,
+  includePipelineVariables = false,
+  includeRawCustomFieldVariables = false,
+  includeBotFieldVariables = false,
+  showEmojiPicker = true,
+  inline = false,
+}: PlainTextEditorFieldProps) => {
+  const { control, getValues } = useFormContext()
+  const t = useTranslations("fields")
+
+  const [initValue, setInitValue] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    const initValue = getValues(name)
+    setInitValue(initValue)
+  }, [getValues, name])
+
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }) => (
+        <FormItem className={cn("w-full", formItemClassName)}>
+          {label ? (
+            <FormLabel className="flex gap-1">
+              {label}
+              {!required && (
+                <span className="self-start font-normal text-xxs">
+                  {t("optionalHint")}
+                </span>
+              )}
+            </FormLabel>
+          ) : null}
+          <FormControl>
+            <PlainTextTiptapEditor
+              botFieldsOnly={botFieldsOnly}
+              channels={channels}
+              className={editorClassName}
+              includeBotFieldVariables={includeBotFieldVariables}
+              includeCouponVariables={includeCouponVariables}
+              includePipelineVariables={includePipelineVariables}
+              includeRawCustomFieldVariables={includeRawCustomFieldVariables}
+              initValue={initValue}
+              inline={inline}
+              onChange={field.onChange}
+              placeholder={placeholder}
+              showEmojiPicker={showEmojiPicker}
+            />
+          </FormControl>
+          {description ? (
+            <FormDescription>{description}</FormDescription>
+          ) : null}
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+}

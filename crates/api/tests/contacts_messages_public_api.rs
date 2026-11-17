@@ -31,8 +31,9 @@ async fn seed(f: &Fixture) {
                    VALUES (50, 123, 123, 5, 'webchat', 'direct', 'guest-123'), (51, 124, 124, 5, 'webchat', 'direct', 'guest-124')"#,
                 [],
             )?;
+            // createdAt 0: findForContact reads messages since the conversation start; the TS test mocks it.
             tx.execute(
-                r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId") VALUES (70, ?1, 123)"#,
+                r#"INSERT INTO "Conversation" ("id", "createdAt", "workspaceId", "contactId") VALUES (70, 0, ?1, 123)"#,
                 params![WS],
             )?;
             tx.execute(

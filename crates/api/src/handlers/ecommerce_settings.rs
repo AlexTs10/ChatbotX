@@ -60,7 +60,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             };
             input.finish()?;
             let patch = patch.unwrap_or_default();
-            ecommerce_settings::update(&state.db, ws, patch)
+            ecommerce_settings::update(&state.db, ws, patch, state.jobs.as_deref())
                 .await
                 .map_err(|e| business_error(e, UPDATING))?;
             state

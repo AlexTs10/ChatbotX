@@ -677,27 +677,26 @@ fn assert_payment_methods_usable(conn: &Connection, workspace_id: i64, s: &Value
     Ok(())
 }
 
-/// `assertExternalStoreConnected` (the store presence; its currency read is
-/// not ported).
+/// `assertExternalStoreConnected`: the connected store's currency.
 fn assert_external_store_connected(
     conn: &Connection,
     workspace_id: i64,
     source: &str,
-) -> Result<()> {
+) -> Result<String> {
     let (table, name) = if source == "shopify" {
         ("IntegrationShopify", "Shopify")
     } else {
         ("IntegrationWoocommerce", "WooCommerce")
     };
-    let found = conn
+    let found: Option<String> = conn
         .query_row(
-            &format!(r#"SELECT 1 FROM "{table}" WHERE "workspaceId" = ?1"#),
+            &format!(r#"SELECT "currency" FROM "{table}" WHERE "workspaceId" = ?1"#),
             [workspace_id],
-            |_| Ok(()),
+            |r| r.get(0),
         )
         .optional()
         .map_err(repo_err)?;
-    if found.is_none() {
+    let Some(currency) = found else {
         return Err(with_data(
             format!(
                 "Connect a {name} store in Ecommerce → Settings → {name} before selling from it."
@@ -705,6 +704,148 @@ fn assert_external_store_connected(
             "externalStoreNotConnected",
             json!({ "store": source }),
         ));
+    };
+    Ok(currency)
+}
+
+/// `currencySymbolFor`: the English narrow symbol of an ISO currency
+/// (`Intl.NumberFormat` `narrowSymbol`), `None` when it is the code itself.
+/// ponytail: a table of the common store currencies; another code is `None`
+/// (the merchant sets the symbol), add rows as stores need them.
+pub fn currency_symbol_for(currency: &str) -> Option<&'static str> {
+    const SYMBOLS: &[(&str, &str)] = &[
+        ("ARS", "$"),
+        ("AUD", "$"),
+        ("BDT", "৳"),
+        ("BRL", "R$"),
+        ("CAD", "$"),
+        ("CLP", "$"),
+        ("CNY", "¥"),
+        ("COP", "$"),
+        ("CRC", "₡"),
+        ("CZK", "Kč"),
+        ("DKK", "kr"),
+        ("EGP", "E£"),
+        ("EUR", "€"),
+        ("GBP", "£"),
+        ("GEL", "₾"),
+        ("GHS", "GH₵"),
+        ("HKD", "$"),
+        ("HUF", "Ft"),
+        ("IDR", "Rp"),
+        ("ILS", "₪"),
+        ("INR", "₹"),
+        ("ISK", "kr"),
+        ("JPY", "¥"),
+        ("KHR", "៛"),
+        ("KRW", "₩"),
+        ("KZT", "₸"),
+        ("LAK", "₭"),
+        ("LKR", "Rs"),
+        ("MNT", "₮"),
+        ("MXN", "$"),
+        ("MYR", "RM"),
+        ("NGN", "₦"),
+        ("NOK", "kr"),
+        ("NPR", "Rs"),
+        ("NZD", "$"),
+        ("PHP", "₱"),
+        ("PKR", "Rs"),
+        ("PLN", "zł"),
+        ("PYG", "₲"),
+        ("RON", "lei"),
+        ("RUB", "₽"),
+        ("SEK", "kr"),
+        ("SGD", "$"),
+        ("THB", "฿"),
+        ("TRY", "₺"),
+        ("TWD", "$"),
+        ("UAH", "₴"),
+        ("USD", "$"),
+        ("UYU", "$"),
+        ("VND", "₫"),
+        ("ZAR", "R"),
+    ];
+    let code = currency.to_ascii_uppercase();
+    SYMBOLS.iter().find(|(c, _)| *c == code).map(|(_, s)| *s)
+}
+
+/// `RUNNING_SYNC_STATUSES` / `STALE_SYNC_MS` of the store integrations.
+const STALE_SYNC_MS: i64 = 30 * 60 * 1000;
+
+/// `shopifyIntegrationService.requestSync` / `wooCommerceIntegrationService.requestSync`
+/// with scope `all`: 409 `<store>SyncInProgress` while a fresh sync is
+/// queued or running; else the row is `queued` and the sync job goes to the
+/// integration queue (a queue error marks the row `failed`).
+/// ponytail: WooCommerce's webhook reactivation before the sync is not
+/// ported (it calls the store; it comes with the WooCommerce port).
+pub async fn request_store_sync(
+    db: &Db,
+    jobs: Option<&dyn chatbotx_jobs::Enqueuer>,
+    workspace_id: i64,
+    source: &str,
+) -> Result<()> {
+    let (table, prefix) = if source == "shopify" {
+        ("IntegrationShopify", "shopify")
+    } else {
+        ("IntegrationWoocommerce", "woocommerce")
+    };
+    let now = chatbotx_db::repo::now_ms();
+    tx::write(db, move |conn| {
+        let row: Option<(String, i64)> = conn
+            .query_row(
+                &format!(r#"SELECT "syncStatus", "updatedAt" FROM "{table}" WHERE "workspaceId" = ?1"#),
+                [workspace_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(repo_err)?;
+        let Some((status, updated_at)) = row else {
+            return Err(BusinessError::not_found("Store integration not found"));
+        };
+        if matches!(status.as_str(), "queued" | "running") && now - updated_at <= STALE_SYNC_MS {
+            return Err(BusinessError::exception(
+                "A sync is already in progress",
+                &format!("{prefix}SyncInProgress"),
+                409,
+            ));
+        }
+        conn.execute(
+            &format!(r#"UPDATE "{table}" SET "syncStatus" = 'queued', "syncError" = NULL, "updatedAt" = ?2 WHERE "workspaceId" = ?1"#),
+            params![workspace_id, now],
+        )
+        .map_err(repo_err)?;
+        Ok(())
+    })
+    .await?;
+    let name = format!("{prefix}Sync");
+    let queued = match jobs {
+        Some(jobs) => jobs
+            .add(
+                chatbotx_jobs::QueueName::Integration,
+                &name,
+                json!({ "type": name, "data": { "workspaceId": workspace_id.to_string(), "scope": "all" } }),
+                chatbotx_jobs::JobOptions {
+                    job_id: Some(format!("{prefix}-sync-{workspace_id}-all-{now}")),
+                    ..chatbotx_jobs::JobOptions::default()
+                },
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        None => Err("the job queue is off".to_string()),
+    };
+    if let Err(reason) = queued {
+        tx::write(db, move |conn| {
+            conn.execute(
+                &format!(r#"UPDATE "{table}" SET "syncStatus" = 'failed', "syncError" = 'Could not queue the sync.', "updatedAt" = ?2 WHERE "workspaceId" = ?1"#),
+                params![workspace_id, chatbotx_db::repo::now_ms()],
+            )
+            .map_err(repo_err)?;
+            Ok(())
+        })
+        .await?;
+        return Err(BusinessError::Repo(chatbotx_db::repo::Error::msg(reason)));
     }
     Ok(())
 }
@@ -783,8 +924,17 @@ pub async fn get(db: &Db, workspace_id: i64) -> Result<Value> {
 /// row when missing, merge the patch groups, check the merged settings
 /// (schema, external store, coherence, online payment methods) and write
 /// every column. Returns the merged settings.
-pub async fn update(db: &Db, workspace_id: i64, patch: Value) -> Result<Value> {
-    tx::write(db, move |tx| {
+pub async fn update(
+    db: &Db,
+    workspace_id: i64,
+    patch: Value,
+    jobs: Option<&dyn chatbotx_jobs::Enqueuer>,
+) -> Result<Value> {
+    let source_in_patch = patch
+        .get("general")
+        .and_then(|g| g.get("storeSource"))
+        .is_some();
+    let (next, previous_source) = tx::write(db, move |tx| {
         // `assertReferencable`: every flow the patch names belongs to the
         // workspace (`404 Flow not found`), before any other check.
         for (group, key) in [
@@ -813,7 +963,7 @@ pub async fn update(db: &Db, workspace_id: i64, patch: Value) -> Result<Value> {
                 }
             }
         }
-        let next = parse_groups(&merged, false).map_err(|issues| BusinessError::Exception {
+        let mut next = parse_groups(&merged, false).map_err(|issues| BusinessError::Exception {
             message: "Invalid ecommerce settings".to_string(),
             code: "invalidRequestData".to_string(),
             status: 422,
@@ -824,13 +974,15 @@ pub async fn update(db: &Db, workspace_id: i64, patch: Value) -> Result<Value> {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        if patch
-            .get("general")
-            .and_then(|g| g.get("storeSource"))
-            .is_some()
-            && source != "chatbotx"
-        {
-            assert_external_store_connected(tx, workspace_id, &source)?;
+        // `withExternalStoreCurrency`: the store's currency is the store's.
+        if source_in_patch && source != "chatbotx" {
+            let currency = assert_external_store_connected(tx, workspace_id, &source)?;
+            let unchanged = current["general"]["storeSource"] == source.as_str()
+                && current["payments"]["currency"] == currency.as_str();
+            if !unchanged {
+                next["payments"]["currencySymbol"] = json!(currency_symbol_for(&currency));
+                next["payments"]["currency"] = json!(currency);
+            }
         }
         assert_coherent(tx, workspace_id, &next, &patch)?;
         if patch
@@ -841,9 +993,30 @@ pub async fn update(db: &Db, workspace_id: i64, patch: Value) -> Result<Value> {
             assert_payment_methods_usable(tx, workspace_id, &next)?;
         }
         upsert(tx, workspace_id, &next)?;
-        Ok(next)
+        let previous = current["general"]["storeSource"]
+            .as_str()
+            .unwrap_or("chatbotx")
+            .to_string();
+        Ok((next, previous))
     })
-    .await
+    .await?;
+    // `syncSwitchedStore`: a sync already running covers it; a queue error
+    // does not undo the switch.
+    let source = next["general"]["storeSource"].as_str().unwrap_or_default();
+    if source != "chatbotx"
+        && source != previous_source
+        && let Err(error) = request_store_sync(db, jobs, workspace_id, source).await
+        && !matches!(
+            error.code(),
+            Some("shopifySyncInProgress" | "woocommerceSyncInProgress")
+        )
+    {
+        tracing::warn!(%error, workspace_id, source, "[ecommerce-settings] could not queue the store's sync after switching to it");
+    }
+    // ponytail: `wooCommerceIntegrationService.refreshStoreCurrency` (the
+    // store's symbol and position, read from WooCommerce) is not ported; the
+    // save keeps the currency taken above, as the original after a failed read.
+    Ok(next)
 }
 
 /// `ecommerceSettingsService.dropPaymentMethod`: remove `method`; an empty

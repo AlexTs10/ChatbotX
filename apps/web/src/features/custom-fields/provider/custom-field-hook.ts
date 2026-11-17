@@ -1,0 +1,476 @@
+import {
+  type ChannelType,
+  type CustomFieldType,
+  type SystemFieldType,
+  systemFieldTypes,
+} from "@chatbotx.io/database/partials"
+import { formatBotFieldReference } from "@chatbotx.io/flow-config"
+import type { SelectOption } from "@chatbotx.io/ui/components/form/select-field"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  CalendarClockIcon,
+  CalendarDaysIcon,
+  CheckIcon,
+  HashIcon,
+  type LucideIcon,
+  MailIcon,
+  PhoneIcon,
+  TextIcon,
+} from "lucide-react"
+import { useTranslations } from "next-intl"
+import { useCallback, useMemo } from "react"
+import type { BotFieldResource } from "@/features/bot-fields/schema/resource"
+import type { CustomFieldResource } from "@/features/custom-fields/schema/resource"
+import { useWorkspaceId } from "@/hooks/routing"
+import { orpc } from "@/lib/orpc/query"
+import { maxPerPage } from "@/lib/shared-request"
+
+export const customFieldIconsMap: Record<CustomFieldType, LucideIcon> = {
+  shortText: TextIcon,
+  longText: TextIcon,
+  number: HashIcon,
+  date: CalendarDaysIcon,
+  datetime: CalendarClockIcon,
+  boolean: CheckIcon,
+  email: MailIcon,
+  phoneNumber: PhoneIcon,
+}
+
+export const reservedCustomFieldIds: {
+  type: CustomFieldType
+  id: SystemFieldType
+  labelKey: string
+  channels?: ChannelType[]
+}[] = [
+  {
+    id: systemFieldTypes.enum.first_name,
+    type: "shortText",
+    labelKey: "fields.firstName.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_name,
+    type: "shortText",
+    labelKey: "fields.lastName.label",
+  },
+  {
+    id: systemFieldTypes.enum.full_name,
+    type: "shortText",
+    labelKey: "fields.fullName.label",
+  },
+  {
+    id: systemFieldTypes.enum.email,
+    type: "shortText",
+    labelKey: "fields.email.label",
+  },
+  {
+    id: systemFieldTypes.enum.phone,
+    type: "shortText",
+    // Dedicated key: `fields.phoneNumber` is the form-field label ("Phone
+    // number") reused across contact forms and template dialogs.
+    labelKey: "fields.phone.label",
+  },
+  {
+    id: systemFieldTypes.enum.avatar,
+    type: "shortText",
+    labelKey: "fields.avatar.label",
+  },
+  {
+    id: systemFieldTypes.enum.locale,
+    type: "shortText",
+    labelKey: "fields.locale.label",
+  },
+  {
+    id: systemFieldTypes.enum.gender,
+    type: "shortText",
+    labelKey: "fields.gender.label",
+  },
+  {
+    id: systemFieldTypes.enum.timezone,
+    type: "shortText",
+    labelKey: "fields.timezone.label",
+  },
+  {
+    id: systemFieldTypes.enum.user_id,
+    type: "shortText",
+    labelKey: "fields.userId.label",
+  },
+  {
+    id: systemFieldTypes.enum.user_tags,
+    type: "shortText",
+    labelKey: "fields.userTags.label",
+  },
+  {
+    id: systemFieldTypes.enum.workspace_name,
+    type: "shortText",
+    labelKey: "fields.workspaceName.label",
+  },
+  {
+    id: systemFieldTypes.enum.workspace_id,
+    type: "shortText",
+    labelKey: "fields.workspaceId.label",
+  },
+  {
+    id: systemFieldTypes.enum.page_user_name,
+    type: "shortText",
+    labelKey: "fields.pageUserName.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_input,
+    type: "shortText",
+    labelKey: "fields.lastInput.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_opportunity_id,
+    type: "shortText",
+    labelKey: "fields.lastOpportunityId.label",
+  },
+  {
+    // Latest incoming plain text; unlike `last_input` it never yields a media URL.
+    id: systemFieldTypes.enum.last_text_input,
+    type: "shortText",
+    labelKey: "fields.lastTextInput.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_call_recorded,
+    type: "shortText",
+    labelKey: "fields.lastCallRecorded.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_call_transcript,
+    type: "longText",
+    labelKey: "fields.lastCallTranscript.label",
+  },
+  {
+    id: systemFieldTypes.enum["ai.queued.messages"],
+    type: "shortText",
+    labelKey: "fields.aiQueuedMessages.label",
+  },
+  {
+    id: systemFieldTypes.enum.current_time,
+    type: "shortText",
+    labelKey: "fields.currentTime.label",
+  },
+  {
+    id: systemFieldTypes.enum.booking_calendar,
+    type: "shortText",
+    labelKey: "fields.bookingCalendar.label",
+  },
+  {
+    id: systemFieldTypes.enum.booking_date,
+    type: "datetime",
+    labelKey: "fields.bookingDate.label",
+  },
+  {
+    id: systemFieldTypes.enum.booking_link,
+    type: "shortText",
+    labelKey: "fields.bookingLink.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_seen,
+    type: "datetime",
+    labelKey: "fields.lastSeen.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_interaction,
+    type: "datetime",
+    labelKey: "fields.lastInteraction.label",
+  },
+  {
+    id: systemFieldTypes.enum.inbox_link,
+    type: "shortText",
+    labelKey: "fields.inboxLink.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_btn_title,
+    type: "shortText",
+    labelKey: "fields.lastButtonTitle.label",
+  },
+  {
+    id: systemFieldTypes.enum.fb_chat_link,
+    type: "shortText",
+    labelKey: "fields.fbChatLink.label",
+    channels: ["messenger"],
+  },
+  {
+    id: systemFieldTypes.enum.last_fb_comment,
+    type: "shortText",
+    labelKey: "fields.lastFbComment.label",
+    channels: ["messenger", "instagram"],
+  },
+  {
+    // The inbox user who sent the running flow — not the conversation assignee.
+    // Only set on a flow an inbox user started.
+    id: systemFieldTypes.enum.admin_name,
+    type: "shortText",
+    labelKey: "fields.adminName.label",
+  },
+  {
+    id: systemFieldTypes.enum.admin_team_name,
+    type: "shortText",
+    labelKey: "fields.adminTeamName.label",
+  },
+  {
+    id: systemFieldTypes.enum.booking_id,
+    type: "shortText",
+    labelKey: "fields.bookingId.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_points,
+    type: "number",
+    labelKey: "fields.lastPoints.label",
+  },
+  {
+    id: systemFieldTypes.enum.last_ad_headline,
+    type: "shortText",
+    labelKey: "fields.lastAdHeadline.label",
+    channels: ["messenger", "instagram", "whatsapp"],
+  },
+  {
+    // Read from the contact's ad touch log (all inboxes), not the last referral.
+    id: systemFieldTypes.enum.ad_ids,
+    type: "shortText",
+    labelKey: "fields.adIds.label",
+    channels: ["messenger", "instagram", "whatsapp", "zalo"],
+  },
+  {
+    id: systemFieldTypes.enum.ad_id,
+    type: "shortText",
+    labelKey: "fields.adId.label",
+    channels: ["messenger", "instagram", "whatsapp", "zalo"],
+  },
+  {
+    // Only WhatsApp Click-to-WhatsApp referrals carry an ad body.
+    id: systemFieldTypes.enum.last_ad_body,
+    type: "shortText",
+    labelKey: "fields.lastAdBody.label",
+    channels: ["whatsapp"],
+  },
+  {
+    id: systemFieldTypes.enum.last_story_id,
+    type: "shortText",
+    labelKey: "fields.lastStoryId.label",
+    channels: ["instagram"],
+  },
+  {
+    id: systemFieldTypes.enum.last_lead_id,
+    type: "shortText",
+    labelKey: "fields.lastLeadId.label",
+    channels: ["messenger"],
+  },
+  {
+    id: systemFieldTypes.enum.last_form_id,
+    type: "shortText",
+    labelKey: "fields.lastFormId.label",
+    channels: ["messenger"],
+  },
+  {
+    id: systemFieldTypes.enum.last_form_name,
+    type: "shortText",
+    labelKey: "fields.lastFormName.label",
+    channels: ["messenger"],
+  },
+  {
+    id: systemFieldTypes.enum.last_adgroup_id,
+    type: "shortText",
+    labelKey: "fields.lastAdgroupId.label",
+    channels: ["messenger"],
+  },
+  {
+    // Inviter's name for a contact who joined a leaderboard through a
+    // referral link — used in the leaderboard welcome message.
+    id: systemFieldTypes.enum.referral_name,
+    type: "shortText",
+    labelKey: "fields.referralName.label",
+  },
+  {
+    // Always blank: clears a field or leaves a slot empty.
+    id: systemFieldTypes.enum.empty,
+    type: "shortText",
+    labelKey: "fields.empty.label",
+  },
+]
+
+/**
+ * Groups already-built option lists into the "System Fields" / "Custom
+ * Fields" / "Account Fields" sections rendered by `ComboboxField` (via
+ * `SelectOption.children`). Pure and side-effect free so the grouping shape
+ * is unit-testable without mounting the hook. A group is omitted entirely
+ * when it has no options, so a workspace with no Account Fields yet never
+ * renders an empty "Account Fields" heading.
+ */
+export const buildGroupedFieldOptions = (groups: {
+  systemFields: { label: string; options: SelectOption[] }
+  customFields: { label: string; options: SelectOption[] }
+  accountFields: { label: string; options: SelectOption[] }
+}): SelectOption[] =>
+  ([groups.systemFields, groups.customFields, groups.accountFields] as const)
+    .filter((group) => group.options.length > 0)
+    .map((group) => ({
+      value: `__group__:${group.label}`,
+      label: group.label,
+      children: group.options,
+    }))
+
+export const useCustomFields = (
+  workspaceId: string | undefined,
+  options?: { enabled?: boolean },
+) =>
+  // The SPA oRPC client is untyped (lib/orpc/orpc.ts): name the data type.
+  useQuery<unknown, Error, CustomFieldResource[]>(
+    orpc.customFieldsAPI.privateListCustomFieldsAPI.queryOptions({
+      input: { workspaceId: workspaceId ?? "", perPage: maxPerPage },
+      enabled: Boolean(workspaceId) && (options?.enabled ?? true),
+      select: (res) => res.data,
+    }),
+  )
+
+export const useBotFields = (
+  workspaceId: string | undefined,
+  options?: { enabled?: boolean },
+) =>
+  // The SPA oRPC client is untyped (lib/orpc/orpc.ts): name the data type.
+  useQuery<unknown, Error, BotFieldResource[]>(
+    orpc.botFieldAPIs.privateListBotFieldsAPI.queryOptions({
+      input: { workspaceId: workspaceId ?? "", perPage: maxPerPage },
+      enabled: Boolean(workspaceId) && (options?.enabled ?? true),
+      select: (res) => res.data,
+    }),
+  )
+
+export const useInvalidateCustomFields = () => {
+  const queryClient = useQueryClient()
+  return useCallback(
+    () =>
+      queryClient.invalidateQueries({ queryKey: orpc.customFieldsAPI.key() }),
+    [queryClient],
+  )
+}
+
+export const useInvalidateBotFields = () => {
+  const queryClient = useQueryClient()
+  return useCallback(
+    () =>
+      queryClient.invalidateQueries({
+        queryKey: orpc.botFieldAPIs.privateListBotFieldsAPI.key(),
+      }),
+    [queryClient],
+  )
+}
+
+export const useCustomFieldSelectOptions = (
+  props: {
+    customFieldTypes?: CustomFieldType[]
+    includeReserved?: boolean
+    prefix?: string
+    customFieldValueKey?: "name"
+    channels?: ChannelType[]
+    reservedFieldIds?: SystemFieldType[]
+    /**
+     * When true, also includes Account Fields (bot fields) as a separate
+     * group at the end of the option list, using
+     * `formatBotFieldReference(id)` as the option value. Defaults to false so
+     * the ~24 existing consumers keep their current flat-list shape,
+     * byte-identical. Allowlisted v1 surfaces only (see plan 3.3).
+     */
+    includeBotFields?: boolean
+  } = {},
+): SelectOption[] => {
+  const {
+    customFieldTypes,
+    includeReserved,
+    prefix,
+    customFieldValueKey,
+    channels,
+    reservedFieldIds,
+    includeBotFields,
+  } = props
+  const t = useTranslations()
+
+  const workspaceId = useWorkspaceId()
+  const { data: rawCustomFields = [] } = useCustomFields(workspaceId)
+  const { data: rawBotFields = [] } = useBotFields(workspaceId, {
+    enabled: includeBotFields,
+  })
+  // `channels` still drives the filter below; it no longer prefixes the label.
+  const reservedCustomFieldOptions = useMemo(
+    () =>
+      reservedCustomFieldIds.map((field) => ({
+        ...field,
+        name: t(field.labelKey),
+      })),
+    [t],
+  )
+
+  return useMemo(() => {
+    const matchesType = (type: string) =>
+      !customFieldTypes || customFieldTypes.includes(type as CustomFieldType)
+
+    const toOption = (
+      field: { id: string | number; name: string; type: string },
+      value: string,
+    ): SelectOption => ({
+      label: field.name,
+      value: prefix ? `${prefix}:${value}` : value,
+      icon: customFieldIconsMap[field.type as CustomFieldType],
+    })
+
+    const reservedOptions = includeReserved
+      ? reservedCustomFieldOptions
+          .filter(
+            (field) =>
+              (reservedFieldIds
+                ? reservedFieldIds.includes(field.id)
+                : matchesType(field.type)) &&
+              (!(field.channels && channels) ||
+                field.channels.some((channel) => channels.includes(channel))),
+          )
+          .map((field) => toOption(field, field.id.toString()))
+      : []
+
+    const customOptions = rawCustomFields
+      .filter((field) => matchesType(field.type))
+      .map((field) =>
+        toOption(
+          field,
+          customFieldValueKey === "name" ? field.name : field.id.toString(),
+        ),
+      )
+
+    if (!includeBotFields) {
+      return [...reservedOptions, ...customOptions]
+    }
+
+    const botOptions = rawBotFields
+      .filter((field) => matchesType(field.type))
+      .map((field) =>
+        toOption(field, formatBotFieldReference(field.id.toString())),
+      )
+
+    return buildGroupedFieldOptions({
+      systemFields: {
+        label: t("fields.customField.groupSystemFields"),
+        options: reservedOptions,
+      },
+      customFields: {
+        label: t("fields.customField.groupCustomFields"),
+        options: customOptions,
+      },
+      accountFields: {
+        label: t("fields.customField.groupAccountFields"),
+        options: botOptions,
+      },
+    })
+  }, [
+    customFieldTypes,
+    customFieldValueKey,
+    channels,
+    reservedFieldIds,
+    includeReserved,
+    includeBotFields,
+    rawCustomFields,
+    rawBotFields,
+    prefix,
+    reservedCustomFieldOptions,
+    t,
+  ])
+}

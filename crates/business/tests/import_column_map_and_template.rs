@@ -2,8 +2,8 @@
 //!
 //! - `packages/business/__tests__/import-column-map.test.ts`, the
 //!   `suggestContactImportColumnMap` case (1, ported). The three
-//!   `resolveProductImportColumnMap` cases move to the product import slice
-//!   (P3.6-D1 "Product imports / Meta catalog").
+//!   `resolveProductImportColumnMap` cases are in `import_product_column_map.rs`
+//!   (Q.D1i).
 //! - `apps/builder/__tests__/contacts-import-template.test.ts` (6, ported).
 
 use chatbotx_business::import::csv::UTF8_BOM;

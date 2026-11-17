@@ -1,0 +1,498 @@
+"use client"
+
+import {
+  type ButtonStepInput,
+  type ButtonStepProps,
+  type ButtonType,
+  buttonStepSchema,
+  buttonTypes,
+  type FlowNode,
+  resolveSendTextLengthLimits,
+  stepTypes,
+} from "@chatbotx.io/flow-config"
+import { InputField } from "@chatbotx.io/ui/components/form/input-field"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@chatbotx.io/ui/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@chatbotx.io/ui/components/ui/dropdown-menu"
+import { Form } from "@chatbotx.io/ui/components/ui/form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useReactFlow } from "@xyflow/react"
+import { getProperty } from "dot-prop"
+import { PlusIcon, XIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+  useFieldArray,
+  useForm,
+  useFormContext,
+  useWatch,
+} from "react-hook-form"
+import { setProperty } from "@/lib/object-util"
+import {
+  ButtonEditorChannelContext,
+  useButtonEditorChannel,
+} from "./button-editor-channel"
+import RecursiveDropdownMenu from "./components/recursive-dropdown-menu"
+import {
+  useCreateButtonTarget,
+  useHandleEdges,
+} from "./hooks/use-button-target"
+import { sendMessageEditorMenusWithButton } from "./nodes/send-message/menu"
+import type { MenuItem } from "./nodes/types"
+import { allSteps, DynamicStepEditor } from "./steps"
+import { allButtonsConfig, offeredButtonsConfig } from "./steps/button-config"
+import { SpreadsheetDialogProvider } from "./steps/spreadsheet/components/spreadsheet-dialog-context"
+import { useStepStore } from "./stores/step-store-provider"
+
+/**
+ * The channel a node sends on, or `undefined` for a node type that carries no
+ * `chooseChannel` beforeStep. Narrowed with `in` because `FlowNode["data"]` is
+ * a union that React Flow's `Node<Data>` does not discriminate by `type`.
+ */
+function resolveNodeChannel(node: FlowNode | null): string | undefined {
+  const details = node?.data?.details
+  const beforeStep =
+    details && "beforeStep" in details ? details.beforeStep : null
+
+  return beforeStep && "channel" in beforeStep ? beforeStep.channel : undefined
+}
+
+export function AllButtonOptions({
+  onChooseButton,
+  hiddenButtonTypes,
+}: {
+  onChooseButton: (buttonType: ButtonType | null) => void
+  hiddenButtonTypes?: ButtonType[]
+}) {
+  const t = useTranslations()
+  const channel = useButtonEditorChannel()
+  const allButtons = useMemo(
+    () => offeredButtonsConfig(t, { channel, hiddenButtonTypes }),
+    [t, hiddenButtonTypes, channel],
+  )
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {allButtons.map((buttonConfig) => (
+        <Button
+          className="flex w-full justify-start gap-2"
+          key={buttonConfig.buttonType}
+          onClick={() => onChooseButton(buttonConfig.buttonType)}
+          type="button"
+          variant="outline"
+        >
+          <buttonConfig.icon />
+          <span className="text-center">{buttonConfig.label}</span>
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+export function ActiveButton({
+  buttonType,
+  onChooseButton,
+  beforeStepName = "beforeStep",
+}: {
+  buttonType: ButtonType
+  onChooseButton: (buttonType: ButtonType | null) => void
+  beforeStepName?: string
+}) {
+  const t = useTranslations()
+  const allButtons = useMemo(() => allButtonsConfig(t), [t])
+  const activeButton = allButtons.find((bt) => bt.buttonType === buttonType)
+  const { getValues } = useFormContext()
+  const beforeStep = getValues(beforeStepName)
+
+  if (!activeButton) {
+    return null
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1.5 rounded border border-dashed ps-4 text-sm">
+        <activeButton.icon className="size-4" />
+        <span className="flex-1">{activeButton.label}</span>
+        <Button
+          className="hover:bg-red hover:text-destructive"
+          onClick={(e) => {
+            e.stopPropagation()
+            onChooseButton(null)
+          }}
+          type="button"
+          variant="ghost"
+        >
+          <XIcon />
+        </Button>
+      </div>
+
+      {beforeStep && (
+        <DynamicStepEditor
+          parentName={beforeStepName}
+          type={beforeStep.stepType}
+        />
+      )}
+    </div>
+  )
+}
+
+function ButtonSteps({ buttonType }: { buttonType: ButtonType }) {
+  const t = useTranslations()
+  const { control } = useFormContext()
+  const allowsSteps = useMemo(
+    () =>
+      allButtonsConfig(t).find((config) => config.buttonType === buttonType)
+        ?.allowsSteps !== false,
+    [t, buttonType],
+  )
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "steps",
+  })
+
+  const onAddAction = useCallback(
+    (menuItem: MenuItem) => {
+      if (menuItem.stepType) {
+        const newStep = allSteps[menuItem.stepType]?.defaultFn(menuItem.props)
+        if (newStep) {
+          append(newStep)
+        }
+      }
+    },
+    [append],
+  )
+
+  if (!allowsSteps) {
+    return null
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <div className="font-medium">{t("flows.additionalSteps")}</div>
+
+      {fields.map((field, index) => (
+        <div className="flex items-center gap-2" key={field.id}>
+          <div className="break-word flex-1">
+            <DynamicStepEditor
+              parentName={`steps.${index}`}
+              // biome-ignore lint/suspicious/noExplicitAny: wip
+              type={(field as any).stepType}
+            />
+          </div>
+          <Button
+            className="size-8 shrink-0"
+            onClick={() => remove(index)}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <XIcon aria-hidden="true" className="size-4" />
+          </Button>
+        </div>
+      ))}
+
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button className="w-32" size="sm" variant="outline">
+              <PlusIcon />
+              {t("actions.actions")}
+            </Button>
+          }
+        />
+        <DropdownMenuContent className="w-max">
+          <RecursiveDropdownMenu
+            data={sendMessageEditorMenusWithButton(t)}
+            onClick={onAddAction}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+export function ButtonEditorDialog() {
+  const [activeNode, setActiveNode] = useState<FlowNode | null>(null)
+
+  const t = useTranslations()
+
+  const { getNodes, updateNodeData } = useReactFlow()
+  const { refreshEdge, removeEdge } = useHandleEdges()
+  const createButtonTarget = useCreateButtonTarget()
+  const buttonPath = useStepStore((state) => state.buttonPath)
+  const setButtonPath = useStepStore((state) => state.setButtonPath)
+  const buttonInitialData = useStepStore((state) => state.buttonInitialData)
+  const openButtonEditorDialog = useStepStore(
+    (state) => state.openButtonEditorDialog,
+  )
+  const setOpenButtonEditorDialog = useStepStore(
+    (state) => state.setOpenButtonEditorDialog,
+  )
+  const onChangeButtonData = useStepStore((state) => state.onChangeButtonData)
+  const buttonEditorConfig = useStepStore((state) => state.buttonEditorConfig)
+
+  const form = useForm<ButtonStepInput, object, ButtonStepProps>({
+    resolver: zodResolver(buttonStepSchema),
+    defaultValues: {},
+    mode: "onChange",
+  })
+  const { setValue, getValues, control } = form
+  const buttonType = useWatch({ control, name: "buttonType" })
+  const buttonId = useWatch({ control, name: "id" })
+
+  // The dialog lives outside the node's form (frame.tsx), so the channel is
+  // read off the selected node rather than watched — `buttonPath` is already
+  // rooted at `data.details`, and it also says whether this is a node-level
+  // quick reply or a button attached to a step. The visible counter sits on
+  // the button itself (steps/button/editor.tsx); this only caps the input.
+  const isQuickReply = buttonPath?.startsWith("data.details.quickReplies")
+  const channel = resolveNodeChannel(activeNode)
+  const labelMax = useMemo(() => {
+    const limits = resolveSendTextLengthLimits({ channel })
+
+    return isQuickReply ? limits.quickReplyLabel : limits.buttonLabel
+  }, [channel, isQuickReply])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: wip
+  useEffect(() => {
+    if (buttonPath && openButtonEditorDialog && buttonInitialData) {
+      const allNodes = getNodes()
+      const foundNode = allNodes.find((node) => node.selected) as FlowNode
+      if (foundNode) {
+        setActiveNode(foundNode)
+        form.reset(buttonInitialData)
+        setOpenButtonEditorDialog(true)
+        return
+      }
+    }
+
+    form.reset()
+    setActiveNode(null)
+    setOpenButtonEditorDialog(false)
+  }, [buttonPath, openButtonEditorDialog, buttonInitialData])
+
+  const onSave = useCallback(() => {
+    if (!(activeNode && buttonPath)) {
+      return
+    }
+
+    const values = form.getValues()
+    setProperty(activeNode, buttonPath, values)
+    updateNodeData(activeNode.id, activeNode.data)
+
+    const currentButtonId = values.id as string
+    // `beforeStep.stepType === startAnotherNode` covers buttonType
+    // startAnotherNode itself as well as sendMessage/performAction, which
+    // also always carry a startAnotherNode beforeStep (button.ts) — for all
+    // three, beforeStep.nodeId is a mirror of where the button's own edge
+    // leads (flow.ts skips executing it and follows the edge instead), so
+    // any of them retargeting the combobox must move the edge too.
+    if (values.beforeStep?.stepType === stepTypes.enum.startAnotherNode) {
+      const targetNodeId = values.beforeStep.nodeId
+
+      if (currentButtonId && targetNodeId) {
+        refreshEdge(currentButtonId, activeNode.id, targetNodeId)
+      }
+    } else if (
+      currentButtonId &&
+      values.beforeStep?.stepType !== stepTypes.enum.openMiniApp
+    ) {
+      // An Open Mini App button keeps the edge the user drew: it says where
+      // the flow continues once the Mini App is submitted.
+      // Any action besides a node jump (openWebsite, startExternalFlow,
+      // startExternalNode, ...) fully handles its own routing on the worker
+      // side. Clear a leftover edge from a previous startAnotherNode/
+      // sendMessage/performAction config so it doesn't keep pointing at a
+      // node this button no longer targets.
+      removeEdge(currentButtonId)
+    }
+
+    setOpenButtonEditorDialog(false)
+    onChangeButtonData({
+      path: buttonPath,
+      data: values as unknown as ButtonStepProps,
+    })
+  }, [
+    activeNode,
+    buttonPath,
+    form,
+    onChangeButtonData,
+    refreshEdge,
+    removeEdge,
+    setOpenButtonEditorDialog,
+    updateNodeData,
+  ])
+
+  const onDelete = useCallback(() => {
+    if (!(activeNode && buttonPath)) {
+      return
+    }
+
+    const foundedButton: ButtonStepProps | null = getProperty(
+      activeNode,
+      buttonPath,
+    )
+    if (foundedButton) {
+      removeEdge(foundedButton.id)
+      onChangeButtonData({
+        path: buttonPath,
+        data: null,
+      })
+    }
+
+    setOpenButtonEditorDialog(false)
+    setButtonPath(null)
+  }, [
+    activeNode,
+    buttonPath,
+    onChangeButtonData,
+    removeEdge,
+    setButtonPath,
+    setOpenButtonEditorDialog,
+  ])
+
+  const onChooseButton = useCallback(
+    (selectedButtonType: ButtonType | null) => {
+      setValue("buttonType", selectedButtonType)
+      setValue("steps", [])
+      setValue("beforeStep", null)
+      if (!selectedButtonType) {
+        return
+      }
+
+      const created = createButtonTarget(selectedButtonType)
+      if (!created) {
+        return
+      }
+
+      setValue("beforeStep", created.beforeStep)
+
+      // Switching to Open Mini App starts with no edge: one left over from a
+      // previous Send Message / Start Another Node config would otherwise
+      // become where the flow continues after the Mini App is submitted.
+      if (selectedButtonType === buttonTypes.enum.openMiniApp) {
+        const currentButtonId = getValues("id") as string
+        if (currentButtonId) {
+          removeEdge(currentButtonId)
+        }
+      }
+
+      if (created.newNode) {
+        const currentButtonId = getValues("id") as string
+        if (currentButtonId && activeNode) {
+          refreshEdge(currentButtonId, activeNode.id, created.newNode.id)
+        }
+        onSave()
+      }
+    },
+    [
+      activeNode,
+      createButtonTarget,
+      getValues,
+      onSave,
+      refreshEdge,
+      removeEdge,
+      setValue,
+    ],
+  )
+
+  return buttonId ? (
+    <Dialog
+      onOpenChange={(isOpen) => setOpenButtonEditorDialog(isOpen)}
+      open={openButtonEditorDialog}
+    >
+      <DialogContent className={"max-h-screen max-w-lg overflow-y-scroll"}>
+        <DialogHeader>
+          <DialogTitle>
+            {t("messages.editFeature", { feature: t("fields.button.label") })}
+          </DialogTitle>
+          <DialogDescription />
+        </DialogHeader>
+
+        <Form {...form}>
+          <ButtonEditorChannelContext.Provider value={channel}>
+            <SpreadsheetDialogProvider>
+              <form
+                className="flex w-full flex-col gap-4"
+                onSubmit={(e) => {
+                  e.stopPropagation()
+                  return form.handleSubmit(onSave)(e)
+                }}
+              >
+                <InputField
+                  disabled={!!buttonEditorConfig?.lockLabel}
+                  label={t("fields.name.label")}
+                  maxLength={labelMax}
+                  name="label"
+                  required
+                />
+
+                <div className="mt-2 font-medium">
+                  {t("fields.button.whenPressed")}
+                </div>
+
+                {buttonType ? (
+                  <div className="flex flex-col gap-2">
+                    <ActiveButton
+                      buttonType={buttonType}
+                      onChooseButton={onChooseButton}
+                    />
+                    <ButtonSteps buttonType={buttonType} />
+                  </div>
+                ) : (
+                  <AllButtonOptions
+                    hiddenButtonTypes={
+                      buttonEditorConfig?.hiddenButtonTypes ?? undefined
+                    }
+                    onChooseButton={onChooseButton}
+                  />
+                )}
+              </form>
+            </SpreadsheetDialogProvider>
+          </ButtonEditorChannelContext.Provider>
+        </Form>
+
+        <DialogFooter>
+          <div className="flex-1">
+            {!buttonEditorConfig?.hideDelete && (
+              <Button
+                onClick={onDelete}
+                size="sm"
+                type="button"
+                variant="destructive"
+              >
+                {t("actions.delete")}
+              </Button>
+            )}
+          </div>
+          <DialogClose
+            render={
+              <Button size="sm" type="button" variant="ghost">
+                {t("actions.cancel")}
+              </Button>
+            }
+          />
+          <Button
+            disabled={!form.formState.isValid}
+            onClick={form.handleSubmit(onSave)}
+            size="sm"
+          >
+            {t("actions.confirm")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  ) : null
+}

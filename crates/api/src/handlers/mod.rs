@@ -2,12 +2,18 @@
 //! one module per builder router. [`dispatch`] runs the handler of a route after
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
+pub mod ai_agents;
+pub mod ai_files;
+pub mod ai_functions;
+pub mod ai_handover;
+pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
 pub mod capabilities;
 pub mod channels;
 pub mod connections;
 pub mod contact_custom_fields;
+pub mod contact_exports;
 pub mod contact_filter;
 pub mod contact_imports;
 pub mod contact_inboxes;
@@ -16,6 +22,7 @@ pub mod contact_notes;
 pub mod contact_sequences;
 pub mod contacts;
 pub mod contacts_bulk;
+pub mod conversations;
 pub mod custom_fields;
 pub mod ecommerce_settings;
 pub mod error_logs;
@@ -23,12 +30,18 @@ pub mod flows;
 pub mod folders;
 pub mod inbox_teams;
 pub mod input;
+pub mod integrations_ai;
+pub mod keywords;
+pub mod media_library;
+pub mod messages;
+pub mod meta_catalog;
 pub mod minigames;
 pub mod open_hours;
 pub mod pipelines;
 pub mod places;
 pub mod polls;
 pub mod product_categories;
+pub mod product_imports;
 pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
@@ -87,6 +100,9 @@ pub struct ApiState {
     pub license_token: Option<String>,
     /// The license verification keys (`LICENSE_PUBLIC_KEYS`; tests set them).
     pub license_keys: &'static [(&'static str, &'static str)],
+    /// The query embedding client (`aiFiles.search`); the provider APIs by
+    /// default.
+    pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
 }
 
 impl ApiState {
@@ -107,6 +123,7 @@ impl ApiState {
                 .map(|keys| Arc::new(chatbotx_core::encryption::Encryption::new(keys))),
             license_token: std::env::var("LICENSE_KEY").ok(),
             license_keys: chatbotx_business::license::LICENSE_PUBLIC_KEYS,
+            embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
         }
     }
 
@@ -154,6 +171,15 @@ impl ApiState {
     /// Runs the services as this edition.
     pub fn with_edition(mut self, edition: chatbotx_business::keys::Edition) -> ApiState {
         self.edition = edition;
+        self
+    }
+
+    /// Embeds search queries with `embedder`.
+    pub fn with_embedder(
+        mut self,
+        embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
+    ) -> ApiState {
+        self.embedder = embedder;
         self
     }
 
@@ -262,6 +288,41 @@ pub struct Call<'a> {
 tokio::task_local! {
     /// `context.apiToken.id` of the running dispatch ([`dispatch_as`]).
     static TOKEN_ID: Option<i64>;
+    /// The signed-in member of a `/rpc` call that runs a public route
+    /// ([`dispatch_as_member`]).
+    static MEMBER: Option<Member>;
+}
+
+/// A workspace member calling a public route through `/rpc` (P4): the
+/// `ContactPermissionScope` and the export owner filter of the builder's
+/// private procedures. Public token calls have none (unscoped, full PII).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Member {
+    pub user_id: i64,
+    /// `isWorkspaceAdminMember` (sees every member's exports).
+    pub is_admin: bool,
+    pub can_view_email_and_phone: bool,
+    pub restrict_to_assigned_user_id: Option<i64>,
+}
+
+/// The member of the running [`dispatch_as_member`]; `None` for a token call.
+pub fn member() -> Option<Member> {
+    MEMBER.try_with(|member| *member).ok().flatten()
+}
+
+/// Runs the public route `route_id` for a signed-in member; `None` = not ported.
+pub async fn dispatch_as_member(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    member: Member,
+) -> Option<Response> {
+    MEMBER
+        .scope(
+            Some(member),
+            dispatch_as(state, route_id, call, &Principal::default()),
+        )
+        .await
 }
 
 impl Call<'_> {
@@ -457,6 +518,18 @@ async fn route(
 ) -> Option<Response> {
     let reply = if connections::ROUTES.contains(&route_id) {
         connections::handle(state, route_id, call, principal).await?
+    } else if integrations_ai::ROUTES.contains(&route_id) {
+        integrations_ai::handle(state, route_id, call).await
+    } else if ai_files::ROUTES.contains(&route_id) {
+        ai_files::handle(state, route_id, call).await
+    } else if ai_handover::ROUTES.contains(&route_id) {
+        ai_handover::handle(state, route_id, call).await
+    } else if ai_agents::ROUTES.contains(&route_id) {
+        ai_agents::handle(state, route_id, call).await
+    } else if ai_functions::ROUTES.contains(&route_id) {
+        ai_functions::handle(state, route_id, call).await
+    } else if ai_mcp_servers::ROUTES.contains(&route_id) {
+        ai_mcp_servers::handle(state, route_id, call).await
     } else if analytics::ROUTES.contains(&route_id) {
         analytics::handle(state, route_id, call).await
     } else if contact_sequences::ROUTES.contains(&route_id) {
@@ -471,6 +544,14 @@ async fn route(
         contact_inboxes::handle(state, route_id, call).await
     } else if contact_notes::ROUTES.contains(&route_id) {
         contact_notes::handle(state, route_id, call).await
+    } else if contact_messages::ROUTES.contains(&route_id) {
+        contact_messages::handle(state, route_id, call).await
+    } else if conversations::ROUTES.contains(&route_id) {
+        conversations::handle(state, route_id, call).await
+    } else if messages::ROUTES.contains(&route_id) {
+        messages::handle(state, route_id, call).await
+    } else if keywords::ROUTES.contains(&route_id) {
+        keywords::handle(state, route_id, call).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
     } else if contacts_bulk::ROUTES.contains(&route_id) {
@@ -503,6 +584,10 @@ async fn route(
         products::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
+    } else if meta_catalog::ROUTES.contains(&route_id) {
+        meta_catalog::handle(state, route_id, call).await
+    } else if media_library::ROUTES.contains(&route_id) {
+        media_library::handle(state, route_id, call).await
     } else if minigames::ROUTES.contains(&route_id) {
         minigames::handle(state, route_id, call).await
     } else if questionnaires::ROUTES.contains(&route_id) {
@@ -511,6 +596,12 @@ async fn route(
         reflinks::handle(state, route_id, call).await
     } else if workspace_members::ROUTES.contains(&route_id) {
         workspace_members::handle(state, route_id, call).await
+    } else if contact_exports::ROUTES.contains(&route_id) {
+        contact_exports::handle(state, route_id, call).await
+    } else if product_imports::ROUTES.contains(&route_id) {
+        product_imports::handle(state, route_id, call).await
+    } else if contact_imports::ROUTES.contains(&route_id) {
+        contact_imports::handle(state, route_id, call).await
     } else if contact_filter::ROUTES.contains(&route_id) {
         contact_filter::handle(state, route_id, call).await
     } else if workspace_settings::ROUTES.contains(&route_id) {

@@ -21,12 +21,18 @@ chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
 # Concurrent error-log emits (`Promise.allSettled`, Q.D11).
 futures = { workspace = true }
+# Q.D1i product imports: XLSX (a ZIP of XML parts) read / template write; same versions as the lockfile.
+flate2 = "1.1"
+quick-xml = "0.41"
 # P3.6-D2 contacts: E.164 normalization (libphonenumber-js).
 phonenumber = { workspace = true }
 # SSRF guard DoH lookup (`fetch("https://1.1.1.1/dns-query")`); same client as crates/files.
+# Flow import token rewrites (`VARIABLE_PLACEHOLDER_SOURCE` replace).
+regex = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 # Random token bytes (`crypto.getRandomValues`).
 ring = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 # Task-local audit actor (`withAuditContext`, P3.6-X1).
@@ -36,6 +42,10 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+# Q.D6 AI file tests: a fake download client (`HttpFetcher`) and its response.
+async-trait = "0.1"
+bytes = { workspace = true }
+http = { workspace = true }
 chatbotx-core = { workspace = true }
 # P3.6-D2 profile refresh tests: `MemKv::ttl_secs`.
 chatbotx-kv = { workspace = true, features = ["test-util"] }

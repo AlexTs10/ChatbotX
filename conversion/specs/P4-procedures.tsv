@@ -1,0 +1,184 @@
+procedure	ui_uses	used_in_web	rust
+adsAPI.getReferralStats	1		missing
+adsAPI.listChannelAdAccounts	1		missing
+adsCampaignAPI.createMessagingAd	1		missing
+adsCampaignAPI.deleteMessagingAd	1		missing
+adsCampaignAPI.getAdAccountDetails	1		missing
+adsCampaignAPI.getAdVideoStatus	1		missing
+adsCampaignAPI.getMessagingAdsInsights	2		missing
+adsCampaignAPI.listAdAccounts	3		missing
+adsCampaignAPI.listMessagingAds	2		missing
+adsCampaignAPI.listMessengerPages	1		missing
+adsCampaignAPI.pauseMessagingAd	1		missing
+adsCampaignAPI.publishMessagingAd	1		missing
+adsCampaignAPI.retryMessagingAd	1		missing
+adsCampaignAPI.uploadAdVideo	1		missing
+aiAgentsAPI.key	1	web	missing
+aiAgentsAPI.listAIAgentsAPI	1	web	missing
+aiFilesAPI.getAIFileAuthenticatedAPI	2		missing
+aiFilesAPI.listAIFilesAuthenticatedAPI	1	web	missing
+aiFunctionsAPI.listAIFunctionsAuthenticatedAPI	1	web	missing
+aiHandoverAPIs.getApplyToAllStatus	2		missing
+aiHandoverAPIs.listBulkHistory	2		missing
+aiMcpServerAPIs.listAIMcpServersAuthenticatedAPI	1	web	missing
+aiMcpServerAPIs.validateAIMcpServerAuthenticatedAPI	1		missing
+appointmentCalendarsAPI.getContactAvailabilityAPI	2		missing
+appointmentCalendarsAPI.listAppointmentCalendarsForFlowAPI	2	web	missing
+appointmentsAPI.key	1		missing
+appointmentsAPI.listContactAppointmentsAPI	1		missing
+botFieldAPIs.privateListBotFieldsAPI	2	web	rust
+broadcastAPIs.privateGetBatchBroadcastStatsAPI	1		missing
+broadcastAPIs.privateListBroadcastContactsAPI	1		missing
+broadcastAPIs.privateListBroadcastOccurrencesAPI	2		missing
+broadcastAPIs.privateListBroadcastOptionsAPI	1	web	missing
+broadcastAPIs.privateListBroadcastRunGroupsAPI	2		missing
+commentAutomationsAPI.automationAccountsAPI	1		missing
+commentAutomationsAPI.moderationLogsAPI	1		missing
+commentAutomationsAPI.moderationSummaryAPI	1		missing
+connectionsAPI.key	1		missing
+connectSessionsAPI.getConnectSessionAPI	1		missing
+connectSessionsAPI.key	1		missing
+contactFilterAPI.getActivityAvailabilityAPI	1	web	rust
+contactFilterAPI.listActivityValueOptionsAPI	1	web	rust
+contactFilterAPI.resolveFilterValueLabelsAPI	1	web	rust
+contactNotesAPI.listContactNotesAuthenticatedAPI	1		rust
+contactsAPIs.countContactInboxesAuthenticatedAPI	1		missing
+contactsAPIs.countContactsAuthenticatedAPI	1		rust
+contactsAPIs.getContactAuthenticatedAPI	1		rust
+contactsAPIs.getExportFileAuthenticatedAPI	2	web	rust
+contactsAPIs.listContactAdReferralsAuthenticatedAPI	1		rust
+contactsAPIs.listContactInboxesAudiencePreviewAuthenticatedAPI	1		missing
+contactsAPIs.listContactsByPOSTAuthenticatedAPI	3	web	rust
+contactsAPIs.listExportFilesAuthenticatedAPI	2	web	rust
+contactScanAPIs.getContactScanStatusAuthenticatedAPI	2		missing
+contactSequencesAPI.listContactSequencesAuthenticatedAPI	1		rust
+conversationsAPI.findConversationAuthenticatedAPI	2		missing
+conversationsAPI.getPostDetailsAuthenticatedAPI	1		missing
+conversationsAPI.listConversationsByPOSTAuthenticatedAPI	2		missing
+couponsAPI.archiveCouponTopicAPI	2		missing
+couponsAPI.createCouponTopicAPI	1		missing
+couponsAPI.deleteCouponTopicAPI	2		missing
+couponsAPI.getCouponExportFileAPI	1		missing
+couponsAPI.listContactCouponsAPI	1		missing
+couponsAPI.listCouponsAPI	1		missing
+couponsAPI.listCouponTopicOptionsAPI	1	web	missing
+couponsAPI.listCouponTopicsAPI	1		missing
+couponsAPI.unarchiveCouponTopicAPI	2		missing
+couponsAPI.updateCouponTopicAPI	1		missing
+customFieldsAPI.key	1	web	missing
+customFieldsAPI.privateListCustomFieldsAPI	1	web	rust
+decisionProfilesAPI.key	1		missing
+decisionProfilesAPI.listActiveForFlow	1	web	missing
+decisionProfilesAPI.listGlobalRouterDestinations	1		missing
+dynamicImagesAPI.getDynamicImageAPI	1	web	missing
+emailTopicsAPI.privateListWorkspaceEmailTopicsAPI	1	web	missing
+facebookLeadAdsAPI.listLeadAdsFormsAPI	1		missing
+facebookLeadAdsAPI.listLeadAdsPagesAPI	1		missing
+facebookMarketingMessagesAPI.getMarketingMessagesStatisticsAPI	1		missing
+facebookMarketingMessagesAPI.listMarketingMessagesAdAccountsAPI	3		missing
+facebookMarketingMessagesAPI.listMarketingMessagesAudiencesAPI	1		missing
+facebookMarketingMessagesAPI.listMarketingMessagesPagesAPI	3		missing
+fbCommentsAPI.facebookPostsAPI	1		missing
+fbCommentsAPI.privateListCommentAutomationContactsAPI	1		missing
+flowsAPI.privateGetFlowStatsAPI	1	web	missing
+flowsAPI.privateGetMessengerAdsJsonAPI	1	web	missing
+flowsAPI.privateListFlowsAPI	2	web	rust
+flowsAPI.privateListFlowVersionsAPI	1	web	rust
+flowsAPI.privateResetFlowStatsAPI	1		missing
+foldersAPI.listFoldersAuthenticatedAPI	1	web	rust
+googleAdsAPI.getInFlightConnectSession	1		missing
+googleAdsAPI.getIntegration	1	web	missing
+googleAdsAPI.key	1		missing
+googleAdsAPI.listEvents	1		missing
+igCommentsAPI.instagramMediaAPI	1		missing
+igStoriesAPI.instagramStoriesAPI	1		missing
+inboxesAPI.listAllInboxesAuthenticatedAPI	2	web	missing
+inboxTeamsAPI.listInboxTeamsAuthenticatedAPI	2	web	missing
+integrationActiveCampaignAPI.listAutomations	1	web	missing
+integrationActiveCampaignAPI.listCustomFields	1	web	missing
+integrationActiveCampaignAPI.listLists	1	web	missing
+integrationActiveCampaignAPI.listTags	1	web	missing
+integrationDripAPI.listAccounts	1	web	missing
+integrationDripAPI.listCustomFields	1	web	missing
+integrationDripAPI.listTags	1	web	missing
+integrationFacebookAdsAPI.listAdAccounts	3	web	missing
+integrationFacebookAdsAPI.listCustomAudiences	2	web	missing
+integrationGetResponseAPI.listCampaigns	1	web	missing
+integrationGetResponseAPI.listTags	1	web	missing
+integrationInstagramAPIs.connectInstagramAccountAPI	1		missing
+integrationInstagramAPIs.connectInstagramFacebookAccountAPI	1		missing
+integrationInstagramAPIs.setCoexistInstagramAPI	1		missing
+integrationKlaviyoAPI.listLists	2	web	missing
+integrationMailchimpAPI.listAudiences	1	web	missing
+integrationMailchimpAPI.listMergeFields	1	web	missing
+integrationMailchimpAPI.listTags	1	web	missing
+integrationMailerLiteAPI.listFields	2	web	missing
+integrationMailerLiteAPI.listGroups	2	web	missing
+integrationMessengerAPIs.connectMessengerPageAPI	1		missing
+integrationMessengerAPIs.setCoexistMessengerAPI	2		missing
+integrationMoosendAPI.listMailingLists	2	web	missing
+integrationSendGridAPI.listCustomFields	1	web	missing
+integrationSendGridAPI.listLists	2	web	missing
+integrationWhatsappAPIs.connectWhatsappNumberAPI	1		missing
+integrationWhatsappAPIs.getWhatsappRoutingRolesAPI	1		missing
+integrationWhatsappAPIs.getWhatsappRoutingRolesByInboxAPI	2		missing
+integrationWhatsappAPIs.listIntegrationWhatsappInternalAPI	1		missing
+integrationWhatsappAPIs.listWhatsappPhoneNumbersInternalAPI	1		missing
+integrationWhatsappAPIs.setCoexistWhatsappAPI	2		missing
+integrationWhatsappAPIs.syncWhatsappRoutingRolesAPI	1		missing
+leaderboardsAPI.listLeaderboardOptionsAPI	2	web	missing
+mediaLibraryAPI.listMediaLibraryFiles	1	web	missing
+mediaLibraryAPI.listMediaLibraryFolders	1	web	missing
+messagesAPI.getWhatsappFlowResponseAuthenticatedAPI	1		missing
+messagesAPI.listMessagesAuthenticatedAPI	1		missing
+messengerMessageTemplateAPIs.listMessengerMessageTemplatesInternalAPI	1	web	missing
+miniAppsAPI.listMiniAppOptionsAPI	1	web	missing
+personasAPIs.listMessengerPersonasAuthenticatedAPI	1	web	missing
+pipelinesAPI.key	1		missing
+pipelinesAPI.privateGetBoardAPI	2		missing
+pipelinesAPI.privateGetItemAPI	2		missing
+pipelinesAPI.privateGetPipelineAPI	2	web	missing
+pipelinesAPI.privateGetStatsAPI	2		missing
+pipelinesAPI.privateListContactItemsAPI	2		missing
+pipelinesAPI.privateListItemActivityAPI	2		missing
+pipelinesAPI.privateListItemCommentsAPI	2		missing
+pipelinesAPI.privateListPipelineMembersAPI	1		missing
+pipelinesAPI.privateListPipelineOptionsAPI	2	web	missing
+pipelinesAPI.privateListPipelinesAPI	3		missing
+pipelinesAPI.privateListStagePageAPI	1		missing
+placesNearMeAPI.listPlaceCategoryOptionsAPI	2	web	rust
+platformCredentialsAPI.getGiphyApiKeyAPI	1	web	missing
+pollsAPI.bulkDeletePollsAPI	1		missing
+pollsAPI.createPollAPI	1		missing
+pollsAPI.getPollAnalyticsAPI	1		missing
+pollsAPI.getPollLinksAPI	1		missing
+pollsAPI.key	1		missing
+pollsAPI.updatePollAPI	1		missing
+productsAPI.listProductFormOptionsAPI	4	web	missing
+productsAPI.listProductsAuthorizedAPI	2		missing
+productsAPI.listSendableProductsAuthorizedAPI	2	web	missing
+questionnairesAPI.listQuestionnairesForFlowAPI	1	web	rust
+realtimeAPI.mintWorkspaceConnectTokenAuthenticatedAPI	1	web	rust
+refLinksAPI.listRefLinkOptionsAuthenticatedAPI	1	web	missing
+responseSlaAPI.getResponseSlaStatusWorkspaceAuthAPI	2		missing
+savedRepliesAPI.listSavedRepliesAuthorizedAPI	2		missing
+sequencesAPI.listSequencesWorkspaceAuthAPI	2	web	missing
+sequencesAPI.privateGetSequenceStepStatsAPI	1		missing
+sequencesAPI.privateListSequenceStepContactsAPI	1		missing
+spreadsheetsAPI.listSpreadsheetsAuthenticatedAPI	1	web	missing
+spreadsheetsAPI.listWorksheetHeadersAuthenticatedAPI	1	web	missing
+spreadsheetsAPI.listWorksheetsAuthenticatedAPI	1	web	missing
+tagsAPI.key	1	web	missing
+tagsAPI.privateListWorkspaceTagsAPI	1	web	rust
+templatesAPI.key	1		missing
+templatesAPI.listLockedIdsAPI	1	web	missing
+templatesAPI.listSelectableResourcesAPI	2		missing
+templatesAPI.previewDependenciesAPI	1		missing
+threadsCommentsAPI.threadsPostsAPI	1		missing
+userPersistentMenusAPI.listUserPersistentMenusAuthenticatedAPI	1	web	missing
+whatsappFlowAPIs.getWhatsappFlowScreensInternalAPI	2	web	missing
+whatsappFlowAPIs.listWhatsappFlowsInternalAPI	1	web	missing
+whatsappMessageTemplateAPIs.listWhatsappMessageTemplatesInternalAPI	2	web	missing
+whatsappMessageTemplateAPIs.searchMetaCatalogProductsAPI	2	web	missing
+workingHoursAPI.listWorkingHoursOptionsWorkspaceAuthAPI	2	web	missing
+workspaceMembersAPI.listWorkspaceMembersAuthenticatedAPI	2	web	rust

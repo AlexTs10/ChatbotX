@@ -5,14 +5,16 @@
 //! is unchanged); a stored row is set up with SQL.
 
 mod common;
+mod x1_support;
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::ecommerce_settings::{self, defaults, parse_patch};
 use common::{OTHER_WS, WS, flow, open_hours, scalar_text, setup, two_workspaces};
 use serde_json::{Value, json};
+use x1_support::RecordingEnqueuer;
 
 async fn update(db: &chatbotx_db::Db, patch: Value) -> Result<Value, BusinessError> {
-    ecommerce_settings::update(db, WS, patch).await
+    ecommerce_settings::update(db, WS, patch, None).await
 }
 
 fn field_of(error: &BusinessError) -> Option<String> {
@@ -380,6 +382,238 @@ async fn selling_from_an_external_store_switching_to_a_store_that_is_not_connect
     assert_eq!(error.code(), Some("externalStoreNotConnected"));
     assert_eq!(data_of(&error), Some(json!({ "store": "woocommerce" })));
     assert_eq!(stored(&db, "currency").await, None);
+}
+
+/// A connected Shopify / WooCommerce store in `currency` (sync `idle`).
+async fn connect_store(db: &chatbotx_db::Db, source: &'static str, currency: &'static str) {
+    setup(db, move |tx| {
+        let sql = if source == "shopify" {
+            r#"INSERT INTO "IntegrationShopify" ("workspaceId", "shopDomain", "currency", "authKind", "encryptedAuth", "webhookSubscriptionIds")
+               VALUES (?1, 'shop.myshopify.com', ?2, 'token', '{}', '[]')"#
+        } else {
+            r#"INSERT INTO "IntegrationWoocommerce" ("workspaceId", "siteUrl", "currency", "encryptedAuth", "webhookIds")
+               VALUES (?1, 'https://shop.test', ?2, '{}', '[]')"#
+        };
+        tx.execute(sql, chatbotx_db::rusqlite::params![WS, currency])?;
+        Ok(())
+    })
+    .await;
+}
+
+async fn switch(
+    db: &chatbotx_db::Db,
+    jobs: &RecordingEnqueuer,
+    general: Value,
+) -> Result<Value, BusinessError> {
+    ecommerce_settings::update(
+        db,
+        WS,
+        json!({ "general": general }),
+        Some(jobs as &dyn chatbotx_jobs::Enqueuer),
+    )
+    .await
+}
+
+/// Port of: packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts:423 "selling from an external store > switching to Shopify takes the store's currency"
+#[tokio::test]
+async fn selling_from_an_external_store_switching_to_shopify_takes_the_store_s_currency() {
+    let db = two_workspaces().await;
+    connect_store(&db, "shopify", "VND").await;
+    let saved = switch(
+        &db,
+        &RecordingEnqueuer::default(),
+        json!({ "storeSource": "shopify" }),
+    )
+    .await
+    .expect("saved");
+    assert_eq!(saved["payments"]["currency"], json!("VND"));
+    assert_eq!(saved["payments"]["currencySymbol"], json!("₫"));
+    assert_eq!(stored(&db, "currency").await.as_deref(), Some("VND"));
+    assert_eq!(
+        scalar_text(
+            &db,
+            r#"SELECT "currencySymbol" FROM "EcommerceSettings" WHERE "workspaceId" = ?1"#,
+            WS
+        )
+        .await
+        .as_deref(),
+        Some("₫")
+    );
+}
+
+/// Port of: packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts:440 "selling from an external store > switching to WooCommerce reads the store's symbol and position too"
+#[tokio::test]
+async fn selling_from_an_external_store_switching_to_woocommerce_reads_the_store_s_symbol_and_position_too()
+ {
+    let db = two_workspaces().await;
+    connect_store(&db, "woocommerce", "VND").await;
+    switch(
+        &db,
+        &RecordingEnqueuer::default(),
+        json!({ "storeSource": "woocommerce" }),
+    )
+    .await
+    .expect("saved");
+    assert_eq!(stored(&db, "currency").await.as_deref(), Some("VND"));
+    // Changed: `refreshStoreCurrency` (a WooCommerce REST read) is not
+    // ported; the save keeps the store's currency (DECISIONS 2026-11-17).
+}
+
+/// Port of: packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts:453 "selling from an external store > a failed read of the store's currency does not fail the save"
+#[tokio::test]
+async fn selling_from_an_external_store_a_failed_read_of_the_store_s_currency_does_not_fail_the_save()
+ {
+    let db = two_workspaces().await;
+    connect_store(&db, "woocommerce", "VND").await;
+    let saved = switch(
+        &db,
+        &RecordingEnqueuer::default(),
+        json!({ "storeSource": "woocommerce" }),
+    )
+    .await
+    .expect("saved");
+    assert_eq!(saved["payments"]["currency"], json!("VND"));
+}
+
+// ts:465 describe("switching the store source")
+
+fn syncs(jobs: &RecordingEnqueuer) -> Vec<(String, Value)> {
+    jobs.calls()
+        .into_iter()
+        .map(|call| {
+            assert_eq!(call.queue, chatbotx_jobs::QueueName::Integration);
+            (call.name, call.data["data"].clone())
+        })
+        .collect()
+}
+
+/// Port of: packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts:479 "switching the store source > switching to Shopify queues a full Shopify sync"
+#[tokio::test]
+async fn switching_the_store_source_switching_to_shopify_queues_a_full_shopify_sync() {
+    let db = two_workspaces().await;
+    connect_store(&db, "shopify", "USD").await;
+    let jobs = RecordingEnqueuer::default();
+    switch(&db, &jobs, json!({ "storeSource": "shopify" }))
+        .await
+        .expect("saved");
+    assert_eq!(
+        syncs(&jobs),
+        vec![(
+            "shopifySync".to_string(),
+            json!({ "workspaceId": WS.to_string(), "scope": "all" })
+        )]
+    );
+    assert_eq!(
+        scalar_text(
+            &db,
+            r#"SELECT "syncStatus" FROM "IntegrationShopify" WHERE "workspaceId" = ?1"#,
+            WS
+        )
+        .await
+        .as_deref(),
+        Some("queued")
+    );
+}
+
+/// Port of: packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts:493 "switching the store source > switching from Shopify to WooCommerce queues a WooCommerce sync"
+#[tokio::test]
+async fn switching_the_store_source_switching_from_shopify_to_woocommerce_queues_a_woocommerce_sync()
+ {
+    let db = two_workspaces().await;
+    connect_store(&db, "shopify", "VND").await;
+    connect_store(&db, "woocommerce", "VND").await;
+    stored_row(&db, r#""storeSource" = 'shopify'"#).await;
+    let jobs = RecordingEnqueuer::default();
+    switch(&db, &jobs, json!({ "storeSource": "woocommerce" }))
+        .await
+        .expect("saved");
+    assert_eq!(
+        syncs(&jobs),
+        vec![(
+            "woocommerceSync".to_string(),
+            json!({ "workspaceId": WS.to_string(), "scope": "all" })
+        )]
+    );
+}
+
+/// Port of: packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts:507 "switching the store source > saving the same source again does not sync"
+#[tokio::test]
+async fn switching_the_store_source_saving_the_same_source_again_does_not_sync() {
+    let db = two_workspaces().await;
+    connect_store(&db, "shopify", "USD").await;
+    stored_row(&db, r#""storeSource" = 'shopify'"#).await;
+    let jobs = RecordingEnqueuer::default();
+    switch(
+        &db,
+        &jobs,
+        json!({ "storeSource": "shopify", "orderingAvailable": false }),
+    )
+    .await
+    .expect("saved");
+    assert!(syncs(&jobs).is_empty());
+}
+
+/// Port of: packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts:517 "switching the store source > switching back to our own catalog does not sync"
+#[tokio::test]
+async fn switching_the_store_source_switching_back_to_our_own_catalog_does_not_sync() {
+    let db = two_workspaces().await;
+    connect_store(&db, "shopify", "USD").await;
+    stored_row(&db, r#""storeSource" = 'shopify'"#).await;
+    let jobs = RecordingEnqueuer::default();
+    switch(&db, &jobs, json!({ "storeSource": "chatbotx" }))
+        .await
+        .expect("saved");
+    assert!(syncs(&jobs).is_empty());
+}
+
+/// Port of: packages/business/src/ecommerce-settings/__tests__/ecommerce-settings-service.test.ts:527 "switching the store source > a sync already running, or a queue error, does not fail the switch"
+#[tokio::test]
+async fn switching_the_store_source_a_sync_already_running_or_a_queue_error_does_not_fail_the_switch()
+ {
+    let db = two_workspaces().await;
+    connect_store(&db, "shopify", "USD").await;
+    setup(&db, |tx| {
+        tx.execute(
+            r#"UPDATE "IntegrationShopify" SET "syncStatus" = 'running', "updatedAt" = ?2 WHERE "workspaceId" = ?1"#,
+            chatbotx_db::rusqlite::params![WS, chatbotx_db::repo::now_ms()],
+        )?;
+        Ok(())
+    })
+    .await;
+    let jobs = RecordingEnqueuer::default();
+    let saved = switch(&db, &jobs, json!({ "storeSource": "shopify" }))
+        .await
+        .expect("running sync");
+    assert_eq!(saved["general"]["storeSource"], json!("shopify"));
+    assert!(syncs(&jobs).is_empty());
+
+    setup(&db, |tx| {
+        tx.execute(
+            r#"UPDATE "IntegrationShopify" SET "syncStatus" = 'idle' WHERE "workspaceId" = ?1"#,
+            [WS],
+        )?;
+        tx.execute(
+            r#"UPDATE "EcommerceSettings" SET "storeSource" = 'chatbotx' WHERE "workspaceId" = ?1"#,
+            [WS],
+        )?;
+        Ok(())
+    })
+    .await;
+    jobs.fail_next("redis down");
+    let saved = switch(&db, &jobs, json!({ "storeSource": "shopify" }))
+        .await
+        .expect("queue error");
+    assert_eq!(saved["general"]["storeSource"], json!("shopify"));
+    assert_eq!(
+        scalar_text(
+            &db,
+            r#"SELECT "syncError" FROM "IntegrationShopify" WHERE "workspaceId" = ?1"#,
+            WS
+        )
+        .await
+        .as_deref(),
+        Some("Could not queue the sync.")
+    );
 }
 
 // legacy keys (apps/builder/__tests__/ecommerce-settings-legacy-keys.test.ts)

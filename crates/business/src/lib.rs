@@ -3,18 +3,29 @@
 //! (`crates/api`) maps their results and [`errors::BusinessError`]s to the
 //! original JSON shapes.
 
+pub mod ai;
+pub mod ai_agent;
+pub mod ai_file;
+pub mod ai_function;
+pub mod ai_handover;
+pub mod ai_mcp_server;
 pub mod analytics;
 pub mod audit;
+pub mod automated_response;
 pub mod billing;
 pub mod bot_field;
 pub mod capabilities;
 pub mod connection;
 pub mod contact;
 pub mod contact_custom_field;
+pub mod contact_export;
 pub mod contact_filter;
 pub mod contact_note;
 pub mod contact_referral_event;
 pub mod contact_sequence;
+pub mod conversation;
+pub mod conversation_actions;
+pub mod conversation_list;
 pub mod copy_name;
 pub mod count_mode;
 pub mod custom_field;
@@ -30,11 +41,17 @@ pub mod folder;
 pub mod import;
 pub mod inbox;
 pub mod inbox_team;
+pub mod integration_ai_provider;
 pub mod integration_api;
+pub mod integration_openai_compatible;
 pub mod integration_webchat;
 pub mod invitation;
 pub mod keys;
 pub mod license;
+pub mod media_library;
+pub mod message;
+pub mod message_actions;
+pub mod meta_catalog;
 pub mod minigame;
 pub mod net;
 pub mod pipeline;

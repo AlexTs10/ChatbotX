@@ -9,10 +9,14 @@ pub mod iso8601;
 pub mod jobs_admin;
 pub mod mail;
 pub mod orpc;
+pub mod presigned_upload;
 pub mod reflink_widget;
 pub mod routes;
 pub mod rpc;
+pub mod rpc_ai;
+pub mod rpc_procedures;
 pub mod session;
+pub mod spa;
 
 use axum::Router;
 use axum::http::header;

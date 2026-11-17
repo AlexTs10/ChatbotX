@@ -1,6 +1,7 @@
 //! `chatbotx-server`: the single ChatbotX binary.
 
 mod config;
+mod web;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -12,8 +13,10 @@ use chatbotx_business::audit::AuditService;
 use chatbotx_business::events::cache::ActiveCache;
 use chatbotx_business::events::emitter::QueueEmitter;
 use chatbotx_db::Db;
+use chatbotx_jobs::runtime::Runtime;
+use chatbotx_jobs::shutdown::{Shutdown, ShutdownReason};
 use chatbotx_kv::{Clock, Kv, KvConfig, SystemClock};
-use chatbotx_rt::{KvPresence, NoRevokeRetry, Realtime, RtConfig};
+use chatbotx_rt::{KvPresence, Realtime, RtConfig};
 use config::Config;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -131,13 +134,17 @@ fn files_uploader() -> std::io::Result<Arc<chatbotx_files::Uploader>> {
 }
 
 /// Starts the realtime hub on the shared kv stores.
-fn start_realtime(shared: &Shared, rt_config: RtConfig) -> Realtime {
+fn start_realtime(
+    shared: &Shared,
+    rt_config: RtConfig,
+    jobs: Arc<dyn chatbotx_jobs::Enqueuer>,
+) -> Realtime {
     Realtime::start(
         Arc::clone(&shared.kv),
         Arc::clone(&shared.clock),
         rt_config,
         Arc::new(KvPresence::new(Arc::clone(&shared.kv))),
-        Arc::new(NoRevokeRetry),
+        Arc::new(chatbotx_worker::default_queue::JobsRevokeRetry(jobs)),
     )
 }
 
@@ -200,8 +207,15 @@ fn is_cloud() -> bool {
 
 async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<()> {
     let shared = open_shared(&config).await?;
+    // One job store for the API (enqueue) and the workers: the wake-up
+    // notifications are in-process.
+    let jobs = Arc::new(
+        chatbotx_jobs::JobStore::open(Arc::clone(&shared.db), Arc::new(chatbotx_jobs::SystemClock))
+            .await
+            .map_err(std::io::Error::other)?,
+    );
     let realtime = match rt_config {
-        Some(rt_config) => Some(start_realtime(&shared, rt_config)),
+        Some(rt_config) => Some(start_realtime(&shared, rt_config, Arc::clone(&jobs) as _)),
         None => {
             tracing::info!("realtime gateway off: REALTIME_BROADCAST_SECRET is not set");
             None
@@ -228,14 +242,15 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         std::process::exit(1);
     }
     chatbotx_api::session::bootstrap_platform_admin_at_startup(&shared.db).await;
-    let (api, job_store) = api_state(&shared, realtime.as_ref()).await?;
-    let api = Arc::new(api);
+    let (shutdown, exited) = start_workers(&shared, &jobs, realtime.as_ref())?;
     let jobs_admin =
         chatbotx_api::jobs_admin::router(Arc::new(chatbotx_api::jobs_admin::JobsAdminState {
             auth: Arc::clone(&sessions),
-            store: job_store,
+            store: Arc::clone(&jobs),
         }));
+    let api = Arc::new(api_state(&shared, Arc::clone(&jobs), realtime.as_ref()));
     let mut app = chatbotx_api::router()
+        .merge(chatbotx_api::spa::spa_router(Arc::clone(&sessions)))
         .merge(chatbotx_api::rpc::rpc_router_with(
             chatbotx_api::rpc::RpcState {
                 auth: Arc::clone(&sessions),
@@ -247,13 +262,30 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,
         )))
         .merge(jobs_admin)
+        .merge(chatbotx_api::presigned_upload::router(
+            chatbotx_api::presigned_upload::UploadState {
+                auth: Arc::clone(&sessions),
+                api: Arc::clone(&api),
+                is_cloud: is_cloud(),
+            },
+        ))
         .merge(chatbotx_api::session::auth_router(sessions))
-        .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
-        .merge(chatbotx_api::routes::public_api_router_with(auth, api));
+        .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
     app = app.merge(chatbotx_api::files::router(Arc::clone(&shared.files)));
+    // The public API and the SPA (`apps/web/dist`, P4) answer every path no
+    // route matched: the SPA takes the GETs outside the API paths.
+    let public_api = chatbotx_api::routes::public_api_router_with(auth, api);
+    let web_dir = std::path::PathBuf::from(env_or("WEB_DIR", "apps/web/dist"));
+    match web::router(web_dir.clone(), public_api.clone()) {
+        Some(web) => app = app.merge(web),
+        None => {
+            tracing::info!(dir = %web_dir.display(), "web UI off: no index.html in WEB_DIR");
+            app = app.merge(public_api);
+        }
+    }
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
     tracing::info!(
         addr = %listener.local_addr()?,
@@ -262,7 +294,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         "listening"
     );
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(realtime))
+        .with_graceful_shutdown(shutdown_signal(realtime, shutdown, exited))
         .await?;
     tracing::info!("shutdown complete");
     Ok(())
@@ -271,22 +303,12 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
 /// The handler state: the database, the app URL and the cross-cutting
 /// services (realtime producer, kv, job store for jobs and audit records,
 /// the in-process event bus).
-async fn api_state(
+fn api_state(
     shared: &Shared,
+    jobs: Arc<chatbotx_jobs::JobStore>,
     realtime: Option<&Realtime>,
-) -> std::io::Result<(
-    chatbotx_api::handlers::ApiState,
-    Arc<chatbotx_jobs::JobStore>,
-)> {
-    let store = Arc::new(
-        chatbotx_jobs::JobStore::open(Arc::clone(&shared.db), Arc::new(chatbotx_jobs::SystemClock))
-            .await
-            .map_err(std::io::Error::other)?,
-    );
-    let app_url = env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
-        .trim_end_matches('/')
-        .to_string();
-    let jobs: Arc<dyn chatbotx_jobs::Enqueuer> = store.clone();
+) -> chatbotx_api::handlers::ApiState {
+    let jobs: Arc<dyn chatbotx_jobs::Enqueuer> = jobs;
     // The flow-trigger and webhook emitters queue `evaluate-triggers` /
     // `evaluate-webhooks` jobs for the (later) trigger and webhook workers.
     let events = chatbotx_business::events::EventBus::new();
@@ -301,7 +323,7 @@ async fn api_state(
     // Audit rows are written in the request (the `sendAuditLog` handler);
     // the community edition writes none, as the original handler.
     let audit = AuditService::direct(Arc::clone(&shared.db), edition() != "community");
-    let mut state = chatbotx_api::handlers::ApiState::new(Arc::clone(&shared.db), app_url)
+    let mut state = chatbotx_api::handlers::ApiState::new(Arc::clone(&shared.db), app_url())
         .with_kv(Arc::clone(&shared.kv))
         .with_jobs(jobs)
         .with_events(events)
@@ -310,13 +332,75 @@ async fn api_state(
     if let Some(realtime) = realtime {
         state = state.with_realtime(realtime.clone());
     }
-    Ok((state, store))
+    state
 }
 
-/// Resolve on SIGINT (Ctrl-C) or SIGTERM, after the realtime drain
-/// (producers flushed, sockets closed 4003 with `retryAfter`).
-async fn shutdown_signal(realtime: Option<Realtime>) {
-    wait_for_signal().await;
+/// `NEXT_PUBLIC_BUILDER_URL` without a trailing `/`.
+fn app_url() -> String {
+    env_or("NEXT_PUBLIC_BUILDER_URL", "http://localhost:3000")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+type Exited = tokio::sync::watch::Receiver<Option<i32>>;
+
+/// Starts the `chat`, `integration` and `default` workers (Q.W1). The
+/// shutdown coordinator drains them on SIGINT / SIGTERM
+/// (`WORKER_SHUTDOWN_TIMEOUT_MS`); its exit call resolves `Exited`.
+fn start_workers(
+    shared: &Shared,
+    jobs: &Arc<chatbotx_jobs::JobStore>,
+    realtime: Option<&Realtime>,
+) -> std::io::Result<(Arc<Shutdown>, Exited)> {
+    let (exit_tx, exited) = tokio::sync::watch::channel(None);
+    let timeout_ms = std::env::var("WORKER_SHUTDOWN_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0);
+    let shutdown = Shutdown::new(
+        timeout_ms,
+        Arc::new(move |code| {
+            let _ = exit_tx.send(Some(code));
+        }),
+        Arc::new(|| Box::pin(async { Ok(()) })),
+    );
+    let runtime = Runtime::new(
+        Arc::clone(jobs),
+        Arc::clone(&shutdown),
+        Arc::new(chatbotx_jobs::SystemClock),
+    );
+    let deps = chatbotx_worker::Deps {
+        db: Arc::clone(&shared.db),
+        jobs: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::Enqueuer>,
+        waiter: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::JobWaiter>,
+        realtime: realtime.cloned(),
+        channels: chatbotx_worker::Channels::builtin(),
+        app_url: app_url(),
+        variables: chatbotx_worker::variables::VariableDeps::from_env(
+            Arc::clone(&shared.db),
+            app_url(),
+        )
+        .map(Arc::new),
+    };
+    chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
+    Ok((shutdown, exited))
+}
+
+/// Resolve on SIGINT (Ctrl-C) or SIGTERM, after the worker drain and the
+/// realtime drain (producers flushed, sockets closed 4003 with
+/// `retryAfter`).
+async fn shutdown_signal(realtime: Option<Realtime>, shutdown: Arc<Shutdown>, mut exited: Exited) {
+    tokio::select! {
+        () = wait_for_signal() => {}
+        _ = exited.wait_for(Option::is_some) => {}
+    }
+    // Idempotent: the coordinator's own signal handler may have started it.
+    shutdown.request(ShutdownReason::Sigterm, None).await;
+    if let Ok(code) = exited.wait_for(Option::is_some).await
+        && *code != Some(0)
+    {
+        tracing::error!(exit_code = ?*code, "workers did not drain cleanly");
+    }
     if let Some(realtime) = realtime {
         realtime.shutdown().await;
     }

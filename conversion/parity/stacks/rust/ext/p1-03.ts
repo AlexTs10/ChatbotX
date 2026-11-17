@@ -25,7 +25,8 @@ import type {
 } from "../../../src/fixtures/ext/p1-03.ts"
 
 const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
-const PLACE_ID = 7n
+// A place id of its own (p1-12 uses 4, p1-06 5, p1-09 6, p1-07 7, p1-11 8).
+const PLACE_ID = 9n
 
 let lastMs = 0n
 let sequence = 0n

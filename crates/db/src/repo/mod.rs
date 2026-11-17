@@ -95,7 +95,107 @@ macro_rules! table_row {
                 Ok($name { $($field,)* })
             }
         }
+
+        impl $name {
+            /// The row as the builder's JSON resource ([`$crate::repo::ColumnJson`]).
+            pub fn to_json(&self) -> ::serde_json::Value {
+                let mut object = ::serde_json::Map::new();
+                $(
+                    object.insert(
+                        $col.to_string(),
+                        $crate::repo::ColumnJson::column_json(&self.$field, $col),
+                    );
+                )*
+                ::serde_json::Value::Object(object)
+            }
+        }
     };
+}
+
+/// One column value as the builder's JSON (`/rpc`, P4): ids (`id`, `*Id`) as
+/// strings, timestamp columns ([`is_date_column`]) as ISO strings, JSON as is.
+pub trait ColumnJson {
+    fn column_json(&self, column: &str) -> serde_json::Value;
+}
+
+/// The timestamp columns of the schema (unix ms here, `Date` in the builder).
+pub fn is_date_column(column: &str) -> bool {
+    column.ends_with("At")
+        || column.ends_with("Until")
+        || column.ends_with("Since")
+        || matches!(
+            column,
+            "authTime"
+                | "date"
+                | "dueDate"
+                | "fromDueDate"
+                | "toDueDate"
+                | "hourBucket"
+                | "measuredFrom"
+                | "monthlyBotMessagesPeriodStart"
+                | "periodEnd"
+                | "periodStart"
+                | "revoked"
+                | "sinceTime"
+                | "specificDateTime"
+        )
+}
+
+/// Unix ms as `Date.toISOString()` (`2026-11-16T10:00:00.000Z`).
+pub fn iso_millis(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .unwrap_or_default()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string()
+}
+
+impl ColumnJson for i64 {
+    fn column_json(&self, column: &str) -> serde_json::Value {
+        if is_date_column(column) {
+            serde_json::Value::String(iso_millis(*self))
+        } else if column == "id" || column.ends_with("Id") {
+            serde_json::Value::String(self.to_string())
+        } else {
+            serde_json::Value::from(*self)
+        }
+    }
+}
+
+impl ColumnJson for String {
+    fn column_json(&self, _column: &str) -> serde_json::Value {
+        serde_json::Value::String(self.clone())
+    }
+}
+
+impl ColumnJson for bool {
+    fn column_json(&self, _column: &str) -> serde_json::Value {
+        serde_json::Value::Bool(*self)
+    }
+}
+
+impl ColumnJson for f64 {
+    fn column_json(&self, _column: &str) -> serde_json::Value {
+        serde_json::Value::from(*self)
+    }
+}
+
+impl ColumnJson for Json {
+    fn column_json(&self, _column: &str) -> serde_json::Value {
+        self.0.clone()
+    }
+}
+
+impl ColumnJson for Vec<u8> {
+    fn column_json(&self, _column: &str) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+}
+
+impl<T: ColumnJson> ColumnJson for Option<T> {
+    fn column_json(&self, column: &str) -> serde_json::Value {
+        self.as_ref()
+            .map_or(serde_json::Value::Null, |value| value.column_json(column))
+    }
 }
 
 /// One row of `M` by a SQL `WHERE` clause (`None` when there is none).

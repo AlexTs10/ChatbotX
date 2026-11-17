@@ -271,6 +271,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "bytes",
  "chacha20poly1305",
  "chatbotx-business",
  "chatbotx-core",
@@ -296,7 +297,9 @@ dependencies = [
 name = "chatbotx-business"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
+ "bytes",
  "chatbotx-core",
  "chatbotx-db",
  "chatbotx-files",
@@ -305,10 +308,15 @@ dependencies = [
  "chatbotx-rt",
  "chrono",
  "chrono-tz",
+ "flate2",
  "futures",
+ "http",
  "phonenumber",
+ "quick-xml",
+ "regex",
  "reqwest",
  "ring",
+ "serde",
  "serde_json",
  "sha2",
  "tokio",
@@ -442,9 +450,31 @@ dependencies = [
  "chatbotx-jobs",
  "chatbotx-kv",
  "chatbotx-rt",
+ "chatbotx-worker",
+ "serde_json",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "chatbotx-worker"
+version = "0.1.0"
+dependencies = [
+ "chatbotx-business",
+ "chatbotx-core",
+ "chatbotx-db",
+ "chatbotx-jobs",
+ "chatbotx-kv",
+ "chatbotx-rt",
+ "regex",
+ "reqwest",
+ "ring",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

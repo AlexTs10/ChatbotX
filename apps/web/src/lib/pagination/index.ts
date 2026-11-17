@@ -1,0 +1,104 @@
+import z from "zod"
+
+const sortSchema = z.array(
+  z.object({
+    id: z.string().describe("Column to sort by, e.g. `createdAt`."),
+    desc: z.boolean().describe("true for descending, false for ascending."),
+  }),
+)
+
+export const basePaginationRequest = z.object({
+  page: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .nullish()
+    .describe("Page number, starting at 1."),
+  perPage: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .nullish()
+    .describe("Number of items per page."),
+  sort: z.preprocess((val) => {
+    if (val === undefined) {
+      return
+    }
+
+    try {
+      const parsedArray = sortSchema.safeParse(val)
+      if (parsedArray.success) {
+        return parsedArray.data
+      }
+
+      const value = JSON.parse(decodeURIComponent(`${val}`))
+      const { success, data } = sortSchema.safeParse(value)
+      if (!success) {
+        return
+      }
+      return data
+    } catch {
+      return
+    }
+  }, sortSchema
+    .nullish()
+    .describe("Sort order as `[{ id, desc }]` column/direction pairs.")),
+})
+
+export const cursorPaginationRequest = z.object({
+  cursor: z
+    .string()
+    .optional()
+    .describe(
+      "Opaque pagination cursor from a previous response's `nextCursor`. Omit to start from the first page.",
+    ),
+  perPage: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .nullish()
+    .describe("Number of items per page."),
+  sort: z.preprocess((val) => {
+    if (val === undefined) {
+      return
+    }
+
+    try {
+      const parsedArray = sortSchema.safeParse(val)
+      if (parsedArray.success) {
+        return parsedArray.data
+      }
+
+      const value = JSON.parse(decodeURIComponent(`${val}`))
+      const { success, data } = sortSchema.safeParse(value)
+      if (!success) {
+        return
+      }
+      return data
+    } catch {
+      return
+    }
+  }, sortSchema
+    .nullish()
+    .describe("Sort order as `[{ id, desc }]` column/direction pairs.")),
+})
+
+export const decodeCursor = <T>(
+  encoded: string,
+  schema: z.ZodSchema<T>,
+): T | null => {
+  try {
+    const cursor = JSON.parse(Buffer.from(encoded, "base64").toString())
+    const { success, data } = schema.safeParse(cursor)
+    if (!success) {
+      return null
+    }
+    return data
+  } catch {
+    return null
+  }
+}
+
+export const encodeCursor = <T extends Record<string, unknown>>(
+  cursor: T,
+): string => Buffer.from(JSON.stringify(cursor)).toString("base64")

@@ -38,7 +38,7 @@ pub async fn call(
 ) -> Option<Result<Value, OrpcError>> {
     let api = state.api.as_ref()?;
     if !PORTED.contains(&path) {
-        return None;
+        return crate::rpc_procedures::procedure(state, path, context, input).await;
     }
     let workspace = context.workspace.as_ref()?;
     let workspace_id = workspace.workspace_id;

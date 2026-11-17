@@ -17,8 +17,8 @@ z::object(vec![("actual", z::number().optional()),
 ("unit", z::string().optional())])]));
 
 /// `FlowAuthoringError`.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct FlowAuthoringError {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability: Option<Value>,
