@@ -7,7 +7,6 @@ Branch `feat/conversion-i34`.
 | # | Slice | Rust | Original |
 |---|-------|------|----------|
 | 1 | `POST /api/shopify/{workspaceId}/webhook`, `POST /api/woocommerce/{workspaceId}/webhook`: HMAC-SHA256 (base64) with the store secret, constant-time compare; shop domain / site check; job `shopifyWebhook` / `woocommerceWebhook` on the integration queue, job id = delivery (`shopify-webhook-<id>`, `woocommerce-webhook-<ws>-<sha256>`) | `api::store_webhooks` | `app/api/{shopify,woocommerce}/[workspaceId]/webhook/route.ts`, `packages/business/src/{shopify,woocommerce}/webhooks.ts` |
-
 | 2 | Google Sheets client (`listSheetNames`, `listSheetHeaders`, `getSheetValues`, `insertRow`, `updateRow`, `clearRow`, revoke) with the `OAuth2Client` token refresh (5 min margin, once more after a 401); `disconnectGoogleSheetsAction` | `business::google_sheets`, `api::rpc_procedures::email_marketing` | `integrations/google-sheets/src/**`, `features/integration-google-sheets/actions/disconnect.action.ts` |
 
 The store secret is decrypted with the original AAD (`shopify:<ws>`,
