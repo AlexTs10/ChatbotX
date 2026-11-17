@@ -11,6 +11,7 @@ pub mod analytics;
 pub mod bot_fields;
 pub mod broadcasts;
 pub mod capabilities;
+pub mod ads;
 pub mod capi;
 pub mod facebook_lead_ads;
 pub mod channel_integrations;
@@ -638,6 +639,8 @@ async fn route(
         product_vendors::handle(state, route_id, call).await
     } else if products::ROUTES.contains(&route_id) {
         products::handle(state, route_id, call).await
+    } else if ads::ROUTES.contains(&route_id) {
+        ads::handle(state, route_id, call).await
     } else if capi::ROUTES.contains(&route_id) {
         capi::handle(state, route_id, call).await
     } else if facebook_lead_ads::ROUTES.contains(&route_id) {

@@ -197,7 +197,7 @@ pub async fn create(db: &Db, workspace_id: i64, input: CreateInput) -> Result<Au
         );
         return Err(BusinessError::exception(
             "Failed to subscribe the page to lead webhooks. Try again.",
-            "businessError",
+            "systemError",
             400,
         ));
     }
