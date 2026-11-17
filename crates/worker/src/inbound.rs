@@ -1384,13 +1384,13 @@ mod tests {
             }),
             ..Received::default()
         };
-        let mut r = tap(Some("123"), Some("junk"), "hi");
+        let mut r = tap(Some("1161247330962636"), Some("junk"), "hi");
         sanitize_actions(&mut r, "messenger", false);
         assert_eq!(
             (r.postback_action.as_deref(), r.quick_reply_action),
-            (Some("123"), None)
+            (Some("1161247330962636"), None)
         );
-        let mut r = tap(Some("123"), None, "hi");
+        let mut r = tap(Some("1161247330962636"), None, "hi");
         sanitize_actions(&mut r, "telegram", false);
         assert_eq!(r.postback_action, None);
 
