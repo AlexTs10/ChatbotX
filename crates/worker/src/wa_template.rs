@@ -3,8 +3,8 @@
 //! (`validateWhatsappTemplate`, `replaceWhatsappTemplateVariables`) and
 //! `wa-payment-request-guard.ts` (`assertPaymentRequestsSendable`).
 //!
-//! ponytail: `message:sent` / `message:failed` events and the sent
-//! analytics wait for Q.W2 (no worker event bus yet).
+//! `message:sent` / `message:failed` go to the message bus (the broadcast
+//! outcome listener).
 
 use chatbotx_business::message::message_json;
 use chatbotx_core::flow_config::steps::{
@@ -463,7 +463,10 @@ pub async fn process_template(
     let mut template = input.template.clone();
     template["params"] = resolved;
     let flow = input.flow.clone().unwrap_or_default();
-    let result = send_flow_step_to_channel(
+    let flow_id = flow.id.clone();
+    let ctx = crate::events::MessageContext::of(conversation, contact_inbox);
+    let step_ids = json!({ "stepId": step_id, "nodeId": node_id });
+    let sent = send_flow_step_to_channel(
         deps,
         conversation,
         contact_inbox,
@@ -483,7 +486,36 @@ pub async fn process_template(
         },
         &message,
     )
-    .await?;
+    .await;
+    let result = match sent {
+        Ok(result) => {
+            crate::events::emit_message_event(
+                deps.events.as_ref(),
+                "message:sent",
+                &ctx,
+                json!({ "messageId": "", "flowId": flow_id }),
+                input.metadata.as_ref(),
+                step_ids,
+            )
+            .await;
+            result
+        }
+        Err(error) => {
+            let mut extra = step_ids;
+            extra["errorData"] = crate::events::parsed_error(&error);
+            extra["willRetry"] = json!(false);
+            crate::events::emit_message_event(
+                deps.events.as_ref(),
+                "message:failed",
+                &ctx,
+                json!({ "messageId": message.message.id.to_string(), "flowId": flow_id }),
+                input.metadata.as_ref(),
+                extra,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     if result.sent_count > 0 {
         crate::chat::mark_read_after_delivery(
             deps,
