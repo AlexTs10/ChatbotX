@@ -376,3 +376,4 @@ Spec: `conversion/specs/P2.5.md` (126 tables + 4 rollup tables, 358 indexes, 300
 - 2026-11-17 P4 (orchestrator-delegated, recommended option): the pipeline option procedures build `pipelineScopeFromMember` from the `WorkspaceMember` row (grants apply), not the workspace-token scope of `/v1`.
 - 2026-11-17 P4 (orchestrator-delegated, recommended option): `peekImportHeadersAction` errors show the business English message, not the builder's `fields.import.*` translation.
 - 2026-11-17 P4 (orchestrator-delegated, recommended option): the API-channel form keeps Create disabled while the optional Callback URL is empty: the builder has the same code (`callbackUrl: ""` fails `z.url().nullish()`), so the behaviour is the original.
+- 2026-11-17 P4 (orchestrator-delegated, recommended option): the SPA router keeps search values as strings (`parseSearchWith(identity)`), as Next.js does; the default JSON parse rounded ids above 2^53.

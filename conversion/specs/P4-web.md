@@ -244,6 +244,29 @@ new workspace is in `pages.home`. Without `REALTIME_SECRET` the realtime
 token call answers 500 and the shell retries (no realtime in this check).
 Main entry chunk: 595 KB (was 5.4 MB); every route is its own chunk.
 
+Second browser check on the Dell (2026-11-17, release build at `ab7ce2209`
++ the two web fixes below, empty `DATA_DIR`). The T3 preview tab was hidden,
+so there are no screenshots; the QA drove the page with JavaScript and read
+the DOM text. Results: sign-up, sign-in, first workspace; `createApiAction`
+with `workspaceId` adds an API inbox; `inboxesAPI.listAllInboxesAuthenticatedAPI`
+200; Create Contact dialog opens with Source / Inbox and `createContactAction`
+(channel `api`, User ID) 200; contact note create 200; contacts list
+"1 contact"; inbox `/space/<id>/inbox` lists "Ada Lovelace — Hello from QA",
+opens the conversation (message, "Assigned to me", "Bot is active", contact
+panel with "Notes (1)"); `createMessageAction` 200 (stored, queued);
+archive / unarchive / assign 200; tags page lists `vip`; custom fields page
+shows Custom Fields and Bot Fields; sequences page renders. Two bugs found
+and fixed: (1) search params with an id above 2^53 were rounded (the router
+JSON-parsed them), so `/channels/create?workspaceId=<id>` answered 401 and
+rendered blank; the router now keeps search values as strings; (2) the
+sequences page re-created its list promise on each suspend (endless
+`listSequencesWorkspaceAuthAPI` calls); the table now has its own
+`<Suspense>`. Still 404 / 500 on these screens: `responseSlaAPI.*`,
+`getPendingIncomingVoipCallAction`, `resolveOutboundCallModeAction`,
+`templatesAPI.listLockedIdsAPI`, the realtime token (no `REALTIME_SECRET`).
+Select popups do not open in a hidden tab, so the dialog's own submit was
+checked through the same action call.
+
 Development: `CHATBOTX_SERVER_URL=http://localhost:3000 pnpm --filter web dev`
 (Vite on :3123, proxies `/rpc`, `/api`, `/files`, `/realtime` to the Rust
 server).
