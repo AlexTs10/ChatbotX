@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -39,7 +39,7 @@ pub fn router(state: RedirectState) -> Router {
 }
 
 fn message(status: StatusCode, text: &str) -> Response {
-    (status, axum::Json(json!({ "message": text }))).into_response()
+    crate::handlers::json(status.as_u16(), json!({ "message": text }))
 }
 
 fn redirect(destination: &str) -> Response {
@@ -72,8 +72,12 @@ async fn servable(api: &ApiState, workspace_id: i64) -> bool {
 async fn handle(
     State(state): State<RedirectState>,
     Path((workspace, name)): Path<(String, String)>,
-    Query(query): Query<HashMap<String, String>>,
+    RawQuery(raw): RawQuery,
 ) -> Response {
+    let query: HashMap<String, String> =
+        url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes())
+            .into_owned()
+            .collect();
     let api = &state.api;
     let Some(workspace_id) = workspace
         .parse::<i64>()
@@ -83,11 +87,7 @@ async fn handle(
         return message(StatusCode::NOT_FOUND, "Not found");
     };
     if !servable(api, workspace_id).await {
-        return (
-            StatusCode::GONE,
-            axum::Json(json!({ "code": "workspaceScheduledDeletion" })),
-        )
-            .into_response();
+        return crate::handlers::json(410, json!({ "code": "workspaceScheduledDeletion" }));
     }
     let row = match magic_link::find_by_name(&api.db, workspace_id, name).await {
         Ok(Some(row)) => row,

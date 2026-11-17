@@ -46,7 +46,7 @@ async fn method_not_allowed() -> Response {
 }
 
 fn respond(status: StatusCode, body: Value, retry_after: Option<u64>) -> Response {
-    let mut response = (status, axum::Json(body)).into_response();
+    let mut response = crate::handlers::json(status.as_u16(), body);
     let headers = response.headers_mut();
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if let Some(seconds) = retry_after {
