@@ -218,4 +218,18 @@ async fn flow_page_loads_the_editor_props_and_channels_create_checks_the_workspa
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The settings channels policy and the AI agents options (owner = admin).
+    let (status, policy) = page(
+        &state,
+        "settingsChannels",
+        true,
+        json!({ "workspaceId": id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{policy}");
+    assert_eq!(policy["creatable"], json!(["webchat", "api", "telegram"]));
+    let (status, options) = page(&state, "aiAgents", true, json!({ "workspaceId": id })).await;
+    assert_eq!(status, StatusCode::OK, "{options}");
+    assert_eq!(options["admins"].as_array().map(Vec::len), Some(1));
 }

@@ -20,6 +20,8 @@ const workspace = () => import("@/routes/workspace")
 const flows = () => import("@/routes/flows")
 const fields = () => import("@/routes/fields")
 const sequences = () => import("@/routes/sequences")
+const ai = () => import("@/routes/ai")
+const settings = () => import("@/routes/settings")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -172,6 +174,85 @@ const sectionRoutes = [
   sectionRoute("sequences", sequences, "SequencesLayout", "SequencesPage"),
 ]
 
+// `(ai)`: a pathless layout (flows permission, AI integration check).
+const aiRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "ai",
+  component: lazyRouteComponent(ai, "AILayout"),
+})
+const aiPages = (
+  [
+    ["ai-agents", "AIAgentsPage"],
+    ["ai-files", "AIFilesPage"],
+    ["ai-files/test-query", "AIFilesTestQueryPage"],
+    ["ai-files/$aiFileId", "AIFileDetailPage"],
+    ["ai-functions", "AIFunctionsPage"],
+    ["ai-mcp-servers", "AIMcpServersPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => aiRoute,
+    path,
+    component: lazyRouteComponent(ai, page),
+  }),
+)
+
+// `(settings)/settings`: the settings tabs (superAdmin).
+const settingsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "settings",
+  component: lazyRouteComponent(settings, "SettingsLayout"),
+})
+const settingsPage = (
+  parent: () => typeof settingsRoute,
+  path: string,
+  page: keyof Awaited<ReturnType<typeof settings>>,
+) =>
+  createRoute({
+    getParentRoute: parent,
+    path,
+    component: lazyRouteComponent(settings, page),
+  })
+const settingsChannelsRoute = settingsPage(
+  () => settingsRoute,
+  "channels",
+  "SettingsChannelsLayout",
+)
+const settingsIntegrationsRoute = settingsPage(
+  () => settingsRoute,
+  "integrations",
+  "SettingsIntegrationsLayout",
+)
+const settingsRoutes = settingsRoute.addChildren([
+  settingsPage(() => settingsRoute, "/", "SettingsIndexPage"),
+  settingsPage(() => settingsRoute, "general", "SettingsGeneralPage"),
+  settingsPage(() => settingsRoute, "admins", "SettingsAdminsPage"),
+  settingsChannelsRoute.addChildren([
+    createRoute({
+      getParentRoute: () => settingsChannelsRoute,
+      path: "/",
+      component: lazyRouteComponent(settings, "SettingsChannelsIndexPage"),
+    }),
+    createRoute({
+      getParentRoute: () => settingsChannelsRoute,
+      path: "$channel",
+      component: lazyRouteComponent(settings, "SettingsChannelPage"),
+    }),
+  ]),
+  settingsIntegrationsRoute.addChildren([
+    createRoute({
+      getParentRoute: () => settingsIntegrationsRoute,
+      path: "/",
+      component: lazyRouteComponent(settings, "SettingsIntegrationsIndexPage"),
+    }),
+    createRoute({
+      getParentRoute: () => settingsIntegrationsRoute,
+      path: "$slug",
+      component: lazyRouteComponent(settings, "SettingsIntegrationPage"),
+    }),
+  ]),
+])
+
 // `(no-sidebar)`: the flow editor is outside the workspace sidebar layout.
 const flowDetailRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -201,6 +282,8 @@ const routeTree = rootRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
       ...sectionRoutes,
+      aiRoute.addChildren(aiPages),
+      settingsRoutes,
     ]),
   ]),
 ])

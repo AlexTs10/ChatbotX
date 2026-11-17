@@ -404,6 +404,30 @@ pub async fn connect_ai_key(
     config: &Map<String, Value>,
     actor_user_id: Option<i64>,
 ) -> Result<ConnectionRow> {
+    connect_ai_key_with(
+        db,
+        upstream,
+        workspace_id,
+        provider,
+        config,
+        actor_user_id,
+        false,
+    )
+    .await
+}
+
+/// [`connect_ai_key`] with `allowUpdate`: `true` (the builder connect
+/// actions) updates an active connection of the same source in place
+/// instead of answering `connectionAlreadyConnected`.
+pub async fn connect_ai_key_with(
+    db: &Db,
+    upstream: &impl Upstream,
+    workspace_id: i64,
+    provider: AiKeyProvider,
+    config: &Map<String, Value>,
+    actor_user_id: Option<i64>,
+    allow_update: bool,
+) -> Result<ConnectionRow> {
     let fields = config_fields(provider.provider);
     let parsed = parse_config(fields, config)?;
     let columns = provider.config_columns();
@@ -444,7 +468,7 @@ pub async fn connect_ai_key(
     let now = repo::now_ms();
     tx::write(db, move |tx| {
         let existing = find_by_source(tx, workspace_id, provider.provider, "workspace")?;
-        if existing.as_ref().is_some_and(|row| is_active(&row.status)) {
+        if !allow_update && existing.as_ref().is_some_and(|row| is_active(&row.status)) {
             return Err(already_connected());
         }
         // `saveOrInsertSatellite`: update the satellite of a revived row, else
@@ -671,6 +695,20 @@ pub async fn disconnect_integration(db: &Db, current: ConnectionRow) -> Result<C
             .map_err(repo_err)?;
         }
         Ok(updated)
+    })
+    .await
+}
+
+/// `connectionStateService.findByProviderSourceId({ provider, sourceId:
+/// "workspace" })`: the workspace-singleton connection of `provider`.
+pub async fn find_workspace_connection(
+    db: &Db,
+    workspace_id: i64,
+    provider: &str,
+) -> Result<Option<ConnectionRow>> {
+    let provider = provider.to_string();
+    tx::read(db, move |conn| {
+        find_by_source(conn, workspace_id, &provider, "workspace")
     })
     .await
 }

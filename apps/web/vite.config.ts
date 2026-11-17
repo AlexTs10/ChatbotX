@@ -29,6 +29,16 @@ export default defineConfig({
         find: /^nuqs\/adapters\/next\/app$/,
         replacement: "nuqs/adapters/tanstack-router",
       },
+      // packages/ui exports `./components/*` as `.tsx` only; Next resolved this `.ts` file.
+      {
+        find: /^@chatbotx\.io\/ui\/components\/ui\/vatsalpipalava\/color-converter$/,
+        replacement: fileURLToPath(
+          new URL(
+            "../../packages/ui/src/components/ui/vatsalpipalava/color-converter.ts",
+            import.meta.url,
+          ),
+        ),
+      },
       { find: /^@\//, replacement: src("") },
     ],
   },

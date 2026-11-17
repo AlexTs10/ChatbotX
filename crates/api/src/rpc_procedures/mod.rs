@@ -12,6 +12,7 @@ mod contacts;
 mod conversations;
 mod flows;
 mod inboxes;
+pub(crate) mod integrations;
 mod lists;
 mod media_library;
 mod pipelines;
@@ -145,6 +146,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = workspaces::action(ctx, name, &args).await {
         return Some(outcome);
     }
+    if let Some(outcome) = integrations::auth_action(ctx, name, &args).await {
+        return Some(outcome);
+    }
     // Every other action is a `workspaceActionClient` one.
     if context.workspace.is_none() {
         return match name {
@@ -153,7 +157,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str())
                 || conversations::ACTIONS.contains(&n)
                 || lists::ACTIONS.contains(&n)
-                || media_library::ACTIONS.contains(&n) =>
+                || media_library::ACTIONS.contains(&n)
+                || integrations::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -173,6 +178,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = flows::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = integrations::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");
