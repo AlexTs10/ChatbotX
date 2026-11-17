@@ -57,6 +57,5 @@ Not run in this unit. Suites: `50-mini-apps`, `51-mini-apps-whatsapp`
 
 - WhatsApp Flows (publish, draft, preview, Flow removal on delete).
 - The Messenger template Mini App button.
-- The `resolveContactVariables` cases of
-  `mini-app-contact-variables.test.ts`, the "files in the response message"
-  cases of `validate.test.ts`.
+- The `resolveContactVariables` cases of `mini-app-contact-variables.test.ts`
+  (covered by parity `50-mini-apps`).

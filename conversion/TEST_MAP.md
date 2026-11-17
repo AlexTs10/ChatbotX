@@ -2963,7 +2963,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/mini-app/__tests__/tree.test.ts` | C | tbd | todo | Mini-apps |
 | `packages/mini-app/__tests__/uploads.test.ts` | C | `crates/core/tests/mini_app_runtime.rs` | ported | Mini-apps; Q.D1m |
 | `packages/mini-app/__tests__/validate-issue-codes.test.ts` | C | `crates/core/tests/mini_app_validate_issue_codes.rs` | ported | Mini-apps; Q.D1m |
-| `packages/mini-app/__tests__/validate.test.ts` | C | `crates/core/tests/mini_app_validate.rs` | ported | Mini-apps; Q.D1m; partial: the "files in the response message" cases left |
+| `packages/mini-app/__tests__/validate.test.ts` | C | `crates/core/tests/mini_app_validate.rs` | ported | Mini-apps; Q.D1m |
 | `packages/payments/__tests__/minor-units.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/payments/__tests__/paypal.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/payments/__tests__/stripe.test.ts` | C | tbd | todo | Licensing, billing and quotas |
