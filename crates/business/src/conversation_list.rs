@@ -49,6 +49,9 @@ pub struct ListInput {
     pub contact_filter: Option<FilterCriteria>,
     pub per_page: Option<i64>,
     pub cursor: Option<ListCursor>,
+    /// `!includeEmailAndPhone`: a member without `emailAndPhone` (the private
+    /// list) cannot search or filter by email / phone. Tokens see them.
+    pub hide_email_and_phone: bool,
 }
 
 /// One conversation with `contact`, `contactInboxes.inbox`, the assignees
@@ -149,7 +152,7 @@ fn bind(text: &str, value: impl Into<chatbotx_db::rusqlite::types::Value>) -> Op
     Some(Sql::bind(text, value))
 }
 
-/// `buildConversationWhere` over `c` (workspace token: email / phone visible).
+/// `buildConversationWhere` over `c`.
 pub fn build_conversation_where(input: &ListInput, now: i64) -> Sql {
     let has = |tag: &str| input.tags.iter().any(|t| t == tag);
     let mut parts: Vec<Option<Sql>> = vec![bind("c.\"workspaceId\" = ", input.workspace_id)];
@@ -213,7 +216,10 @@ pub fn build_conversation_where(input: &ListInput, now: i64) -> Sql {
     if let Some(keyword) = input.keyword.as_deref() {
         parts.push(build_smart_keyword_where(
             keyword,
-            SmartKeywordOptions::default(),
+            SmartKeywordOptions {
+                include_email_and_phone: !input.hide_email_and_phone,
+                ..SmartKeywordOptions::default()
+            },
         ));
     }
     if has("noAdminReply") {
@@ -234,7 +240,10 @@ pub fn build_conversation_where(input: &ListInput, now: i64) -> Sql {
         parts.push(bind("c.\"responseSlaBreachingAt\" <= ", now));
         parts.push(bind("c.\"responseDueAt\" > ", now));
     }
-    if let Some(filter) = prune_email_phone_filter_conditions(input.contact_filter.as_ref(), true) {
+    if let Some(filter) = prune_email_phone_filter_conditions(
+        input.contact_filter.as_ref(),
+        !input.hide_email_and_phone,
+    ) {
         parts.push(apply_contact_filter(&filter, Some(input.workspace_id), now));
     }
     Sql::and(parts)

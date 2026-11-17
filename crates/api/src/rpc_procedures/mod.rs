@@ -9,7 +9,9 @@
 //! route ([`public`]) after the member checks, so both stay one code path.
 
 mod contacts;
+mod conversations;
 mod flows;
+mod inboxes;
 mod lists;
 mod workspaces;
 
@@ -103,6 +105,12 @@ pub async fn procedure(
     if let Some(outcome) = flows::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = inboxes::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = conversations::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 
@@ -123,13 +131,19 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     // Every other action is a `workspaceActionClient` one.
     if context.workspace.is_none() {
         return match name {
-            n if contacts::ACTIONS.contains(&n) || flows::ACTIONS.contains(&n) => {
+            n if contacts::ACTIONS.contains(&n)
+                || flows::ACTIONS.contains(&n)
+                || conversations::ACTIONS.contains(&n) =>
+            {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
             _ => None,
         };
     }
     if let Some(outcome) = contacts::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = conversations::action(ctx, name, &args).await {
         return Some(outcome);
     }
     flows::action(ctx, name, &args).await

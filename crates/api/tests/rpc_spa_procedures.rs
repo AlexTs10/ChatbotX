@@ -370,3 +370,158 @@ async fn the_first_api_channel_creates_the_workspace() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(json["message"], "Workspace not found");
 }
+
+#[tokio::test]
+async fn inbox_screen_lists_and_acts_on_conversations() {
+    let (router, db) = router().await;
+    db.write(|tx| {
+        tx.execute(
+            r#"INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId") VALUES (601, 'Site', 'webchat', 's', ?1)"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "InboxTeam" ("id", "workspaceId", "name") VALUES (602, ?1, 'Support')"#,
+            params![WS],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "InboxTeamMember" ("id", "inboxTeamId", "userId") VALUES (603, 602, ?1)"#,
+            params![ADMIN_ID],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId", "lastActivityAt") VALUES (604, ?1, ?2, ?3)"#,
+            params![WS, CONTACT_ID, NOW_MS],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("seed inbox");
+
+    let (status, inboxes, _) = post(
+        &router,
+        "inboxesAPI/listAllInboxesAuthenticatedAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "includes": ["integration"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inboxes}");
+    assert_eq!(inboxes["data"][0]["id"], "601");
+    assert_eq!(inboxes["data"][0]["integrationWebchat"], Value::Null);
+
+    let (status, teams, _) = post(
+        &router,
+        "inboxTeamsAPI/listInboxTeamsAuthenticatedAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{teams}");
+    assert_eq!(
+        teams["data"][0]["inboxTeamMembers"][0]["user"]["id"],
+        ADMIN_ID.to_string()
+    );
+
+    // The builder list has no assigned-only filter: the agent sees it too.
+    let list = |token: &'static str| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                "conversationsAPI/listConversationsByPOSTAuthenticatedAPI",
+                token,
+                json!({ "workspaceId": ws() }),
+            )
+            .await
+        }
+    };
+    let (status, page, _) = list("assignedtoken").await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["data"][0]["id"], "604");
+
+    let (status, _, _) = post(
+        &router,
+        "actions/assignConversationAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "contactIds": [CONTACT_ID.to_string()], "assignedId": "t_602" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, page, _) = list("admintoken").await;
+    assert_eq!(page["data"][0]["assignedInboxTeamId"], "602");
+
+    let (status, read, _) = post(
+        &router,
+        "actions/readConversationAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), "604"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(read["agentLastReadAt"].is_string(), "{read}");
+
+    let (status, _, _) = post(
+        &router,
+        "actions/archiveConversationAction",
+        "admintoken",
+        json!({ "workspaceId": ws(), "args": [ws(), { "ids": ["604"] }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, page, _) = list("admintoken").await;
+    assert_eq!(page["data"], json!([]));
+}
+
+#[tokio::test]
+async fn contact_notes_keep_the_author_and_the_member_scope() {
+    let (router, _) = router().await;
+    let note = |token: &'static str, name: &'static str, input: Value| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                token,
+                json!({ "workspaceId": ws(), "args": [ws(), CONTACT_ID.to_string(), input] }),
+            )
+            .await
+        }
+    };
+    let (status, created, _) = note(
+        "admintoken",
+        "createContactNoteAction",
+        json!({ "text": " hi " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["text"], "hi");
+    assert_eq!(created["createdById"], ADMIN_ID.to_string());
+
+    // An assigned-only agent without the conversation: 404, no write.
+    let (status, error, _) = note(
+        "assignedtoken",
+        "createContactNoteAction",
+        json!({ "text": "x" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(error["message"], "Contact not found");
+
+    let id = created["id"].as_str().unwrap().to_string();
+    let (status, edited, _) = note(
+        "admintoken",
+        "editContactNoteAction",
+        json!({ "contactNoteId": id, "text": "edited" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(edited["text"], "edited");
+    for _ in 0..2 {
+        // The second delete is a no-op, not an error.
+        let (status, _, _) = note(
+            "admintoken",
+            "deleteContactNoteAction",
+            json!({ "contactNoteId": id }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+}

@@ -63,7 +63,7 @@ pub fn custom_field_json(field: &CustomField) -> Value {
 }
 
 /// `zodFieldName()`: trimmed, 1..=255, not `bot_field:`.
-fn field_name(input: &mut Input) -> Option<String> {
+pub(crate) fn field_name(input: &mut Input) -> Option<String> {
     let name = input.string("name", Str::trimmed(1, 255))?;
     if name.starts_with(RESERVED_PREFIX) {
         input.issue(
@@ -93,7 +93,7 @@ fn digits(input: &mut Input, name: &str, required: bool) -> Option<i64> {
 }
 
 /// A `.nullish()` [`digits`] key: absent = `None`, `null` = `Some(None)`.
-fn nullish_digits(input: &mut Input, name: &str) -> Option<Option<i64>> {
+pub(crate) fn nullish_digits(input: &mut Input, name: &str) -> Option<Option<i64>> {
     match input.get(name) {
         None => None,
         Some(Value::Null) => Some(None),
