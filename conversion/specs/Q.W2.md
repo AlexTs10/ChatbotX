@@ -13,7 +13,7 @@ domain is in Rust.
 | # | Slice | State |
 |---|-------|-------|
 | 1 | LLM runtime (`crates/worker/src/ai/`): provider wire formats (OpenAI chat for OpenAI / DeepSeek / OpenRouter / Muse / OpenAI-compatible, Anthropic messages, Gemini `generateContent`) with the tool-step loop, model factory (`normalizeAIModelId`, Muse transform, `nearai` reasoning strip), toolset (knowledge-file search, AI functions, MCP tools), prompt guards, channel length instruction, AI context summary + summarizer; steps `aiGenerateText`, `aiGenerateTextAgent`, `aiDeleteMessageHistory` | 1a done |
-| 2 | Heavy queue: `processAIFile` (text extraction, chunkers, embeddings), AI handover bulk run (toggle engine, sweeper, chunk refund) | todo |
+| 2 | Heavy queue: `processAIFile` (text extraction, chunkers, embeddings), AI handover bulk run (toggle engine, sweeper, chunk refund) | 2a done (text formats; binary formats left) |
 | 3 | Events (analytics, error log, flow, message incl. `message:failed`), webhook, notification, schedule crons, leaderboard, questionnaires + Get User Data, marketing message, low | todo |
 | 4 | `default-worker` tests (16) and the default / template handlers of Rust domains | todo |
 
@@ -29,6 +29,18 @@ domain is in Rust.
 | `ai-delete-message-history.test.ts` | 7 | `ai_delete_message_history` (4: complete-history fallback + cache delete, no `lastMessageAt`, no message, DM reset); the storage-error / marker-failure mock cases are n-a (no typed storage errors) | partial |
 | `ai-error-log-provider.test.ts` | 2 | — | slice 3 (ErrorLog) |
 | `agent-tool-stats.test.ts` | 4 | — | n-a (logging-only collector of the SDK callbacks) |
+
+## Test map (slice 2)
+
+| TS test file | Cases | Rust | State |
+|---|---|---|---|
+| `chunkers.test.ts` | 25 (with `each`) | `ai/chunk.rs` tests (20) | done |
+| `text-extractor.test.ts` | 22 | `ai/extract.rs` tests (13: legacy text output, CSV tables, BOM, Windows-1252 reject, Markdown, budgets); PDF / XLSX cases wait for the binary parsers | partial |
+| `process-ai-file.test.ts` | 25 | `ai_file.rs` tests (13, on a DB and a local file store); the lock / call-order mock cases are covered by the DB state | partial |
+| `process-pending-embeddings.test.ts` | 4 | `ai_file.rs` tests (5) | done (no ErrorLog row: slice 3) |
+| `mark-embedding-chunk-failed.test.ts` | 6 | `ai_file::handle_ai_agent` (last attempt marks the chunk `error`) | partial (no own test) |
+| `ai-handover-bulk-toggle.test.ts` | 57 | `ai_handover.rs` tests (12: claiming, preconditions, integration unavailable, resuming, reconcile after the end) | partial: the batch / quota / token cases need the thread control (Q.D12 / Q.I1b) |
+| `scan-ai-handover-bulk-runs.test.ts` | 15 | `ai_handover.rs` tests (4: exhausted runs, dispatch, refund of a queued chunk, enqueue failure, reconcile without cursor) | partial: no distributed lock (n-a) |
 
 ## Decisions
 
@@ -56,7 +68,32 @@ domain is in Rust.
 - `logStepProviderError` (ErrorLog rows) waits for the error-log worker
   (slice 3).
 
+- AI hand-over bulk run: no Rust thread control yet (Messenger hand-over
+  protocol, Q.D12 / Q.I1b), so a run takes the original's
+  "integration unavailable" path: the eligible threads after the cursor are
+  counted skipped and the run fails `integrationUnavailable`, then the Page
+  is reconciled. Claim, stop reasons, in-flight recovery, total count and
+  the finish are the original.
+- The sweeper reads the previous chunk's state from the `jobs` table (same
+  SQLite file as the job store) instead of `queue.getJob().getState()`. No
+  distributed lock: one process runs the schedule queue.
+- The `schedule` queue worker registers only the ported crons
+  (`schedule::PORTED`, today `scanAiHandoverBulkRuns`, every minute at
+  second 36), so an unported cron never wakes the process.
+- `processAIFile`: an in-process per-file lock replaces the Redis lock.
+  Text formats are read as the original (plain text, CSV as a table, Markdown,
+  RTF, XML, VTT, properties); HTML and the prose reading of Markdown use a
+  reduced `html-to-text` / `remove-markdown`. PDF, DOCX, XLSX, PPTX, PPT,
+  EPUB and e-mail need parser crates: until then such a file fails the run
+  `fileUnreadable` (not read as garbage). Chunk lengths are UTF-16 units, as
+  JavaScript, so chunk ids match.
+- The heavy queue serves only `processAIFile`, the aiAgent queue only
+  `processPendingEmbedding`; other actions fail unrecoverable (nothing in
+  Rust enqueues them yet).
+
 ## State
 
 Slice 1a (LLM runtime + 3 AI steps): 196 worker tests pass (Dell; 168 before); fmt, clippy -D warnings clean.
+Slice 2a (AI hand-over bulk engine + sweeper, schedule worker, `processAIFile` for text formats, `processPendingEmbedding`): 263 worker + 7 server tests pass (Dell; 196 before); fmt, clippy -D warnings clean. Parity p1-03 ai-handover / p1-02 ai-files not run yet (end of the big slices).
+Left in slice 2: PDF / DOCX / XLSX / PPTX / PPT / EPUB / e-mail extraction (parser crates), the other heavy actions (image edit / generate / segment, speech, analyze image, extract text, optimize stored image), the bulk thread-control batches (Q.D12 / Q.I1b).
 Left in slice 1: `aiAnalyzeImage`, `aiEditImage` / `aiGenerateImage` / `aiSegmentImage` / text to speech (heavy queue), `aiExtractData`, the automated response (`processAutomatedResponse`, rich replies, system tools, global router), AI agent actions / handoff re-entry, comment AI reply / moderation, story automations, the `aiAgent` queue jobs (`processPendingEmbedding`, `summarizeConversation`, conversation sources).

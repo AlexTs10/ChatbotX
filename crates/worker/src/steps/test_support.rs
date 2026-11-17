@@ -86,9 +86,24 @@ impl Enqueuer for Jobs {
     fn add_bulk(
         &self,
         _: QueueName,
-        _: Vec<NewJob>,
+        jobs: Vec<NewJob>,
     ) -> BoxFuture<'_, Result<Vec<AddResult>, JobsError>> {
-        Box::pin(async { Ok(Vec::new()) })
+        let mut added = self.0.lock().unwrap();
+        let results = jobs
+            .into_iter()
+            .map(|job| {
+                added.push(Added {
+                    name: job.name,
+                    data: job.data,
+                    opts: job.opts,
+                });
+                AddResult {
+                    job_id: added.len().to_string(),
+                    created: true,
+                }
+            })
+            .collect();
+        Box::pin(async move { Ok(results) })
     }
 }
 
@@ -155,6 +170,7 @@ impl Fixture {
             app_url: "http://app.test".into(),
             variables: None,
             ai: Arc::new(crate::ai::Ai::live()),
+            files: None,
         };
         Fixture { deps, jobs, dir }
     }

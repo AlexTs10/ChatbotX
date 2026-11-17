@@ -3,6 +3,8 @@
 //! AI context summary) and the agent runner of
 //! `integration/handlers/shared/ai-agent-runner.ts`.
 
+pub mod chunk;
+pub mod extract;
 pub mod llm;
 pub mod model;
 pub mod text;

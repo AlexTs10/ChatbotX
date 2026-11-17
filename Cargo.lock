@@ -464,6 +464,7 @@ dependencies = [
  "chatbotx-business",
  "chatbotx-core",
  "chatbotx-db",
+ "chatbotx-files",
  "chatbotx-jobs",
  "chatbotx-kv",
  "chatbotx-rt",

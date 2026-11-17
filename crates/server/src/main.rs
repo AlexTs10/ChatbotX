@@ -368,8 +368,16 @@ fn start_workers(
         )
         .map(Arc::new),
         ai: Arc::new(chatbotx_worker::ai::Ai::live()),
+        files: Some(Arc::clone(&shared.files)),
     };
     chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
+    let store = Arc::clone(jobs);
+    tokio::spawn(async move {
+        match chatbotx_worker::schedule::register(&*store).await {
+            Ok(()) => tracing::info!("Schedules registered"),
+            Err(err) => tracing::error!(err = %err, "Error registering schedules"),
+        }
+    });
     Ok((shutdown, exited))
 }
 
