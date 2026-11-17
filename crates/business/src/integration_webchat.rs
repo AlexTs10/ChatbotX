@@ -412,3 +412,479 @@ pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
     })
     .await
 }
+
+// ---- guest access (`webchat-access-token.ts`, `authorized-domain.ts`,
+// `guest-conversation-id.ts`) -------------------------------------------------
+
+/// `TOKEN_TTL_SECONDS`.
+const ACCESS_TOKEN_TTL_SECONDS: i64 = 30 * 60;
+
+fn normalize_host(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .trim_start_matches('.')
+        .trim_end_matches('.')
+        .to_string()
+}
+
+/// `getHostFromOrigin`.
+pub fn host_from_origin(origin: Option<&str>) -> Option<String> {
+    let value = origin?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Ok(url) = url::Url::parse(value)
+        && let Some(host) = url.host_str()
+    {
+        return Some(normalize_host(host));
+    }
+    let rest = match value.find("://") {
+        Some(at) if at > 0 && value[..at].bytes().all(|b| b.is_ascii_alphabetic()) => {
+            &value[at + 3..]
+        }
+        _ => value,
+    };
+    let host = rest.split(['/', ':', '?', '#']).next().unwrap_or("");
+    (!host.is_empty()).then(|| normalize_host(host))
+}
+
+/// `isOriginAuthorized`: no origin = a direct open (allowed); else the host
+/// or a subdomain of one of the domains.
+pub fn is_origin_authorized(origin: Option<&str>, authorized_domains: &[String]) -> bool {
+    if origin.is_none() {
+        return true;
+    }
+    let domains: Vec<String> = authorized_domains
+        .iter()
+        .map(|d| normalize_host(d))
+        .filter(|d| !d.is_empty())
+        .collect();
+    if domains.is_empty() {
+        return false;
+    }
+    let Some(host) = host_from_origin(origin) else {
+        return false;
+    };
+    domains
+        .iter()
+        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+}
+
+/// `isEmbedOriginAllowed`: an empty allowlist = embeddable anywhere.
+pub fn is_embed_origin_allowed(origin: Option<&str>, authorized_domains: &[String]) -> bool {
+    authorized_domains.is_empty() || is_origin_authorized(origin, authorized_domains)
+}
+
+/// `isFirstPartyOrigin`: no origin, or the app's own host.
+pub fn is_first_party_origin(origin: Option<&str>, app_host: &str) -> bool {
+    if origin.is_none() {
+        return true;
+    }
+    host_from_origin(origin)
+        .is_some_and(|host| !app_host.is_empty() && host == app_host.to_lowercase())
+}
+
+/// `isAllowedGuestOrigin`.
+pub fn is_allowed_guest_origin(
+    parent_origin: Option<&str>,
+    authorized_domains: &[String],
+    app_host: &str,
+) -> bool {
+    is_embed_origin_allowed(parent_origin, authorized_domains)
+        || is_first_party_origin(parent_origin, app_host)
+}
+
+/// `GUEST_CONVERSATION_ID_REGEX`: digits, optionally `:<uuid>`.
+pub fn is_valid_guest_conversation_id(value: &str) -> bool {
+    let (digits, uuid) = match value.split_once(':') {
+        Some((digits, uuid)) => (digits, Some(uuid)),
+        None => (value, None),
+    };
+    let hex_groups = |uuid: &str| {
+        let groups: Vec<&str> = uuid.split('-').collect();
+        groups.len() == 5
+            && groups
+                .iter()
+                .zip([8, 4, 4, 4, 12])
+                .all(|(g, n)| g.len() == n && g.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) && uuid.is_none_or(hex_groups)
+}
+
+/// `createGuestConversationId`: `<workspaceId>:<random uuid v4>`.
+pub fn create_guest_conversation_id(workspace_id: i64) -> String {
+    let mut b = [0u8; 16];
+    let _ = ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b);
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!(
+        "{workspace_id}:{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
+}
+
+fn b64url(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// `createWebchatAccessToken`: `base64url(payload).hmacHex` with
+/// `BETTER_AUTH_SECRET` (`secret`).
+pub fn create_access_token(
+    secret: &str,
+    workspace_id: &str,
+    webchat_id: &str,
+    origin: Option<&str>,
+    now_secs: i64,
+) -> String {
+    // Keys in the original order (alphabetical, as serde_json's map).
+    let payload = json!({
+        "exp": now_secs + ACCESS_TOKEN_TTL_SECONDS,
+        "originHost": host_from_origin(origin),
+        "webchatId": webchat_id,
+        "workspaceId": workspace_id,
+    });
+    let encoded = b64url(payload.to_string().as_bytes());
+    let signature = chatbotx_core::utils::crypto::hmac_sha256_hex(secret, &encoded);
+    format!("{encoded}.{signature}")
+}
+
+/// `verifyWebchatAccessToken`: signature, workspace, webchat, origin host
+/// and expiry.
+pub fn verify_access_token(
+    secret: &str,
+    token: Option<&str>,
+    workspace_id: &str,
+    webchat_id: &str,
+    origin: Option<&str>,
+    now_secs: i64,
+) -> bool {
+    use base64::Engine as _;
+    let Some(token) = token.filter(|t| !t.is_empty()) else {
+        return false;
+    };
+    let mut parts = token.split('.');
+    let (Some(encoded), Some(signature)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    if encoded.is_empty() || signature.is_empty() || secret.is_empty() {
+        return false;
+    }
+    let expected = chatbotx_core::utils::crypto::hmac_sha256_hex(secret, encoded);
+    if !chatbotx_core::utils::crypto::timing_safe_string_equal(signature, &expected) {
+        return false;
+    }
+    // Node's base64url decoder also takes padded input.
+    let Ok(bytes) =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded.trim_end_matches('='))
+    else {
+        return false;
+    };
+    let Ok(payload) = serde_json::from_slice::<Value>(&bytes) else {
+        return false;
+    };
+    payload["workspaceId"].as_str() == Some(workspace_id)
+        && payload["webchatId"].as_str() == Some(webchat_id)
+        && payload["originHost"].as_str().map(str::to_string) == host_from_origin(origin)
+        && payload["exp"]
+            .as_f64()
+            .is_some_and(|exp| exp >= now_secs as f64)
+}
+
+/// `findByIdForWorkspaceOrNull`.
+pub async fn find_by_id_for_workspace_or_null(
+    db: &Db,
+    id: i64,
+    workspace_id: i64,
+) -> Result<Option<WebchatRow>> {
+    tx::read(db, move |conn| find(conn, id, workspace_id)).await
+}
+
+/// The rows `findOrCreateGuestConversation` created.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestConversation {
+    pub contact_id: i64,
+    pub contact_inbox_id: i64,
+    pub conversation_id: i64,
+}
+
+/// `findOrCreateGuestConversation` (the create half; the caller looked the
+/// contact inbox up first), inside the caller's write transaction: a
+/// "Guest" contact, its webchat contact inbox and a conversation, behind
+/// the MAC gate. `None` = no MAC room (the original's `null`).
+#[allow(clippy::too_many_arguments)]
+pub fn create_guest_conversation(
+    conn: &Connection,
+    workspace_id: i64,
+    owner_id: i64,
+    inbox_id: i64,
+    guest_conversation_id: &str,
+    locale: Option<&str>,
+    timezone: Option<&str>,
+    parent_url: Option<&str>,
+    now_ms: i64,
+) -> Result<Option<GuestConversation>> {
+    use chatbotx_core::variables::system_field::{normalize_locale, normalize_stored_timezone};
+    // ponytail: `finalizeContactProfile` without the phone hint and the
+    // region timezone table (a guest has no phone; the widget sends its zone).
+    let locale = normalize_locale(locale);
+    let timezone = normalize_stored_timezone(timezone);
+    let language = crate::contact::update_fields::normalize_language(locale.as_deref());
+    let created = crate::quota_enforcement::create_new_contact_with_mac(
+        conn,
+        owner_id,
+        workspace_id,
+        |conn, period_start| {
+            let contact_id = chatbotx_db::repo::new_id();
+            conn.execute(
+                r#"INSERT INTO "Contact" ("id", "createdAt", "updatedAt", "workspaceId", "email",
+                     "gender", "firstName", "lastName", "locale", "timezone")
+                   VALUES (?1, ?2, ?2, ?3, ?4, 'unknown', 'Guest', ?5, ?6, ?7)"#,
+                params![
+                    contact_id,
+                    now_ms,
+                    workspace_id,
+                    guest_conversation_id,
+                    crate::contact::create::random_string(10),
+                    locale,
+                    timezone
+                ],
+            )
+            .map_err(repo_err)?;
+            let contact_inbox_id = chatbotx_db::repo::new_id();
+            conn.execute(
+                r#"INSERT INTO "ContactInbox" ("id", "createdAt", "updatedAt", "inboxId", "contactId",
+                     "originalContactId", "source", "sourceId", "channel", "language", "webchatParentUrl")
+                   VALUES (?1, ?2, ?2, ?3, ?4, ?4, 'webchat', ?5, 'webchat', ?6, ?7)"#,
+                params![
+                    contact_inbox_id,
+                    now_ms,
+                    inbox_id,
+                    contact_id,
+                    guest_conversation_id,
+                    language,
+                    parent_url
+                ],
+            )
+            .map_err(repo_err)?;
+            // ponytail: `messageCleanupService.cancelByInboxSource` has no
+            // Rust store yet (no scheduled message cleanup rows to cancel).
+            let conversation_id = chatbotx_db::repo::new_id();
+            conn.execute(
+                r#"INSERT INTO "Conversation" ("id", "createdAt", "updatedAt", "workspaceId", "contactId")
+                   VALUES (?1, ?2, ?2, ?3, ?4)"#,
+                params![conversation_id, now_ms, workspace_id, contact_id],
+            )
+            .map_err(repo_err)?;
+            let counted = match period_start {
+                Some(period_start) => crate::analytics::mac::claim_new_active_contact(
+                    conn,
+                    workspace_id,
+                    (contact_id, contact_inbox_id),
+                    inbox_id,
+                    period_start,
+                    now_ms,
+                )?,
+                None => false,
+            };
+            Ok((
+                GuestConversation {
+                    contact_id,
+                    contact_inbox_id,
+                    conversation_id,
+                },
+                counted,
+            ))
+        },
+    )?;
+    Ok(created.ok())
+}
+
+#[cfg(test)]
+mod guest_tests {
+    //! `apps/builder/__tests__/webchat-guest-session.test.ts` (the server
+    //! helpers: authorized domains, access token, guest conversation id;
+    //! the browser store cases are the SPA's, P4).
+    use super::*;
+
+    const WS: &str = "workspace-1";
+    const WC: &str = "webchat-1";
+    const SECRET: &str = "test-better-auth-secret";
+    const NOW: i64 = 1_700_000_000;
+
+    fn mint(origin: Option<&str>) -> String {
+        create_access_token(SECRET, WS, WC, origin, NOW)
+    }
+
+    fn verify(token: Option<&str>, ws: &str, origin: Option<&str>) -> bool {
+        verify_access_token(SECRET, token, ws, WC, origin, NOW)
+    }
+
+    #[test]
+    fn creates_a_guest_conversation_id_scoped_to_the_workspace_with_an_unguessable_suffix() {
+        let first = create_guest_conversation_id(1);
+        let second = create_guest_conversation_id(1);
+        for id in [&first, &second] {
+            let (ws, uuid) = id.split_once(':').unwrap();
+            assert_eq!(ws, "1");
+            assert!(is_valid_guest_conversation_id(id));
+            assert_eq!(uuid.len(), 36);
+        }
+        assert_ne!(first, second);
+        assert!(is_valid_guest_conversation_id("20260101000000001"));
+        assert!(!is_valid_guest_conversation_id(
+            "11588416937148416:11609574568902656"
+        ));
+        assert!(!is_valid_guest_conversation_id("not-a-valid-id"));
+    }
+
+    #[test]
+    fn rejects_origins_when_no_domains_are_configured_fail_closed() {
+        assert!(!is_origin_authorized(Some("https://example.com"), &[]));
+    }
+
+    #[test]
+    fn allows_a_missing_origin_even_when_no_domains_are_configured() {
+        assert!(is_origin_authorized(None, &[]));
+    }
+
+    #[test]
+    fn allows_exact_hosts_and_subdomains() {
+        let domains = vec!["example.com".to_string()];
+        assert!(is_origin_authorized(Some("https://example.com"), &domains));
+        assert!(is_origin_authorized(
+            Some("https://www.example.com"),
+            &domains
+        ));
+    }
+
+    #[test]
+    fn rejects_mismatched_origins_when_domains_are_configured() {
+        let domains = vec!["example.com".to_string()];
+        assert!(!is_origin_authorized(
+            Some("https://attacker.test"),
+            &domains
+        ));
+    }
+
+    #[test]
+    fn allows_a_missing_origin_even_when_domains_are_configured() {
+        assert!(is_origin_authorized(None, &["example.com".to_string()]));
+    }
+
+    #[test]
+    fn authorizes_a_token_minted_for_the_same_workspace_webchat_origin() {
+        let token = mint(Some("https://example.com"));
+        assert!(verify(Some(&token), WS, Some("https://example.com")));
+    }
+
+    #[test]
+    fn rejects_a_missing_token() {
+        assert!(!verify(None, WS, Some("https://example.com")));
+    }
+
+    #[test]
+    fn rejects_a_token_whose_workspace_does_not_match() {
+        let token = mint(Some("https://example.com"));
+        assert!(!verify(
+            Some(&token),
+            "workspace-2",
+            Some("https://example.com")
+        ));
+    }
+
+    #[test]
+    fn rejects_a_tampered_signature() {
+        let token = mint(Some("https://example.com"));
+        let payload = token.split('.').next().unwrap();
+        let tampered = format!("{payload}.deadbeef");
+        assert!(!verify(Some(&tampered), WS, Some("https://example.com")));
+    }
+
+    #[test]
+    fn rejects_a_token_presented_from_a_different_origin() {
+        let token = mint(Some("https://example.com"));
+        assert!(!verify(Some(&token), WS, Some("https://attacker.test")));
+    }
+
+    #[test]
+    fn matches_a_bare_origin_against_a_referer_shaped_origin_used_at_mint_time() {
+        let token = mint(Some("https://example.com/pricing?ref=ad"));
+        assert!(verify(Some(&token), WS, Some("https://example.com")));
+    }
+
+    #[test]
+    fn matches_a_subdomain_consistent_origin_the_same_way_on_mint_and_verify() {
+        let token = mint(Some("https://widget.example.com"));
+        assert!(verify(
+            Some(&token),
+            WS,
+            Some("https://widget.example.com/some/path")
+        ));
+    }
+
+    #[test]
+    fn treats_a_null_origin_at_mint_and_verify_as_consistent() {
+        let token = mint(None);
+        assert!(verify(Some(&token), WS, None));
+    }
+
+    #[test]
+    fn rejects_when_minted_with_no_origin_but_presented_with_one() {
+        let token = mint(None);
+        assert!(!verify(Some(&token), WS, Some("https://example.com")));
+    }
+
+    #[test]
+    fn an_expired_token_is_rejected() {
+        let token = mint(None);
+        assert!(!verify_access_token(
+            SECRET,
+            Some(&token),
+            WS,
+            WC,
+            None,
+            NOW + 1801
+        ));
+    }
+
+    #[test]
+    fn guest_origin_accepts_the_first_party_host_with_an_allowlist() {
+        let domains = vec!["shop.com".to_string()];
+        assert!(is_allowed_guest_origin(
+            Some("https://app.io"),
+            &domains,
+            "app.io"
+        ));
+        assert!(!is_allowed_guest_origin(
+            Some("https://evil.com"),
+            &domains,
+            "app.io"
+        ));
+        assert!(is_allowed_guest_origin(
+            Some("https://evil.com"),
+            &[],
+            "app.io"
+        ));
+    }
+
+    // `webchat-message-schema.test.ts`: the `guestConversationId` rule.
+    #[test]
+    fn accepts_the_minted_and_legacy_guest_ids_and_rejects_anything_else() {
+        const WORKSPACE_ID: i64 = 11_530_439_376_896;
+        assert!(is_valid_guest_conversation_id(
+            &create_guest_conversation_id(WORKSPACE_ID)
+        ));
+        assert!(is_valid_guest_conversation_id("11616773281153025"));
+        assert!(!is_valid_guest_conversation_id("../../not-an-id"));
+        assert!(!is_valid_guest_conversation_id(&format!(
+            "{WORKSPACE_ID}:guest-1"
+        )));
+    }
+}

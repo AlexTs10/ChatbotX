@@ -857,6 +857,70 @@ fn telegram_bot_id(token: &str) -> Option<&str> {
     (!bot_id.is_empty() && bot_id.bytes().all(|b| b.is_ascii_digit())).then_some(bot_id)
 }
 
+/// `TELEGRAM_ALLOWED_UPDATES`.
+pub const TELEGRAM_ALLOWED_UPDATES: [&str; 4] =
+    ["message", "callback_query", "my_chat_member", "chat_member"];
+
+/// `generateWebhookSecretToken`: 32 random bytes as hex.
+pub fn generate_webhook_secret_token() -> String {
+    let mut bytes = [0u8; 32];
+    let _ = ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The `onConnected` hook of `connectTelegramAction`: a fresh webhook
+/// secret on the inbox's `IntegrationTelegram` row (`auth.metadata`) and
+/// `setWebhook` to `<broker>/integrations/telegram/webhook?botId=<id>`.
+pub async fn register_telegram_webhook(
+    db: &Db,
+    upstream: &impl Upstream,
+    workspace_id: i64,
+    inbox_id: i64,
+    broker_url: &str,
+) -> Result<()> {
+    let row = tx::read(db, move |conn| {
+        conn.query_row(
+            r#"SELECT "auth", "botId" FROM "IntegrationTelegram" WHERE "inboxId" = ?1 AND "workspaceId" = ?2"#,
+            params![inbox_id, workspace_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(repo_err)
+    })
+    .await?
+    .ok_or_else(|| BusinessError::not_found("Telegram integration not found"))?;
+    let (auth, bot_id) = row;
+    let mut auth: Value = serde_json::from_str(&auth).unwrap_or_else(|_| json!({}));
+    let token = auth["secretText"].as_str().unwrap_or_default().to_owned();
+    let secret = generate_webhook_secret_token();
+    let webhook_url = format!(
+        "{}/integrations/telegram/webhook?botId={bot_id}",
+        broker_url.trim_end_matches('/')
+    );
+    let body = json!({
+        "url": webhook_url,
+        "allowed_updates": TELEGRAM_ALLOWED_UPDATES,
+        "secret_token": secret,
+    });
+    if telegram_call(upstream, &token, "setWebhook", "POST", Some(body))
+        .await
+        .is_err()
+    {
+        return Err(BusinessError::exception("setWebhook", "telegramError", 400));
+    }
+    auth["metadata"] = json!({ "botId": bot_id, "webhookSecretToken": secret });
+    let auth = auth.to_string();
+    tx::write(db, move |tx| {
+        tx.execute(
+            r#"UPDATE "IntegrationTelegram" SET "auth" = ?1, "updatedAt" = ?2 WHERE "inboxId" = ?3 AND "workspaceId" = ?4"#,
+            params![auth, repo::now_ms(), inbox_id, workspace_id],
+        )
+        .map_err(repo_err)?;
+        Ok(())
+    })
+    .await
+}
+
 /// `connectFromCredentials` for `telegram`: `getMe`, then a `connected`
 /// channel (`Inbox` + `IntegrationTelegram` + `Connection`; a disconnected
 /// row of the same bot is revived with its inbox).

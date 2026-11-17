@@ -610,10 +610,7 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
             &conversation,
             &contact_inbox,
             SendFlowStep {
-                contact: OutgoingContact {
-                    contact_inbox: contact_inbox.clone(),
-                    source_conversation_id: conversation.source_id.clone(),
-                },
+                contact: OutgoingContact::new(&contact_inbox, &conversation),
                 flow_id: flow_id.clone(),
                 flow_version_id: flow_version_id.clone(),
                 step: resolved.clone(),

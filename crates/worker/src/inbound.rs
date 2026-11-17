@@ -147,6 +147,7 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
             &conversation,
             incoming,
             &received,
+            None,
         )
         .await?;
         if is_new {
@@ -218,6 +219,7 @@ pub(crate) fn find_or_create_conversation(
     workspace_id: i64,
     contact_id: i64,
     source_id: Option<&str>,
+    channel_conversation_id: Option<&str>,
 ) -> chatbotx_db::rusqlite::Result<Conversation> {
     let find = |conn: &Connection| {
         conn.query_row(
@@ -230,13 +232,34 @@ pub(crate) fn find_or_create_conversation(
         )
         .optional()
     };
+    let channel_conversation_id = channel_conversation_id.filter(|id| !id.is_empty());
     if let Some(existing) = find(conn)? {
-        return Ok(existing);
+        // `syncChannelConversationId`.
+        let Some(channel_id) = channel_conversation_id else {
+            return Ok(existing);
+        };
+        let mut attributes = existing
+            .additional_attributes
+            .as_ref()
+            .map(|a| a.0.clone())
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
+        if attributes["channelConversationId"] == channel_id {
+            return Ok(existing);
+        }
+        attributes["channelConversationId"] = json!(channel_id);
+        conn.execute(
+            r#"UPDATE "Conversation" SET "additionalAttributes" = ?2 WHERE "id" = ?1"#,
+            params![existing.id, attributes.to_string()],
+        )?;
+        return find(conn)?.ok_or(chatbotx_db::rusqlite::Error::QueryReturnedNoRows);
     }
+    let attributes =
+        channel_conversation_id.map(|id| json!({ "channelConversationId": id }).to_string());
     conn.execute(
-        r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId", "sourceId")
-           VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING"#,
-        params![new_id(), workspace_id, contact_id, source_id],
+        r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId", "sourceId", "additionalAttributes")
+           VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT DO NOTHING"#,
+        params![new_id(), workspace_id, contact_id, source_id, attributes],
     )?;
     find(conn)?.ok_or(chatbotx_db::rusqlite::Error::QueryReturnedNoRows)
 }
@@ -263,6 +286,7 @@ async fn detect_contact_and_conversation(
                     inbox.workspace_id,
                     existing.contact_id,
                     source_conversation_id,
+                    contact.channel_conversation_id.as_deref(),
                 )?;
                 return Ok((existing, conversation, false));
             }
@@ -323,6 +347,7 @@ async fn detect_contact_and_conversation(
                 inbox.workspace_id,
                 contact_id,
                 source_conversation_id,
+                contact.channel_conversation_id.as_deref(),
             )?;
             Ok((contact_inbox, conversation, true))
         })
@@ -368,7 +393,7 @@ async fn update_contact_from_message(
 }
 
 /// `contactService.unblockIfBlocked`.
-async fn unblock_if_blocked(deps: &Deps, contact_id: i64, workspace_id: i64) {
+pub(crate) async fn unblock_if_blocked(deps: &Deps, contact_id: i64, workspace_id: i64) {
     let result = deps
         .db
         .write(move |tx| {
@@ -393,13 +418,14 @@ fn is_inbound_conversation_message(message: &IncomingMessage) -> bool {
 /// `saveAndBroadcastMessage` / `persistMessage`: the deduplicated insert,
 /// the activity tracking of a new row, the realtime event. Returns the
 /// stored row JSON and whether it is new.
-async fn save_message(
+pub(crate) async fn save_message(
     deps: &Deps,
     inbox: &InboundInbox,
     contact_inbox: &ContactInbox,
     conversation: &Conversation,
     incoming: &IncomingMessage,
     received: &Received,
+    client_id: Option<&str>,
 ) -> Result<(Value, bool), JobError> {
     let inbound = incoming.message_type != "outgoing";
     let created_at = now_ms();
@@ -518,12 +544,16 @@ async fn save_message(
         .map_err(db_fail)?;
     let row = message_json(&stored);
     if is_new {
+        let mut event = row.clone();
+        if let Some(client_id) = client_id {
+            event["clientId"] = json!(client_id);
+        }
         crate::chat::queue_event(
             deps,
             conversation,
             inbox.inbox_id,
             EventType::MessageCreated,
-            row.clone(),
+            event,
         )
         .await;
         // ponytail: the incoming notification job, the `message:received`
@@ -650,7 +680,7 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
     Ok(())
 }
 
-async fn add_job(
+pub(crate) async fn add_job(
     deps: &Deps,
     queue: QueueName,
     name: &str,
@@ -728,7 +758,7 @@ pub(crate) async fn ensure_active(deps: &Deps, conversation: &Conversation) -> b
 /// `automatedResponseService.enqueue` (`enqueueMessage`): the delayed,
 /// debounced `processAutomatedResponse` job plus the pending-message list.
 /// A media-only message is queued only when a keyword rule matches it.
-async fn enqueue_automated_response(
+pub(crate) async fn enqueue_automated_response(
     deps: &Deps,
     stored: &Stored,
     message_id: i64,
@@ -794,7 +824,7 @@ async fn enqueue_automated_response(
 
 /// `automatedResponseService.enqueueFlowAction`: a button tap starts the
 /// flow node it names (`runFlowPostback` / `runFlowQuickReply`).
-async fn enqueue_flow_action(
+pub(crate) async fn enqueue_flow_action(
     deps: &Deps,
     stored: &Stored,
     kind: &str,
@@ -1047,7 +1077,7 @@ mod tests {
             1
         );
         assert_eq!(
-            count(&deps, r#"SELECT count(*) FROM "ContactInbox" WHERE "sourceId" = 'c-1' AND "channel" = 'api'"#).await,
+            count(&deps, r#"SELECT count(*) FROM "ContactInbox" WHERE "sourceId" = 'c-1' AND "channel" = 'api' AND "lastIncomingMessageAt" IS NOT NULL"#).await,
             1
         );
         assert_eq!(

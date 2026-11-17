@@ -31,7 +31,7 @@ pub struct WebhookReply {
     pub body: String,
 }
 
-fn json_reply(status: u16, message: &str) -> WebhookReply {
+pub(crate) fn json_reply(status: u16, message: &str) -> WebhookReply {
     WebhookReply {
         status,
         content_type: "application/json",
@@ -419,31 +419,32 @@ pub async fn manual_webhook(
     }
 }
 
-/// `platformCredentialService.findDecryptedPlatform({ type: "whatsapp" })`:
-/// the decrypted config of the platform WhatsApp app.
+/// `platformCredentialService.findDecryptedPlatform({ type })`: the
+/// decrypted config of a platform app (`whatsapp`, `zalo`).
 // ponytail: the minimum of Q.D11's `platform_credential` service (no config
 // schema parse, no tenant / credential-scoped lookups).
-pub async fn find_platform_whatsapp_config(
+pub async fn find_platform_config(
     db: &Arc<Db>,
     encryption: &Encryption,
+    kind: &'static str,
 ) -> Option<Map<String, Value>> {
     let row = db
-        .read(|conn| {
+        .read(move |conn| {
             chatbotx_db::repo::find_one::<PlatformCredential>(
                 conn,
-                r#""userId" IS NULL AND "type" = 'whatsapp'"#,
-                &[],
+                r#""userId" IS NULL AND "type" = ?1"#,
+                &[&kind],
             )
             .map_err(crate::repo_err)
         })
         .await
         .ok()??;
     let blob: EncryptedData = serde_json::from_value(row.value.0).ok()?;
-    let aad = credential_aad_for(None, "whatsapp");
+    let aad = credential_aad_for(None, kind);
     match encryption.decrypt_object::<Map<String, Value>>(&blob, Some(&aad)) {
         Ok(config) => Some(config),
         Err(error) => {
-            tracing::error!(%error, "Platform WhatsApp credential could not be decrypted");
+            tracing::error!(%error, kind, "Platform credential could not be decrypted");
             None
         }
     }
@@ -481,7 +482,7 @@ pub async fn platform_webhook(
     let Some(encryption) = encryption else {
         return not_configured();
     };
-    let Some(config) = find_platform_whatsapp_config(db, encryption).await else {
+    let Some(config) = find_platform_config(db, encryption, "whatsapp").await else {
         tracing::debug!("Integration whatsapp is not configured");
         return not_configured();
     };

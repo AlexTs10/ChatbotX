@@ -2,6 +2,7 @@
 
 mod config;
 mod web;
+mod webchat;
 mod whatsapp;
 
 use std::process::ExitCode;
@@ -257,7 +258,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             (None, None)
         }
     };
-    let (shutdown, exited) = start_workers(&shared, &jobs, realtime.as_ref(), buses)?;
+    let (shutdown, exited, worker_deps) = start_workers(&shared, &jobs, realtime.as_ref(), buses)?;
     let jobs_admin =
         chatbotx_api::jobs_admin::router(Arc::new(chatbotx_api::jobs_admin::JobsAdminState {
             auth: Arc::clone(&sessions),
@@ -291,6 +292,12 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }
     app = app.merge(chatbotx_api::files::router(Arc::clone(&shared.files)));
+    app = app.merge(webchat::router(
+        Arc::clone(&api),
+        worker_deps,
+        env_or("BETTER_AUTH_SECRET", ""),
+        realtime_secret(),
+    ));
     app = app.merge(whatsapp::router(
         Arc::clone(&shared.db),
         Arc::clone(&jobs) as _,
@@ -308,6 +315,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             app = app.merge(public_api);
         }
     }
+    let app = app.layer(axum::middleware::from_fn(whatsapp::zalo_verifier_rewrite));
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
     tracing::info!(
         addr = %listener.local_addr()?,
@@ -377,7 +385,7 @@ fn start_workers(
     jobs: &Arc<chatbotx_jobs::JobStore>,
     realtime: Option<&Realtime>,
     events: Option<chatbotx_jobs::events::EventBuses>,
-) -> std::io::Result<(Arc<Shutdown>, Exited)> {
+) -> std::io::Result<(Arc<Shutdown>, Exited, chatbotx_worker::Deps)> {
     let (exit_tx, exited) = tokio::sync::watch::channel(None);
     let timeout_ms = std::env::var("WORKER_SHUTDOWN_TIMEOUT_MS")
         .ok()
@@ -395,26 +403,36 @@ fn start_workers(
         Arc::clone(&shutdown),
         Arc::new(chatbotx_jobs::SystemClock),
     );
+    let media = chatbotx_worker::channels::whatsapp_media::WhatsappMedia {
+        files: Arc::clone(&shared.files),
+        storage_url: chatbotx_business::contact::avatar::TenantUrls::from_app_url(
+            &app_url(),
+            std::env::var("NEXT_PUBLIC_STORAGE_URL").ok().as_deref(),
+        )
+        .storage_url,
+    };
     let deps = chatbotx_worker::Deps {
         db: Arc::clone(&shared.db),
         jobs: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::Enqueuer>,
         waiter: Arc::clone(jobs) as Arc<dyn chatbotx_jobs::JobWaiter>,
         realtime: realtime.cloned(),
-        channels: chatbotx_worker::Channels::builtin().with(
-            "whatsapp",
-            Arc::new(
-                chatbotx_worker::channels::whatsapp::Whatsapp::new().with_media(
-                    chatbotx_worker::channels::whatsapp_media::WhatsappMedia {
-                        files: Arc::clone(&shared.files),
-                        storage_url: chatbotx_business::contact::avatar::TenantUrls::from_app_url(
-                            &app_url(),
-                            std::env::var("NEXT_PUBLIC_STORAGE_URL").ok().as_deref(),
-                        )
-                        .storage_url,
-                    },
+        channels: chatbotx_worker::Channels::builtin()
+            .with(
+                "whatsapp",
+                Arc::new(
+                    chatbotx_worker::channels::whatsapp::Whatsapp::new().with_media(media.clone()),
                 ),
+            )
+            .with(
+                "telegram",
+                Arc::new(
+                    chatbotx_worker::channels::telegram::Telegram::new().with_media(media.clone()),
+                ),
+            )
+            .with(
+                "zalo",
+                Arc::new(chatbotx_worker::channels::zalo::Zalo::new().with_media(media)),
             ),
-        ),
         app_url: app_url(),
         variables: chatbotx_worker::variables::VariableDeps::from_env(
             Arc::clone(&shared.db),
@@ -436,7 +454,7 @@ fn start_workers(
             Err(err) => tracing::error!(err = %err, "Error registering schedules"),
         }
     });
-    Ok((shutdown, exited))
+    Ok((shutdown, exited, deps))
 }
 
 /// Resolve on SIGINT (Ctrl-C) or SIGTERM, after the worker drain and the

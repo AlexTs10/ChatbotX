@@ -10,6 +10,7 @@ pub mod ai_mcp_servers;
 pub mod analytics;
 pub mod bot_fields;
 pub mod capabilities;
+pub mod channel_integrations;
 pub mod channels;
 pub mod comment_automations;
 pub mod connect_sessions;
@@ -591,6 +592,8 @@ async fn route(
         flows::handle(state, route_id, call).await
     } else if webchats::ROUTES.contains(&route_id) {
         webchats::handle(state, route_id, call).await
+    } else if channel_integrations::ROUTES.contains(&route_id) {
+        channel_integrations::handle(state, route_id, call).await
     } else if places::ROUTES.contains(&route_id) {
         places::handle(state, route_id, call).await
     } else if open_hours::ROUTES.contains(&route_id) {

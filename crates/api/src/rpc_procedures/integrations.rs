@@ -119,6 +119,22 @@ pub(super) async fn auth_action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Ou
             )
             .await
             .map_err(action_fail)?;
+            // `onConnected`: the webhook secret and `setWebhook`.
+            if let Some(inbox_id) = row.inbox_id {
+                let broker = std::env::var("NEXT_PUBLIC_BROKER_URL")
+                    .ok()
+                    .filter(|u| !u.is_empty())
+                    .unwrap_or_else(|| ctx.api.app_url.clone());
+                credentials::register_telegram_webhook(
+                    &ctx.api.db,
+                    &HttpUpstream,
+                    workspace_id,
+                    inbox_id,
+                    &broker,
+                )
+                .await
+                .map_err(action_fail)?;
+            }
             if row.created_at == row.updated_at {
                 let telegram_id = telegram_id_of_inbox(ctx, workspace_id, row.inbox_id).await?;
                 audit(

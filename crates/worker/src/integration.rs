@@ -152,7 +152,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "aiHandoverBulkToggle" => {
             crate::ai_handover::run_bulk_toggle(&deps, &job.data["data"]).await?;
         }
-        crate::inbound::INCOMING_MESSAGE => {
+        // `incomingMessageEcho` (a message the account itself sent) takes the
+        // same path; an echo never matches the contact-input rules.
+        crate::inbound::INCOMING_MESSAGE | "incomingMessageEcho" => {
             crate::inbound::incoming_message(&deps, &job.data["data"]).await?
         }
         crate::inbound::MESSAGE_STATUS => {

@@ -15,6 +15,7 @@ pub mod automated_response;
 pub mod billing;
 pub mod bot_field;
 pub mod capabilities;
+pub mod channel_integration;
 pub mod comment_automation;
 pub mod connect_session;
 pub mod connection;
