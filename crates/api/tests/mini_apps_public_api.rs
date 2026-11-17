@@ -105,9 +105,24 @@ async fn create_without_flow_json_starts_from_the_builders_starter_screen() {
     .expect("definition");
     let stored: Value = serde_json::from_str(&stored).expect("json");
     assert_eq!(
-        stored,
-        chatbotx_core::mini_app::starter_definition().to_value()
+        without_ids(stored),
+        without_ids(chatbotx_core::mini_app::starter_definition().to_value())
     );
+}
+
+/// The definition without its random screen keys and node ids.
+fn without_ids(mut definition: Value) -> Value {
+    for screen in definition["screens"].as_array_mut().into_iter().flatten() {
+        if let Some(s) = screen.as_object_mut() {
+            s.remove("key");
+        }
+        for node in screen["children"].as_array_mut().into_iter().flatten() {
+            if let Some(n) = node.as_object_mut() {
+                n.remove("id");
+            }
+        }
+    }
+    definition
 }
 
 #[tokio::test]
