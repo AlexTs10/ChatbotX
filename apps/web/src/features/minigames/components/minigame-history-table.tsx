@@ -136,7 +136,9 @@ export function MinigameHistoryTable({
   const { execute: loadPlays } = useAction(boundGetMinigamePlaysAction, {
     onSuccess: ({ data: plays, input }) => {
       if (plays) {
-        const player = data.find((row) => row.contactId === input.contactId)
+        // The SPA action stub is untyped; the input is `{ contactId, minigameId }`.
+        const { contactId } = input as { contactId: string }
+        const player = data.find((row) => row.contactId === contactId)
         setRecord({
           contactName:
             player?.contact.fullName ?? t("minigames.history.unknownContact"),

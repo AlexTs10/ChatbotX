@@ -77,11 +77,17 @@ function Section(props: {
 }
 
 /** The search of a page, parsed once per search string. */
-function useSearch<S>(cache: { parse: (input: Record<string, string>) => S }) {
+function useSearch<S>(cache: {
+  all: () => S
+  parse: (input: Record<string, string>) => unknown
+}) {
   const searchParams = useSearchParams()
   const key = searchParams.toString()
   // biome-ignore lint/correctness/useExhaustiveDependencies: the search string is the key
-  return useMemo(() => cache.parse(Object.fromEntries(searchParams)), [key])
+  return useMemo(
+    () => cache.parse(Object.fromEntries(searchParams)) as S,
+    [key],
+  )
 }
 
 export function AdminWorkspacesPage() {
