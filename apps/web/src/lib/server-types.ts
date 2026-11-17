@@ -93,7 +93,7 @@ export type RefConfig =
   | { type: "reflink"; name: string }
 
 /** `ai-file/service.ts` (`AIFileWithProcessing`) */
-export type AIFileWithEmbeddingStatus = Omit<
+export type AIFileWithProcessing = Omit<
   AIFileModel,
   "chunking" | "chunkingConfig"
 > & {
@@ -106,6 +106,8 @@ export type AIFileWithEmbeddingStatus = Omit<
   indexOutdated: boolean
   processingRun: (AIFileProcessingRun & { stale: boolean }) | null
 }
+
+export type AIFileWithEmbeddingStatus = AIFileWithProcessing
 
 /** `meta-catalog/integration.service.ts` (`findByWorkspaceId`) */
 export type MetaCatalogConnectionModel = IntegrationMetaCatalogModel
