@@ -17,8 +17,8 @@ the tests, implement. Test map: `specs/Q.D11-test-map.tsv`.
 | 7 | Platform credential (platform admins, branding, SMTP, email templates moved to slice 10: they are `enterprise/features`) | code + tests, gate pending |
 | 8 | Analytics: `/v1/analytics/*` + `analyticsRoutes.*` (parity `p1-03`) | 8a (contacts, conversations, messages, agents, bot messages) code + tests; 8b (broadcasts, sequences, flows, comment automation, magic / ref links) code + tests; 8c (MAC tracking `claimNewActiveContact`, row-level test map, Rust parity ext p1-03) code + tests |
 | 9 | Workspace lifecycle (freeze + heavy-data purge) + jobs admin page (replaces Bull Board) | code + tests |
-| 10 | Enterprise: license, tenant, billing, custom domain, inbox teams, help items, platform admins, platform branding / SMTP / email templates | 10a (inbox teams, help items, license): code + tests; rest todo |
-| 11 | Admin workspace | todo |
+| 10 | Enterprise: license, tenant, billing, custom domain, inbox teams, help items, platform admins, platform branding / SMTP / email templates | 10a (inbox teams, help items, license) and 10b (platform admins, tenant, branding / SMTP / email templates, billing, custom domain): code + tests |
+| 11 | Admin workspace | code + tests |
 
 ## 1. Slice 1 — workspace core and settings
 
@@ -203,6 +203,36 @@ Notes:
 - License: Ed25519 JWS verify with `ring` (jose order of checks and messages). The stored `License` token wins when it has the same `licenseId` and a better state. Community is never entitled.
 - No caches (inbox teams, help items, license status).
 - Tests: `crates/api/tests/{inbox_teams_public_api,rpc_inbox_teams,rpc_help_items}.rs`, `crates/business/tests/license_service.rs`.
+
+## 9. Slice 10b — platform admins, tenant, settings, billing, custom domain
+
+| TS | Rust |
+| --- | --- |
+| `platformAdminService.add / remove`, `findOrProvisionRootUser`, add / remove platform admin actions | `crates/api/src/rpc/platform_admins.rs` (key `platformAdminActions`) |
+| `tenantService` (find, visible channels, provision, upserts, status, suspend / reactivate / downgrade, reconcile), `customDomainService` | `chatbotx_business::tenant` |
+| branding, email template and platform SMTP actions | `crates/api/src/rpc/platform_settings.rs` (key `platformSettingsActions`) |
+| `reconcileTenantEntitlementAction` | same file (key `billingActions`) |
+| `billingService.provisionDefaultPlan` | `chatbotx_business::billing` |
+| `assertEnterpriseFeatures` of the actions | `ApiState::assert_enterprise_features` (`license_token` from `LICENSE_KEY`, `license_keys` = the built-in keys; tests set both) |
+
+Notes:
+- `superAdminActionClient` / `platformAdminActionClient` run before the input schema (403 `unauthorized`); `assertEnterpriseFeatures` runs after it (403 `enterpriseFeatureRequired`).
+- The account credential mail is plain text over the auth `Mailer` (now on `ActionContext.mailer`); a failed mail creates no user.
+- Not ported (owners): `previewEmailTemplate` and the SMTP `verifySmtpTransport` (mail package port); the `suspend` workspace pause and the `reactivate` connection / inbox resume (connection lifecycle units); `listPlatformAdmins` (no web procedure asks for it).
+- License refresh and startup: `license::refresh_license` (vendor POST, a newer valid renewal of the same license is stored in `License`) and `license::startup_check` (the server exits 1 on a missing or invalid license for enterprise / cloud). The refresh schedule belongs to the worker cron unit.
+- Tests: `crates/api/tests/{platform_admins,platform_settings}.rs`, `crates/business/tests/{tenant_service,billing_service,license_refresh}.rs`.
+
+## 10. Slice 11 — admin workspace
+
+| TS | Rust |
+| --- | --- |
+| `adminWorkspaceService.createWithMembers`, `createAdminWorkspaceAction` | `crates/api/src/rpc/admin_workspaces.rs` (key `adminWorkspaceActions`, action `createAdminWorkspace`) |
+| `listAdminWorkspaces` (`workspaceSupportAccessService.listWorkspaces`) | same file, action `listAdminWorkspaces` (not a super admin: 404) |
+
+Notes:
+- Order kept: owner resolved first; existing workspace (409) before the team-member room check; members resolved after both; one create transaction with every member; audit `create` for the actor.
+- The action returns `{ workspace, owner, members }`; `workspace` has the id, dates, name, owner and tenant only.
+- Tests: `crates/api/tests/admin_workspaces.rs`.
 
 ## Decisions (also in DECISIONS.md)
 

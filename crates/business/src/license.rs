@@ -523,3 +523,198 @@ pub async fn assert_enterprise_features(db: &Db, edition: Edition) -> crate::Res
         Err(enterprise_feature_required())
     }
 }
+
+/// `LICENSE_REFRESH_URL` default.
+pub const DEFAULT_LICENSE_REFRESH_URL: &str = "https://chatbotx.io/api/licenses/refresh";
+/// `REFRESH_TIMEOUT_MS`.
+const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10_000);
+
+/// The `refreshLicense` settings (`keys()`).
+#[derive(Debug, Clone)]
+pub struct RefreshConfig<'a> {
+    pub edition: Edition,
+    /// `LICENSE_KEY`.
+    pub token: Option<&'a str>,
+    /// `LICENSE_REFRESH_ENABLED` (default `true`).
+    pub enabled: bool,
+    /// `LICENSE_REFRESH_URL`.
+    pub url: &'a str,
+    pub keys: &'a [(&'a str, &'a str)],
+}
+
+/// `LicenseRefreshOutcome` (dates in ms).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefreshOutcome {
+    /// `community`, `disabled` or the current state.
+    Skipped(String),
+    /// `requestFailed`, `http_<status>`, `badBody` or `rejectedToken`.
+    Failed(String),
+    Refreshed {
+        expires_at: i64,
+    },
+    Unchanged {
+        expires_at: i64,
+    },
+}
+
+/// `refreshLicense()`: posts the current token to the vendor and stores a
+/// newer valid renewal of the same license (`License` row).
+pub async fn refresh_license(db: &Db, config: RefreshConfig<'_>, now_ms: i64) -> RefreshOutcome {
+    if config.edition.is_community() {
+        return RefreshOutcome::Skipped("community".into());
+    }
+    if !config.enabled {
+        return RefreshOutcome::Skipped("disabled".into());
+    }
+    let current = resolve_license(db, config.token, config.edition, config.keys, now_ms).await;
+    let (Some(license_id), Some(token)) = (current.license_id.clone(), config.token) else {
+        return RefreshOutcome::Skipped(current.state.as_str().into());
+    };
+    match current.state {
+        LicenseState::Grace => tracing::warn!(
+            license_id,
+            "license: expired and running on its grace window; enterprise features stop at graceEndsAt unless a renewal arrives"
+        ),
+        LicenseState::Expired => tracing::warn!(
+            license_id,
+            "license: grace window elapsed; enterprise features are disabled until a renewal is issued"
+        ),
+        _ => {}
+    }
+    let edition = match config.edition {
+        Edition::Cloud => "cloud",
+        Edition::Enterprise => "enterprise",
+        Edition::Community => "community",
+    };
+    let body =
+        serde_json::json!({ "token": token.trim(), "licenseId": license_id, "edition": edition });
+    let sent = reqwest::Client::new()
+        .post(config.url)
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .timeout(REFRESH_TIMEOUT)
+        .send()
+        .await;
+    let response = match sent {
+        Ok(response) => response,
+        Err(err) => {
+            tracing::error!(%err, license_id, "license: refresh request failed");
+            return RefreshOutcome::Failed("requestFailed".into());
+        }
+    };
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        tracing::error!(
+            license_id,
+            status,
+            "license: refresh returned a non-OK status"
+        );
+        return RefreshOutcome::Failed(format!("http_{status}"));
+    }
+    // `z.object({ token: z.string().min(1) })`.
+    let renewed = response
+        .text()
+        .await
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|v| v.get("token").and_then(Value::as_str).map(str::to_owned))
+        .filter(|t| !t.is_empty());
+    let Some(renewed) = renewed else {
+        tracing::error!(license_id, "license: refresh returned an unreadable body");
+        return RefreshOutcome::Failed("badBody".into());
+    };
+    let next = verify_license_token(&renewed, config.keys, allowed_tiers(config.edition), now_ms);
+    let Some(expires_at) = next.expires_at.filter(|_| {
+        next.state == LicenseState::Valid && next.license_id.as_deref() == Some(license_id.as_str())
+    }) else {
+        tracing::error!(
+            license_id,
+            state = next.state.as_str(),
+            "license: refresh returned a token this deployment cannot use"
+        );
+        return RefreshOutcome::Failed("rejectedToken".into());
+    };
+    if !is_newer_license(&next, &current) {
+        return RefreshOutcome::Unchanged {
+            expires_at: current.expires_at.unwrap_or(expires_at),
+        };
+    }
+    let id = license_id.clone();
+    let stored = db
+        .write(move |tx| {
+            chatbotx_db::repo::license::upsert(tx, &id, &renewed, expires_at)
+                .map_err(|e| chatbotx_db::DbError::other(e.message()))
+        })
+        .await;
+    if let Err(err) = stored {
+        tracing::error!(%err, license_id, "license: could not store the renewed token");
+        return RefreshOutcome::Failed("requestFailed".into());
+    }
+    tracing::info!(
+        license_id,
+        expires_at,
+        days_remaining = next.days_remaining,
+        "license: refreshed"
+    );
+    RefreshOutcome::Refreshed { expires_at }
+}
+
+/// What `assertLicenseAtStartup` decides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupCheck {
+    /// Community: no check.
+    Skipped,
+    /// Missing or invalid: log and exit 1.
+    Refuse {
+        state: &'static str,
+        error: Option<String>,
+    },
+    /// Inside the grace window: a warning.
+    Grace,
+    /// Past the grace window: a warning (community feature set).
+    Lapsed,
+    Verified,
+}
+
+/// `assertLicenseAtStartup()` without the exit: the caller exits on
+/// [`StartupCheck::Refuse`].
+pub fn startup_check(edition: Edition, license: &LicenseStatus) -> StartupCheck {
+    if edition.is_community() {
+        return StartupCheck::Skipped;
+    }
+    match license.state {
+        LicenseState::Missing | LicenseState::Invalid => {
+            tracing::error!(
+                state = license.state.as_str(),
+                error = license.error.as_deref().unwrap_or(""),
+                "This edition requires a valid LICENSE_KEY issued for this deployment. Refusing to start."
+            );
+            StartupCheck::Refuse {
+                state: license.state.as_str(),
+                error: license.error.clone(),
+            }
+        }
+        LicenseState::Grace => {
+            tracing::warn!(
+                customer_name = license.customer_name.as_deref().unwrap_or(""),
+                "License has expired. Enterprise features keep working for {LICENSE_GRACE_PERIOD_DAYS} days after expiry — renew before graceEndsAt or this deployment falls back to the community feature set."
+            );
+            StartupCheck::Grace
+        }
+        LicenseState::Expired => {
+            tracing::warn!(
+                customer_name = license.customer_name.as_deref().unwrap_or(""),
+                "License expired more than the grace period ago. Enterprise features are disabled; running with the community feature set until the license is renewed."
+            );
+            StartupCheck::Lapsed
+        }
+        LicenseState::Valid => {
+            tracing::info!(
+                tier = license.tier.as_deref().unwrap_or(""),
+                days_remaining = license.days_remaining,
+                "License verified"
+            );
+            StartupCheck::Verified
+        }
+    }
+}

@@ -5,6 +5,7 @@
 
 pub mod analytics;
 pub mod audit;
+pub mod billing;
 pub mod bot_field;
 pub mod capabilities;
 pub mod connection;
@@ -51,6 +52,7 @@ pub mod reflink;
 pub mod sequence;
 pub mod store_source;
 pub mod tag;
+pub mod tenant;
 pub mod tenant_help_item;
 pub mod tx;
 pub mod user_quota;

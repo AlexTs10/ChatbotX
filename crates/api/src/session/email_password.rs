@@ -266,7 +266,7 @@ pub fn generate_session_token() -> String {
 }
 
 /// better-auth `generateRandomString(length)` (`a-zA-Z0-9`).
-pub(super) fn random_string(length: usize) -> String {
+pub fn random_string(length: usize) -> String {
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     random_bytes(length)
         .iter()

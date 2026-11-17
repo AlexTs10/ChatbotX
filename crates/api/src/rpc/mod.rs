@@ -10,9 +10,12 @@
 //! auth.
 
 pub mod actions;
+pub mod admin_workspaces;
 pub mod help_items;
 pub mod inbox_teams;
+pub mod platform_admins;
 pub mod platform_credentials;
+pub mod platform_settings;
 pub mod procedures;
 mod table;
 pub mod workspace;

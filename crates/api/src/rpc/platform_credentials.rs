@@ -175,7 +175,7 @@ async fn write(
 }
 
 /// The stored config of the scope (`strict`).
-async fn stored(
+pub(super) async fn stored(
     api: &ApiState,
     user: Option<i64>,
     credential_type: &'static str,
@@ -197,7 +197,7 @@ async fn stored(
     Ok(found.map(|c| c.config))
 }
 
-async fn save(
+pub(super) async fn save(
     api: &ApiState,
     user: Option<i64>,
     credential_type: &'static str,

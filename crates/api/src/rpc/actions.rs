@@ -34,6 +34,10 @@ pub const ACTION_KEYS: &[&str] = &[
     "platformCredentialActions",
     "inboxTeamActions",
     "helpItemActions",
+    "platformAdminActions",
+    "platformSettingsActions",
+    "billingActions",
+    "adminWorkspaceActions",
 ];
 
 /// next-safe-action `DEFAULT_SERVER_ERROR_MESSAGE`.
@@ -54,7 +58,7 @@ pub enum Gate {
 }
 
 /// The context an action runs with (`ctx`).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ActionContext {
     pub user_id: i64,
     /// The workspace of a workspace action.
@@ -63,6 +67,8 @@ pub struct ActionContext {
     pub permissions: Value,
     /// `ctx.isSupportSession` (support access is not ported: always `false`).
     pub is_support_session: bool,
+    /// The auth mailer (account credential mails).
+    pub mailer: std::sync::Arc<dyn crate::mail::Mailer>,
 }
 
 impl ActionContext {
@@ -237,6 +243,10 @@ fn gate_of(key: &str, name: &str) -> Option<Gate> {
         "workspaceMemberActions" => super::workspace_members::action_gate(name),
         "inboxTeamActions" => super::inbox_teams::action_gate(name),
         "helpItemActions" => super::help_items::action_gate(name),
+        "platformAdminActions" => super::platform_admins::action_gate(name),
+        "platformSettingsActions" => super::platform_settings::action_gate(name),
+        "billingActions" => super::platform_settings::billing_action_gate(name),
+        "adminWorkspaceActions" => super::admin_workspaces::action_gate(name),
         "platformCredentialActions" => super::platform_credentials::action_gate(name),
         _ => None,
     }
@@ -259,6 +269,15 @@ async fn run(
         }
         "inboxTeamActions" => super::inbox_teams::run_action(api, name, context, input).await,
         "helpItemActions" => super::help_items::run_action(api, name, context, input).await,
+        "platformAdminActions" => {
+            super::platform_admins::run_action(api, name, context, input).await
+        }
+        "adminWorkspaceActions" => {
+            super::admin_workspaces::run_action(api, name, context, input).await
+        }
+        "platformSettingsActions" | "billingActions" => {
+            super::platform_settings::run_action(api, name, context, input).await
+        }
         _ => Err(ActionError::Internal(format!("unknown action key {key}"))),
     }
 }
@@ -314,6 +333,7 @@ pub async fn handle(
         workspace: None,
         permissions: json!({}),
         is_support_session: false,
+        mailer: std::sync::Arc::clone(&state.auth.mailer),
     };
     if gate != Gate::Auth {
         let not_found = || internal("Workspace not found");

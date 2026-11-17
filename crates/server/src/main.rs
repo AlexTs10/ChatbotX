@@ -219,6 +219,14 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         mailer: mailer(),
         now_ms,
     });
+    // `assertLicenseAtStartup`: enterprise / cloud need a valid or lapsed license.
+    let edition_now = chatbotx_business::keys::Edition::from_env();
+    let license = chatbotx_business::license::license_status(&shared.db, edition_now).await;
+    if let chatbotx_business::license::StartupCheck::Refuse { .. } =
+        chatbotx_business::license::startup_check(edition_now, &license)
+    {
+        std::process::exit(1);
+    }
     chatbotx_api::session::bootstrap_platform_admin_at_startup(&shared.db).await;
     let (api, job_store) = api_state(&shared, realtime.as_ref()).await?;
     let api = Arc::new(api);

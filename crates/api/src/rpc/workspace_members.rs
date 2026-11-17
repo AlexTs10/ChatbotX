@@ -70,7 +70,7 @@ fn bool_object(
 }
 
 /// `workspaceMemberPermissionsRequest`: every flag, at least one set.
-fn permissions_request(input: &mut Input) -> Option<Value> {
+pub(super) fn permissions_request(input: &mut Input) -> Option<Value> {
     let value = input.get("permissions").cloned();
     let path = key("permissions");
     let permissions = bool_object(input, &path, value.as_ref(), PERMISSION_KEYS)?;
