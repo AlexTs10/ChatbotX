@@ -2,8 +2,10 @@
 //! `lib/exception.ts`, `api/message.ts`), `lib/error-mapper.ts`,
 //! `receiveMessage` (`incoming-message/index.ts`), `sendMessage` /
 //! `sendFlowStep` (`outgoing-message/*`) and `handlers/webhook.ts` behind
-//! the platform credential (`[...integration]/webhook.ts`). OAuth, tags and
-//! `getProfile` are not channel handlers here.
+//! the platform credential (`[...integration]/webhook.ts`). Tags and the
+//! profile lookup are `Zalo` methods (their tag-sync / contact-profile
+//! callers are other units); OAuth is in
+//! `chatbotx_business::connection::oauth_channels`.
 
 use std::sync::Arc;
 
@@ -237,6 +239,218 @@ async fn send_message_api(
     let payload = json!({ "recipient": { "user_id": recipient }, "message": message });
     let data = api_post(client, base, token, SEND_MESSAGE, Body::Json(payload)).await?;
     Ok(data["data"]["message_id"].as_str().map(str::to_owned))
+}
+
+// ---- tags and profile (`api/tag.ts`, `api/user.ts`, `lib/image.ts`) ------
+
+const TAG_FOLLOWER: &str = "v2.0/oa/tag/tagfollower";
+const RM_FOLLOWER_FROM_TAG: &str = "v2.0/oa/tag/rmfollowerfromtag";
+const LIST_TAGS: &str = "v2.0/oa/tag/gettagsofoa";
+const RM_TAG: &str = "v2.0/oa/tag/rmtag";
+const GET_USER_PROFILE: &str = "v3.0/oa/user/detail";
+
+/// One authenticated `ZaloHttpClient.get` (the envelope check of
+/// [`api_post`]). `timeout` = `requestTimeoutMs` (one try, as `retries: 0`).
+// ponytail: no ky GET retries without a timeout either.
+async fn api_get(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    endpoint: &str,
+    timeout: Option<std::time::Duration>,
+) -> Result<Value, ApiError> {
+    let mut request = client
+        .get(format!("{base}{endpoint}"))
+        .header("access_token", token);
+    if let Some(timeout) = timeout {
+        request = request.timeout(timeout);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| ApiError::new(e.to_string()))?;
+    let status = response.status().as_u16();
+    let text = response.text().await.unwrap_or_default();
+    if !(200..300).contains(&status) {
+        tracing::error!(endpoint, status, error = text, "Zalo OA API error response");
+        return Err(ApiError {
+            http_status: status,
+            code: None,
+            message: format!("API request failed: {status} {text}"),
+        });
+    }
+    let data: Value = serde_json::from_str(&text).map_err(|e| ApiError::new(e.to_string()))?;
+    check_api_error(&data)?;
+    Ok(data)
+}
+
+/// A Zalo user profile (`getUserProfile` → `IncomingContact`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZaloProfile {
+    pub source_id: String,
+    pub first_name: String,
+    pub phone_number: String,
+    pub gender: Option<&'static str>,
+    pub referral: Option<chatbotx_core::utils::google_click::GoogleClickReferral>,
+    pub avatar: Option<String>,
+}
+
+/// `normalizeZaloGender`: `1` male, `2` female (number or string).
+fn zalo_gender(gender: &Value) -> Option<&'static str> {
+    match gender {
+        Value::Number(n) if n.as_f64() == Some(1.0) => Some("male"),
+        Value::Number(n) if n.as_f64() == Some(2.0) => Some("female"),
+        Value::String(s) if s == "1" => Some("male"),
+        Value::String(s) if s == "2" => Some("female"),
+        _ => None,
+    }
+}
+
+impl Zalo {
+    /// `tagFollower`.
+    pub async fn tag_follower(&self, token: &str, user_id: &str, tag_name: &str) -> Result<Value, ApiError> {
+        let body = json!({ "user_id": user_id, "tag_name": tag_name });
+        api_post(&self.client, &self.base_url, token, TAG_FOLLOWER, Body::Json(body)).await?;
+        Ok(json!({ "success": true }))
+    }
+
+    /// `removeFollowerFromTag`.
+    pub async fn remove_follower_from_tag(
+        &self,
+        token: &str,
+        user_id: &str,
+        tag_name: &str,
+    ) -> Result<Value, ApiError> {
+        let body = json!({ "user_id": user_id, "tag_name": tag_name });
+        api_post(&self.client, &self.base_url, token, RM_FOLLOWER_FROM_TAG, Body::Json(body)).await?;
+        Ok(json!({ "success": true }))
+    }
+
+    /// `listOaTags`: `data`, `[]` when absent or null.
+    pub async fn list_oa_tags(&self, token: &str) -> Result<Vec<String>, ApiError> {
+        let data = api_get(&self.client, &self.base_url, token, LIST_TAGS, None).await?;
+        Ok(data["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|t| t.as_str().map(str::to_owned))
+            .collect())
+    }
+
+    /// `removeTag`.
+    pub async fn remove_tag(&self, token: &str, tag_name: &str) -> Result<Value, ApiError> {
+        let body = json!({ "tag_name": tag_name });
+        api_post(&self.client, &self.base_url, token, RM_TAG, Body::Json(body)).await?;
+        Ok(json!({ "success": true }))
+    }
+
+    /// `fetchZaloUserDetail` / the `getUserDetail` action: the raw `data`.
+    pub async fn get_user_detail(
+        &self,
+        token: &str,
+        user_id: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<Value, ApiError> {
+        let query: String =
+            url::form_urlencoded::byte_serialize(json!({ "user_id": user_id }).to_string().as_bytes())
+                .collect();
+        let endpoint = format!("{GET_USER_PROFILE}?data={query}");
+        let data = api_get(&self.client, &self.base_url, token, &endpoint, timeout).await?;
+        Ok(data["data"].clone())
+    }
+
+    /// `getUserProfile`: name, shared phone, gender, the Google click of
+    /// `dynamic_param` and (when `include_avatar`) the re-uploaded avatar.
+    pub async fn get_user_profile(
+        &self,
+        token: &str,
+        workspace_id: i64,
+        psid: &str,
+        include_avatar: bool,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<ZaloProfile, ApiError> {
+        let detail = self.get_user_detail(token, psid, timeout).await?;
+        let now = chatbotx_db::repo::now_ms();
+        let referral = chatbotx_core::utils::google_click::consume_google_click_ref(
+            detail["dynamic_param"].as_str(),
+            Some(now),
+            now,
+        )
+        .google_referral;
+        let mut profile = ZaloProfile {
+            source_id: psid.to_owned(),
+            first_name: detail["display_name"].as_str().unwrap_or_default().to_owned(),
+            phone_number: detail["shared_info"]["phone"].as_str().unwrap_or_default().to_owned(),
+            gender: zalo_gender(&detail["user_gender"]),
+            referral,
+            avatar: None,
+        };
+        if let (true, Some(url)) = (include_avatar, detail["avatar"].as_str().filter(|u| !u.is_empty())) {
+            profile.avatar = self
+                .fetch_and_reupload_image(token, workspace_id, url)
+                .await
+                .map_err(ApiError::new)?;
+        }
+        Ok(profile)
+    }
+
+    /// `fetchAndReuploadImage`: the avatar (bearer token) through the
+    /// encoder with the `avatar` profile under the workspace storage prefix;
+    /// `None` when the download does not answer 2xx or there is no store.
+    pub async fn fetch_and_reupload_image(
+        &self,
+        token: &str,
+        workspace_id: i64,
+        avatar_url: &str,
+    ) -> Result<Option<String>, String> {
+        let Some(media) = &self.media else {
+            return Ok(None);
+        };
+        // Stricter than the original's plain `fetch`: public URLs only.
+        chatbotx_business::net::ssrf_guard::assert_public_url(avatar_url, "Zalo avatar URL").await?;
+        let response = self
+            .media_client
+            .get(avatar_url)
+            .bearer_auth(token)
+            .header("User-Agent", "node")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Ok(None);
+        }
+        let mime_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("image/png")
+            .to_owned();
+        let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+        store_avatar(media, workspace_id, bytes, &mime_type).await.map(Some)
+    }
+}
+
+/// The store half of [`Zalo::fetch_and_reupload_image`]: the stored path.
+pub(crate) async fn store_avatar(
+    media: &WhatsappMedia,
+    workspace_id: i64,
+    bytes: bytes::Bytes,
+    mime_type: &str,
+) -> Result<String, String> {
+    let key = format!(
+        "{}/{}",
+        chatbotx_files::get_storage_prefix(&workspace_id.to_string()),
+        chatbotx_core::utils::id::create_id()
+    );
+    let stored = super::whatsapp_media::store_bytes(
+        media,
+        &key,
+        bytes,
+        mime_type,
+        chatbotx_core::utils::image_optimize::ImageOptimizeProfile::Avatar,
+    )
+    .await?;
+    Ok(stored.origin_path)
 }
 
 /// `uploadAttachment`: the response `data` (`attachment_id` | `token`,

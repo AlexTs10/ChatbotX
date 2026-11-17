@@ -206,7 +206,19 @@ pub async fn copy_to_storage(
         .map(str::to_owned)
         .or(declared)
         .unwrap_or_else(|| "image/png".into());
-    let mime_type = mime_type.as_str();
+    store_downloaded(media, bytes, &mime_type, loc, attachment).await
+}
+
+/// The `storeIncomingImage` half of [`copy_to_storage`]: a photo message
+/// goes through the inline encoder with the `media` profile, any other file
+/// keeps its bytes (`original`); the attachment takes the stored fields.
+pub(crate) async fn store_downloaded(
+    media: &WhatsappMedia,
+    bytes: Bytes,
+    mime_type: &str,
+    loc: &ChannelMediaLocation,
+    attachment: &mut IncomingAttachment,
+) -> Result<(), String> {
     if attachment.mime_type.is_empty() {
         attachment.mime_type = mime_type.to_owned();
     }
@@ -220,21 +232,7 @@ pub async fn copy_to_storage(
     } else {
         ImageOptimizeProfile::Original
     };
-    let putter = FilesPutter(&media.files);
-    let stored = store_incoming_image(
-        StoreIncomingImageInput {
-            uploader: Some(&putter),
-            key: &key,
-            bytes,
-            mime_type,
-            profile,
-            acl: Some("public-read"),
-        },
-        &chatbotx_core::env::ProcessEnv,
-        &EncodeSlots::global(),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let stored = store_bytes(media, &key, bytes, mime_type, profile).await?;
     let fields = to_stored_media_fields(&stored);
     attachment.origin_path = fields.origin_path;
     attachment.size = Some(fields.size as i64);
@@ -249,6 +247,31 @@ pub async fn copy_to_storage(
         attachment.mime_type = fields.mime_type;
     }
     Ok(())
+}
+
+/// `storeIncomingImage` on the file store (`public-read`).
+pub(crate) async fn store_bytes(
+    media: &WhatsappMedia,
+    key: &str,
+    bytes: Bytes,
+    mime_type: &str,
+    profile: ImageOptimizeProfile,
+) -> Result<chatbotx_core::utils::store_incoming_image::StoredIncomingImage, String> {
+    let putter = FilesPutter(&media.files);
+    store_incoming_image(
+        StoreIncomingImageInput {
+            uploader: Some(&putter),
+            key,
+            bytes,
+            mime_type,
+            profile,
+            acl: Some("public-read"),
+        },
+        &chatbotx_core::env::ProcessEnv,
+        &EncodeSlots::global(),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 // ---- outbound (`prepareOutboundMedia`) -------------------------------------
