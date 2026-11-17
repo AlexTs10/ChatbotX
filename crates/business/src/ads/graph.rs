@@ -532,34 +532,6 @@ pub async fn source_auth(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_numeric_insight_fields() {
-        assert_eq!(numeric(&json!("20")), 20.0);
-        assert_eq!(numeric(&json!(1.5)), 1.5);
-        assert_eq!(numeric(&json!("")), 0.0);
-        assert_eq!(numeric(&json!("abc")), 0.0);
-        assert_eq!(numeric(&Value::Null), 0.0);
-    }
-
-    #[tokio::test]
-    async fn caches_successes_only() {
-        let key = "test:cache".to_owned();
-        let first: std::result::Result<Value, ()> =
-            cached(key.clone(), LIST_TTL, || async { Err(()) }).await;
-        assert!(first.is_err());
-        let second: std::result::Result<Value, ()> =
-            cached(key.clone(), LIST_TTL, || async { Ok(json!(1)) }).await;
-        assert_eq!(second, Ok(json!(1)));
-        let third: std::result::Result<Value, ()> =
-            cached(key, LIST_TTL, || async { Ok(json!(2)) }).await;
-        assert_eq!(third, Ok(json!(1)));
-    }
-}
-
 /// `invalidateMessagingAdsCache`: drops the cached Graph reads of one
 /// integration.
 fn invalidate(workspace_id: i64, channel: &str, integration_id: i64) {
@@ -629,4 +601,32 @@ pub async fn disconnect(
     tx::write(db, move |tx| Ok(connections::remove(tx, id, workspace_id)?)).await?;
     invalidate(workspace_id, channel, integration_id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_numeric_insight_fields() {
+        assert_eq!(numeric(&json!("20")), 20.0);
+        assert_eq!(numeric(&json!(1.5)), 1.5);
+        assert_eq!(numeric(&json!("")), 0.0);
+        assert_eq!(numeric(&json!("abc")), 0.0);
+        assert_eq!(numeric(&Value::Null), 0.0);
+    }
+
+    #[tokio::test]
+    async fn caches_successes_only() {
+        let key = "test:cache".to_owned();
+        let first: std::result::Result<Value, ()> =
+            cached(key.clone(), LIST_TTL, || async { Err(()) }).await;
+        assert!(first.is_err());
+        let second: std::result::Result<Value, ()> =
+            cached(key.clone(), LIST_TTL, || async { Ok(json!(1)) }).await;
+        assert_eq!(second, Ok(json!(1)));
+        let third: std::result::Result<Value, ()> =
+            cached(key, LIST_TTL, || async { Ok(json!(2)) }).await;
+        assert_eq!(third, Ok(json!(1)));
+    }
 }

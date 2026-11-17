@@ -42,11 +42,11 @@ fn conversations(
 }
 
 /// Rows keyed by `key`, in first-seen order.
-fn row_for<'a>(
-    rows: &'a mut Vec<(String, Map<String, Value>)>,
+fn row_for(
+    rows: &mut Vec<(String, Map<String, Value>)>,
     key: String,
     init: impl FnOnce() -> Map<String, Value>,
-) -> &'a mut Map<String, Value> {
+) -> &mut Map<String, Value> {
     let index = match rows.iter().position(|(k, _)| *k == key) {
         Some(index) => index,
         None => {

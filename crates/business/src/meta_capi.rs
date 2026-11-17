@@ -1,6 +1,6 @@
 //! The channel Meta Conversions API operations behind the public
 //! `<channel>Channels.*Capi*` routes (`meta-conversions/lib/capi-operations.ts`
-//! + `metaConversionsService` save / provision / test-code / test-event /
+//! and `metaConversionsService` save / provision / test-code / test-event /
 //! disconnect / reconnect, `integrations/meta-conversions` dataset + events).
 //!
 //! One table-generic path for Messenger, Instagram (Facebook Login only) and
