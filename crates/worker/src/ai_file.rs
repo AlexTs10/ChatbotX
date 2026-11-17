@@ -418,8 +418,14 @@ pub async fn process_pending_embedding(deps: &Deps, id: i64) -> Result<(), JobEr
         Ok(vector) => vector,
         Err(err) => {
             if is_invalid_api_key_error(Some(&err)) {
-                // ponytail: the ErrorLog row (`logProviderError`) comes with
-                // the error-log worker (slice 3).
+                // Surfaced on the workspace's Error Logs, then failed without retry.
+                let input = crate::events::ProviderError {
+                    provider: crate::events::ai_error_log_provider(model.provider).to_owned(),
+                    workspace_id: ws.to_string(),
+                    error: json!({ "message": err.message, "statusCode": err.status }),
+                    ..Default::default()
+                };
+                crate::events::log_provider_errors(deps.events.as_ref(), &[input]).await;
                 return Err(JobError::unrecoverable(format!(
                     "Embedding provider rejected the API key: {}",
                     err.message

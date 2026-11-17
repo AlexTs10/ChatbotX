@@ -13,15 +13,21 @@ pub mod ai_handover;
 pub mod channel;
 pub mod channels;
 pub mod chat;
+pub mod condition;
 pub mod default_queue;
+pub mod events;
 pub mod flow;
 pub mod inbound;
 pub mod integration;
 pub mod meta_catalog;
+pub mod notification;
+pub mod purge;
 pub mod schedule;
 pub mod send_flow_step;
 pub mod steps;
+pub mod trigger;
 pub mod variables;
+pub mod webhook;
 
 use std::sync::Arc;
 
@@ -53,6 +59,12 @@ pub struct Deps {
     pub ai: Arc<ai::Ai>,
     /// The file store (AI file extraction); `None` = not configured.
     pub files: Option<Arc<chatbotx_files::Uploader>>,
+    /// The outgoing webhook transport (SSRF-guarded on every hop).
+    pub webhook_http: Arc<dyn webhook::WebhookHttp>,
+    /// The durable event buses (`emit`); `None` = no bus (tests).
+    pub events: Option<chatbotx_jobs::events::EventBuses>,
+    /// The Expo push sender; `None` = `EXPO_PUSH_ENABLED=false` (tests).
+    pub push: Option<Arc<dyn notification::PushSender>>,
 }
 
 /// A handler failure that BullMQ would retry (`throw new Error(..)`).
@@ -133,6 +145,35 @@ pub(crate) async fn load_contact_inbox(
     .map_err(db_fail)
 }
 
+/// `isBlockedWorkspace` (community edition: the row reasons of
+/// `resolveWorkspaceFreezeReason`): a missing or deletion-scheduled
+/// workspace is frozen; a job without a workspace id runs.
+pub(crate) async fn is_blocked_workspace(db: &Db, workspace_id: &str) -> Result<bool, JobError> {
+    if workspace_id.is_empty() {
+        return Ok(false);
+    }
+    let Ok(id) = workspace_id.parse::<i64>() else {
+        return Ok(true);
+    };
+    let scheduled: Option<Option<i64>> = db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    r#"SELECT "scheduledDeletionAt" FROM "Workspace" WHERE "id" = ?1"#,
+                    [id],
+                    |r| r.get(0),
+                )
+                .optional()?)
+        })
+        .await
+        .map_err(db_fail)?;
+    let blocked = !matches!(scheduled, Some(None));
+    if blocked {
+        tracing::info!(workspace_id, "Skipping job for a frozen workspace");
+    }
+    Ok(blocked)
+}
+
 /// `env.<NAME>` concurrency: an integer in `1..=max`, else the default.
 pub fn concurrency_env(name: &str, default: u32, max: u32) -> u32 {
     std::env::var(name)
@@ -193,6 +234,26 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
         handler(deps, |deps, job| {
             Box::pin(ai_file::handle_ai_agent(deps, job))
         }),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::Webhook).concurrency(concurrency_env(
+            "WEBHOOK_WORKER_CONCURRENCY",
+            50,
+            200,
+        )),
+        handler(deps, |deps, job| Box::pin(webhook::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::Notification).concurrency(concurrency_env(
+            "NOTIFICATION_WORKER_CONCURRENCY",
+            10,
+            200,
+        )),
+        handler(deps, |deps, job| Box::pin(notification::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::Trigger).concurrency(100),
+        handler(deps, |deps, job| Box::pin(trigger::handle(deps, job))),
     )?;
     runtime.spawn_worker(
         spec_of(QueueName::Schedule),

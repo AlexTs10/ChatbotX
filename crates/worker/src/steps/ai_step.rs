@@ -1,8 +1,8 @@
 //! Q.W2 slice 1: the AI flow steps that run in the integration worker
 //! (`generate-text`, `generate-text-agent`, `delete-message-history`).
 //!
-//! ponytail: a provider failure is not written to `ErrorLog`
-//! (`logStepProviderError`) until the error-log event worker (Q.W2 slice 3).
+//! A provider failure of `aiGenerateText` is written to `ErrorLog`
+//! (`logStepProviderError`) through the error-log bus.
 
 use chatbotx_business::contact_custom_field::{self, SetValueByKeyInput};
 use chatbotx_db::repo::message::{SinceTimeInput, get_safe_since_time};
@@ -159,14 +159,30 @@ async fn generate_text(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobError> {
             }
         }
         Err(err) if err.status == Some(402) => {
+            log_step_provider_error(ctx, &err).await;
             tracing::error!(err = %err, "AI provider insufficient credits");
             Ok(step_error(ctx, ERROR_INSUFFICIENT_CREDITS))
         }
         Err(err) => {
+            log_step_provider_error(ctx, &err).await;
             tracing::error!(err = %err, "An error occurred while generating text");
             Ok(step_error(ctx, &err.message))
         }
     }
+}
+
+/// `logStepProviderError(aiErrorLogProvider(step.provider), ...)`.
+async fn log_step_provider_error(ctx: &StepCtx<'_, '_>, err: &llm::LlmError) {
+    let provider = crate::events::ai_error_log_provider(ctx.str("provider").unwrap_or("openai"));
+    let input = crate::events::ProviderError {
+        provider: provider.to_owned(),
+        workspace_id: ctx.workspace_id().to_string(),
+        contact_id: Some(ctx.contact_id().to_string()),
+        source_id: Some(ctx.run.contact_inbox.source_id.clone()),
+        error: json!({ "message": err.message, "statusCode": err.status }),
+        ..Default::default()
+    };
+    crate::events::log_provider_errors(ctx.run.deps.events.as_ref(), &[input]).await;
 }
 
 fn string_list(value: Option<&Value>) -> Vec<String> {

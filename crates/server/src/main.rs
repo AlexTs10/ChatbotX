@@ -240,7 +240,16 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         now_ms,
     });
     chatbotx_api::session::bootstrap_platform_admin_at_startup(&shared.db).await;
-    let (shutdown, exited) = start_workers(&shared, &jobs, realtime.as_ref())?;
+    // The events worker (SQLite event bus): the error-log writer and the
+    // `message:failed` listeners.
+    let (buses, event_worker) = match chatbotx_worker::events::start(Arc::clone(&shared.db)).await {
+        Ok((buses, worker)) => (Some(buses), Some(worker)),
+        Err(err) => {
+            tracing::error!(err = %err, "events worker did not start");
+            (None, None)
+        }
+    };
+    let (shutdown, exited) = start_workers(&shared, &jobs, realtime.as_ref(), buses)?;
     let api = Arc::new(api_state(&shared, Arc::clone(&jobs), realtime.as_ref()));
     let mut app = chatbotx_api::router()
         .merge(chatbotx_api::spa::spa_router(Arc::clone(&sessions)))
@@ -292,6 +301,9 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(realtime, shutdown, exited))
         .await?;
+    if let Some(worker) = event_worker {
+        worker.stop().await;
+    }
     tracing::info!("shutdown complete");
     Ok(())
 }
@@ -347,6 +359,7 @@ fn start_workers(
     shared: &Shared,
     jobs: &Arc<chatbotx_jobs::JobStore>,
     realtime: Option<&Realtime>,
+    events: Option<chatbotx_jobs::events::EventBuses>,
 ) -> std::io::Result<(Arc<Shutdown>, Exited)> {
     let (exit_tx, exited) = tokio::sync::watch::channel(None);
     let timeout_ms = std::env::var("WORKER_SHUTDOWN_TIMEOUT_MS")
@@ -379,6 +392,10 @@ fn start_workers(
         .map(Arc::new),
         ai: Arc::new(chatbotx_worker::ai::Ai::live()),
         files: Some(Arc::clone(&shared.files)),
+        webhook_http: Arc::new(chatbotx_worker::webhook::LiveWebhookHttp::default()),
+        events,
+        push: chatbotx_worker::notification::ExpoPush::from_env()
+            .map(|p| Arc::new(p) as Arc<dyn chatbotx_worker::notification::PushSender>),
     };
     chatbotx_worker::start(&runtime, &deps).map_err(std::io::Error::other)?;
     let store = Arc::clone(jobs);
