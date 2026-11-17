@@ -253,8 +253,8 @@ async fn receive_comment(
             parent_id,
             text: str_of(c, "message").map(str::to_owned),
             r#type: Some("comment".into()),
-            // A replay is dated at the comment (it may be days old).
-            created_at: only.map(|_| created_time * 1000),
+            // A replay is dated at the comment (it may be days old); else now.
+            created_at: Some(only.map_or_else(now_ms, |_| created_time * 1000)),
             updated_at: None,
         },
     )
