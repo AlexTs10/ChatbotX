@@ -36,7 +36,7 @@ const NON_EMPTY: Str = Str {
 };
 
 /// `mediaLibraryFolderPublicResource`.
-fn folder_json(folder: &MediaLibraryFolder) -> Map<String, Value> {
+pub(crate) fn folder_json(folder: &MediaLibraryFolder) -> Map<String, Value> {
     let Value::Object(out) = json!({
         "id": id(folder.id),
         "createdAt": date(folder.created_at),
@@ -48,7 +48,7 @@ fn folder_json(folder: &MediaLibraryFolder) -> Map<String, Value> {
     out
 }
 
-fn folder_with_count(row: &FolderWithCount) -> Value {
+pub(crate) fn folder_with_count(row: &FolderWithCount) -> Value {
     let mut out = folder_json(&row.folder);
     out.insert("fileCount".into(), Value::from(row.file_count));
     Value::Object(out)

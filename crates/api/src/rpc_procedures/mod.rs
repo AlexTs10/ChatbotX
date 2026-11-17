@@ -13,6 +13,7 @@ mod conversations;
 mod flows;
 mod inboxes;
 mod lists;
+mod media_library;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -108,6 +109,9 @@ pub async fn procedure(
     if let Some(outcome) = inboxes::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = media_library::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = conversations::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -134,7 +138,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
             n if contacts::ACTIONS.contains(&n)
                 || flows::ACTIONS.contains(&n)
                 || conversations::ACTIONS.contains(&n)
-                || lists::ACTIONS.contains(&n) =>
+                || lists::ACTIONS.contains(&n)
+                || media_library::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -145,6 +150,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = conversations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = media_library::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = lists::action(ctx, name, &args).await {

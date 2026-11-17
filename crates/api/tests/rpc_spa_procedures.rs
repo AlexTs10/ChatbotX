@@ -572,3 +572,54 @@ async fn tag_actions_create_validate_and_delete() {
         "{json}"
     );
 }
+
+#[tokio::test]
+async fn media_library_folders_round_trip_through_the_actions() {
+    let (router, _) = router().await;
+    let act = |name: &'static str, input: Value| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": [ws(), input] }),
+            )
+            .await
+        }
+    };
+    let (status, folder, _) =
+        act("createMediaLibraryFolderAction", json!({ "name": "Logos" })).await;
+    assert_eq!(status, StatusCode::OK, "{folder}");
+    let id = folder["id"].as_str().unwrap().to_string();
+    let (status, _, _) = act(
+        "renameMediaLibraryFolderAction",
+        json!({ "folderId": id, "name": "Brand" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, json, _) = post(
+        &router,
+        "mediaLibraryAPI/listMediaLibraryFolders",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"][0]["name"], "Brand");
+    assert_eq!(json["data"][0]["fileCount"], 0);
+
+    let (status, json, _) = post(
+        &router,
+        "mediaLibraryAPI/listMediaLibraryFiles",
+        "admintoken",
+        json!({ "workspaceId": ws(), "folderId": id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"], json!([]));
+
+    // A bare id input (`zodBigintAsString()`).
+    let (status, _, _) = act("deleteMediaLibraryFolderAction", json!(id)).await;
+    assert_eq!(status, StatusCode::OK);
+}
