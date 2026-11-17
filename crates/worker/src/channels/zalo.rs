@@ -308,9 +308,21 @@ fn zalo_gender(gender: &Value) -> Option<&'static str> {
 
 impl Zalo {
     /// `tagFollower`.
-    pub async fn tag_follower(&self, token: &str, user_id: &str, tag_name: &str) -> Result<Value, ApiError> {
+    pub async fn tag_follower(
+        &self,
+        token: &str,
+        user_id: &str,
+        tag_name: &str,
+    ) -> Result<Value, ApiError> {
         let body = json!({ "user_id": user_id, "tag_name": tag_name });
-        api_post(&self.client, &self.base_url, token, TAG_FOLLOWER, Body::Json(body)).await?;
+        api_post(
+            &self.client,
+            &self.base_url,
+            token,
+            TAG_FOLLOWER,
+            Body::Json(body),
+        )
+        .await?;
         Ok(json!({ "success": true }))
     }
 
@@ -322,7 +334,14 @@ impl Zalo {
         tag_name: &str,
     ) -> Result<Value, ApiError> {
         let body = json!({ "user_id": user_id, "tag_name": tag_name });
-        api_post(&self.client, &self.base_url, token, RM_FOLLOWER_FROM_TAG, Body::Json(body)).await?;
+        api_post(
+            &self.client,
+            &self.base_url,
+            token,
+            RM_FOLLOWER_FROM_TAG,
+            Body::Json(body),
+        )
+        .await?;
         Ok(json!({ "success": true }))
     }
 
@@ -340,7 +359,14 @@ impl Zalo {
     /// `removeTag`.
     pub async fn remove_tag(&self, token: &str, tag_name: &str) -> Result<Value, ApiError> {
         let body = json!({ "tag_name": tag_name });
-        api_post(&self.client, &self.base_url, token, RM_TAG, Body::Json(body)).await?;
+        api_post(
+            &self.client,
+            &self.base_url,
+            token,
+            RM_TAG,
+            Body::Json(body),
+        )
+        .await?;
         Ok(json!({ "success": true }))
     }
 
@@ -351,9 +377,10 @@ impl Zalo {
         user_id: &str,
         timeout: Option<std::time::Duration>,
     ) -> Result<Value, ApiError> {
-        let query: String =
-            url::form_urlencoded::byte_serialize(json!({ "user_id": user_id }).to_string().as_bytes())
-                .collect();
+        let query: String = url::form_urlencoded::byte_serialize(
+            json!({ "user_id": user_id }).to_string().as_bytes(),
+        )
+        .collect();
         let endpoint = format!("{GET_USER_PROFILE}?data={query}");
         let data = api_get(&self.client, &self.base_url, token, &endpoint, timeout).await?;
         Ok(data["data"].clone())
@@ -379,13 +406,22 @@ impl Zalo {
         .google_referral;
         let mut profile = ZaloProfile {
             source_id: psid.to_owned(),
-            first_name: detail["display_name"].as_str().unwrap_or_default().to_owned(),
-            phone_number: detail["shared_info"]["phone"].as_str().unwrap_or_default().to_owned(),
+            first_name: detail["display_name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            phone_number: detail["shared_info"]["phone"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
             gender: zalo_gender(&detail["user_gender"]),
             referral,
             avatar: None,
         };
-        if let (true, Some(url)) = (include_avatar, detail["avatar"].as_str().filter(|u| !u.is_empty())) {
+        if let (true, Some(url)) = (
+            include_avatar,
+            detail["avatar"].as_str().filter(|u| !u.is_empty()),
+        ) {
             profile.avatar = self
                 .fetch_and_reupload_image(token, workspace_id, url)
                 .await
@@ -407,7 +443,8 @@ impl Zalo {
             return Ok(None);
         };
         // Stricter than the original's plain `fetch`: public URLs only.
-        chatbotx_business::net::ssrf_guard::assert_public_url(avatar_url, "Zalo avatar URL").await?;
+        chatbotx_business::net::ssrf_guard::assert_public_url(avatar_url, "Zalo avatar URL")
+            .await?;
         let response = self
             .media_client
             .get(avatar_url)
@@ -426,7 +463,9 @@ impl Zalo {
             .unwrap_or("image/png")
             .to_owned();
         let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-        store_avatar(media, workspace_id, bytes, &mime_type).await.map(Some)
+        store_avatar(media, workspace_id, bytes, &mime_type)
+            .await
+            .map(Some)
     }
 }
 

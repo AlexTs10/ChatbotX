@@ -649,8 +649,18 @@ async fn the_credential_scoped_route_checks_the_owner() {
     assert_eq!(credential_owner(&db, "23").await, None);
     assert_eq!(credential_owner(&db, "x").await, None);
     let removed = json!({ "event": "authorization.removed", "user_openid": "open-1" }).to_string();
-    let other = webhook(&db, &NoJobs, credential_owner(&db, "22").await, None, &removed).await;
-    assert_eq!((other.status, other.body.contains(NOT_CONFIGURED)), (404, true));
+    let other = webhook(
+        &db,
+        &NoJobs,
+        credential_owner(&db, "22").await,
+        None,
+        &removed,
+    )
+    .await;
+    assert_eq!(
+        (other.status, other.body.contains(NOT_CONFIGURED)),
+        (404, true)
+    );
     let own = webhook(&db, &NoJobs, Some(1), None, &removed).await;
     assert_eq!(own.status, 200);
     let _ = std::fs::remove_dir_all(dir);

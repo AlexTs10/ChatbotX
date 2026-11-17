@@ -5,11 +5,12 @@
 //! The bound `credentialScopeSchema` arg is the input field `scope`
 //! (`"user"` | `"platform"`). Server-side messages are the English
 //! `messages/en.json` text. Not ported here: `updateStripeSettings` /
-//! `deleteStripeSettings` (Stripe Connect webhook, P3.6-D1o) and
-//! `updateTiktokSetting` (TikTok webhook subscription, Q.I2); the WhatsApp
+//! `deleteStripeSettings` (Stripe Connect webhook, P3.6-D1o); the WhatsApp
 //! app-level `calls` webhook subscription after a save is Q.I1.
 
 use chatbotx_business::BusinessError;
+use chatbotx_business::connection::credentials::HttpUpstream;
+use chatbotx_business::connection::oauth_channels::{self, TiktokSettings};
 use chatbotx_business::platform_credential::{self as pc, DecryptOptions, UpsertCredential};
 use chatbotx_core::encryption::Encryption;
 use serde_json::{Map, Value, json};
@@ -17,7 +18,7 @@ use serde_json::{Map, Value, json};
 use super::RpcContext;
 use super::actions::{ActionContext, ActionError, ActionResult, Gate};
 use super::workspace::RpcOut;
-use crate::handlers::input::{Input, Str, key};
+use crate::handlers::input::{Input, Str, child, key};
 use crate::handlers::{ApiState, LISTING, business_error};
 use crate::orpc::OrpcError;
 
@@ -58,6 +59,7 @@ pub fn action_gate(name: &str) -> Option<Gate> {
                 | "updateGiphySettings"
                 | "updateMakeSettings"
                 | "cloneFromMessenger"
+                | "updateTiktokSetting"
         );
     known.then_some(Gate::Auth)
 }
@@ -241,6 +243,27 @@ async fn is_valid_giphy_api_key(api_key: &str) -> bool {
         Err(err) => {
             tracing::error!(err = %err, "Invalid GIPHY API key");
             false
+        }
+    }
+}
+
+/// `tiktokCredentialUpdateSchema.features`: both default on; not both off.
+fn tiktok_features(input: &mut Input) -> (bool, bool) {
+    let path = key("features");
+    match input.get("features").cloned() {
+        None => (true, true),
+        Some(Value::Object(features)) => {
+            let messaging =
+                input.bool_at(&child(&path, "messaging"), features.get("messaging"), true);
+            let comments = input.bool_at(&child(&path, "comments"), features.get("comments"), true);
+            if messaging == Some(false) && comments == Some(false) {
+                input.issue(&child(&path, "messaging"), "custom", "Invalid input");
+            }
+            (messaging.unwrap_or(true), comments.unwrap_or(true))
+        }
+        Some(_) => {
+            input.issue(&path, "invalid_type", "Invalid input: expected object");
+            (true, true)
         }
     }
 }
@@ -504,6 +527,35 @@ pub async fn run_action(
                 ));
             };
             save(api, user, "instagramFacebook", messenger.config).await?;
+            Ok(None)
+        }
+        "updateTiktokSetting" => {
+            let config = fields(&mut input, &[("clientId", true), ("clientSecret", true)]);
+            let features = tiktok_features(&mut input);
+            input.finish()?;
+            let user = resolve_scope(api, context, &scope.unwrap_or_default(), false).await?;
+            let broker = std::env::var("NEXT_PUBLIC_BROKER_URL")
+                .ok()
+                .filter(|u| !u.is_empty())
+                .unwrap_or_else(|| api.app_url.clone());
+            let broker_origin = url::Url::parse(&broker)
+                .map(|u| u.origin().ascii_serialization())
+                .map_err(|e| ActionError::Internal(format!("broker URL: {e}")))?;
+            let text_of = |name: &str| text(&config, name).unwrap_or_default().to_string();
+            oauth_channels::update_tiktok_settings(
+                &api.db,
+                encryption(api)?,
+                &HttpUpstream,
+                TiktokSettings {
+                    user_id: user,
+                    cloud: api.edition.is_cloud(),
+                    broker_origin,
+                    client_id: text_of("clientId"),
+                    client_secret: text_of("clientSecret"),
+                    features,
+                },
+            )
+            .await?;
             Ok(None)
         }
         _ => Err(ActionError::Internal(format!("unknown action {name}"))),

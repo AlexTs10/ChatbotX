@@ -436,6 +436,9 @@ pub fn resolve_platform_app_access_token(
 /// `upsertForUser` / `upsertPlatform` input.
 #[derive(Debug, Clone)]
 pub struct UpsertCredential {
+    /// The id of a new user-scoped row (`None` = a generated one); an
+    /// existing row keeps its id.
+    pub id: Option<i64>,
     pub user_id: Option<i64>,
     pub credential_type: String,
     pub config: Value,
@@ -447,6 +450,7 @@ pub struct UpsertCredential {
 impl UpsertCredential {
     pub fn new(user_id: Option<i64>, credential_type: &str, config: Value) -> UpsertCredential {
         UpsertCredential {
+            id: None,
             user_id,
             credential_type: credential_type.to_string(),
             config,
@@ -482,7 +486,7 @@ pub fn upsert(conn: &Connection, encryption: &Encryption, input: UpsertCredentia
                  "updatedAt" = excluded."updatedAt"
                RETURNING "id""#,
             params![
-                new_id(),
+                input.id.unwrap_or_else(new_id),
                 user_id,
                 input.credential_type,
                 public,

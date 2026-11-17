@@ -262,7 +262,10 @@ async fn zalo_exchange(
                     "content-type".into(),
                     "application/x-www-form-urlencoded".into(),
                 ),
-                ("secret_key".into(), text(config, "clientSecret").to_string()),
+                (
+                    "secret_key".into(),
+                    text(config, "clientSecret").to_string(),
+                ),
             ],
             body: Some(form),
         },
@@ -336,7 +339,8 @@ pub fn persist(
     actor_user_id: Option<i64>,
     now: i64,
 ) -> Result<ConnectionRow> {
-    let (table, column) = satellite(provider).ok_or_else(|| super::oauth::not_configured(provider))?;
+    let (table, column) =
+        satellite(provider).ok_or_else(|| super::oauth::not_configured(provider))?;
     let (source_id, name) = describe(provider, auth)?;
     let (existing, inbox_id) =
         super::oauth::new_channel_inbox(conn, workspace_id, provider, &source_id, &name, now)?;
@@ -347,7 +351,14 @@ pub fn persist(
                        "tokenRefreshError" = NULL, "updatedAt" = ?6
                    WHERE "workspaceId" = ?1 AND "{column}" = ?2"#
             ),
-            params![workspace_id, source_id, auth.to_string(), name, inbox_id, now],
+            params![
+                workspace_id,
+                source_id,
+                auth.to_string(),
+                name,
+                inbox_id,
+                now
+            ],
         )
         .map_err(repo_err)?;
     if moved == 0 {
@@ -372,6 +383,155 @@ pub fn persist(
         actor_user_id,
         now,
     )
+}
+
+/// `subscribeWebhook`: `POST business/webhook/update/` for one `event_type`.
+async fn tiktok_subscribe(
+    upstream: &impl Upstream,
+    client_id: &str,
+    client_secret: &str,
+    callback_url: &str,
+    event_type: &str,
+) -> Result<()> {
+    let body = json!({
+        "app_id": client_id,
+        "secret": client_secret,
+        "event_type": event_type,
+        "callback_url": callback_url,
+    });
+    let answer = call(
+        upstream,
+        UpstreamRequest {
+            method: "POST",
+            url: format!("{TIKTOK_API}business/webhook/update/"),
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: Some(body.to_string()),
+        },
+    )
+    .await
+    .and_then(|answer| tiktok_ok(answer, "Webhook subscription failed"));
+    match answer {
+        Ok(_) => Ok(()),
+        Err(ProviderFailure::Rejected(message)) => {
+            Err(BusinessError::exception(message, "tiktokError", 400))
+        }
+        Err(ProviderFailure::Unavailable(status)) => Err(BusinessError::exception(
+            "Webhook subscription failed",
+            "tiktokError",
+            status,
+        )),
+    }
+}
+
+/// `subscribeTiktokWebhooks`: `DIRECT_MESSAGE` is fatal; `COMMENT` is best
+/// effort while messaging is on and fatal when it is off. Returns the
+/// `(messaging, comments)` subscriptions in place.
+pub async fn subscribe_tiktok_webhooks(
+    upstream: &impl Upstream,
+    client_id: &str,
+    client_secret: &str,
+    callback_url: &str,
+    (messaging, comments): (bool, bool),
+) -> Result<(bool, bool)> {
+    let sub = |event| tiktok_subscribe(upstream, client_id, client_secret, callback_url, event);
+    if !messaging {
+        sub("COMMENT").await?;
+        return Ok((false, true));
+    }
+    sub("DIRECT_MESSAGE").await?;
+    if !comments {
+        return Ok((true, false));
+    }
+    match sub("COMMENT").await {
+        Ok(()) => Ok((true, true)),
+        Err(err) => {
+            tracing::error!(err = %err, "TikTok comment webhook subscription failed; comments will not arrive");
+            Ok((true, false))
+        }
+    }
+}
+
+/// `buildCredentialWebhookUrl` for TikTok.
+pub fn tiktok_webhook_url(origin: &str, credential_id: Option<i64>) -> String {
+    let origin = origin.strip_suffix('/').unwrap_or(origin);
+    match credential_id {
+        Some(id) => format!("{origin}/integrations/tiktok/webhook/c/{id}"),
+        None => format!("{origin}/integrations/tiktok/webhook"),
+    }
+}
+
+/// The input of [`update_tiktok_settings`].
+pub struct TiktokSettings {
+    /// The credential scope (`None` = platform).
+    pub user_id: Option<i64>,
+    pub cloud: bool,
+    /// `getBrokerOrigin()`.
+    pub broker_origin: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub features: (bool, bool),
+}
+
+/// `updateTiktokSettingAction`: the webhook on the owner's active custom
+/// domain (else the broker; a user without an active tenant gets the
+/// credential-scoped route with its existing or a new id), subscribed before
+/// the credential is saved. Returns the subscribed `(messaging, comments)`.
+pub async fn update_tiktok_settings(
+    db: &chatbotx_db::Db,
+    encryption: &chatbotx_core::encryption::Encryption,
+    upstream: &impl Upstream,
+    input: TiktokSettings,
+) -> Result<(bool, bool)> {
+    let (mut domain_origin, mut has_active_tenant) = (None, false);
+    if let (Some(owner), true) = (input.user_id, input.cloud)
+        && let Some(tenant) = crate::tenant::find_by_owner(db, owner).await?
+        && tenant.status == "active"
+    {
+        has_active_tenant = true;
+        domain_origin = crate::tenant::find_active_domain_by_tenant(db, tenant.id)
+            .await?
+            .map(|d| format!("https://{}", d.domain));
+    }
+    let credential_id = match input.user_id {
+        Some(owner) if !has_active_tenant => Some(
+            crate::tx::read(db, move |c| {
+                Ok(crate::platform_credential::find_for_user(
+                    c, owner, "tiktok",
+                )?)
+            })
+            .await?
+            .map_or_else(new_id, |c| c.id),
+        ),
+        _ => None,
+    };
+    let origin = domain_origin.as_deref().unwrap_or(&input.broker_origin);
+    let subscribed = subscribe_tiktok_webhooks(
+        upstream,
+        &input.client_id,
+        &input.client_secret,
+        &tiktok_webhook_url(origin, credential_id),
+        input.features,
+    )
+    .await?;
+    if subscribed == (true, false) && input.features.1 {
+        tracing::warn!(user_id = ?input.user_id, "TikTok comment webhook is not subscribed; only direct messages will arrive");
+    }
+    let (messaging, comments) = input.features;
+    let config = json!({
+        "clientId": input.client_id,
+        "clientSecret": input.client_secret,
+        "features": { "messaging": messaging, "comments": comments },
+    });
+    let encryption = encryption.clone();
+    let user_id = input.user_id;
+    crate::tx::write(db, move |c| {
+        let mut upsert =
+            crate::platform_credential::UpsertCredential::new(user_id, "tiktok", config);
+        upsert.id = credential_id;
+        crate::platform_credential::upsert(c, &encryption, upsert)
+    })
+    .await?;
+    Ok(subscribed)
 }
 
 #[cfg(test)]
@@ -415,11 +575,23 @@ mod tests {
     #[test]
     fn authorize_urls_carry_the_state() {
         let config = json!({ "clientId": "ck" });
-        let tiktok = authorize_url("tiktok", &config, "https://app.test/integrations/tiktok/callback", "5.n0");
-        assert!(tiktok.starts_with("https://www.tiktok.com/v2/auth/authorize/?client_key=ck&response_type=code&scope="));
+        let tiktok = authorize_url(
+            "tiktok",
+            &config,
+            "https://app.test/integrations/tiktok/callback",
+            "5.n0",
+        );
+        assert!(tiktok.starts_with(
+            "https://www.tiktok.com/v2/auth/authorize/?client_key=ck&response_type=code&scope="
+        ));
         assert!(tiktok.ends_with("&redirect_uri=https%3A%2F%2Fapp.test%2Fintegrations%2Ftiktok%2Fcallback&disable_auto_auth=1&state=5.n0"));
         assert_eq!(
-            authorize_url("zalo", &config, "https://app.test/integrations/zalo/callback", "5.n0"),
+            authorize_url(
+                "zalo",
+                &config,
+                "https://app.test/integrations/zalo/callback",
+                "5.n0"
+            ),
             "https://oauth.zaloapp.com/v4/oa/permission?app_id=ck&redirect_uri=https%3A%2F%2Fapp.test%2Fintegrations%2Fzalo%2Fcallback&state=5.n0"
         );
     }
@@ -441,9 +613,15 @@ mod tests {
     #[test]
     fn describe_falls_back_to_the_provider_name() {
         let tiktok = json!({ "metadata": { "openId": "o1", "displayName": "", "username": "u1" } });
-        assert_eq!(describe("tiktok", &tiktok).unwrap(), ("o1".into(), "u1".into()));
+        assert_eq!(
+            describe("tiktok", &tiktok).unwrap(),
+            ("o1".into(), "u1".into())
+        );
         let zalo = json!({ "oaId": "9", "metadata": {} });
-        assert_eq!(describe("zalo", &zalo).unwrap(), ("9".into(), "Zalo".into()));
+        assert_eq!(
+            describe("zalo", &zalo).unwrap(),
+            ("9".into(), "Zalo".into())
+        );
         assert!(describe("zalo", &json!({})).is_err());
     }
 }

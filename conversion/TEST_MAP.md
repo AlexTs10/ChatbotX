@@ -833,7 +833,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/threads-tiktok-comment-read-adapters.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/threads-tiktok-comments-public-api.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/threads-webhook-url.test.ts` | B | - | todo | Threads channel; builder jsdom |
-| `apps/builder/__tests__/tiktok-settings-actions.test.ts` | C | tbd | todo | TikTok channel; builder server code |
+| `apps/builder/__tests__/tiktok-settings-actions.test.ts` | C | `crates/business/tests/connection_oauth_channels.rs`, `crates/api/tests/rpc_platform_credentials.rs` | passing | TikTok channel; builder server code |
 | `apps/builder/__tests__/timezone-sync.test.tsx` | B | - | todo | Builder app shell and shared components; builder jsdom |
 | `apps/builder/__tests__/token-introspection-public-api.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/token-scope.test.ts` | B | - | todo | Workspace API tokens and public API; builder node-env, client logic |
@@ -1018,7 +1018,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/workspace-token-scope-registry.test.ts` | B | - | todo | Workspace API tokens and public API; builder jsdom |
 | `apps/builder/__tests__/workspace-update-actions-scheduled-deletion-guard.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/workspaces-list.community-zero.test.tsx` | B | - | todo | Workspaces; builder jsdom |
-| `apps/builder/__tests__/zalo-settings-actions.test.ts` | C | tbd | todo | Zalo channel; builder server code |
+| `apps/builder/__tests__/zalo-settings-actions.test.ts` | C | `crates/api/tests/rpc_platform_credentials.rs` | passing | Zalo channel; builder server code |
 | `apps/builder/src/components/__tests__/nav-user.test.tsx` | B | - | todo | Builder app shell and shared components; builder jsdom |
 | `apps/builder/src/components/tiptap/extensions/variable-injection/__tests__/suggestion.test.ts` | B | - | todo | Variables (contact/bot/system variable interpolation); builder jsdom |
 | `apps/builder/src/features/ads/lib/__tests__/build-whatsapp-retarget-href.test.ts` | B | - | todo | Ads analytics and CTWA tracking; builder jsdom |
@@ -1814,7 +1814,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/tiktok/__tests__/callback.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/comment-api.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/comment-webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
-| `integrations/tiktok/__tests__/connection-oauth.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/connection-oauth.test.ts` | C | `crates/business/tests/connection_oauth_channels.rs` (exchange, missing scopes; rest todo) | todo | TikTok channel |
 | `integrations/tiktok/__tests__/direct-reply-api.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/high-intent-comment-webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/incoming-message.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
@@ -1824,7 +1824,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/tiktok/__tests__/quick-replies-attachment.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/scopes.test.ts` | C | tbd | todo | TikTok channel |
 | `integrations/tiktok/__tests__/send-multiple-images.test.ts` | C | tbd | todo | TikTok channel |
-| `integrations/tiktok/__tests__/subscribe-webhooks.test.ts` | C | tbd | todo | TikTok channel |
+| `integrations/tiktok/__tests__/subscribe-webhooks.test.ts` | C | `crates/business/tests/connection_oauth_channels.rs` | passing | TikTok channel |
 | `integrations/tiktok/__tests__/webhook.test.ts` | C | `crates/worker/src/channels/tiktok_tests.rs` | passing | TikTok channel |
 | `integrations/webchat/__tests__/integration.test.ts` | C | tbd | todo | Webchat channel |
 | `integrations/webchat/__tests__/realtime-sender.test.ts` | C | tbd | todo | Webchat channel |
@@ -1898,19 +1898,19 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/woocommerce/__tests__/client.test.ts` | C | tbd | todo | WooCommerce integration |
 | `integrations/woocommerce/__tests__/lib.test.ts` | C | tbd | todo | WooCommerce integration |
 | `integrations/zalo/__tests__/call-phone-number-button.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
-| `integrations/zalo/__tests__/connection-oauth.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/connection-oauth.test.ts` | C | `crates/business/tests/connection_oauth_channels.rs` (exchange; rest todo) | todo | Zalo channel |
 | `integrations/zalo/__tests__/error-mapper.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/follow-event.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
-| `integrations/zalo/__tests__/get-user-profile.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/get-user-profile.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/google-click-partner-samples.test.ts` | C | tbd | todo | Zalo channel |
 | `integrations/zalo/__tests__/incoming-gif-message.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
-| `integrations/zalo/__tests__/incoming-image-compression.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/incoming-image-compression.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/outgoing-message-ids.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/outgoing-text-with-images.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/quick-replies-attachment.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/refresh-access-token.test.ts` | C | tbd | todo | Zalo channel |
 | `integrations/zalo/__tests__/send-multiple-images.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
-| `integrations/zalo/__tests__/tag.test.ts` | C | tbd | todo | Zalo channel |
+| `integrations/zalo/__tests__/tag.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/webhook-routing.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `packages/ai/__tests__/ai-context-service.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/ai/__tests__/call-summarizer.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |

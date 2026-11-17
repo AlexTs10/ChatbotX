@@ -20,9 +20,9 @@ use chatbotx_db::rusqlite::{Connection, OptionalExtension as _, params};
 use serde_json::{Value, json};
 
 use super::credentials::{Upstream, UpstreamRequest};
+use super::oauth_channels;
 use super::{COLUMNS, ConnectionRow, find_or_fail, providers, repo_err, row};
 use crate::connect_session::{self, NewSession, SessionRow};
-use super::oauth_channels;
 use crate::{BusinessError, Result, tx};
 
 const GRAPH: &str = "https://graph.facebook.com";
@@ -95,9 +95,21 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
             multi_account: true,
         }),
         "tiktok" | "zalo" => Some(Adapter {
-            provider: if provider == "tiktok" { "tiktok" } else { "zalo" },
-            credential_type: if provider == "tiktok" { "tiktok" } else { "zalo" },
-            slug: if provider == "tiktok" { "tiktok" } else { "zalo" },
+            provider: if provider == "tiktok" {
+                "tiktok"
+            } else {
+                "zalo"
+            },
+            credential_type: if provider == "tiktok" {
+                "tiktok"
+            } else {
+                "zalo"
+            },
+            slug: if provider == "tiktok" {
+                "tiktok"
+            } else {
+                "zalo"
+            },
             multi_account: false,
         }),
         _ => None,

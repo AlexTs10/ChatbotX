@@ -49,8 +49,8 @@ Not ported (ponytail): guest file uploads (JSON route), `enqueueHandoffReentry`,
   `crates/business/src/channel_integration.rs`.
 
 Not ported: comment writes (Q.D10), the comment / high-intent / audience job
-handlers (other units), TikTok / Zalo OAuth connect + callback, the
-credential-scoped route, quota release on revoke.
+handlers (other units). OAuth connect, the credential-scoped route and the
+revoke quota release are slice 5.
 
 ## Slice 3: Zalo + zalo-verifier
 
@@ -79,6 +79,31 @@ credential-scoped route, quota release on revoke.
   then the `channel-api-rate-limit` (429 with `Retry-After`).
 - Inbound attachment `fileType` is `fileTypes` (`image`, `audio`, `video`,
   `file`; no `gif`).
+
+## Slice 5: OAuth connect, scoped webhook, settings, Zalo tags / profile
+
+- Inbound pipeline: contact, conversation and message save in ONE write
+  transaction (`inbound::receive_message`); `messageCreated` after commit.
+- TikTok / Zalo OAuth connect over the connect-session engine
+  (`crates/business/src/connection/oauth_channels.rs` + `oauth.rs`):
+  authorize URL, code exchange, profile, persist (Inbox, satellite,
+  Connection). The callback auto-connects the one target when the session
+  has no actor.
+- TikTok `authorization.removed` releases one `channels` unit and
+  `WorkspaceUsage.channelsUsed` (`connection::mark_unhealthy_by_identifier`).
+- `/integrations/tiktok/webhook/c/{credentialId}` (cloud only): the
+  credential owner must own the workspace, else 404.
+- `updateTiktokSetting` (`oauth_channels::update_tiktok_settings`): webhook
+  on the active tenant's custom domain, else the broker; a user without an
+  active tenant gets `/c/{id}` (existing id, else a new one); subscribe
+  (`DIRECT_MESSAGE` fatal, `COMMENT` best effort, fatal with messaging off)
+  BEFORE the save.
+- Zalo tags (`tag_follower`, `remove_follower_from_tag`, `list_oa_tags`,
+  `remove_tag`), `get_user_profile` (`v3.0/oa/user/detail`, avatar
+  re-upload), incoming image compression (Media profile for photos).
+
+Not ported (as asked): the comment / high-intent comment / label / follow
+workers.
 
 ## Parity
 
