@@ -187,9 +187,17 @@ pub async fn graph_get(
     path: &str,
     query: &[(&str, &str)],
 ) -> std::result::Result<Value, GraphFailure> {
+    graph_call("GET", path, query).await
+}
+
+async fn graph_call(
+    method: &'static str,
+    path: &str,
+    query: &[(&str, &str)],
+) -> std::result::Result<Value, GraphFailure> {
     let reply = HttpUpstream
         .send(UpstreamRequest {
-            method: "GET",
+            method,
             url: graph_url(path, query),
             headers: Vec::new(),
             body: None,
@@ -550,4 +558,75 @@ mod tests {
             cached(key, LIST_TTL, || async { Ok(json!(2)) }).await;
         assert_eq!(third, Ok(json!(1)));
     }
+}
+
+/// `invalidateMessagingAdsCache`: drops the cached Graph reads of one
+/// integration.
+fn invalidate(workspace_id: i64, channel: &str, integration_id: i64) {
+    let suffix = format!(":{workspace_id}:{channel}:{integration_id}");
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.retain(|key, _| !(key.starts_with("msgads:") && key.ends_with(&suffix)));
+    }
+}
+
+/// `checkCampaignPrerequisites`.
+pub async fn prerequisites(db: &Db, reference: IntegrationRef) -> Result<Value> {
+    let row = tx::read(db, move |conn| {
+        Ok(connections::find_for_integration(conn, reference)?)
+    })
+    .await?;
+    let connected = row.as_ref().is_some_and(|r| r.status == "active");
+    Ok(json!({ "connected": connected, "reconnectNeeded": row.is_some() && !connected }))
+}
+
+/// `listForChannel` (active only) as `{ data }`.
+pub async fn list_connections(db: &Db, workspace_id: i64, channel: String) -> Result<Value> {
+    let rows = tx::read(db, move |conn| {
+        Ok(connections::list_for_channel(conn, workspace_id, &channel)?)
+    })
+    .await?;
+    let data: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.id.to_string(),
+                "channel": r.channel,
+                "integrationId": integration_of(r).map(|id| id.to_string()).unwrap_or_default(),
+                "status": r.status,
+                "createdAt": chatbotx_db::repo::iso(r.created_at),
+                "updatedAt": chatbotx_db::repo::iso(r.updated_at),
+            })
+        })
+        .collect();
+    Ok(json!({ "data": data }))
+}
+
+/// `revokeAndDisconnect`: a best-effort `DELETE me/permissions` (skipped when
+/// the auth does not decrypt), then the row is always removed.
+pub async fn disconnect(
+    db: &Db,
+    workspace_id: i64,
+    channel: &str,
+    integration_id: i64,
+) -> Result<()> {
+    let reference = integration_ref(workspace_id, channel, integration_id);
+    let row = tx::read(db, move |conn| {
+        Ok(connections::find_for_integration(conn, reference)?)
+    })
+    .await?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+    if let Some(auth) = decrypt(&row.auth.0) {
+        let path = format!("{}/me/permissions", auth.version);
+        if let Err(failure) =
+            graph_call("DELETE", &path, &[("access_token", &auth.access_token)]).await
+        {
+            tracing::warn!(message = %failure.message, "messaging-ads token revoke failed");
+        }
+    }
+    let id = row.id;
+    tx::write(db, move |tx| Ok(connections::remove(tx, id, workspace_id)?)).await?;
+    invalidate(workspace_id, channel, integration_id);
+    Ok(())
 }

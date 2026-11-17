@@ -31,6 +31,9 @@ pub const ROUTES: &[&str] = &[
     "ads.getAnalyticsTimeseries",
     "ads.listChannelAdAccounts",
     "ads.listCustomAudiences",
+    "ads.checkCampaignPrerequisites",
+    "ads.listConnections",
+    "ads.disconnectConnection",
 ];
 
 fn ad_account_id(text: &str) -> bool {
@@ -173,6 +176,18 @@ fn range_input(input: &mut Input, ws: i64) -> DateRangeInput {
 const REPORTING: super::ErrorMap = &[("businessError", 400), ("reportTimeout", 503)];
 /// `adsEligibleChannelTypes`.
 const ELIGIBLE_CHANNELS: &[&str] = &["whatsapp", "messenger", "instagram"];
+/// `messagingAdChannelSchema`.
+const MESSAGING_CHANNELS: &[&str] = &["messenger", "instagram", "whatsapp"];
+
+/// `messagingAdsIntegrationIdentityPublicShape`.
+fn integration_identity(input: &mut Input) -> (String, i64) {
+    let channel = enum_field(input, "channel", MESSAGING_CHANNELS, true);
+    let integration_id = input.id("integrationId");
+    (
+        channel.unwrap_or_default(),
+        integration_id.unwrap_or_default(),
+    )
+}
 
 /// `YYYY-MM-DD`.
 fn date_key(text: &str) -> bool {
@@ -490,10 +505,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "ads.listChannelAdAccounts" => {
             let mut input = Input::from_query(call.params, call.query);
-            let channel = enum_field(&mut input, "channel", ELIGIBLE_CHANNELS, true);
-            let integration_id = opt_id(&mut input, "integrationId");
+            let (channel, integration_id) = integration_identity(&mut input);
             input.finish()?;
-            graph::channel_ad_accounts(db, ws, &channel.unwrap_or_default(), integration_id)
+            graph::channel_ad_accounts(db, ws, &channel, Some(integration_id))
                 .await
                 .map(|accounts| {
                     let data: Vec<Value> = accounts.into_iter().map(|a| a.account).collect();
@@ -509,6 +523,33 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .await
                 .map(|data| json(200, json!({ "data": data })))
                 .map_err(|e| business_error(e, FINDING))
+        }
+        "ads.checkCampaignPrerequisites" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let (channel, integration_id) = integration_identity(&mut input);
+            input.finish()?;
+            graph::prerequisites(db, graph::integration_ref(ws, &channel, integration_id))
+                .await
+                .map(|body| json(200, body))
+                .map_err(|e| business_error(e, FINDING))
+        }
+        "ads.listConnections" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let channel = enum_field(&mut input, "channel", MESSAGING_CHANNELS, true);
+            input.finish()?;
+            graph::list_connections(db, ws, channel.unwrap_or_default())
+                .await
+                .map(|body| json(200, body))
+                .map_err(|e| business_error(e, LISTING))
+        }
+        "ads.disconnectConnection" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let (channel, integration_id) = integration_identity(&mut input);
+            input.finish()?;
+            graph::disconnect(db, ws, &channel, integration_id)
+                .await
+                .map(|()| no_content())
+                .map_err(|e| business_error(e, MUTATING))
         }
         _ => Err(crate::routes::not_ported_error()),
     }
