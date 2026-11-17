@@ -76,7 +76,7 @@ async fn get(app: &Router, code: &str) -> Response {
         .unwrap()
 }
 
-fn header_of<'a>(response: &'a Response, name: header::HeaderName) -> Option<&'a str> {
+fn header_of(response: &Response, name: header::HeaderName) -> Option<&str> {
     response.headers().get(name).and_then(|v| v.to_str().ok())
 }
 
