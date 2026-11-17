@@ -57,6 +57,7 @@ pub mod license;
 pub mod media_library;
 pub mod message;
 pub mod message_actions;
+pub mod messenger_menu;
 pub mod meta_catalog;
 pub mod minigame;
 pub mod net;

@@ -595,7 +595,10 @@ pub enum Kind {
     Never,
     Any,
     Unknown,
-    Date,
+    /// `coerce` = `z.coerce.date()` (`new Date(input)`).
+    Date {
+        coerce: bool,
+    },
     Literal(Vec<Value>),
     Enum(Vec<String>),
     Array(Schema),
@@ -780,7 +783,7 @@ pub fn unknown() -> Schema {
     node(Kind::Unknown)
 }
 pub fn date() -> Schema {
-    node(Kind::Date)
+    node(Kind::Date { coerce: false })
 }
 pub fn literal(value: Value) -> Schema {
     node(Kind::Literal(vec![value]))
@@ -894,9 +897,10 @@ impl Schema {
 
     pub fn coerce(self) -> Self {
         self.edit(|n| match &mut n.kind {
-            Kind::String { coerce } | Kind::Boolean { coerce } | Kind::Number { coerce, .. } => {
-                *coerce = true
-            }
+            Kind::String { coerce }
+            | Kind::Boolean { coerce }
+            | Kind::Number { coerce, .. }
+            | Kind::Date { coerce } => *coerce = true,
             _ => {}
         })
     }
@@ -1212,7 +1216,7 @@ impl Schema {
             Kind::Never => "never",
             Kind::Any => "any",
             Kind::Unknown => "unknown",
-            Kind::Date => "date",
+            Kind::Date { .. } => "date",
             Kind::Literal(_) => "literal",
             Kind::Enum(_) => "enum",
             Kind::Array(_) => "array",
@@ -1546,9 +1550,21 @@ impl Schema {
                     .push(RawIssue::invalid_type("never", p.value.as_ref()));
             }
             Kind::Any | Kind::Unknown => {}
-            Kind::Date => {
-                p.issues
-                    .push(RawIssue::invalid_type("date", p.value.as_ref()));
+            Kind::Date { coerce } => {
+                // JSON has no Date: only `z.coerce.date()` accepts a value,
+                // when `new Date(input)` is valid. The input is kept (callers
+                // read the string / epoch number).
+                let valid = *coerce
+                    && match &p.value {
+                        Some(Value::String(s)) => js::parse_date(s).is_some(),
+                        Some(Value::Number(n)) => n.as_f64().is_some_and(f64::is_finite),
+                        Some(Value::Null | Value::Bool(_)) => true,
+                        _ => false,
+                    };
+                if !valid {
+                    p.issues
+                        .push(RawIssue::invalid_type("date", p.value.as_ref()));
+                }
             }
             Kind::Literal(values) => {
                 let ok = p
@@ -2662,7 +2678,7 @@ impl JsonSchemaCtx {
             Kind::Undefined | Kind::Any | Kind::Unknown | Kind::Custom(_) => json!({}),
             Kind::Transform(_) | Kind::TransformOpt(_) => json!({}),
             Kind::Never => json!({ "not": {} }),
-            Kind::Date => json!({ "type": "string", "format": "date-time" }),
+            Kind::Date { .. } => json!({ "type": "string", "format": "date-time" }),
             Kind::Literal(values) => {
                 let type_of = |v: &Value| match v {
                     Value::String(_) => Some("string"),
@@ -2790,4 +2806,18 @@ fn insert_max(map: &mut Map<String, Value>, key: &str, n: usize, keep_larger: bo
         None => n,
     };
     map.insert(key.into(), json!(next));
+}
+
+#[cfg(test)]
+mod date_tests {
+    use super::*;
+
+    #[test]
+    fn only_coerced_dates_accept_a_valid_input() {
+        let coerced = date().coerce();
+        assert!(coerced.parse(&json!("2026-11-17T08:00:00.000Z")).is_ok());
+        assert!(coerced.parse(&json!(1_780_963_200_000_i64)).is_ok());
+        assert!(coerced.parse(&json!("not a date")).is_err());
+        assert!(date().parse(&json!("2026-11-17T08:00:00.000Z")).is_err());
+    }
 }

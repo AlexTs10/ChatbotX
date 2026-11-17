@@ -11,6 +11,7 @@ pub mod analytics;
 pub mod bot_fields;
 pub mod capabilities;
 pub mod channel_integrations;
+pub mod channel_settings;
 pub mod channels;
 pub mod comment_automations;
 pub mod connect_sessions;
@@ -38,6 +39,8 @@ pub mod integrations_ai;
 pub mod keywords;
 pub mod media_library;
 pub mod messages;
+pub mod messenger_menus;
+pub mod messenger_templates;
 pub mod meta_catalog;
 pub mod minigames;
 pub mod open_hours;
@@ -639,6 +642,10 @@ async fn route(
         inbox_teams::handle(state, route_id, call).await
     } else if capabilities::ROUTES.contains(&route_id) {
         capabilities::handle(state, route_id, call).await
+    } else if messenger_menus::ROUTES.contains(&route_id) {
+        messenger_menus::handle(state, route_id, call).await
+    } else if messenger_templates::ROUTES.contains(&route_id) {
+        messenger_templates::handle(state, route_id, call).await
     } else {
         return None;
     };

@@ -457,6 +457,38 @@ pub trait Channel: Send + Sync {
         let _ = (contact, message_source_id);
         missing(ctx, "conversation", "agentMarkAsRead")
     }
+
+    /// `contact.getUserCustomSettings`: `{ userLevel, pageLevel }`, each the
+    /// default-locale persistent menu (absent = none).
+    fn get_user_custom_settings(
+        &self,
+        ctx: &ChannelCtx,
+        psid: String,
+    ) -> BoxFuture<'static, ChannelResult<Value>> {
+        let _ = psid;
+        missing(ctx, "contact", "getUserCustomSettings")
+    }
+
+    /// `contact.setUserPersistentMenu`.
+    fn set_user_persistent_menu(
+        &self,
+        ctx: &ChannelCtx,
+        psid: String,
+        persistent_menu: Value,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let _ = (psid, persistent_menu);
+        missing(ctx, "contact", "setUserPersistentMenu")
+    }
+
+    /// `contact.deleteUserPersistentMenu`.
+    fn delete_user_persistent_menu(
+        &self,
+        ctx: &ChannelCtx,
+        psid: String,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let _ = psid;
+        missing(ctx, "contact", "deleteUserPersistentMenu")
+    }
 }
 
 /// The registered channels (`allIntegrations` / `getRegisteredIntegration`).
@@ -470,7 +502,7 @@ impl Channels {
         Channels::default()
     }
 
-    /// The channels of this crate (webchat, API channel).
+    /// The channels of this crate.
     pub fn builtin() -> Channels {
         Channels::new()
             .with("webchat", Arc::new(crate::channels::webchat::Webchat))
@@ -480,11 +512,41 @@ impl Channels {
                 Arc::new(crate::channels::whatsapp::Whatsapp::new()),
             )
             .with(
+                "messenger",
+                Arc::new(crate::channels::messenger::Messenger::new()),
+            )
+            .with(
+                "instagram",
+                Arc::new(crate::channels::instagram::Instagram::new()),
+            )
+            .with(
+                "instagramFacebook",
+                Arc::new(crate::channels::instagram::Instagram::facebook()),
+            )
+            .with(
+                "threads",
+                Arc::new(crate::channels::threads::Threads::new()),
+            )
+            .with(
                 "telegram",
                 Arc::new(crate::channels::telegram::Telegram::new()),
             )
             .with("tiktok", Arc::new(crate::channels::tiktok::Tiktok::new()))
             .with("zalo", Arc::new(crate::channels::zalo::Zalo::new()))
+    }
+
+    /// `isInstagramViaFacebook`: an `instagram` row of `type = 'facebook'`
+    /// is served by the `instagramFacebook` integration.
+    fn for_row(
+        &self,
+        channel: Arc<dyn Channel>,
+        integration_type: &str,
+        row_type: Option<&str>,
+    ) -> Arc<dyn Channel> {
+        if integration_type == "instagram" && row_type == Some("facebook") {
+            return self.get("instagramFacebook").unwrap_or(channel);
+        }
+        channel
     }
 
     pub fn with(mut self, channel: &str, implementation: Arc<dyn Channel>) -> Channels {
@@ -520,21 +582,28 @@ impl Channels {
             .into());
         };
         let inbox_id = contact_inbox.inbox_id;
+        let type_column = row_type_column(table);
         let row = db
             .read(move |conn| {
                 Ok(conn
                     .query_row(
                         &format!(
-                            r#"SELECT "id", "auth" FROM "{table}" WHERE "inboxId" = ?1 LIMIT 1"#
+                            r#"SELECT "id", "auth", {type_column} FROM "{table}" WHERE "inboxId" = ?1 LIMIT 1"#
                         ),
                         params![inbox_id],
-                        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+                        |r| {
+                            Ok((
+                                r.get::<_, i64>(0)?,
+                                r.get::<_, String>(1)?,
+                                r.get::<_, Option<String>>(2)?,
+                            ))
+                        },
                     )
                     .optional()?)
             })
             .await
             .map_err(|e| SendFailure::Other(e.to_string()))?;
-        let Some((integration_id, auth)) = row else {
+        let Some((integration_id, auth, row_type)) = row else {
             return Err(ChannelError::new(
                 format!("Unable to find integration auth for channel: {channel_name}"),
                 Category::AuthFailed,
@@ -551,6 +620,7 @@ impl Channels {
             db: Arc::clone(db),
             realtime: realtime.cloned(),
         };
+        let channel = self.for_row(channel, &ctx.channel, row_type.as_deref());
         Ok((channel, ctx))
     }
 }
@@ -586,12 +656,16 @@ impl Channels {
             )));
         };
         let identifier = identifier.to_owned();
+        let type_column = match row_type_column(table) {
+            "NULL" => "NULL".to_owned(),
+            column => format!("t.{column}"),
+        };
         let row = db
             .read(move |conn| {
                 Ok(conn
                     .query_row(
                         &format!(
-                            r#"SELECT t."id", t."auth", i."id", i."workspaceId", i."channel"
+                            r#"SELECT t."id", t."auth", i."id", i."workspaceId", i."channel", {type_column}
                                FROM "{table}" t JOIN "Inbox" i ON i."id" = t."inboxId"
                                WHERE t."{column}" = ?1 LIMIT 1"#
                         ),
@@ -605,6 +679,7 @@ impl Channels {
                                     workspace_id: r.get(3)?,
                                     channel: r.get(4)?,
                                 },
+                                r.get::<_, Option<String>>(5)?,
                             ))
                         },
                     )
@@ -612,7 +687,8 @@ impl Channels {
             })
             .await
             .map_err(|e| SendFailure::Other(e.to_string()))?;
-        Ok(row.map(|(integration_id, auth, inbox)| {
+        Ok(row.map(|(integration_id, auth, inbox, row_type)| {
+            let channel = self.for_row(channel, integration_type, row_type.as_deref());
             let ctx = ChannelCtx {
                 workspace_id: inbox.workspace_id,
                 channel: integration_type.to_owned(),
@@ -628,7 +704,7 @@ impl Channels {
 }
 
 /// The identifier column of each channel's integration table.
-fn identifier_column(channel: &str) -> Option<(&'static str, &'static str)> {
+pub fn identifier_column(channel: &str) -> Option<(&'static str, &'static str)> {
     Some(match channel {
         "whatsapp" => ("IntegrationWhatsapp", "phoneNumberId"),
         "telegram" => ("IntegrationTelegram", "botId"),
@@ -641,6 +717,15 @@ fn identifier_column(channel: &str) -> Option<(&'static str, &'static str)> {
         "api" => ("IntegrationApi", "inboxId"),
         _ => return None,
     })
+}
+
+/// The `type` column of `IntegrationInstagram` (`NULL` elsewhere).
+fn row_type_column(table: &str) -> &'static str {
+    if table == "IntegrationInstagram" {
+        r#""type""#
+    } else {
+        "NULL"
+    }
 }
 
 /// `integrationTableByChannel` (+ Threads).

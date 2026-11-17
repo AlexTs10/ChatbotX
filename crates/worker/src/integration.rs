@@ -157,6 +157,24 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::inbound::INCOMING_MESSAGE | "incomingMessageEcho" => {
             crate::inbound::incoming_message(&deps, &job.data["data"]).await?
         }
+        crate::inbound_events::CONTACT_MARK_AS_READ => {
+            crate::inbound_events::contact_mark_as_read(&deps, &job.data["data"]).await?
+        }
+        crate::inbound_events::MESSAGE_REACTION => {
+            crate::inbound_events::message_reaction(&deps, &job.data["data"]).await?
+        }
+        crate::inbound_events::DELETE_INCOMING_MESSAGE => {
+            crate::inbound_events::delete_incoming(&deps, &job.data["data"], "messageId").await?
+        }
+        crate::inbound_events::DELETE_INCOMING_COMMENT => {
+            crate::inbound_events::delete_incoming(&deps, &job.data["data"], "commentId").await?
+        }
+        crate::inbound_events::UPDATE_INCOMING_COMMENT => {
+            crate::inbound_events::update_incoming_comment(&deps, &job.data["data"]).await?
+        }
+        crate::inbox_labels::CHANNEL_LABEL_CHANGE => {
+            crate::inbox_labels::handle(&deps, &job.data["data"]).await?
+        }
         crate::inbound::MESSAGE_STATUS => {
             crate::inbound::message_status(&deps, &job.data["data"]).await?
         }

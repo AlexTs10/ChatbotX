@@ -151,7 +151,12 @@ pub(super) fn datetime_at(input: &mut Input, name: &str, required: bool) -> Opti
     parsed
 }
 
-fn url_at(input: &mut Input, path: &Path, value: Option<&Value>, required: bool) -> Option<String> {
+pub(crate) fn url_at(
+    input: &mut Input,
+    path: &Path,
+    value: Option<&Value>,
+    required: bool,
+) -> Option<String> {
     let text = input.string_at(path, value, Str::default(), required)?;
     if url::Url::parse(&text).is_err() {
         input.issue(path, "invalid_format", "Invalid URL");

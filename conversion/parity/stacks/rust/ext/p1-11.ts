@@ -11,6 +11,8 @@ import type {
   P111ContactInput,
   P111Fixtures,
   P111MessageInput,
+  P111MessengerPage,
+  P111MessengerPageInput,
   P111WhatsappChannel,
   P111WhatsappChannelInput,
 } from "../../../src/fixtures/ext/p1-11.ts"
@@ -40,6 +42,16 @@ const createId = (): bigint => {
 const uniqueDigits = () => `${Date.now()}${randomBytes(3).readUIntBE(0, 3).toString().padStart(8, "0")}`
 const uniqueText = (prefix: string) => `${prefix}-${Date.now().toString(36)}${randomBytes(4).toString("hex")}`
 const ms = (iso: string | null | undefined): number | null => (iso == null ? null : Date.parse(iso))
+
+const oauth2Auth = (accessToken: string, metadata: Record<string, unknown>, redirectUrl: string) => ({
+  authType: "oauth2",
+  clientId: "parity-client",
+  clientSecret: "parity-secret",
+  redirectUrl,
+  version: "v23.0",
+  tokens: { accessToken },
+  metadata,
+})
 
 const notPorted = (name: string) => (): never => {
   throw new Error(`p1-11 fixture ${name} is not ported to the Rust stack yet`)
@@ -78,8 +90,129 @@ class SqliteP111Fixtures implements P111Fixtures {
     }
   }
 
-  createMessengerPage = notPorted("createMessengerPage")
-  createInstagramForPage = notPorted("createInstagramForPage")
+  private insertInbox(
+    db: DatabaseSync,
+    input: { workspaceId: string; name: string; channel: string; sourceId: string },
+  ): bigint {
+    const inboxId = createId()
+    db.prepare(
+      `INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId", "status")
+       VALUES (?, ?, ?, ?, ?, 'connected')`,
+    ).run(inboxId, input.name, input.channel, input.sourceId, BigInt(input.workspaceId))
+    return inboxId
+  }
+
+  async createMessengerPage(input: P111MessengerPageInput): Promise<P111MessengerPage> {
+    const accessToken = `page-token-${input.pageId}`
+    return this.transaction((db) => {
+      const inboxId = this.insertInbox(db, {
+        workspaceId: input.workspaceId,
+        name: input.name,
+        channel: "messenger",
+        sourceId: input.pageId,
+      })
+      const integrationId = createId()
+      const auth = oauth2Auth(
+        accessToken,
+        { pageId: input.pageId, pageName: input.name, version: "v23.0" },
+        "http://app/integrations/messenger/callback",
+      )
+      db.prepare(
+        `INSERT INTO "IntegrationMessenger"
+           ("id", "auth", "pageId", "name", "workspaceId", "inboxId", "conversationStarters", "persistentMenus",
+            "personas", "personaId", "hasCapiScope", "datasetId", "capiTestEventCode", "capiDisconnectedAt",
+            "tokenRefreshError")
+         VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        integrationId,
+        JSON.stringify(auth),
+        input.pageId,
+        input.name,
+        BigInt(input.workspaceId),
+        inboxId,
+        JSON.stringify(input.personas ?? []),
+        input.personaId ?? null,
+        input.hasCapiScope ? 1 : 0,
+        input.datasetId ?? null,
+        input.capiTestEventCode ?? null,
+        input.capiDisconnected ? Date.now() : null,
+        input.tokenRefreshError ?? null,
+      )
+      db.prepare(
+        `INSERT INTO "Connection"
+           ("id", "workspaceId", "provider", "kind", "channel", "inboxId", "sourceId", "displayName", "status", "connectedAt")
+         VALUES (?, ?, 'messenger', 'channel', 'messenger', ?, ?, ?, 'connected', ?)`,
+      ).run(createId(), BigInt(input.workspaceId), inboxId, input.pageId, input.name, Date.now())
+      return { integrationId: integrationId.toString(), inboxId: inboxId.toString(), accessToken }
+    })
+  }
+
+  async createInstagramForPage(input: { workspaceId: string; pageId: string; igId: string; name: string }) {
+    return this.transaction((db) => {
+      const inboxId = this.insertInbox(db, {
+        workspaceId: input.workspaceId,
+        name: input.name,
+        channel: "instagram",
+        sourceId: input.igId,
+      })
+      const integrationId = createId()
+      const auth = oauth2Auth(
+        `ig-token-${input.igId}`,
+        { igId: input.igId, pageId: input.pageId, version: "v23.0" },
+        "http://app/integrations/instagram/callback",
+      )
+      db.prepare(
+        `INSERT INTO "IntegrationInstagram"
+           ("id", "auth", "igId", "pageId", "name", "username", "workspaceId", "inboxId", "type",
+            "conversationStarters", "persistentMenus")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'facebook', '[]', '[]')`,
+      ).run(
+        integrationId,
+        JSON.stringify(auth),
+        input.igId,
+        input.pageId,
+        input.name,
+        `parity_${input.igId}`,
+        BigInt(input.workspaceId),
+        inboxId,
+      )
+      db.prepare(
+        `INSERT INTO "Connection"
+           ("id", "workspaceId", "provider", "kind", "channel", "inboxId", "sourceId", "displayName", "status", "connectedAt")
+         VALUES (?, ?, 'instagramFacebook', 'channel', 'instagram', ?, ?, ?, 'connected', ?)`,
+      ).run(createId(), BigInt(input.workspaceId), inboxId, input.igId, input.name, Date.now())
+      return { integrationId: integrationId.toString(), inboxId: inboxId.toString() }
+    })
+  }
+  async createMessengerTemplate(input: {
+    integrationMessengerId: string
+    name: string
+    language: string
+    status: "APPROVED" | "PENDING" | "REJECTED"
+    category: string
+    components: unknown[]
+    sourceId?: string
+  }): Promise<{ templateId: string }> {
+    const templateId = createId()
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO "MessengerMessageTemplate"
+           ("id", "name", "integrationMessengerId", "sourceId", "language", "category", "status", "parameterFormat", "components")
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'POSITIONAL', ?)`,
+      ).run(
+        templateId,
+        input.name,
+        BigInt(input.integrationMessengerId),
+        input.sourceId ?? randomBytes(6).readUIntBE(0, 6).toString(),
+        input.language,
+        input.category,
+        input.status,
+        JSON.stringify(input.components),
+      )
+    })
+    return { templateId: templateId.toString() }
+  }
+
   // Same rows as `stacks/original/ext/p1-11.ts` (the WhatsApp embedded signup).
   async createWhatsappChannel(input: P111WhatsappChannelInput): Promise<P111WhatsappChannel> {
     const accessToken = `wa-token-${input.phoneNumberId}`
@@ -174,7 +307,6 @@ class SqliteP111Fixtures implements P111Fixtures {
       )
     return { templateId: templateId.toString() }
   }
-  createMessengerTemplate = notPorted("createMessengerTemplate")
   setMustChangePassword = notPorted("setMustChangePassword")
 
   async createContact(input: P111ContactInput): Promise<P111Contact> {
