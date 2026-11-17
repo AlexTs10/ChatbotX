@@ -3,10 +3,14 @@
 //! grant switches and the sync history (`templateSyncRequestService`).
 
 use chatbotx_db::Db;
-use chatbotx_db::rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value as Sql};
+use chatbotx_db::rusqlite::{
+    Connection, OptionalExtension, params, params_from_iter, types::Value as Sql,
+};
 use serde_json::{Map, Value, json};
 
-use super::permissions::{Actor, assert_can_use_categories, assert_can_write_installs, visible_install_categories};
+use super::permissions::{
+    Actor, assert_can_use_categories, assert_can_write_installs, visible_install_categories,
+};
 use super::{ACTIVE_STATUSES_SQL, db_error, json_col};
 use crate::errors::{BusinessError, Result};
 use crate::tx;
@@ -99,7 +103,11 @@ fn holds_category_outside(visible: &[&str]) -> String {
         if visible.is_empty() {
             String::new()
         } else {
-            let list = visible.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ");
+            let list = visible
+                .iter()
+                .map(|c| format!("'{c}'"))
+                .collect::<Vec<_>>()
+                .join(", ");
             format!(" AND {column} NOT IN ({list})")
         }
     };
@@ -128,9 +136,18 @@ const HAS_ACTIVE_SYNC: &str = r#"EXISTS (SELECT 1 FROM "TemplateInstallationSync
 
 /// `listInstallationsPage` with the public row shape (`activeSync` dropped,
 /// `uninstalledByKind` as `uninstalledBy`).
-pub async fn list_page(db: &Db, workspace_id: i64, input: ListInstallations, actor: &Actor) -> Result<Value> {
+pub async fn list_page(
+    db: &Db,
+    workspace_id: i64,
+    input: ListInstallations,
+    actor: &Actor,
+) -> Result<Value> {
     let limit = input.limit.unwrap_or(PAGE_SIZE);
-    let codes = INSTALLER_WARNING_CODES.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ");
+    let codes = INSTALLER_WARNING_CODES
+        .iter()
+        .map(|c| format!("'{c}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut sql = format!(
         r#"SELECT i."id", i."templateName", i."status", i."errorCode", i."resourceCount",
                   i."warningCount",
@@ -149,7 +166,9 @@ pub async fn list_page(db: &Db, workspace_id: i64, input: ListInstallations, act
         values.push(Sql::Text(status));
     }
     if input.active_only {
-        sql.push_str(&format!(r#" AND (i."status" IN ('pending', 'installing') OR {HAS_ACTIVE_SYNC})"#));
+        sql.push_str(&format!(
+            r#" AND (i."status" IN ('pending', 'installing') OR {HAS_ACTIVE_SYNC})"#
+        ));
     }
     if let Some(before) = input.before_id {
         sql.push_str(r#" AND i."id" < ?"#);
@@ -241,7 +260,13 @@ fn strings(conn: &Connection, sql: &str, values: Vec<Sql>) -> Result<Vec<String>
 }
 
 /// `setAutoUpdate`.
-pub async fn set_auto_update(db: &Db, workspace_id: i64, id: i64, actor: &Actor, auto_update: bool) -> Result<()> {
+pub async fn set_auto_update(
+    db: &Db,
+    workspace_id: i64,
+    id: i64,
+    actor: &Actor,
+    auto_update: bool,
+) -> Result<()> {
     assert_can_write_installs(actor)?;
     let actor = actor.clone();
     tx::write(db, move |tx| {
@@ -373,8 +398,11 @@ const SYNC_COLUMNS: &str = r#""id", "status", "trigger", "requestedVersion", "fr
 
 /// `toSyncSummary` of a `TemplateInstallationSync` row, plus its raw warnings
 /// and installation id.
-fn sync_of(row: &chatbotx_db::rusqlite::Row<'_>) -> chatbotx_db::rusqlite::Result<(Value, Value, i64)> {
-    let opt_date = |ms: Option<i64>| ms.map_or(Value::Null, |ms| Value::String(chatbotx_db::repo::iso(ms)));
+fn sync_of(
+    row: &chatbotx_db::rusqlite::Row<'_>,
+) -> chatbotx_db::rusqlite::Result<(Value, Value, i64)> {
+    let opt_date =
+        |ms: Option<i64>| ms.map_or(Value::Null, |ms| Value::String(chatbotx_db::repo::iso(ms)));
     let summary = json!({
         "id": row.get::<_, i64>(0)?.to_string(),
         "status": row.get::<_, String>(1)?,
@@ -395,10 +423,21 @@ fn sync_counts(value: &Value) -> Value {
     let Value::Object(map) = value else {
         return Value::Null;
     };
-    let keys = ["created", "updated", "detached", "overwrittenModified", "notUpdatable"];
+    let keys = [
+        "created",
+        "updated",
+        "detached",
+        "overwrittenModified",
+        "notUpdatable",
+    ];
     Value::Object(
         keys.iter()
-            .map(|key| ((*key).to_string(), map.get(*key).cloned().unwrap_or(Value::Null)))
+            .map(|key| {
+                (
+                    (*key).to_string(),
+                    map.get(*key).cloned().unwrap_or(Value::Null),
+                )
+            })
             .collect(),
     )
 }
@@ -413,9 +452,10 @@ pub async fn list_syncs(db: &Db, workspace_id: i64, installation_id: i64) -> Res
                    WHERE "installationId" = ?1 AND "workspaceId" = ?2 ORDER BY "id" DESC LIMIT ?3"#
             ))
             .map_err(db_error)?;
-        stmt.query_map(params![installation_id, workspace_id, SYNC_HISTORY_LIMIT], |row| {
-            Ok(sync_of(row)?.0)
-        })
+        stmt.query_map(
+            params![installation_id, workspace_id, SYNC_HISTORY_LIMIT],
+            |row| Ok(sync_of(row)?.0),
+        )
         .map_err(db_error)?
         .collect::<chatbotx_db::rusqlite::Result<Vec<_>>>()
         .map_err(db_error)
@@ -424,7 +464,12 @@ pub async fn list_syncs(db: &Db, workspace_id: i64, installation_id: i64) -> Res
 }
 
 /// `templateInstallations.getSync`: the summary with warnings and backups.
-pub async fn get_sync(db: &Db, workspace_id: i64, installation_id: i64, sync_id: i64) -> Result<Value> {
+pub async fn get_sync(
+    db: &Db,
+    workspace_id: i64,
+    installation_id: i64,
+    sync_id: i64,
+) -> Result<Value> {
     tx::read(db, move |conn| {
         let found = conn
             .query_row(

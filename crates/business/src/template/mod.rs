@@ -75,7 +75,11 @@ pub(crate) fn decode_text_cursor(cursor: &str) -> Option<(String, i64)> {
     let [Value::String(key), Value::String(id)] = parsed.as_array()?.as_slice() else {
         return None;
     };
-    if key.contains('\0') || id.is_empty() || id.len() > 19 || !id.bytes().all(|b| b.is_ascii_digit()) {
+    if key.contains('\0')
+        || id.is_empty()
+        || id.len() > 19
+        || !id.bytes().all(|b| b.is_ascii_digit())
+    {
         return None;
     }
     Some((key.clone(), id.parse().ok()?))
@@ -116,7 +120,10 @@ pub async fn list_blocking_ids(
              AND i."sourceDeletedAt" IS NULL AND i."templateId" IS NOT NULL
            ORDER BY r."resourceId""#
     );
-    let mut values = vec![Sql::Integer(workspace_id), Sql::Text(resource_kind.to_string())];
+    let mut values = vec![
+        Sql::Integer(workspace_id),
+        Sql::Text(resource_kind.to_string()),
+    ];
     values.extend(resource_ids.iter().map(|id| Sql::Integer(*id)));
     tx::read(db, move |conn| {
         let mut stmt = conn.prepare(&sql).map_err(db_error)?;
@@ -137,9 +144,22 @@ pub async fn list_locked_resource_ids(
     resource_kind: &str,
     resource_ids: &[i64],
 ) -> Result<(Vec<String>, Vec<String>)> {
-    let locked = list_blocking_ids(db, workspace_id, resource_kind, resource_ids, Blocking::Edit).await?;
-    let undeletable =
-        list_blocking_ids(db, workspace_id, resource_kind, resource_ids, Blocking::Delete).await?;
+    let locked = list_blocking_ids(
+        db,
+        workspace_id,
+        resource_kind,
+        resource_ids,
+        Blocking::Edit,
+    )
+    .await?;
+    let undeletable = list_blocking_ids(
+        db,
+        workspace_id,
+        resource_kind,
+        resource_ids,
+        Blocking::Delete,
+    )
+    .await?;
     Ok((locked, undeletable))
 }
 
@@ -150,8 +170,14 @@ mod tests {
     #[test]
     fn text_cursor_round_trip() {
         let cursor = encode_text_cursor("Café ü", 42);
-        assert_eq!(decode_text_cursor(&cursor), Some(("Café ü".to_string(), 42)));
+        assert_eq!(
+            decode_text_cursor(&cursor),
+            Some(("Café ü".to_string(), 42))
+        );
         assert_eq!(decode_text_cursor("bm90LWpzb24"), None);
-        assert_eq!(decode_text_cursor(&URL_SAFE_NO_PAD.encode("%5B%22a%22%2C%22x%22%5D")), None);
+        assert_eq!(
+            decode_text_cursor(&URL_SAFE_NO_PAD.encode("%5B%22a%22%2C%22x%22%5D")),
+            None
+        );
     }
 }

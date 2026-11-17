@@ -26,8 +26,9 @@ async fn list_locked_ids(ctx: &Ctx<'_>, input: &Value) -> Result<Value, crate::o
     if ids.len() > 200 {
         return Err(invalid());
     }
-    let (locked, undeletable) = list_locked_resource_ids(&ctx.api.db, ctx.workspace_id, &kind, &ids)
-        .await
-        .map_err(fail)?;
+    let (locked, undeletable) =
+        list_locked_resource_ids(&ctx.api.db, ctx.workspace_id, &kind, &ids)
+            .await
+            .map_err(fail)?;
     Ok(json!({ "lockedIds": locked, "undeletableIds": undeletable }))
 }

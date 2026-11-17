@@ -95,7 +95,10 @@ pub(crate) fn find_live(conn: &Connection, workspace_id: i64, id: i64) -> Result
 
 /// `getDetailOrFail` / `findByIdOrFail`.
 pub async fn get_detail(db: &Db, workspace_id: i64, id: i64) -> Result<Template> {
-    tx::read(db, move |conn| find_live(conn, workspace_id, id)?.ok_or_else(not_found)).await
+    tx::read(db, move |conn| {
+        find_live(conn, workspace_id, id)?.ok_or_else(not_found)
+    })
+    .await
 }
 
 /// One page of `listPage`: the items with their active install count.
@@ -136,9 +139,10 @@ pub async fn list_page(
             ))
             .map_err(db_error)?;
         let mut items = stmt
-            .query_map(params![workspace_id, after_ms, after_id, limit + 1], |row| {
-                Ok((template_of(row)?, row.get::<_, i64>(20)?))
-            })
+            .query_map(
+                params![workspace_id, after_ms, after_id, limit + 1],
+                |row| Ok((template_of(row)?, row.get::<_, i64>(20)?)),
+            )
             .map_err(db_error)?
             .collect::<chatbotx_db::rusqlite::Result<Vec<_>>>()
             .map_err(db_error)?;
@@ -205,7 +209,12 @@ pub async fn list_versions(db: &Db, workspace_id: i64, id: i64) -> Result<Vec<Ve
 }
 
 /// `getInstallAnalytics` as the JSON the API returns.
-pub async fn install_analytics(db: &Db, workspace_id: i64, id: i64, actor: &Actor) -> Result<Value> {
+pub async fn install_analytics(
+    db: &Db,
+    workspace_id: i64,
+    id: i64,
+    actor: &Actor,
+) -> Result<Value> {
     assert_can_read(actor)?;
     tx::read(db, move |conn| {
         find_live(conn, workspace_id, id)?.ok_or_else(not_found)?;
@@ -262,7 +271,12 @@ pub fn generate_share_token() -> String {
 }
 
 /// `rotateShareToken`: every link shared before stops working.
-pub async fn rotate_share_token(db: &Db, workspace_id: i64, id: i64, actor: &Actor) -> Result<Template> {
+pub async fn rotate_share_token(
+    db: &Db,
+    workspace_id: i64,
+    id: i64,
+    actor: &Actor,
+) -> Result<Template> {
     assert_can_manage(actor)?;
     let token = generate_share_token();
     tx::write(db, move |tx| {
@@ -299,7 +313,13 @@ pub async fn update_share_settings(
                      "shareExpiresAt" = CASE WHEN ?2 THEN ?3 ELSE "shareExpiresAt" END,
                      "updatedAt" = CAST(unixepoch('subsec') * 1000 AS INTEGER)
                    WHERE "id" = ?4 AND "workspaceId" = ?5 AND "deletedAt" IS NULL"#,
-                params![enabled, expires_at.is_some(), expires_at.flatten(), id, workspace_id],
+                params![
+                    enabled,
+                    expires_at.is_some(),
+                    expires_at.flatten(),
+                    id,
+                    workspace_id
+                ],
             )
             .map_err(db_error)?;
         if changed == 0 {

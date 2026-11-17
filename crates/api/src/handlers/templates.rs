@@ -44,7 +44,12 @@ const INSTALLATION_STATUSES: &[&str] = &[
 ];
 
 /// Runs one of [`ROUTES`].
-pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>, principal: &Principal) -> Reply {
+pub async fn handle(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    principal: &Principal,
+) -> Reply {
     // `tokenActor`: anything but an explicit `full` token is read-only.
     let actor = Actor::ApiToken {
         full: !principal.read_only,
@@ -124,7 +129,10 @@ async fn list(state: &ApiState, call: Call<'_>) -> Reply {
             item
         })
         .collect();
-    Ok(json(200, json!({ "items": items, "nextCursor": page.next_cursor })))
+    Ok(json(
+        200,
+        json!({ "items": items, "nextCursor": page.next_cursor }),
+    ))
 }
 
 async fn get(state: &ApiState, call: Call<'_>) -> Reply {
@@ -150,7 +158,10 @@ async fn locked_resources(state: &ApiState, call: Call<'_>) -> Reply {
     let (locked, undeletable) = list_locked_resource_ids(&state.db, call.workspace_id, &kind, &ids)
         .await
         .map_err(|e| business_error(e, LISTING))?;
-    Ok(json(200, json!({ "lockedIds": locked, "undeletableIds": undeletable })))
+    Ok(json(
+        200,
+        json!({ "lockedIds": locked, "undeletableIds": undeletable }),
+    ))
 }
 
 /// `{ resourceKind, resourceIds }` (1..=200 bigint ids; the `/rpc` procedure
@@ -158,7 +169,12 @@ async fn locked_resources(state: &ApiState, call: Call<'_>) -> Reply {
 pub(crate) fn locked_input(input: &Input) -> Result<(String, Vec<i64>), OrpcError> {
     let mut input = input.clone();
     let kind_value = input.get("resourceKind").cloned();
-    let kind = input.enum_at(&key("resourceKind"), kind_value.as_ref(), RESOURCE_KINDS, true);
+    let kind = input.enum_at(
+        &key("resourceKind"),
+        kind_value.as_ref(),
+        RESOURCE_KINDS,
+        true,
+    );
     let ids = match input.get("resourceIds").cloned() {
         Some(Value::Array(items)) => {
             if items.len() > 200 {
@@ -191,7 +207,11 @@ pub(crate) fn locked_input(input: &Input) -> Result<(String, Vec<i64>), OrpcErro
                 "invalid_type",
                 &format!(
                     "Invalid input: expected array, received {}",
-                    if other.is_none() { "undefined" } else { "string" }
+                    if other.is_none() {
+                        "undefined"
+                    } else {
+                        "string"
+                    }
                 ),
             );
             Vec::new()
@@ -221,7 +241,10 @@ async fn update_share(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply 
         Some(Value::Null) => Some(None),
         Some(_) => {
             // `z.string().datetime()`: UTC (`Z`) only.
-            let ends_z = input.get("expiresAt").and_then(Value::as_str).is_some_and(|t| t.ends_with('Z'));
+            let ends_z = input
+                .get("expiresAt")
+                .and_then(Value::as_str)
+                .is_some_and(|t| t.ends_with('Z'));
             let parsed = super::polls::datetime_at(&mut input, "expiresAt", true);
             match parsed {
                 Some(ms) if ends_z => Some(Some(ms)),
@@ -278,7 +301,12 @@ async fn analytics(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
 async fn list_installations(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
     let mut input = Input::from_query(call.params, call.query);
     let status_value = input.get("status").cloned();
-    let status = input.enum_at(&key("status"), status_value.as_ref(), INSTALLATION_STATUSES, false);
+    let status = input.enum_at(
+        &key("status"),
+        status_value.as_ref(),
+        INSTALLATION_STATUSES,
+        false,
+    );
     let active_only = input.opt_coerced_bool("activeOnly");
     let cursor = input.get("cursor").cloned();
     let before_id = match cursor {
@@ -311,14 +339,26 @@ async fn update_installation(state: &ApiState, call: Call<'_>, actor: &Actor) ->
     input.finish()?;
     let installation_id = installation_id.unwrap_or(-1);
     if let Some(granted) = grant {
-        installations::set_publisher_uninstall_grant(&state.db, call.workspace_id, installation_id, actor, granted)
-            .await
-            .map_err(|e| business_error(e, MUTATING))?;
+        installations::set_publisher_uninstall_grant(
+            &state.db,
+            call.workspace_id,
+            installation_id,
+            actor,
+            granted,
+        )
+        .await
+        .map_err(|e| business_error(e, MUTATING))?;
     }
     if let Some(auto_update) = auto_update {
-        installations::set_auto_update(&state.db, call.workspace_id, installation_id, actor, auto_update)
-            .await
-            .map_err(|e| business_error(e, MUTATING))?;
+        installations::set_auto_update(
+            &state.db,
+            call.workspace_id,
+            installation_id,
+            actor,
+            auto_update,
+        )
+        .await
+        .map_err(|e| business_error(e, MUTATING))?;
     }
     Ok(json(200, json!({ "ok": true })))
 }

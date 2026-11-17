@@ -19,7 +19,8 @@ async fn run(
     query: Option<&str>,
     body: Option<Value>,
 ) -> (u16, Value) {
-    let params: Vec<(&'static str, String)> = params.iter().map(|(k, v)| (*k, (*v).to_string())).collect();
+    let params: Vec<(&'static str, String)> =
+        params.iter().map(|(k, v)| (*k, (*v).to_string())).collect();
     let body = body.map(|b| b.to_string()).unwrap_or_default();
     let principal = Principal {
         read_only,
@@ -39,7 +40,9 @@ async fn run(
     .await
     .expect("ported route");
     let status = response.status().as_u16();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.expect("body");
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
@@ -111,7 +114,15 @@ async fn templates_list_pages_with_the_cursor_and_drops_snapshot_and_selection()
 #[tokio::test]
 async fn templates_list_rejects_a_limit_above_the_maximum() {
     let fixture = fixture().await;
-    let (status, body) = run(&fixture, "templates.list", false, &[], Some("limit=101"), None).await;
+    let (status, body) = run(
+        &fixture,
+        "templates.list",
+        false,
+        &[],
+        Some("limit=101"),
+        None,
+    )
+    .await;
     assert!(status >= 400, "{body}");
 }
 
@@ -119,11 +130,27 @@ async fn templates_list_rejects_a_limit_above_the_maximum() {
 async fn templates_get_returns_the_selection_and_404_for_another_workspace() {
     let fixture = fixture().await;
     seed(&fixture).await;
-    let (status, body) = run(&fixture, "templates.get", true, &[("id", "101")], None, None).await;
+    let (status, body) = run(
+        &fixture,
+        "templates.get",
+        true,
+        &[("id", "101")],
+        None,
+        None,
+    )
+    .await;
     assert_eq!(status, 200);
     assert_eq!(body["selection"], json!({ "flows": { "mode": "all" } }));
     assert!(body.get("payload").is_none());
-    let (status, _) = run(&fixture, "templates.get", true, &[("id", "999")], None, None).await;
+    let (status, _) = run(
+        &fixture,
+        "templates.get",
+        true,
+        &[("id", "999")],
+        None,
+        None,
+    )
+    .await;
     assert_eq!(status, 404);
 }
 
@@ -133,18 +160,40 @@ async fn templates_get_returns_the_selection_and_404_for_another_workspace() {
 async fn get_link_refuses_a_read_only_token() {
     let fixture = fixture().await;
     seed(&fixture).await;
-    let (status, body) = run(&fixture, "templates.getLink", true, &[("id", "101")], None, None).await;
-    assert_eq!((status, body["code"].as_str()), (403, Some("templateManagePermissionDenied")));
+    let (status, body) = run(
+        &fixture,
+        "templates.getLink",
+        true,
+        &[("id", "101")],
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (403, Some("templateManagePermissionDenied"))
+    );
 }
 
 #[tokio::test]
 async fn get_link_hands_a_full_token_the_share_url() {
     let fixture = fixture().await;
     seed(&fixture).await;
-    let (status, body) = run(&fixture, "templates.getLink", false, &[("id", "101")], None, None).await;
+    let (status, body) = run(
+        &fixture,
+        "templates.getLink",
+        false,
+        &[("id", "101")],
+        None,
+        None,
+    )
+    .await;
     assert_eq!(status, 200);
     assert_eq!(body["url"], "http://app/t/template?id=101&key=tok-101");
-    assert_eq!((body["templateId"].as_str(), body["templateKey"].as_str()), (Some("101"), Some("tok-101")));
+    assert_eq!(
+        (body["templateId"].as_str(), body["templateKey"].as_str()),
+        (Some("101"), Some("tok-101"))
+    );
 }
 
 #[tokio::test]
@@ -161,14 +210,39 @@ async fn update_share_and_rotate_share_return_the_id_and_key_too() {
     )
     .await;
     assert_eq!(status, 200, "{shared}");
-    assert_eq!((shared["templateId"].as_str(), shared["templateKey"].as_str()), (Some("101"), Some("tok-101")));
+    assert_eq!(
+        (
+            shared["templateId"].as_str(),
+            shared["templateKey"].as_str()
+        ),
+        (Some("101"), Some("tok-101"))
+    );
     assert_eq!(shared["shareExpiresAt"], "2030-01-01T00:00:00.000Z");
-    let (_, rotated) = run(&fixture, "templates.rotateShare", false, &[("id", "101")], None, None).await;
+    let (_, rotated) = run(
+        &fixture,
+        "templates.rotateShare",
+        false,
+        &[("id", "101")],
+        None,
+        None,
+    )
+    .await;
     let key = rotated["templateKey"].as_str().expect("key");
     assert_ne!(key, "tok-101");
-    assert_eq!(rotated["url"], format!("http://app/t/template?id=101&key={key}"));
+    assert_eq!(
+        rotated["url"],
+        format!("http://app/t/template?id=101&key={key}")
+    );
     // Omitted `expiresAt` keeps the expiry; `null` removes it.
-    let (_, kept) = run(&fixture, "templates.updateShare", false, &[("id", "101")], None, Some(json!({ "enabled": false }))).await;
+    let (_, kept) = run(
+        &fixture,
+        "templates.updateShare",
+        false,
+        &[("id", "101")],
+        None,
+        Some(json!({ "enabled": false })),
+    )
+    .await;
     assert_eq!(kept["shareExpiresAt"], "2030-01-01T00:00:00.000Z");
     let (_, cleared) = run(
         &fixture,
@@ -186,11 +260,35 @@ async fn update_share_and_rotate_share_return_the_id_and_key_too() {
 async fn delete_soft_deletes_and_stamps_installations() {
     let fixture = fixture().await;
     seed(&fixture).await;
-    let (status, _) = run(&fixture, "templates.delete", false, &[("id", "101")], None, None).await;
+    let (status, _) = run(
+        &fixture,
+        "templates.delete",
+        false,
+        &[("id", "101")],
+        None,
+        None,
+    )
+    .await;
     assert_eq!(status, 204);
-    let (status, _) = run(&fixture, "templates.get", false, &[("id", "101")], None, None).await;
+    let (status, _) = run(
+        &fixture,
+        "templates.get",
+        false,
+        &[("id", "101")],
+        None,
+        None,
+    )
+    .await;
     assert_eq!(status, 404);
-    let (status, _) = run(&fixture, "templates.delete", false, &[("id", "101")], None, None).await;
+    let (status, _) = run(
+        &fixture,
+        "templates.delete",
+        false,
+        &[("id", "101")],
+        None,
+        None,
+    )
+    .await;
     assert_eq!(status, 404);
 }
 
@@ -226,7 +324,15 @@ async fn locked_resources_validates_and_reads_the_page() {
 async fn the_installation_list_drops_error_message_permissions_and_claim_fields() {
     let fixture = fixture().await;
     seed(&fixture).await;
-    let (status, result) = run(&fixture, "templateInstallations.list", true, &[], None, None).await;
+    let (status, result) = run(
+        &fixture,
+        "templateInstallations.list",
+        true,
+        &[],
+        None,
+        None,
+    )
+    .await;
     assert_eq!(status, 200);
     let serialized = result.to_string();
     assert!(!serialized.contains("secret-internal-detail"));
@@ -245,11 +351,27 @@ async fn the_installation_list_drops_error_message_permissions_and_claim_fields(
 async fn installation_paging_forwards_the_cursor_and_rejects_bad_sizes() {
     let fixture = fixture().await;
     seed(&fixture).await;
-    let (_, result) = run(&fixture, "templateInstallations.list", true, &[], Some("cursor=201&limit=100"), None).await;
+    let (_, result) = run(
+        &fixture,
+        "templateInstallations.list",
+        true,
+        &[],
+        Some("cursor=201&limit=100"),
+        None,
+    )
+    .await;
     assert_eq!(result, json!({ "items": [], "nextCursor": null }));
     for limit in ["0", "101"] {
         let query = format!("limit={limit}");
-        let (status, body) = run(&fixture, "templateInstallations.list", true, &[], Some(&query), None).await;
+        let (status, body) = run(
+            &fixture,
+            "templateInstallations.list",
+            true,
+            &[],
+            Some(&query),
+            None,
+        )
+        .await;
         assert_eq!(body["code"], "invalidRequestData", "{status}");
     }
 }
@@ -267,8 +389,19 @@ async fn installation_update_and_syncs_check_the_installation() {
         Some(json!({ "autoUpdate": true })),
     )
     .await;
-    assert_eq!((status, body["code"].as_str()), (409, Some("templateInstallationNotSyncable")));
-    let (status, body) = run(&fixture, "templateInstallations.listSyncs", true, &[("id", "201")], None, None).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (409, Some("templateInstallationNotSyncable"))
+    );
+    let (status, body) = run(
+        &fixture,
+        "templateInstallations.listSyncs",
+        true,
+        &[("id", "201")],
+        None,
+        None,
+    )
+    .await;
     assert_eq!((status, body), (200, json!({ "items": [] })));
     let (status, _) = run(
         &fixture,
@@ -280,6 +413,14 @@ async fn installation_update_and_syncs_check_the_installation() {
     )
     .await;
     assert_eq!(status, 404);
-    let (status, _) = run(&fixture, "templateInstallations.listSyncs", true, &[("id", "301")], None, None).await;
+    let (status, _) = run(
+        &fixture,
+        "templateInstallations.listSyncs",
+        true,
+        &[("id", "301")],
+        None,
+        None,
+    )
+    .await;
     assert_eq!(status, 404);
 }
