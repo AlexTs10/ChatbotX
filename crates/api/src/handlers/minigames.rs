@@ -214,7 +214,7 @@ fn image(input: &mut Input, path: &[Seg], value: Option<&Value>) -> Option<Value
 }
 
 /// `z.iso.datetime()`: `YYYY-MM-DDTHH:MM(:SS(.f+)?)?Z`.
-fn is_iso_datetime(text: &str) -> bool {
+pub(crate) fn is_iso_datetime(text: &str) -> bool {
     let Some(body) = text.strip_suffix('Z') else {
         return false;
     };

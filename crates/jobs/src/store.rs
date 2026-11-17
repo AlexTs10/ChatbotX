@@ -1778,6 +1778,20 @@ impl Enqueuer for JobStore {
     ) -> BoxFuture<'_, Result<Vec<AddResult>, JobsError>> {
         Box::pin(self.add_many(queue, jobs))
     }
+
+    fn backlog_count(&self, queue: QueueName) -> BoxFuture<'_, Result<u64, JobsError>> {
+        Box::pin(async move {
+            Ok(self.prioritized_count(queue).await? + self.delayed_count(queue).await?)
+        })
+    }
+
+    fn remove_job<'a>(
+        &'a self,
+        queue: QueueName,
+        job_id: &'a str,
+    ) -> BoxFuture<'a, Result<bool, JobsError>> {
+        JobInspector::remove(self, queue, job_id)
+    }
 }
 
 impl JobInspector for JobStore {

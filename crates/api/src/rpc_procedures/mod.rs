@@ -9,8 +9,11 @@
 //! route ([`public`]) after the member checks, so both stay one code path.
 
 mod analytics;
+mod automated_responses;
+mod broadcasts;
 mod contacts;
 mod conversations;
+mod email_topics;
 mod flows;
 mod inboxes;
 pub(crate) mod integrations;
@@ -18,8 +21,10 @@ mod lists;
 mod media_library;
 mod pipelines;
 mod products;
+mod sequences;
 mod templates;
 mod tools;
+mod triggers;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -106,6 +111,9 @@ pub async fn procedure(
     context.workspace.as_ref()?;
     let ctx = ctx(api, context);
     let ctx = &ctx;
+    if let Some(outcome) = broadcasts::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = contacts::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -116,6 +124,12 @@ pub async fn procedure(
         return Some(outcome);
     }
     if let Some(outcome) = flows::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_topics::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = sequences::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
@@ -171,7 +185,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     // Every other action is a `workspaceActionClient` one.
     if context.workspace.is_none() {
         return match name {
-            n if contacts::ACTIONS.contains(&n)
+            n if broadcasts::ACTIONS.contains(&n)
+                || contacts::ACTIONS.contains(&n)
                 || flows::ACTIONS.contains(&n)
                 || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str())
                 || conversations::ACTIONS.contains(&n)
@@ -180,12 +195,19 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || products::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
-                || integrations::ACTIONS.contains(&n) =>
+                || integrations::ACTIONS.contains(&n)
+                || email_topics::ACTIONS.contains(&n)
+                || sequences::ACTIONS.contains(&n)
+                || triggers::ACTIONS.contains(&n)
+                || automated_responses::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
             _ => None,
         };
+    }
+    if let Some(outcome) = broadcasts::action(ctx, name, &args).await {
+        return Some(outcome);
     }
     if let Some(outcome) = contacts::action(ctx, name, &args).await {
         return Some(outcome);
@@ -212,6 +234,18 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = tools::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_topics::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = sequences::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = triggers::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = automated_responses::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

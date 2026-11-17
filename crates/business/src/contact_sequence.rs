@@ -3,9 +3,10 @@
 //! `removeContactSequencesForContacts`, `updateContactSequences`. Private
 //! queries on `"Sequence"`, `"ContactOnSequence"`, `"Contact"`,
 //! `"ContactInbox"`; dispatch rows through `chatbotx_jobs::sequence`
-//! (`create_dispatch_in`, `cancel_pending_dispatches_in`). No scheduler
-//! add / remove and no `sequenceUnsubscribed` events (the API state has no
-//! scheduler or event bus).
+//! (`create_dispatch_in`, `cancel_pending_dispatches_in`); a new dispatch is
+//! added to the SQLite schedule in the same transaction (Q.D5). The schedule
+//! remove of a cancel is left to the reconcile cleanup; no
+//! `sequenceUnsubscribed` events.
 
 use std::collections::HashSet;
 
@@ -20,6 +21,7 @@ use chatbotx_jobs::sequence::dispatch::{
 };
 use chatbotx_jobs::sequence::next_run::calculate_next_run_at_in;
 use chatbotx_jobs::sequence::repo::{CreateId, SequenceError};
+use chatbotx_jobs::sequence::sqlite_schedule::{schedule_in, wake_producer};
 
 use crate::errors::{BusinessError, Result};
 use crate::tx;
@@ -117,7 +119,7 @@ fn enroll(
         vec![Value::Integer(contact_id)],
     )?;
     for contact_inbox_id in inboxes {
-        create_dispatch_in(
+        let dispatch = create_dispatch_in(
             conn,
             &SqlDispatchInserter,
             &CreateId,
@@ -132,6 +134,10 @@ fn enroll(
             },
         )
         .map_err(sequence_error)?;
+        // Q.D5: the schedule entry commits with the row (the original adds it
+        // to the Redis schedule after the insert).
+        schedule_in(conn, dispatch.bucket, &dispatch.id, dispatch.run_at_ms)
+            .map_err(|e| BusinessError::Repo(repo::Error::msg(e.to_string())))?;
     }
     Ok(())
 }
@@ -253,6 +259,7 @@ pub async fn subscribe_contacts(
         })
     })
     .await
+    .inspect(|_| wake_producer())
 }
 
 /// `listByContactId`: 404 "Contact not found" for a contact outside the
@@ -321,6 +328,7 @@ pub async fn update_contact_sequences(
         list_in(tx, workspace_id, contact_id)
     })
     .await
+    .inspect(|_| wake_producer())
 }
 
 /// `unsubscribeContacts`: every sequence must be the workspace's (404
