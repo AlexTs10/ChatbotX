@@ -52,10 +52,12 @@ async fn set_state(db: &Db, state: &'static str, role: Option<&'static str>, at:
 }
 
 async fn row(db: &Db) -> ContactInbox {
-    db.read(|conn| Ok(ci_repo::find_model_by_id_for_workspace(conn, CI, WS)?))
-        .await
-        .expect("read")
-        .expect("contact inbox")
+    chatbotx_business::tx::read(db, |conn| {
+        Ok(ci_repo::find_model_by_id_for_workspace(conn, CI, WS)?)
+    })
+    .await
+    .expect("read")
+    .expect("contact inbox")
 }
 
 async fn activity_count(db: &Db) -> i64 {

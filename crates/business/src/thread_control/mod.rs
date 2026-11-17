@@ -1036,3 +1036,35 @@ pub async fn resolve_current_state(
         stored_state(&row, now_ms()).map(|state| (state, row.thread_control_updated_at))
     }))
 }
+
+/// The service futures run inside axum handlers and jobs, so they must be `Send`.
+#[cfg(test)]
+#[allow(dead_code)]
+mod send_checks {
+    use super::*;
+
+    fn assert_send<T: Send>(_: T) {}
+
+    fn service_futures_are_send(
+        db: &Db,
+        rt: Option<&Realtime>,
+        conversation: &Conversation,
+        row: ContactInbox,
+        jobs: &dyn Enqueuer,
+    ) {
+        assert_send(request_conversation_action(
+            db,
+            rt,
+            "",
+            conversation,
+            0,
+            "take",
+            None,
+            None,
+        ));
+        assert_send(sync_conversation_owner(db, rt, "", conversation, 0));
+        assert_send(record_event(db, rt, RecordEventInput::default()));
+        assert_send(release_owned_threads_for_contacts(db, jobs, 0, &[], 0));
+        assert_send(refresh_for_routing(db, 0, row));
+    }
+}

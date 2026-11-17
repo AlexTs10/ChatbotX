@@ -498,3 +498,27 @@ fn percent(text: &str) -> String {
         })
         .collect()
 }
+
+/// The procedure futures run inside the axum `/rpc` handler, so they must be `Send`.
+#[cfg(test)]
+#[allow(dead_code)]
+mod send_checks {
+    use super::*;
+
+    fn assert_send<T: Send>(_: T) {}
+
+    fn procedure_futures_are_send(ctx: &Ctx<'_>, args: &[Value], input: &Value) {
+        assert_send(conversations::action(ctx, "threadControlAction", args));
+        assert_send(whatsapp::procedure(ctx, "", input));
+        assert_send(whatsapp::action(ctx, "", args));
+    }
+
+    fn handler_futures_are_send(state: &ApiState, call: Call<'_>) {
+        assert_send(crate::handlers::conversations::handle(state, "", call));
+    }
+
+    fn whatsapp_handler_futures_are_send(state: &ApiState, a: Call<'_>, b: Call<'_>) {
+        assert_send(crate::handlers::whatsapp_flows::handle(state, "", a));
+        assert_send(crate::handlers::whatsapp_templates::handle(state, "", b));
+    }
+}
