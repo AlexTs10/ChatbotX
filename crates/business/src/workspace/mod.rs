@@ -637,3 +637,45 @@ pub async fn list_for_member(db: &chatbotx_db::Db, user_id: i64) -> Result<Vec<W
     })
     .await
 }
+#[cfg(test)]
+mod is_active_now_tests {
+    use super::*;
+
+    // 2026-01-01T12:30:00Z
+    const NOON: i64 = 1_767_270_600_000;
+
+    #[test]
+    fn window_and_switch() {
+        assert!(!is_active_now(false, None, None, "UTC", NOON));
+        assert!(is_active_now(true, None, None, "UTC", NOON));
+        assert!(is_active_now(
+            true,
+            Some("09:00"),
+            Some("17:00"),
+            "UTC",
+            NOON
+        ));
+        assert!(!is_active_now(
+            true,
+            Some("13:00"),
+            Some("17:00"),
+            "UTC",
+            NOON
+        ));
+        assert!(is_active_now(
+            true,
+            Some("22:00"),
+            Some("13:00"),
+            "UTC",
+            NOON
+        ));
+        // 19:30 in Ho Chi Minh City.
+        assert!(!is_active_now(
+            true,
+            Some("09:00"),
+            Some("17:00"),
+            "Asia/Ho_Chi_Minh",
+            NOON
+        ));
+    }
+}
