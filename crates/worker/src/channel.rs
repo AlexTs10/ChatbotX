@@ -300,6 +300,18 @@ pub trait Channel: Send + Sync {
         let _ = data;
         missing(ctx, "conversation", "sendTyping")
     }
+
+    /// `conversation.agentMarkAsRead` (the "Seen" receipt; `message_source_id`
+    /// = WhatsApp wamid of the newest incoming message).
+    fn agent_mark_as_read(
+        &self,
+        ctx: &ChannelCtx,
+        contact: OutgoingContact,
+        message_source_id: Option<String>,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let _ = (contact, message_source_id);
+        missing(ctx, "conversation", "agentMarkAsRead")
+    }
 }
 
 /// The registered channels (`allIntegrations` / `getRegisteredIntegration`).
@@ -609,6 +621,17 @@ impl Channel for RecordingChannel {
             "messageSourceId": data.message_source_id,
         });
         self.record("sendTyping", value, |_| ())
+    }
+
+    fn agent_mark_as_read(
+        &self,
+        _ctx: &ChannelCtx,
+        contact: OutgoingContact,
+        message_source_id: Option<String>,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let value =
+            json!({ "contact": contact_json(&contact), "messageSourceId": message_source_id });
+        self.record("agentMarkAsRead", value, |_| ())
     }
 }
 
