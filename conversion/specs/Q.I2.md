@@ -108,14 +108,9 @@ workers.
 ## Parity
 
 - `p1-05/04-connections-telegram.test.ts`: 8 / 8 pass (P1.16).
-- `p1-05/06-channels-api.test.ts`: 7 / 8 pass (P1.18). The failing case
-  (`accepts the message (202) and the worker creates ...`) reads the contact
-  once, right after it appears; the Rust worker picks the job up at once, so
-  the read lands between the contact write and the message write, and
-  `lastIncomingMessageAt` is still null. The original has the same two
-  writes; it passes because its job starts later. The worker test
-  `api_message_creates_rows_once_and_the_keyword_rule_replies` asserts the
-  value after the job. P1.26 has no parity file.
+- `p1-05/06-channels-api.test.ts`: 8 / 8 pass (P1.18) since the inbound
+  pipeline saves the contact and the message in one transaction (5c6b63f5b).
+  P1.26 has no parity file.
 
 ## Tests
 
