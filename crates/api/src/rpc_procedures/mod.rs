@@ -17,6 +17,7 @@ mod lists;
 mod media_library;
 mod pipelines;
 mod products;
+mod templates;
 mod tools;
 mod workspaces;
 
@@ -129,6 +130,9 @@ pub async fn procedure(
         return Some(outcome);
     }
     if let Some(outcome) = tools::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = templates::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     lists::procedure(ctx, path, input).await
