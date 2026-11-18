@@ -27,6 +27,7 @@ pub mod inbox_labels;
 pub mod integration;
 pub mod lead_ads;
 pub mod low;
+pub mod marketing_message;
 pub mod meta_catalog;
 pub mod notification;
 pub mod purge;
@@ -268,6 +269,16 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     runtime.spawn_worker(
         spec_of(QueueName::Trigger).concurrency(100),
         handler(deps, |deps, job| Box::pin(trigger::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::MarketingMessage).concurrency(concurrency_env(
+            "MARKETING_MESSAGE_WORKER_CONCURRENCY",
+            10,
+            100,
+        )),
+        handler(deps, |deps, job| {
+            Box::pin(marketing_message::handle(deps, job))
+        }),
     )?;
     runtime.spawn_worker(
         spec_of(QueueName::Schedule),

@@ -51,6 +51,7 @@ pub mod input;
 pub mod integrations_ai;
 pub mod keywords;
 pub mod magic_links;
+pub mod marketing_messages;
 pub mod me;
 pub mod media_library;
 pub mod member_scope;
@@ -692,6 +693,8 @@ async fn route(
         facebook_lead_ads::handle(state, route_id, call).await
     } else if google_ads::ROUTES.contains(&route_id) {
         google_ads::handle(state, route_id, call).await
+    } else if marketing_messages::ROUTES.contains(&route_id) {
+        marketing_messages::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
     } else if meta_catalog::ROUTES.contains(&route_id) {
