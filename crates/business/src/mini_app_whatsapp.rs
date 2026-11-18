@@ -118,6 +118,14 @@ impl<'a> Graph<'a> {
     fn url(&self, path: &str) -> String {
         format!("{}/{}/{path}", self.base, self.version)
     }
+
+    /// `url(path)?fields=<fields>` (reqwest's `query` feature is off here).
+    fn url_with_fields(&self, path: &str, fields: &str) -> String {
+        let query: String = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("fields", fields)
+            .finish();
+        format!("{}?{query}", self.url(path))
+    }
 }
 
 fn http() -> &'static reqwest::Client {
@@ -176,7 +184,7 @@ type Meta<T> = std::result::Result<T, MetaError>;
 
 async fn get_flow(g: &Graph<'_>, flow_id: &str) -> Meta<Value> {
     send(
-        http().get(g.url(flow_id)).query(&[("fields", FLOW_FIELDS)]),
+        http().get(g.url_with_fields(flow_id, FLOW_FIELDS)),
         &g.token,
     )
     .await
@@ -344,7 +352,8 @@ async fn publish_flow_json(
     let created = send(
         http()
             .post(g.url(&format!("{}/flows", g.waba_id)))
-            .json(&body),
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_string()),
         &g.token,
     )
     .await?;
@@ -715,9 +724,8 @@ pub async fn preview(db: &Db, graph_url: &str, t: Target) -> Result<Value> {
     let publication = load_publication(db, t).await?;
     let integration = load_integration(db, t).await?;
     let g = Graph::new(graph_url, &integration);
-    let request = http()
-        .get(g.url(&publication.source_id))
-        .query(&[("fields", "preview.invalidate(false)")]);
+    let request =
+        http().get(g.url_with_fields(&publication.source_id, "preview.invalidate(false)"));
     let body = send(request, &g.token)
         .await
         .map_err(MetaError::into_business)?;
