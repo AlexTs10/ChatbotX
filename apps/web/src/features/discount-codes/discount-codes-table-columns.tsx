@@ -45,7 +45,10 @@ function ActiveToggleCell({
     },
   )
   // The saved state, except while a change is on its way (shown at once).
-  const checked = isPending && input ? input.isActive : discountCode.isActive
+  const checked =
+    isPending && input
+      ? (input as { isActive: boolean }).isActive
+      : discountCode.isActive
   return (
     <Switch
       checked={checked}

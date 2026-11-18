@@ -102,7 +102,6 @@ pub async fn get_dashboard(
 
         let money = |scaled: i64| round_money(major(scaled), &currency);
         let stat = |value: Value, change: Option<f64>| json!({ "value": value, "change": change });
-        let sales = |s: i64| major(s);
         Ok(json!({
             "currency": currency,
             "otherCurrencyOrders": other_currency_orders,
@@ -110,8 +109,8 @@ pub async fn get_dashboard(
             "to": range.to,
             "timezone": range.timezone,
             "granularity": if hourly { "hour" } else { "day" },
-            "lifetime": stat(json!(money(lifetime.sales)), percent_change(sales(until_end.sales), sales(until_end.sales - current.sales))),
-            "sales": stat(json!(money(current.sales)), percent_change(sales(current.sales), sales(previous.sales))),
+            "lifetime": stat(json!(money(lifetime.sales)), percent_change(major(until_end.sales), major(until_end.sales - current.sales))),
+            "sales": stat(json!(money(current.sales)), percent_change(major(current.sales), major(previous.sales))),
             "orders": stat(json!(current.orders), percent_change(current.orders as f64, previous.orders as f64)),
             "products": stat(json!(current.products), percent_change(current.products as f64, previous.products as f64)),
             "series": range_bucket_keys(&range.from, &range.to, hourly).into_iter().map(|key| {

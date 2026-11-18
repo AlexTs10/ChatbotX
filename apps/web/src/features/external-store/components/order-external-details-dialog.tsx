@@ -35,6 +35,16 @@ import type { OrderListItem } from "@/features/orders/schema/resource"
 import { toastActionError } from "@/lib/errors/safe-action-error-handler"
 import { OrderExternalStatusBadges } from "./order-external-status-badges"
 
+/** A line of `getOrderDetailAction` (its output type lives on the server). */
+type OrderDetailItem = {
+  id: string
+  name: string
+  variantLabel: string | null
+  sku: string | null
+  quantity: number
+  unitPrice: number
+}
+
 type OrderExternalDetailsDialogProps = {
   workspaceId: string
   order: OrderListItem
@@ -63,7 +73,8 @@ export function OrderExternalDetailsDialog({
     execute()
   }, [order.id])
 
-  const items = result.data?.items ?? []
+  const items =
+    (result.data as { items?: OrderDetailItem[] } | undefined)?.items ?? []
   const address = order.shippingAddress
   const addressLines = [
     address?.line1,

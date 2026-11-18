@@ -49,7 +49,13 @@ fn id(text: &str) -> Option<i64> {
 
 fn reply(status: u16) -> Response {
     let code = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
-    (code, axum::Json(json!({ "received": status == 200 }))).into_response()
+    let body = json!({ "received": status == 200 }).to_string();
+    (
+        code,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+        .into_response()
 }
 
 fn failed(error: impl std::fmt::Display) -> Response {

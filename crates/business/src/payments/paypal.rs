@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use super::{
     CheckoutStatus, CreateCheckout, CreatedCheckout, ErrorKind, PResult, PaymentMetadata,
     PaypalSecret, ProviderError, WebhookEvent, format_paypal_value, http, parse_paypal_value,
-    to_paypal_minor_units,
+    read_json, to_paypal_minor_units,
 };
 
 pub const PAYPAL_LIVE: &str = "https://api-m.paypal.com";
@@ -128,7 +128,7 @@ impl Paypal {
 
     async fn read_error(response: reqwest::Response) -> HttpError {
         let status = response.status().as_u16();
-        let body = response.json::<Value>().await.unwrap_or(json!({}));
+        let body = read_json(response).await.unwrap_or(json!({}));
         HttpError::new(status, if body.is_object() { body } else { json!({}) })
     }
 
@@ -165,7 +165,7 @@ impl Paypal {
             }
             return Err(Failure::Http(error));
         }
-        let body: Value = response.json().await.unwrap_or(Value::Null);
+        let body: Value = read_json(response).await.unwrap_or(Value::Null);
         let value = body["access_token"]
             .as_str()
             .unwrap_or_default()
@@ -202,7 +202,7 @@ impl Paypal {
         if response.status().as_u16() == 204 {
             return Ok(Value::Null);
         }
-        Ok(response.json().await.unwrap_or(Value::Null))
+        Ok(read_json(response).await.unwrap_or(Value::Null))
     }
 
     async fn get_order(&self, reference: &str) -> Result<Value, Failure> {

@@ -366,6 +366,12 @@ pub fn parse_paypal_value(value: &str, currency: &str) -> PResult<i64> {
         })
 }
 
+/// A provider response body as JSON (`None` when it is not JSON).
+pub(crate) async fn read_json(response: reqwest::Response) -> Option<serde_json::Value> {
+    let bytes = response.bytes().await.ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

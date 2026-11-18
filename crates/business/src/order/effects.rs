@@ -89,7 +89,6 @@ fn status_event(status: &str) -> &'static str {
 }
 
 struct WorkspaceInfo {
-    name: String,
     language: &'static str,
     timezone: String,
 }
@@ -97,32 +96,17 @@ struct WorkspaceInfo {
 async fn workspace(db: &Db, workspace_id: i64) -> Option<WorkspaceInfo> {
     tx::read(db, move |conn| {
         Ok(conn.query_row(
-            r#"SELECT "name", "language", "timezone" FROM "Workspace" WHERE "id" = ?1"#,
+            r#"SELECT "language", "timezone" FROM "Workspace" WHERE "id" = ?1"#,
             [workspace_id],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            },
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
         )?)
     })
     .await
     .ok()
-    .map(|(name, language, timezone)| WorkspaceInfo {
-        name,
+    .map(|(language, timezone)| WorkspaceInfo {
         language: messages::language(Some(&language)),
         timezone,
     })
-}
-
-/// The workspace name (the payment page's description).
-pub(crate) async fn workspace_name(db: &Db, workspace_id: i64) -> String {
-    workspace(db, workspace_id)
-        .await
-        .map(|w| w.name)
-        .unwrap_or_default()
 }
 
 /// `afterStatusChange`: placed (`from` none) or moved.

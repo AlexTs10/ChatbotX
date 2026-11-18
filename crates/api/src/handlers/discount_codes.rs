@@ -171,9 +171,11 @@ fn parse_write(input: &mut Input, partial: bool) -> Map<String, Value> {
         out.insert("usageLimit".into(), json!(limit.map(|n| n as i64)));
     }
     if sent(input, "customerFilter") {
-        let filter = match input.get("customerFilter") {
-            None | Some(Value::Null) => None,
-            Some(_) => parse_contact_filter(input, "customerFilter", true),
+        let present = !matches!(input.get("customerFilter"), None | Some(Value::Null));
+        let filter = if present {
+            parse_contact_filter(input, "customerFilter", true)
+        } else {
+            None
         };
         out.insert("customerFilter".into(), filter.unwrap_or(Value::Null));
     }

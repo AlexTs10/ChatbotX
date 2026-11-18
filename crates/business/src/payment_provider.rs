@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 use chatbotx_core::encryption::{EncryptedData, Encryption};
 use chatbotx_db::repo::models::EcommercePaymentProvider;
-use chatbotx_db::repo::{Json, find_many, find_one, new_id, now_ms};
+use chatbotx_db::repo::{find_many, find_one, new_id, now_ms};
 use chatbotx_db::rusqlite::{Connection, params};
 use chatbotx_db::{Db, repo};
 use chatbotx_kv::lock::{LockMap, LockOpts};

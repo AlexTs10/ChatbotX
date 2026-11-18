@@ -193,6 +193,9 @@ pub fn order_json(o: &Order) -> Map<String, Value> {
         "taxTotal": money(o.tax_total),
         "couponDiscount": money(o.coupon_discount),
         "total": money(o.total),
+    });
+    // Two halves: one `json!` of every key passes the macro recursion limit.
+    let rest = json!({
         "discountCode": o.discount_code,
         "customerName": o.customer_name,
         "customerEmail": o.customer_email,
@@ -216,10 +219,14 @@ pub fn order_json(o: &Order) -> Map<String, Value> {
         "createdAt": iso(o.created_at),
         "updatedAt": iso(o.updated_at),
     });
-    match value {
+    let mut map = match value {
         Value::Object(map) => map,
         _ => Map::new(),
+    };
+    if let Value::Object(rest) = rest {
+        map.extend(rest);
     }
+    map
 }
 
 pub fn item_json(i: &OrderItem) -> Value {
@@ -778,6 +785,7 @@ pub struct Draft {
 }
 
 /// `priceDraft` (`redeeming` = inside the order's transaction).
+#[allow(clippy::too_many_arguments)]
 pub fn price_draft(
     conn: &Connection,
     workspace_id: i64,
@@ -1465,7 +1473,13 @@ mod tests {
             line_total: 20.0,
             gross: 20.0,
         };
-        let t = compute_totals(&[line.clone()], "USD", 5.0, 10.0, Some((4.0, false)));
+        let t = compute_totals(
+            std::slice::from_ref(&line),
+            "USD",
+            5.0,
+            10.0,
+            Some((4.0, false)),
+        );
         assert_eq!(
             (t.subtotal, t.service_fee_total, t.total),
             (20.0, 1.6, 22.6)

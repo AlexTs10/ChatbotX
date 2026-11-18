@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use super::{
     CheckoutStatus, CreateCheckout, CreatedCheckout, ErrorKind, PResult, PaymentMetadata,
-    ProviderError, WebhookEvent, http, to_stripe_minor_units,
+    ProviderError, WebhookEvent, http, read_json, to_stripe_minor_units,
 };
 
 /// `https://api.stripe.com` (tests point it elsewhere).
@@ -208,7 +208,7 @@ async fn call(
             ))
         })?;
         let status = response.status().as_u16();
-        let body: Value = response.json().await.unwrap_or(Value::Null);
+        let body: Value = read_json(response).await.unwrap_or(Value::Null);
         if (200..300).contains(&status) {
             return Ok(body);
         }
@@ -716,7 +716,7 @@ pub fn sign(raw_body: &str, secret: &str, timestamp: i64) -> String {
 }
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
+    if text.len() % 2 != 0 {
         return None;
     }
     (0..text.len())

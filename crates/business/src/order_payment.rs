@@ -555,6 +555,8 @@ fn return_urls(deps: Deps<'_>, order: &Order, contact_id: i64) -> Result<(String
 }
 
 /// What reading one attempt from its provider came to.
+// ponytail: short-lived, one per attempt; boxing the order buys nothing.
+#[allow(clippy::large_enum_variant)]
 enum SyncOutcome {
     /// `state` = the provider's, or `settled` (paid / refunded already).
     None(&'static str),
