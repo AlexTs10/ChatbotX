@@ -885,10 +885,13 @@ async fn import_and_patch(
         unresolved
             .into_iter()
             .map(|mut p| {
-                p.staged_at = p
-                    .staged_at
-                    .or_else(|| staged_at.get(&p.key()).cloned().flatten())
-                    .or_else(|| Some(now.clone()));
+                if p.staged_at.is_none() {
+                    p.staged_at = staged_at
+                        .get(&p.key())
+                        .cloned()
+                        .flatten()
+                        .or_else(|| Some(now.clone()));
+                }
                 p
             })
             .collect(),
