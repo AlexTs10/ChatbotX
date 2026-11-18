@@ -1,9 +1,10 @@
 //! The read routes of `features/whatsapp-calls/api/public.ts` (scope
 //! `integrations`): `whatsappCalls.list` (`whatsappCallHistoryService.list`
-//! with `member: "workspace"`), `getRecording`, `getTranscript`, `getSummary`.
+//! with `member: "workspace"`), `getRecording`, `getTranscript`, `getSummary`,
+//! `listSummaryProviders`.
 //!
-//! ponytail: `listSummaryProviders` / `generateSummary` (the AI summary
-//! writer) are not ported yet.
+//! ponytail: `generateSummary` (the AI summary writer) is not ported yet: the
+//! AI client lives in `chatbotx-worker`.
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chatbotx_business::{BusinessError, tx};
@@ -18,7 +19,9 @@ use serde_json::{Value, json};
 use super::contact_inboxes::lenient_base64;
 use super::input::{Input, Str, key};
 use super::tags::digits_at;
-use super::{ApiState, Call, ErrorMap, FINDING, Reply, business_error, internal_error, json};
+use super::{
+    ApiState, Call, ErrorMap, FINDING, LISTING, Reply, business_error, internal_error, json,
+};
 
 /// The routes of this module.
 pub const ROUTES: &[&str] = &[
@@ -26,6 +29,18 @@ pub const ROUTES: &[&str] = &[
     "whatsappCalls.getRecording",
     "whatsappCalls.getTranscript",
     "whatsappCalls.getSummary",
+    "whatsappCalls.listSummaryProviders",
+];
+
+/// `aiProviders` with `PROVIDER_LABELS` and the integration table
+/// (`listConnectedCallSummaryProviders`; `openaiCompatible` is left out).
+const SUMMARY_PROVIDERS: [(&str, &str, &str); 6] = [
+    ("openai", "OpenAI", "IntegrationOpenai"),
+    ("gemini", "Gemini", "IntegrationGemini"),
+    ("claude", "Claude", "IntegrationClaude"),
+    ("deepseek", "DeepSeek", "IntegrationDeepseek"),
+    ("openrouter", "OpenRouter", "IntegrationOpenrouter"),
+    ("muse", "Muse", "IntegrationMuse"),
 ];
 
 /// `possibleErrorsOnListingWithCursor`.
@@ -229,6 +244,29 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .map(|out| json(200, out))
                 .map_err(|e| business_error(e, FINDING))
         }
+        "whatsappCalls.listSummaryProviders" => tx::read(&state.db, move |c| {
+            let mut providers = Vec::new();
+            for (provider, label, table) in SUMMARY_PROVIDERS {
+                let id: Option<i64> = c
+                    .query_row(
+                        &format!(
+                            r#"SELECT "id" FROM "{table}" WHERE "workspaceId" = ?1 ORDER BY "id" LIMIT 1"#
+                        ),
+                        params![ws],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if let Some(id) = id {
+                    providers.push(
+                        json!({ "id": id.to_string(), "provider": provider, "label": label }),
+                    );
+                }
+            }
+            Ok(providers)
+        })
+        .await
+        .map(|providers| json(200, json!({ "providers": providers })))
+        .map_err(|e| business_error(e, LISTING)),
         _ => {
             let id = id_input(&call)?;
             load_call(state, ws, id)
