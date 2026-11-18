@@ -82,7 +82,7 @@ pub async fn trigger_smb_app_data_sync(
     if lower.contains("window") || lower.contains("expired") || lower.contains("24 hour") {
         return Ok(Some("window_expired"));
     }
-    tracing::error!(code = ?error["code"], message, "smb_app_data unknown error");
+    tracing::error!(code = ?error["code"], %message, "smb_app_data unknown error");
     Err(if message.is_empty() {
         "smb_app_data error".into()
     } else {
@@ -180,7 +180,7 @@ pub async fn set_whatsapp_coexist(
             }
             Err(message) => {
                 tracing::error!(
-                    error = message,
+                    error = %message,
                     integration_id,
                     "smb_app_data trigger failed"
                 );
