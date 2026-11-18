@@ -163,6 +163,106 @@ pub async fn list_locked_resource_ids(
     Ok((locked, undeletable))
 }
 
+// ---- guards (`installed-resource.service.ts`) ------------------------------------
+
+/// `templateAllowEditViolationException`.
+pub fn allow_edit_violation() -> BusinessError {
+    BusinessError::exception(
+        "This resource was installed from a template that disallows editing",
+        "templateAllowEditViolation",
+        403,
+    )
+}
+
+/// `templateAllowDeleteViolationException`.
+pub fn allow_delete_violation() -> BusinessError {
+    BusinessError::exception(
+        "This resource was installed from a template that disallows deletion",
+        "templateAllowDeleteViolation",
+        400,
+    )
+}
+
+/// `templateUninstallInProgressException`.
+pub fn uninstall_in_progress() -> BusinessError {
+    BusinessError::exception(
+        "This template is being uninstalled",
+        "templateUninstallInProgress",
+        409,
+    )
+}
+
+/// The ids, among `ids`, of live installed copies (`wasExisting` off, not
+/// detached) matching `extra` (an SQL condition on `r`).
+fn installed_ids(
+    conn: &chatbotx_db::rusqlite::Connection,
+    workspace_id: i64,
+    kind: &str,
+    ids: &[i64],
+    extra: &str,
+) -> Result<Vec<i64>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let marks = vec!["?"; ids.len()].join(", ");
+    let sql = format!(
+        r#"SELECT DISTINCT r."resourceId" FROM "TemplateInstalledResource" r
+           JOIN "TemplateInstallation" i ON i."id" = r."installationId"
+           WHERE r."workspaceId" = ? AND r."resourceKind" = ? AND r."resourceId" IN ({marks})
+             AND r."wasExisting" = 0 AND r."detachedAt" IS NULL {extra}"#
+    );
+    let mut values = vec![Sql::Integer(workspace_id), Sql::Text(kind.to_string())];
+    values.extend(ids.iter().map(|id| Sql::Integer(*id)));
+    let mut stmt = conn.prepare(&sql).map_err(db_error)?;
+    stmt.query_map(params_from_iter(values), |row| row.get::<_, i64>(0))
+        .map_err(db_error)?
+        .collect::<chatbotx_db::rusqlite::Result<Vec<_>>>()
+        .map_err(db_error)
+}
+
+const GOVERNING: &str = r#"AND i."sourceDeletedAt" IS NULL AND i."templateId" IS NOT NULL"#;
+
+/// `assertResourceEditable` inside the caller's write transaction (the one
+/// SQLite writer stands for the `tpl-res:` locks): a copy being uninstalled
+/// rejects every write; a write that `touches_locked_content` of a copy whose
+/// template disallows editing is refused.
+pub fn assert_editable_in(
+    conn: &chatbotx_db::rusqlite::Connection,
+    workspace_id: i64,
+    kind: &str,
+    ids: &[i64],
+    touches_locked_content: bool,
+) -> Result<()> {
+    let doomed = r#"AND r."uninstallOutcome" IN ('deleting', 'deletingModified', 'deletingUnverified', 'failed', 'failedModified', 'failedUnverified')"#;
+    if !installed_ids(conn, workspace_id, kind, ids, doomed)?.is_empty() {
+        return Err(uninstall_in_progress());
+    }
+    if !touches_locked_content {
+        return Ok(());
+    }
+    let blocking = format!(r#"AND r."allowEdit" = 0 {GOVERNING}"#);
+    if installed_ids(conn, workspace_id, kind, ids, &blocking)?.is_empty() {
+        Ok(())
+    } else {
+        Err(allow_edit_violation())
+    }
+}
+
+/// `assertDeletable` inside the caller's write transaction (`withDeleteGuard`).
+pub fn assert_deletable_in(
+    conn: &chatbotx_db::rusqlite::Connection,
+    workspace_id: i64,
+    kind: &str,
+    ids: &[i64],
+) -> Result<()> {
+    let blocking = format!(r#"AND r."allowDelete" = 0 {GOVERNING}"#);
+    if installed_ids(conn, workspace_id, kind, ids, &blocking)?.is_empty() {
+        Ok(())
+    } else {
+        Err(allow_delete_violation())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
