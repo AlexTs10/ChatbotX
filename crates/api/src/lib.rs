@@ -21,6 +21,7 @@ pub mod rpc;
 pub mod rpc_ai;
 pub mod rpc_procedures;
 pub mod session;
+pub mod shop_public;
 pub mod spa;
 pub mod store_webhooks;
 

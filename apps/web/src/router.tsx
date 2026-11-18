@@ -29,6 +29,7 @@ const toolEditors = () => import("@/routes/tool-editors")
 const comments = () => import("@/routes/comments")
 const appointments = () => import("@/routes/appointments")
 const booking = () => import("@/routes/booking")
+const shop = () => import("@/routes/shop")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -113,6 +114,23 @@ const bookingPages = (
     getParentRoute: () => rootRoute,
     path,
     component: lazyRouteComponent(booking, page),
+  }),
+)
+
+// `/shop/$workspaceId/*` is public too: the signed shop token is the authority.
+const shopPages = (
+  [
+    ["shop/$workspaceId", "ShopHomePage"],
+    ["shop/$workspaceId/categories", "ShopCategoriesPage"],
+    ["shop/$workspaceId/products/$productId", "ShopProductPage"],
+    ["shop/$workspaceId/cart", "ShopCartPage"],
+    ["shop/$workspaceId/orders/$orderId", "ShopOrderPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    component: lazyRouteComponent(shop, page),
   }),
 )
 
@@ -571,6 +589,7 @@ const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
   invitationRoute,
   ...bookingPages,
+  ...shopPages,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,

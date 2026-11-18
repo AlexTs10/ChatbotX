@@ -119,6 +119,7 @@ pub mod user_persistent_menu;
 pub mod user_quota;
 pub mod vendor;
 pub mod webhook;
+pub mod webshop;
 pub mod whatsapp;
 pub mod whatsapp_flow;
 pub mod woocommerce;

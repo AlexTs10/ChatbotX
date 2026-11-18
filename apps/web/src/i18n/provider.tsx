@@ -56,3 +56,43 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     </IntlProvider>
   )
 }
+
+const loadPair = (target: string) =>
+  Promise.all([load(target), target === "en" ? null : load("en")])
+
+const localeMessages = new Map<string, ReturnType<typeof loadPair>>()
+
+/**
+ * A subtree in another locale than the viewer's: the public web shop speaks
+ * the workspace language, whoever opens the link (`loadWorkspaceMessages`).
+ */
+export function LocaleProvider({
+  locale: target,
+  children,
+}: {
+  locale: string
+  children: ReactNode
+}) {
+  const resolved = resolveLocale(target)
+  let pending = localeMessages.get(resolved)
+  if (!pending) {
+    pending = loadPair(resolved)
+    localeMessages.set(resolved, pending)
+  }
+  const [messages, english] = use(pending)
+  return (
+    <IntlProvider
+      getMessageFallback={({ key, namespace }) => {
+        const path = namespace ? `${namespace}.${key}` : key
+        const fallback = lookup(english ?? messages, path)
+        return typeof fallback === "string" ? fallback : path
+      }}
+      locale={resolved}
+      messages={messages}
+      onError={() => undefined}
+      timeZone={getBrowserTimezone()}
+    >
+      {children}
+    </IntlProvider>
+  )
+}
