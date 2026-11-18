@@ -17,7 +17,7 @@ const GRAPH: &str = "https://graph.facebook.com";
 pub const VERSION: &str = "v23.0";
 /// `GRAPH_ERROR_CODE_INVALID_TOKEN`.
 pub const INVALID_TOKEN: i64 = 190;
-const PAGE_LIMIT: &str = "499";
+pub(crate) const PAGE_LIMIT: &str = "499";
 const MAX_PAGES: usize = 20;
 /// `CHANNEL_ERROR_FALLBACK` of `toKnownOrpcError`.
 const FALLBACK: &str = "The provider rejected the request.";
@@ -40,7 +40,7 @@ impl GraphError {
         self.network || self.status >= 500
     }
 
-    fn invalid(message: &str) -> GraphError {
+    pub(crate) fn invalid(message: &str) -> GraphError {
         GraphError {
             status: 400,
             code: None,
@@ -75,7 +75,7 @@ pub fn redact_tokens(message: &str) -> String {
         .into_owned()
 }
 
-fn url(path: &str, query: &[(&str, &str)]) -> String {
+pub(crate) fn url(path: &str, query: &[(&str, &str)]) -> String {
     let mut out = format!("{GRAPH}/{path}");
     if !query.is_empty() {
         out.push('?');
@@ -114,13 +114,20 @@ async fn send(
 }
 
 /// `rescue`: a non-2xx answer or no answer is a [`GraphError`].
-async fn call(
+pub(crate) async fn call(
     method: &'static str,
     url: String,
     body: Option<&Value>,
     bearer: Option<&str>,
 ) -> std::result::Result<Value, GraphError> {
-    match send(method, url, body, bearer).await {
+    parse_reply(send(method, url, body, bearer).await)
+}
+
+/// The JSON of a 2xx answer, else a [`GraphError`] (`rescue`).
+pub(crate) fn parse_reply(
+    reply: std::result::Result<(u16, String), String>,
+) -> std::result::Result<Value, GraphError> {
+    match reply {
         Ok((status, text)) if (200..300).contains(&status) => {
             serde_json::from_str(&text).map_err(|_| GraphError::invalid("Invalid Graph response"))
         }
@@ -197,7 +204,7 @@ pub struct AdAccount {
 }
 
 /// `fetchAllPages`: follows `paging.cursors.after` while `paging.next` is set.
-async fn all_pages(
+pub(crate) async fn all_pages(
     path: &str,
     query: &[(&str, &str)],
 ) -> std::result::Result<Vec<Value>, GraphError> {

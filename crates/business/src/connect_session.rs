@@ -693,3 +693,72 @@ pub fn complete_authorized(
     .map_err(repo_err)?;
     load(conn, row.id)?.ok_or_else(not_found)
 }
+
+/// `cancelPendingByProvider`: every `pending` session of the provider in
+/// the workspace becomes `cancelled`. The number of rows.
+pub async fn cancel_pending_by_provider(
+    db: &Db,
+    workspace_id: i64,
+    provider: &str,
+) -> Result<usize> {
+    let provider = provider.to_string();
+    tx::write(db, move |conn| {
+        conn.execute(
+            r#"UPDATE "ConnectSession" SET "status" = 'cancelled', "consumedAt" = ?3,
+                   "encryptedAuth" = NULL, "updatedAt" = ?3
+               WHERE "workspaceId" = ?1 AND "provider" = ?2 AND "status" = 'pending'"#,
+            params![workspace_id, provider, repo::now_ms()],
+        )
+        .map_err(repo_err)
+    })
+    .await
+}
+
+/// `updateReturnUrl`: an active session's return path (already
+/// validated by the caller), else `notFound`.
+pub async fn update_return_url(db: &Db, id: i64, return_url: String) -> Result<()> {
+    tx::write(db, move |conn| {
+        let updated = conn
+            .execute(
+                r#"UPDATE "ConnectSession" SET "returnUrl" = ?2, "updatedAt" = ?3
+                   WHERE "id" = ?1 AND "status" IN ('pending', 'authorized', 'awaiting_selection')"#,
+                params![id, return_url, repo::now_ms()],
+            )
+            .map_err(repo_err)?;
+        if updated == 0 {
+            return Err(not_found());
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// `completeSelection`: an `awaiting_selection` session completes (the
+/// candidate ciphertext is dropped); any other is returned unchanged.
+pub async fn complete_selection(db: &Db, id: i64, workspace_id: i64) -> Result<SessionRow> {
+    tx::write(db, move |conn| {
+        let now = repo::now_ms();
+        let set = Set {
+            status: Some("completed"),
+            step: Some("done"),
+            encrypted_auth: Some(None),
+            consumed: true,
+            ..Set::default()
+        };
+        match update_where(
+            conn,
+            id,
+            workspace_id,
+            &["awaiting_selection"],
+            false,
+            set,
+            now,
+        )? {
+            Some(row) => Ok(row),
+            None => load(conn, id)?
+                .filter(|row| row.workspace_id == workspace_id)
+                .ok_or_else(not_found),
+        }
+    })
+    .await
+}

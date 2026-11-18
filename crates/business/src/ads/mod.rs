@@ -1,7 +1,9 @@
 //! The ads domain (`features/ads/api/public.ts` services).
 
 pub mod analytics;
+pub mod campaigns;
 pub mod funnel;
 pub mod graph;
 pub mod referral;
+pub mod retarget;
 pub mod rules;

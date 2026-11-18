@@ -20,6 +20,7 @@ mod ecommerce;
 mod email_marketing;
 mod email_topics;
 mod flows;
+mod google_ads;
 mod inboxes;
 pub(crate) mod integrations;
 mod lists;
@@ -188,6 +189,9 @@ pub async fn procedure(
     if let Some(outcome) = user_persistent_menus::procedure(ctx, path).await {
         return Some(outcome);
     }
+    if let Some(outcome) = google_ads::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 
@@ -244,7 +248,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || email_marketing::ACTIONS.contains(&n)
                 || appointments::ACTIONS.contains(&n)
                 || working_hours::ACTIONS.contains(&n)
-                || whatsapp::ACTIONS.contains(&n) =>
+                || whatsapp::ACTIONS.contains(&n)
+                || google_ads::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -318,6 +323,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = whatsapp::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = google_ads::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

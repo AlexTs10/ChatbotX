@@ -36,7 +36,7 @@ pub const ROUTES: &[&str] = &[
     "ads.disconnectConnection",
 ];
 
-fn ad_account_id(text: &str) -> bool {
+pub(super) fn ad_account_id(text: &str) -> bool {
     text.strip_prefix("act_")
         .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
 }
@@ -88,12 +88,12 @@ const MAX_RANGE_DAYS: f64 = 366.0;
 const MS_PER_DAY: f64 = 86_400_000.0;
 
 /// An optional `zodBigintAsString` key.
-fn opt_id(input: &mut Input, name: &str) -> Option<i64> {
+pub(super) fn opt_id(input: &mut Input, name: &str) -> Option<i64> {
     let value = input.get(name).cloned()?;
     input.id_at(&key(name), Some(&value), true)
 }
 
-fn date_at(input: &mut Input, name: &str) -> Option<i64> {
+pub(super) fn date_at(input: &mut Input, name: &str) -> Option<i64> {
     let value = input.get(name).cloned();
     let parsed = value.as_ref().and_then(super::broadcasts::coerce_date);
     if parsed.is_none() {
@@ -177,10 +177,10 @@ const REPORTING: super::ErrorMap = &[("businessError", 400), ("reportTimeout", 5
 /// `adsEligibleChannelTypes`.
 const ELIGIBLE_CHANNELS: &[&str] = &["whatsapp", "messenger", "instagram"];
 /// `messagingAdChannelSchema`.
-const MESSAGING_CHANNELS: &[&str] = &["messenger", "instagram", "whatsapp"];
+pub(super) const MESSAGING_CHANNELS: &[&str] = &["messenger", "instagram", "whatsapp"];
 
 /// `messagingAdsIntegrationIdentityPublicShape`.
-fn integration_identity(input: &mut Input) -> (String, i64) {
+pub(super) fn integration_identity(input: &mut Input) -> (String, i64) {
     let channel = enum_field(input, "channel", MESSAGING_CHANNELS, true);
     let integration_id = input.id("integrationId");
     (
@@ -209,7 +209,7 @@ const DATE_KEY: Str = Str {
     pattern: Some(date_key),
 };
 
-const NON_EMPTY: Str = Str {
+pub(super) const NON_EMPTY: Str = Str {
     trim: true,
     min: Some(1),
     max: None,
@@ -283,7 +283,12 @@ fn trigger(input: &mut Input, value: Option<&Value>) -> Option<Value> {
     Some(json!({ "type": kind, list_key: items }))
 }
 
-fn enum_field(input: &mut Input, name: &str, options: &[&str], required: bool) -> Option<String> {
+pub(super) fn enum_field(
+    input: &mut Input,
+    name: &str,
+    options: &[&str],
+    required: bool,
+) -> Option<String> {
     let value = input.get(name).cloned();
     input.enum_at(&key(name), value.as_ref(), options, required)
 }

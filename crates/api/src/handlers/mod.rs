@@ -3,6 +3,7 @@
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
 pub mod ads;
+pub mod ads_campaigns;
 pub mod ai_agents;
 pub mod ai_files;
 pub mod ai_functions;
@@ -714,6 +715,8 @@ async fn route(
         product_vendors::handle(state, route_id, call).await
     } else if products::ROUTES.contains(&route_id) {
         products::handle(state, route_id, call).await
+    } else if ads_campaigns::ROUTES.contains(&route_id) {
+        ads_campaigns::handle(state, route_id, call, principal).await
     } else if ads::ROUTES.contains(&route_id) {
         ads::handle(state, route_id, call).await
     } else if capi::ROUTES.contains(&route_id) {
