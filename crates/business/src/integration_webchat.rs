@@ -334,6 +334,7 @@ pub async fn update(
         .map(|menus| brand_webchat_menus(menus, app_url));
     let now = chatbotx_db::repo::now_ms();
     tx::write(db, move |tx| {
+        crate::template::guard::assert_content_editable(tx, workspace_id, "integrationWebchat", &[id])?;
         let mut sets: Vec<(&str, SqlValue)> = Vec::new();
         if let Some(name) = &patch.name {
             sets.push(("name", name.clone().into()));
@@ -400,7 +401,11 @@ pub async fn update(
 /// `delete`: the webchat row and the connection / inbox disconnect.
 pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
     let now = chatbotx_db::repo::now_ms();
-    tx::write(db, move |tx| delete_in(tx, workspace_id, id, now)).await
+    tx::write(db, move |tx| {
+        crate::template::guard::assert_deletable(tx, workspace_id, "integrationWebchat", &[id])?;
+        delete_in(tx, workspace_id, id, now)
+    })
+    .await
 }
 
 /// `deleteInTx`: the webchat and its inbox connection, in the caller's transaction.

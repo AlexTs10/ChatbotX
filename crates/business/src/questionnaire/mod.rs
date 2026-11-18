@@ -302,6 +302,12 @@ pub async fn create(db: &Db, workspace_id: i64, name: &str) -> Result<i64> {
 pub async fn rename(db: &Db, workspace_id: i64, id: i64, name: &str) -> Result<()> {
     let name = chatbotx_core::js::trim(name).to_string();
     tx::write(db, move |conn| {
+        crate::template::guard::assert_content_editable(
+            conn,
+            workspace_id,
+            "questionnaire",
+            &[id],
+        )?;
         let changed = conn
             .execute(
                 r#"UPDATE "Questionnaire" SET "name" = ?1, "updatedAt" = ?2
@@ -402,6 +408,7 @@ pub async fn duplicate(db: &Db, workspace_id: i64, id: i64) -> Result<i64> {
 
 /// `deleteInTx`: cancels the open submissions, soft-deletes.
 pub fn delete_in_tx(conn: &Connection, workspace_id: i64, ids: &[i64]) -> Result<()> {
+    crate::template::guard::assert_deletable(conn, workspace_id, "questionnaire", ids)?;
     if ids.is_empty() {
         return Ok(());
     }
@@ -571,6 +578,7 @@ pub async fn update(db: &Db, input: UpdateQuestionnaire) -> Result<()> {
     let checked = input.clone();
     tx::read(db, move |conn| validate_edit_input(conn, &checked)).await?;
     tx::write(db, move |conn| {
+        crate::template::guard::assert_content_editable(conn, input.workspace_id, "questionnaire", &[input.id])?;
         let questionnaire = find_in(conn, input.workspace_id, input.id)?.ok_or_else(not_found)?;
         if let Some(flow_id) = input.trigger_flow_id {
             let exists: bool = conn

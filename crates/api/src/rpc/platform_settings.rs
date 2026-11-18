@@ -8,6 +8,9 @@
 //!   `enterprise/features/platform-email-templates`;
 //! - `updatePlatformSmtp` / `deletePlatformSmtp` of
 //!   `enterprise/features/platform-smtp`;
+//! - `updateDefaultTemplate` / `clearDefaultTemplate` (own tenant) and
+//!   `updateRootDefaultTemplate` / `clearRootDefaultTemplate` (root tenant)
+//!   of `features/platform-default-template` (Q.D4 slice 6);
 //!
 //! and under the key `billingActions`: `reconcileTenantEntitlement`
 //! (`enterprise/features/billing`).
@@ -15,6 +18,7 @@
 //! ponytail: no `previewEmailTemplate` (MJML compile) and no SMTP
 //! `verifySmtpTransport` (no TLS SMTP client): both come with the mail port.
 
+use chatbotx_business::template::tenant_default as default_template;
 use chatbotx_business::tenant::{self, ROOT_TENANT_ID};
 use chatbotx_db::rusqlite::types::Value as SqlValue;
 use serde_json::{Map, Value, json};
@@ -35,6 +39,10 @@ pub fn action_gate(name: &str) -> Option<Gate> {
             | "updateRootEmailTemplate"
             | "updatePlatformSmtp"
             | "deletePlatformSmtp"
+            | "updateDefaultTemplate"
+            | "clearDefaultTemplate"
+            | "updateRootDefaultTemplate"
+            | "clearRootDefaultTemplate"
     )
     .then_some(Gate::Auth)
 }
@@ -231,7 +239,13 @@ pub async fn run_action(
         return Ok(None);
     }
     // The client middleware runs before the input schema.
-    let own_tenant = matches!(name, "updatePlatformBranding" | "updateEmailTemplate");
+    let own_tenant = matches!(
+        name,
+        "updatePlatformBranding"
+            | "updateEmailTemplate"
+            | "updateDefaultTemplate"
+            | "clearDefaultTemplate"
+    );
     let allowed = if own_tenant {
         is_platform_admin(api, user).await?
     } else {
@@ -290,6 +304,56 @@ pub async fn run_action(
             .await?;
             Ok(None)
         }
+        "updateDefaultTemplate" | "updateRootDefaultTemplate" => {
+            let template_id = input.digits_id("templateId");
+            let key = input.string("templateKey", Str::trimmed(1, usize::MAX));
+            input.finish()?;
+            let Some(encryption) = api.encryption.as_deref() else {
+                return Err(ActionError::Internal(
+                    "encryption keys are not configured".into(),
+                ));
+            };
+            let scope = default_template_scope(own_tenant, user);
+            let saved = default_template::set(
+                &api.db,
+                encryption,
+                scope,
+                template_id.unwrap_or(-1),
+                key.unwrap_or_default(),
+                user,
+            )
+            .await;
+            // `saveDefaultTemplate`: the two expected refusals are outcomes.
+            let reason = match &saved {
+                Ok(()) => return Ok(Some(json!({ "status": "saved" }))),
+                Err(chatbotx_business::BusinessError::Exception { code, .. }) => {
+                    match code.as_str() {
+                        "tenantDefaultTemplateUnavailable" => Some("unavailable"),
+                        "tenantDefaultTemplateShareDisabled" => Some("shareDisabled"),
+                        _ => None,
+                    }
+                }
+                Err(_) => None,
+            };
+            match reason {
+                Some(reason) => Ok(Some(json!({ "status": "rejected", "reason": reason }))),
+                None => Err(saved.unwrap_err().into()),
+            }
+        }
+        "clearDefaultTemplate" | "clearRootDefaultTemplate" => {
+            default_template::clear(&api.db, default_template_scope(own_tenant, user), user)
+                .await?;
+            Ok(None)
+        }
         _ => Err(ActionError::Internal(format!("unknown action {name}"))),
+    }
+}
+
+/// The reseller's own tenant, or the root tenant (`DefaultTemplateScope`).
+fn default_template_scope(own_tenant: bool, user: i64) -> default_template::Scope {
+    if own_tenant {
+        default_template::Scope::Owner(user)
+    } else {
+        default_template::Scope::Root
     }
 }

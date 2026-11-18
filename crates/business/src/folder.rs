@@ -173,6 +173,7 @@ pub async fn create(
 pub async fn update(db: &Db, workspace_id: i64, id: i64, name: &str) -> Result<Folder> {
     let name = name.to_string();
     tx::write(db, move |tx| {
+        crate::template::guard::assert_content_editable(tx, workspace_id, "folder", &[id])?;
         find_in(tx, workspace_id, id, None)?.ok_or_else(folder_not_found)?;
         tx.execute(
             r#"UPDATE "Folder" SET "name" = ?1, "updatedAt" = ?2 WHERE "id" = ?3"#,
@@ -189,6 +190,7 @@ pub async fn update(db: &Db, workspace_id: i64, id: i64, name: &str) -> Result<F
 pub async fn bulk_delete(db: &Db, workspace_id: i64, ids: &[i64]) -> Result<()> {
     let ids = ids.to_vec();
     tx::write(db, move |tx| {
+        crate::template::guard::assert_deletable(tx, workspace_id, "folder", &ids)?;
         for id in ids {
             tx.execute(
                 r#"DELETE FROM "Folder" WHERE "workspaceId" = ?1 AND ("id" = ?2

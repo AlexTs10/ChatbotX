@@ -18,6 +18,7 @@ pub mod platform_credentials;
 pub mod platform_settings;
 pub mod procedures;
 mod table;
+pub mod template_actions;
 pub mod workspace;
 pub mod workspace_members;
 

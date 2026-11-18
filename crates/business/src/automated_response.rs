@@ -394,6 +394,12 @@ pub async fn update(
     data: UpdateAutomatedResponse,
 ) -> Result<Updated> {
     tx::write(db, move |conn| {
+        crate::template::guard::assert_content_editable(
+            conn,
+            workspace_id,
+            "automatedResponse",
+            &[id],
+        )?;
         let existing = find_in(conn, workspace_id, id, kind)?;
         let mut next_flow = data.flow_id;
         let mut next_text = data.text.clone();
@@ -502,6 +508,7 @@ pub async fn delete_many(
     kind: ResponseType,
 ) -> Result<Vec<i64>> {
     tx::write(db, move |conn| {
+        crate::template::guard::assert_deletable(conn, workspace_id, "automatedResponse", &ids)?;
         let list = serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into());
         let mut stmt = conn
             .prepare(

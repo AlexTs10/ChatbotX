@@ -178,6 +178,7 @@ pub async fn update(db: &Db, workspace_id: i64, id: i64, data: FlowUpdate) -> Re
         {
             changed_keys.push("enableInInbox");
         }
+        crate::template::guard::assert_editable(tx, workspace_id, "flow", &[id], &changed_keys)?;
         if changed_keys.is_empty() {
             return Ok(FlowUpdated::default());
         }
@@ -211,6 +212,7 @@ pub async fn duplicate(db: &Db, workspace_id: i64, id: i64) -> Result<i64> {
 /// original `enqueueDelete` job; empty = no job).
 pub async fn delete_many(db: &Db, workspace_id: i64, ids: Vec<i64>) -> Result<Vec<i64>> {
     tx::write(db, move |tx| {
+        crate::template::guard::assert_deletable(tx, workspace_id, "flow", &ids)?;
         let ids = repo::list_ids_by_ids(tx, workspace_id, &ids)?;
         if ids.is_empty() {
             return Ok(ids);

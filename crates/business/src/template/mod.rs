@@ -9,6 +9,7 @@
 //! Postgres advisory locks are the one SQLite writer.
 
 pub mod collect;
+pub mod guard;
 pub mod install;
 pub mod installations;
 pub mod permissions;
@@ -17,6 +18,7 @@ pub mod save;
 pub mod service;
 pub mod snapshot;
 pub mod syncs;
+pub mod tenant_default;
 pub mod uninstall;
 
 use base64::Engine;

@@ -647,8 +647,10 @@ pub async fn delete_by_key(db: &Db, workspace_id: i64, key: &str) -> Result<()> 
 
 /// `bulkDelete` (workspace-scoped).
 pub async fn bulk_delete(db: &Db, workspace_id: i64, ids: &[i64]) -> Result<()> {
+    let owned = ids.to_vec();
     let ids = id_list(ids);
     tx::write(db, move |conn| {
+        crate::template::guard::assert_deletable(conn, workspace_id, "botField", &owned)?;
         conn.execute(
             r#"DELETE FROM "BotField" WHERE "workspaceId" = ?1 AND "id" IN (SELECT value FROM json_each(?2))"#,
             params![workspace_id, ids],

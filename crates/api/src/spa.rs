@@ -447,6 +447,9 @@ pub(crate) fn insert_workspace(tx: &Connection, user_id: i64, name: &str) -> Res
             NOTIFICATION_CHANNELS
         ],
     )?;
+    // The tenant's default template, as a pending install the template sweep runs.
+    chatbotx_business::template::tenant_default::stage_install(tx, workspace_id, tenant_id)
+        .map_err(|e| DbError::other(e.message()))?;
     Ok(workspace_id)
 }
 

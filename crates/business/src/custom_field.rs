@@ -262,6 +262,7 @@ pub async fn update(
 pub async fn delete(db: &Db, workspace_id: i64, ids: &[i64]) -> Result<()> {
     let ids = ids.to_vec();
     tx::write(db, move |conn| {
+        crate::template::guard::assert_deletable(conn, workspace_id, "customField", &ids)?;
         for id in ids {
             conn.execute(
                 r#"DELETE FROM "CustomField" WHERE "workspaceId" = ?1 AND "id" = ?2"#,

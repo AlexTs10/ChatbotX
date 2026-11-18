@@ -221,6 +221,17 @@ async fn preview_install_and_detail_copy_the_template_into_the_workspace() {
         resources["items"].as_array().unwrap().len() >= 2,
         "{resources}"
     );
+
+    // Slice 6 guard: the template does not allow delete, so the flow copy stays.
+    let copy = count(
+        &fixture,
+        r#"SELECT "id" FROM "Flow" WHERE "workspaceId" = ?1 AND "id" <> 11"#,
+    )
+    .await;
+    let refused = chatbotx_business::flow::delete_many(&fixture.state.db, WS, vec![copy])
+        .await
+        .expect_err("guarded");
+    assert_eq!(refused.code(), Some("templateAllowDeleteViolation"));
 }
 
 async fn text_of_copy(fixture: &Fixture) -> Option<String> {

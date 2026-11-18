@@ -93,3 +93,64 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     }
     Ok(Value::Null)
 }
+
+const SWEEP_BATCH: i64 = 500;
+const UNCLAIMED_GRACE_MS: i64 = 5 * 60 * 1000;
+const REDISPATCH_MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// `redispatchTemplateJobs` (schedule, every 5 minutes): closes installs and
+/// syncs too old to retry, then re-enqueues the unfinished installs (the
+/// tenant default staged at workspace creation included), syncs and
+/// uninstalls. Job ids are deterministic and every handler claims, so a
+/// duplicate is harmless.
+///
+/// ponytail: no AI file, publish effect, staged-object, fan-out catch-up or
+/// uninstall notice steps (none of those outboxes is ported).
+pub async fn redispatch(deps: &Deps) -> Result<(), JobError> {
+    let now = now_ms();
+    let lists = chatbotx_business::tx::write(&deps.db, move |tx| {
+        let (pending, lease) = (now - UNCLAIMED_GRACE_MS, now - INSTALL_LEASE_MS);
+        let oldest = now - REDISPATCH_MAX_AGE_MS;
+        template_installation::fail_abandoned(
+            tx,
+            oldest,
+            pending,
+            lease,
+            "templateInstallAbandoned",
+            "The template install could not be completed",
+        )?;
+        template_installation_sync::fail_abandoned(tx, oldest, "templateSyncAbandoned")?;
+        Ok((
+            template_installation::list_stale(tx, pending, lease, oldest, SWEEP_BATCH)?,
+            template_installation_sync::list_unfinished(
+                tx,
+                pending,
+                now - syncs::SYNC_LEASE_MS,
+                oldest,
+                SWEEP_BATCH,
+            )?,
+            chatbotx_db::repo::template_uninstall::list_stale(tx, SWEEP_BATCH)?,
+        ))
+    })
+    .await
+    .map_err(|e| crate::fail(e.to_string()))?;
+    let (installs, sync_rows, uninstalls) = lists;
+    let jobs = deps.jobs.as_ref();
+    use chatbotx_business::template::save;
+    for (id, ws) in installs {
+        if let Err(e) = save::enqueue_install(jobs, id, ws).await {
+            tracing::warn!(error = %e, id, "Could not re-enqueue a template install");
+        }
+    }
+    for (id, ws) in sync_rows {
+        if let Err(e) = save::enqueue_sync(jobs, id, ws, save::PRIORITY_INTERACTIVE).await {
+            tracing::warn!(error = %e, id, "Could not re-enqueue a template sync");
+        }
+    }
+    for (id, ws, attempt) in uninstalls {
+        if let Err(e) = save::enqueue_uninstall(jobs, id, ws, attempt).await {
+            tracing::warn!(error = %e, id, "Could not re-enqueue a template uninstall");
+        }
+    }
+    Ok(())
+}

@@ -73,11 +73,23 @@ pub async fn handle(
     let actor = Actor::ApiToken {
         full: !principal.read_only,
     };
+    handle_as(state, route_id, call, actor, None).await
+}
+
+/// [`handle`] for an actor (a member for the `/rpc` template actions) and the
+/// acting user (`createdBy` / `installedBy` / `retriedBy` / `requestedBy`).
+pub async fn handle_as(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    actor: Actor,
+    user_id: Option<i64>,
+) -> Reply {
     match route_id {
         "templates.list" => list(state, call).await,
         "templates.get" => get(state, call).await,
-        "templates.create" => save(state, call, &actor, false).await,
-        "templates.update" => save(state, call, &actor, true).await,
+        "templates.create" => save(state, call, &actor, false, user_id).await,
+        "templates.update" => save(state, call, &actor, true, user_id).await,
         "templates.listSelectableResources" => selectable(state, call, &actor).await,
         "templates.previewDependencies" => preview_dependencies(state, call, &actor).await,
         "templates.delete" => delete(state, call, &actor).await,
@@ -91,9 +103,9 @@ pub async fn handle(
         "templateInstallations.update" => update_installation(state, call, &actor).await,
         "templateInstallations.listSyncs" => list_syncs(state, call).await,
         "templateInstallations.getSync" => get_sync(state, call).await,
-        "templateInstallations.install" => install(state, call, actor).await,
-        "templateInstallations.retry" => retry(state, call, actor).await,
-        "templateInstallations.sync" => sync(state, call, actor).await,
+        "templateInstallations.install" => install(state, call, actor, user_id).await,
+        "templateInstallations.retry" => retry(state, call, actor, user_id).await,
+        "templateInstallations.sync" => sync(state, call, actor, user_id).await,
         "templateInstallations.restoreBackup" => restore_backup(state, call, actor).await,
         "templateInstallations.previewUninstall" => preview_uninstall(state, call, &actor).await,
         "templateInstallations.uninstall" => uninstall(state, call, &actor).await,
@@ -106,7 +118,7 @@ pub async fn handle(
         "templates.uninstallInstaller" => uninstall_installer(state, call, &actor).await,
         "templateInstallations.get" => get_installation(state, call, actor).await,
         "templateInstallations.listResources" => list_resources(state, call).await,
-        "templatePreviews.get" => preview(state, call, principal).await,
+        "templatePreviews.get" => preview(state, call, &actor).await,
         _ => Err(crate::routes::not_ported_error()),
     }
 }
@@ -544,7 +556,13 @@ fn is_http_url(text: &str) -> bool {
 }
 
 /// `templates.create` / `templates.update`.
-async fn save(state: &ApiState, call: Call<'_>, actor: &Actor, update: bool) -> Reply {
+async fn save(
+    state: &ApiState,
+    call: Call<'_>,
+    actor: &Actor,
+    update: bool,
+    user_id: Option<i64>,
+) -> Reply {
     let mut input = Input::from_body(call.params, call.body);
     let template_id = if update { input.digits_id("id") } else { None };
     let name = input.string("name", Str::trimmed(1, 255));
@@ -570,7 +588,7 @@ async fn save(state: &ApiState, call: Call<'_>, actor: &Actor, update: bool) -> 
         &state.db,
         template_save::SaveInput {
             workspace_id: call.workspace_id,
-            created_by: None,
+            created_by: user_id,
             name: name.unwrap_or_default(),
             description,
             image_url,
@@ -690,7 +708,7 @@ fn inbox_bindings_at(input: &mut Input, name: &str) -> std::collections::BTreeMa
     out
 }
 
-async fn install(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
+async fn install(state: &ApiState, call: Call<'_>, actor: Actor, user_id: Option<i64>) -> Reply {
     let mut input = Input::from_body(call.params, call.body);
     let share_token = input.string("shareToken", Str::trimmed(1, usize::MAX));
     let inbox_bindings = inbox_bindings_at(&mut input, "inboxBindings");
@@ -704,7 +722,7 @@ async fn install(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
         install_request::InstallRequest {
             share_token: share_token.unwrap_or_default(),
             workspace_id: call.workspace_id,
-            installed_by: None,
+            installed_by: user_id,
             allow_duplicate: allow_duplicate.unwrap_or_default(),
             accept_publisher_uninstall: accept,
             auto_update,
@@ -723,7 +741,7 @@ async fn install(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
 }
 
 /// `templateInstallations.sync`: queues a sync to the newest version (202).
-async fn sync(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
+async fn sync(state: &ApiState, call: Call<'_>, actor: Actor, user_id: Option<i64>) -> Reply {
     let installation_id = path_id(call, "id")?;
     let requested = template_syncs::request(
         &state.db,
@@ -732,7 +750,7 @@ async fn sync(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
             workspace_id: call.workspace_id,
             installation_id,
             trigger: "manual",
-            requested_by: None,
+            requested_by: user_id,
             auto_update: None,
             accept_publisher_uninstall: None,
             inbox_bindings: None,
@@ -905,7 +923,7 @@ async fn uninstall_installer(state: &ApiState, call: Call<'_>, actor: &Actor) ->
     ))
 }
 
-async fn retry(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
+async fn retry(state: &ApiState, call: Call<'_>, actor: Actor, user_id: Option<i64>) -> Reply {
     let installation_id = path_id(call, "id")?;
     let retried = install_request::retry(
         &state.db,
@@ -913,7 +931,7 @@ async fn retry(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
         call.workspace_id,
         installation_id,
         actor,
-        None,
+        user_id,
     )
     .await
     .map_err(|e| business_error(e, MUTATING))?;
@@ -955,7 +973,8 @@ async fn list_resources(state: &ApiState, call: Call<'_>) -> Reply {
 
 /// `templatePreviews.get`: a `read_only` token sees `installable: false`
 /// (`templateManagePermissionDenied`) and never the collisions.
-async fn preview(state: &ApiState, call: Call<'_>, principal: &Principal) -> Reply {
+async fn preview(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let read_only = *actor == (Actor::ApiToken { full: false });
     let mut input = Input::from_query(call.params, call.query);
     let share_token = input.string("id", Str::trimmed(1, usize::MAX));
     input.finish()?;
@@ -963,12 +982,15 @@ async fn preview(state: &ApiState, call: Call<'_>, principal: &Principal) -> Rep
         &state.db,
         share_token.unwrap_or_default(),
         call.workspace_id,
-        Actor::ApiToken { full: true },
-        !principal.read_only,
+        match actor {
+            Actor::ApiToken { .. } => Actor::ApiToken { full: true },
+            member => member.clone(),
+        },
+        !read_only,
     )
     .await
     .map_err(|e| business_error(e, FINDING))?;
-    if principal.read_only && preview["installable"] == true {
+    if read_only && preview["installable"] == true {
         return Ok(json(
             200,
             json!({ "installable": false, "reason": "templateManagePermissionDenied" }),

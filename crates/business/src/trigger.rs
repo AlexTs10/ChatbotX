@@ -117,6 +117,7 @@ pub async fn find(db: &Db, workspace_id: i64, id: i64) -> Result<Option<TriggerW
 /// `deleteMany`: the ids actually deleted.
 pub async fn delete_many(db: &Db, workspace_id: i64, ids: Vec<i64>) -> Result<Vec<i64>> {
     tx::write(db, move |tx| {
+        crate::template::guard::assert_deletable(tx, workspace_id, "trigger", &ids)?;
         let mut deleted = Vec::new();
         for id in ids {
             if tx
@@ -179,6 +180,7 @@ pub async fn update_with_conditions(
     conditions: Vec<ConditionInput>,
 ) -> Result<Option<(TriggerWithConditions, bool)>> {
     tx::write(db, move |tx| {
+        crate::template::guard::assert_content_editable(tx, workspace_id, "trigger", &[id])?;
         let Some(existing) = load(tx, workspace_id, id)? else {
             return Ok(None);
         };
