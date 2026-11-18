@@ -185,17 +185,17 @@ pub async fn request_access_token(
     client_id: &str,
     client_secret: &str,
 ) -> ApiResult<(String, i64)> {
+    // Built before the request: the serializer is not `Send` across `.await`.
+    let body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("grant_type", "client_credentials")
+        .append_pair("client_id", client_id)
+        .append_pair("client_secret", client_secret)
+        .finish();
     let response = http()?
         .post(format!("https://{shop_domain}/admin/oauth/access_token"))
         .header("Accept", "application/json")
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(
-            url::form_urlencoded::Serializer::new(String::new())
-                .append_pair("grant_type", "client_credentials")
-                .append_pair("client_id", client_id)
-                .append_pair("client_secret", client_secret)
-                .finish(),
-        )
+        .body(body)
         .send()
         .await
         .map_err(|e| ApiError::new(format!("Shopify could not be reached: {e}"), 503))?;
