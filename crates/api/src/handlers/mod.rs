@@ -132,6 +132,9 @@ pub struct ApiState {
     /// The query embedding client (`aiFiles.search`); the provider APIs by
     /// default.
     pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
+    /// The Meta Graph API base (thread control, WhatsApp templates / flows / calls);
+    /// tests point it at a local server.
+    pub graph_url: String,
     /// The auth state (`POST /v1/me/password`); `None` = off (tests).
     pub sessions: Option<Arc<crate::session::AuthState>>,
 }
@@ -155,6 +158,7 @@ impl ApiState {
             license_token: std::env::var("LICENSE_KEY").ok(),
             license_keys: chatbotx_business::license::LICENSE_PUBLIC_KEYS,
             embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
+            graph_url: chatbotx_business::whatsapp::GRAPH_API_URL.to_owned(),
             sessions: None,
         }
     }

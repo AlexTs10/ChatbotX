@@ -1,8 +1,8 @@
 //! Mini Apps in the SPA (Q.D1m): `miniAppsAPI.listMiniAppOptionsAPI`
 //! (`features/mini-apps/api/private.ts`), the page queries
 //! (`features/mini-apps/queries`) and the builder actions
-//! (`features/mini-apps/actions/*`). The WhatsApp publish / draft / preview
-//! actions are not ported (no WhatsApp Flows Graph port).
+//! (`features/mini-apps/actions/*`, the WhatsApp publish / draft / preview
+//! actions included).
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::mini_app::{self as service, DefinitionInput};
@@ -27,6 +27,10 @@ pub(super) const ACTIONS: &[&str] = &[
     "getMiniAppFlowJsonAction",
     "findSubmissionConversationAction",
     "loadMediaLibraryImageAction",
+    "publishMiniAppWhatsappAction",
+    "publishMiniAppWhatsappDraftAction",
+    "getMiniAppWhatsappPreviewAction",
+    "deleteMiniAppWhatsappDraftAction",
 ];
 
 /// `MINI_APP_OPTIONS_LIMIT`.
@@ -278,6 +282,43 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             crate::handlers::mini_apps::delete_mini_apps(ctx.api, ws, ids, delete_flows)
                 .await
                 .map_err(action_fail)
+        }
+        "publishMiniAppWhatsappAction"
+        | "publishMiniAppWhatsappDraftAction"
+        | "getMiniAppWhatsappPreviewAction"
+        | "deleteMiniAppWhatsappDraftAction" => {
+            use chatbotx_business::mini_app_whatsapp as whatsapp;
+            let input = In(arg(args, 2));
+            let t = whatsapp::Target {
+                workspace_id: ws,
+                mini_app_id: bound(1)?,
+                integration_whatsapp_id: input.id("integrationWhatsappId")?,
+            };
+            let graph = ctx.api.graph_url.as_str();
+            match name {
+                "publishMiniAppWhatsappAction" => {
+                    let publish = input.opt_bool("publish")?.unwrap_or(true);
+                    let out = whatsapp::publish(db, graph, t, publish)
+                        .await
+                        .map_err(action_fail)?;
+                    Ok(crate::handlers::mini_apps::publish_json(&out))
+                }
+                "publishMiniAppWhatsappDraftAction" => {
+                    let out = whatsapp::publish_draft(db, graph, t)
+                        .await
+                        .map_err(action_fail)?;
+                    Ok(crate::handlers::mini_apps::publish_json(&out))
+                }
+                "getMiniAppWhatsappPreviewAction" => {
+                    whatsapp::preview(db, graph, t).await.map_err(action_fail)
+                }
+                _ => {
+                    let outcome = whatsapp::delete_draft(db, graph, t)
+                        .await
+                        .map_err(action_fail)?;
+                    Ok(json!({ "outcome": outcome }))
+                }
+            }
         }
         "getMiniAppFlowJsonAction" => {
             let found = service::find_or_fail(db, ws, bound(1)?)

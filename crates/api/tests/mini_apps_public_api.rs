@@ -2,8 +2,8 @@
 //! mocked services become `handlers::dispatch` calls over a real migrated
 //! database; "the service was called with" becomes the stored rows / the
 //! response; the token tests (scope / read_only) check the route table entry
-//! the P3.5 auth runs on. The WhatsApp draft / publish / preview test is not
-//! ported (no WhatsApp Flows Graph port; test map).
+//! the P3.5 auth runs on. The WhatsApp draft / publish / preview test is in
+//! `mini_apps_whatsapp_public_api.rs` (local Graph server).
 
 mod handlers_common;
 

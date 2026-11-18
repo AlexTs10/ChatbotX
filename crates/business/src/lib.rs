@@ -74,6 +74,7 @@ pub mod message_actions;
 pub mod messenger_menu;
 pub mod meta_catalog;
 pub mod mini_app;
+pub mod mini_app_whatsapp;
 pub mod minigame;
 pub mod net;
 pub mod pipeline;

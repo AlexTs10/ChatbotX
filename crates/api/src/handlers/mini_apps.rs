@@ -1,10 +1,11 @@
 //! `features/mini-apps/api/public.ts` + `mappers.ts` + `lib/delete-mini-apps.ts`:
-//! `miniApps.*`. The WhatsApp Flow routes (publish, draft, preview) need the
-//! WhatsApp Flows Graph port and answer "not ported".
+//! `lib/whatsapp-publication.ts`: `miniApps.*`, with the WhatsApp Flow routes
+//! (`chatbotx_business::mini_app_whatsapp`).
 
 use std::collections::BTreeMap;
 
 use chatbotx_business::mini_app::{self as service, DefinitionInput};
+use chatbotx_business::mini_app_whatsapp::{self as whatsapp, Published, Target};
 use chatbotx_core::mini_app::{
     self as app, collect_custom_field_mappings, locate_issues, validate,
 };
@@ -27,6 +28,11 @@ pub const ROUTES: &[&str] = &[
     "miniApps.delete",
     "miniApps.deleteMany",
     "miniApps.getFlowJson",
+    "miniApps.publishWhatsapp",
+    "miniApps.pushWhatsappDraft",
+    "miniApps.publishWhatsappDraft",
+    "miniApps.getWhatsappPreview",
+    "miniApps.deleteWhatsappDraft",
     "miniApps.listSubmissions",
 ];
 
@@ -34,8 +40,15 @@ pub const ROUTES: &[&str] = &[
 pub const BULK_DELETE_MAX_IDS: usize = 100;
 /// `miniAppName`.
 pub const NAME: Str = Str::trimmed(1, app::NAME_MAX_LENGTH);
-/// The `failed` reason of a Flow removal while WhatsApp Flows are not ported.
-pub const FLOW_REMOVAL_UNAVAILABLE: &str = "WhatsApp Flow removal is not available yet";
+/// `toPublishResponse`.
+pub fn publish_json(p: &Published) -> Value {
+    json!({
+        "status": p.publication.status,
+        "published": p.published,
+        "whatsappFlowId": opt_id(p.publication.whatsapp_flow_id),
+        "validationErrors": p.publication.validation_errors.0,
+    })
+}
 
 /// `buildMiniAppPublicUrl`.
 pub fn public_url(app_url: &str, mini_app_id: i64) -> String {
@@ -188,8 +201,8 @@ fn mappings(input: &mut Input) -> Option<BTreeMap<String, Option<String>>> {
     Some(out)
 }
 
-/// `deleteMiniApps`: deletes the rows; with `deleteWhatsappFlows`, each
-/// publication reports `failed` (the WhatsApp Flows Graph port is missing).
+/// `deleteMiniApps`: deletes the rows first (nothing changed on Meta if that
+/// fails); with `deleteWhatsappFlows`, then removes each Flow from Meta.
 pub async fn delete_mini_apps(
     state: &ApiState,
     ws: i64,
@@ -202,13 +215,17 @@ pub async fn delete_mini_apps(
         Vec::new()
     };
     let deleted = service::delete_many(&state.db, ws, ids).await?;
-    let flows: Vec<Value> = publications
-        .iter()
-        .map(|p| {
-            json!({ "integrationWhatsappId": id(p.integration_whatsapp_id), "outcome": "failed", "error": FLOW_REMOVAL_UNAVAILABLE })
-        })
-        .collect();
+    let flows = whatsapp::remove_flows(&state.db, &state.graph_url, ws, publications).await;
     Ok(json!({ "deletedCount": deleted, "whatsappFlows": flows }))
+}
+
+/// `miniAppWhatsappPublicRequest`: the Mini App and the WhatsApp number.
+fn target(input: &mut Input, ws: i64) -> Target {
+    Target {
+        workspace_id: ws,
+        mini_app_id: input.id("id").unwrap_or_default(),
+        integration_whatsapp_id: input.id("integrationWhatsappId").unwrap_or_default(),
+    }
 }
 
 /// Runs one of [`ROUTES`].
@@ -298,7 +315,12 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             ))
         }
         "miniApps.delete" => {
-            let mut input = Input::from_query(call.params, call.query);
+            // The flag may come in a JSON body (as the parity client sends it) or the query.
+            let mut input = if call.body.iter().all(u8::is_ascii_whitespace) {
+                Input::from_query(call.params, call.query)
+            } else {
+                Input::from_body(call.params, call.body)
+            };
             let app_id = input.id("id").unwrap_or_default();
             let delete_flows = input
                 .opt_coerced_bool("deleteWhatsappFlows")
@@ -330,6 +352,38 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .await
                 .map_err(|e| business_error(e, super::FINDING))?;
             Ok(json(200, found.mini_app.flow_json.0))
+        }
+        "miniApps.publishWhatsapp"
+        | "miniApps.pushWhatsappDraft"
+        | "miniApps.publishWhatsappDraft" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let t = target(&mut input, ws);
+            input.finish()?;
+            let graph = state.graph_url.as_str();
+            let out = match route_id {
+                "miniApps.publishWhatsappDraft" => whatsapp::publish_draft(db, graph, t).await,
+                _ => whatsapp::publish(db, graph, t, route_id == "miniApps.publishWhatsapp").await,
+            }
+            .map_err(|e| business_error(e, super::MUTATING))?;
+            Ok(json(200, publish_json(&out)))
+        }
+        "miniApps.getWhatsappPreview" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let t = target(&mut input, ws);
+            input.finish()?;
+            let out = whatsapp::preview(db, &state.graph_url, t)
+                .await
+                .map_err(|e| business_error(e, super::FINDING))?;
+            Ok(json(200, out))
+        }
+        "miniApps.deleteWhatsappDraft" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let t = target(&mut input, ws);
+            input.finish()?;
+            let outcome = whatsapp::delete_draft(db, &state.graph_url, t)
+                .await
+                .map_err(|e| business_error(e, super::MUTATING))?;
+            Ok(json(200, json!({ "outcome": outcome })))
         }
         "miniApps.listSubmissions" => {
             let mut input = Input::from_query(call.params, call.query);

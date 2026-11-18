@@ -13,6 +13,7 @@ P3.6-D1 (`specs/P3.6-D1.md`).
 | 4 | `/rpc`: `miniAppsAPI.listMiniAppOptionsAPI`, the page queries and the builder actions | `api::rpc_procedures::mini_apps` | `features/mini-apps/api/private.ts`, `queries`, `actions/*` |
 | 5 | Public runtime: `POST /rpc/pages/miniApp`, `submitMiniAppAction`, `saveMiniAppScreenAction`, `POST /api/mini-apps/{id}/uploads`, flow resume | `server::mini_apps` | `app/mini-apps/page.tsx`, `lib/public-mini-app.ts`, `resolve-visitor-contact.ts`, `resolve-contact-variables.ts`, `resume-flow.ts`, `app/api/mini-apps/[id]/uploads/route.ts` |
 | 6 | Flow step: Open Mini App buttons become signed `/mini-apps?id&token&resume` links | `worker::mini_app_buttons`, `worker::send_flow_step` | `apps/worker/src/lib/mini-app-buttons.ts` |
+| 6b | WhatsApp Flows: publish, draft, preview, draft delete (`/v1` + builder actions), Flow removal on delete | `business::mini_app_whatsapp`, `api::handlers::mini_apps`, `rpc_procedures::mini_apps` | `lib/whatsapp-publication.ts`, `lib/delete-mini-apps.ts`, `integrations/whatsapp/src/api/flow.ts` (write calls) |
 | 7 | Web SPA: list, editor, submissions and the public runner page | `apps/web/src/routes/mini-apps.tsx`, `features/mini-apps/*` (copied from the builder), `queries/index.ts` | `app/space/[workspaceId]/mini-apps/*`, `app/mini-apps/page.tsx` |
 
 ## Security
@@ -26,6 +27,9 @@ P3.6-D1 (`specs/P3.6-D1.md`).
 - Resume: the claims must match the contact, workspace and Mini App, and the
   bot must be active. A KV once-guard (`mini-app-resume:{sha256(token)}`,
   8 days) stops a second resume; a failed enqueue frees the guard.
+- WhatsApp Flows: every call reads the Mini App and the number inside the
+  workspace first (404 before any Graph call); Graph calls use the stored
+  token, the fixed Graph URL and no redirects; Meta's messages are sanitized.
 - Rate limits as the original: submit 10, screen save 60, upload 20 per
   window, per client IP (else contact, else anonymous).
 - Uploads: cross-site posts are refused (403, fail closed), the body has a
@@ -43,19 +47,18 @@ See `conversion/DECISIONS.md` (2026-11-17 "Q.D1m" lines).
 
 - `crates/core/tests/mini_app_{display_text,runtime,serialize,validate,validate_issue_codes}.rs`.
 - `crates/business/tests/mini_app_definition.rs`, `mini_app_service.rs`, `mini_app_upload_service.rs`.
-- `crates/api/tests/mini_apps_public_api.rs`.
+- `crates/api/tests/mini_apps_public_api.rs`, `mini_apps_whatsapp_public_api.rs` (local Graph server).
 - Unit tests: `server::mini_apps` (cross-site check), `worker::mini_app_buttons`
   (links, dropped buttons), `rpc_procedures::mini_apps` (number label).
 - The submit and upload route tests are covered by parity `50-mini-apps`.
 
 ## Parity
 
-Not run in this unit. Suites: `50-mini-apps`, `51-mini-apps-whatsapp`
-(the WhatsApp publish cases are expected to fail: not ported).
+Not run in this unit. Suites: `p1-12-miniapps-orders-payments/50-mini-apps`,
+`51-mini-apps-whatsapp`.
 
 ## Not done
 
-- WhatsApp Flows (publish, draft, preview, Flow removal on delete).
 - The Messenger template Mini App button.
 - The `resolveContactVariables` cases of `mini-app-contact-variables.test.ts`
   (covered by parity `50-mini-apps`).
