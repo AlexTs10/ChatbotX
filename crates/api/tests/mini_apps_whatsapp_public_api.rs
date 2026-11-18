@@ -22,6 +22,8 @@ const FLOW: &str = "F1";
 #[derive(Default)]
 struct Meta {
     status: Option<String>,
+    /// `/publish` answers with Meta's business-verification refusal.
+    refuse_publish: bool,
     calls: Vec<String>,
 }
 
@@ -55,6 +57,10 @@ async fn graph(meta: Arc<Mutex<Meta>>, request: Request<Body>) -> Response {
                 json!({ "error": { "code": 100, "message": "Object with ID 'F1' does not exist" } }),
             ),
         },
+        ("POST", "/v23.0/F1/publish") if m.refuse_publish => reply(
+            StatusCode::BAD_REQUEST,
+            json!({ "error": { "code": 139002, "message": "Publishing failed", "error_user_msg": "Verify your business before publishing." } }),
+        ),
         ("POST", "/v23.0/F1/publish") => {
             m.status = Some("PUBLISHED".into());
             reply(StatusCode::OK, json!({ "success": true }))
@@ -254,4 +260,21 @@ async fn another_workspaces_number_or_a_mini_app_not_on_it_is_not_found_before_m
         );
     }
     assert!(meta.lock().unwrap().calls.is_empty());
+}
+
+/// Port of "a refused publish records the draft and surfaces Meta's reason"
+/// (`mini-app-contact-variables.test.ts`).
+#[tokio::test]
+async fn a_refused_publish_records_the_draft_and_surfaces_metas_reason() {
+    let (f, meta, id) = seeded().await;
+    meta.lock().unwrap().refuse_publish = true;
+    let (status, out) = run(&f, "miniApps.publishWhatsapp", &id, "72").await;
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(out["status"], "DRAFT");
+    assert_eq!(out["published"], false);
+    assert_eq!(
+        out["validationErrors"],
+        json!([{ "message": "Verify your business before publishing." }])
+    );
+    assert_eq!(publication_status(&f, &id).await, Some(json!("DRAFT")));
 }

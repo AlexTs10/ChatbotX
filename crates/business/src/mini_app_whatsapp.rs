@@ -846,6 +846,18 @@ mod tests {
         assert!(!e(139_004, "does not exist").missing());
     }
 
+    /// Port of "refuses a Mini App whose texts hold custom fields"
+    /// (`mini-app-contact-variables.test.ts`).
+    #[test]
+    fn a_mini_app_whose_texts_hold_custom_fields_is_refused() {
+        let mut definition = app::starter_definition().to_value();
+        assert!(assert_publishable(&definition).is_ok());
+        definition["screens"][0]["title"] = json!("Hi {{first_name}}");
+        let error = assert_publishable(&definition).unwrap_err();
+        assert_eq!(error.code(), Some("validation"));
+        assert_eq!(error.message(), CONTACT_VARIABLES);
+    }
+
     #[test]
     fn meta_errors_are_bad_request_with_metas_status() {
         let error = MetaError {
