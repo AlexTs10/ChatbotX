@@ -595,37 +595,36 @@ async fn rejects_a_non_numeric_id_before_reaching_the_service() {
 async fn the_sixth_reindex_in_a_window_is_rate_limited() {
     let f = seeded(Some(Arc::new(Jobs::default()))).await;
     let params: Vec<(&'static str, String)> = vec![("id", FILE.to_string())];
-    let mut last = (0, None, Value::Null);
-    for _ in 0..6 {
-        finish_run(&f).await;
-        let response = dispatch(
-            &f.state,
-            "aiFiles.reindex",
-            Call {
-                workspace_id: WS,
-                params: &params,
-                query: None,
-                body: b"",
-            },
-        )
-        .await
-        .expect("ported");
-        let status = response.status().as_u16();
-        let retry = response
-            .headers()
-            .get("retry-after")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        last = (status, retry, serde_json::from_slice(&bytes).expect("json"));
-        if status == 429 {
-            break;
-        }
+    finish_run(&f).await;
+    // ponytail: the first five calls fill the bucket in a tight loop (the route's own
+    // check), so a 10 s window boundary cannot split the six calls on a loaded host.
+    for _ in 0..chatbotx_api::handlers::ai_files::AI_FILE_OPERATION_LIMIT {
+        assert!(
+            chatbotx_api::handlers::ai_files::check_rate_limit(&f.state, "reindex", WS).is_ok()
+        );
     }
-    // Adapted: a window boundary may split the six calls; at least the bucket filled once.
-    let (status, retry, body) = last;
+    let response = dispatch(
+        &f.state,
+        "aiFiles.reindex",
+        Call {
+            workspace_id: WS,
+            params: &params,
+            query: None,
+            body: b"",
+        },
+    )
+    .await
+    .expect("ported");
+    let status = response.status().as_u16();
+    let retry = response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let body: Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!((status, &body["code"]), (429, &json!("tooManyRequests")));
     let retry: u64 = retry.expect("Retry-After").parse().expect("seconds");
     assert!((1..=10).contains(&retry), "{retry}");
