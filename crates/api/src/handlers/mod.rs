@@ -74,6 +74,7 @@ pub mod response_sla;
 pub mod saved_replies;
 pub mod sequences;
 pub mod smtp_integrations;
+pub mod store_connections;
 pub mod spreadsheets;
 pub mod tags;
 pub mod templates;
@@ -651,6 +652,8 @@ async fn route(
         keywords::handle(state, route_id, call).await
     } else if templates::ROUTES.contains(&route_id) {
         templates::handle(state, route_id, call, principal).await
+    } else if store_connections::ROUTES.contains(&route_id) {
+        store_connections::handle(state, route_id, call).await
     } else if webshop::ROUTES.contains(&route_id) {
         webshop::handle(state, call, principal).await
     } else if tags::ROUTES.contains(&route_id) {

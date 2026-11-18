@@ -309,7 +309,12 @@ async fn run_flow_for_customer(deps: Deps<'_>, order: &Order, flow_id: &str) {
 
 /// `announceOrderEvents`: the trigger / webhook event, and `productOrdered`
 /// once when placed.
-async fn announce_events(deps: Deps<'_>, order: &Order, event: &str, product_ordered: bool) {
+pub(crate) async fn announce_events(
+    deps: Deps<'_>,
+    order: &Order,
+    event: &str,
+    product_ordered: bool,
+) {
     let Some(contact_id) = order.contact_id else {
         return;
     };

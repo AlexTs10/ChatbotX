@@ -43,6 +43,9 @@ pub(super) const ACTIONS: &[&str] = &[
     "deleteDiscountCodeAction",
     "generateDiscountCodeAction",
     "updateEcommerceSettingsAction",
+    "connectShopifyAction",
+    "syncShopifyAction",
+    "disconnectShopifyAction",
 ];
 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
@@ -172,9 +175,11 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             let list = order::list(db, order_list(ctx, arg(args, 1), true)?)
                 .await
                 .map_err(fail)?;
-            // ponytail: Shopify / WooCommerce are not ported, so no external store links.
+            let links = chatbotx_business::external_store::store_links(db, &ctx.api.app_url, ws)
+                .await
+                .map_err(fail)?;
             Ok(
-                json!({ "orders": order::page_json(&list), "store": store(ctx).await?, "externalStore": null }),
+                json!({ "orders": order::page_json(&list), "store": store(ctx).await?, "externalStore": links }),
             )
         }
         "orderDetailPage" => {
@@ -240,14 +245,17 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             let flows = flow::list_published_options(db, ws).await.map_err(fail)?;
             let open_hours = public(ctx, "openHours.list", &[], None, None).await?["data"].take();
             let providers = payment_provider::list(db, ws).await.map_err(fail)?;
-            // ponytail: Shopify / WooCommerce are not ported: never connected here.
+            // ponytail: WooCommerce is the next Q.D8 slice: never connected here.
             let disconnected = json!({ "connected": false });
+            let shopify_status = chatbotx_business::shopify::get_status(db, &ctx.api.app_url, ws)
+                .await
+                .map_err(fail)?;
             Ok(json!({
                 "settings": settings,
                 "flowOptions": flows.iter().map(|f| json!({ "id": f.id.to_string(), "name": f.name })).collect::<Vec<_>>(),
                 "openHours": open_hours,
                 "connectedProviders": providers.iter().map(|p| p["provider"].clone()).collect::<Vec<_>>(),
-                "shopifyStatus": disconnected,
+                "shopifyStatus": shopify_status,
                 "wooCommerceStatus": disconnected,
             }))
         }
@@ -333,6 +341,25 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             .await
             .map(|code| json!({ "code": code }))
             .map_err(action_fail),
+        // The same calls `shopify.connect` / `sync` / `disconnect` make.
+        "connectShopifyAction" | "syncShopifyAction" | "disconnectShopifyAction" => {
+            let route = match name {
+                "connectShopifyAction" => "shopify.connect",
+                "syncShopifyAction" => "shopify.sync",
+                _ => "shopify.disconnect",
+            };
+            let body = (route != "shopify.disconnect").then(|| arg(args, 1));
+            public(ctx, route, &[], None, body)
+                .await
+                .map(|v| {
+                    if route == "shopify.disconnect" {
+                        Value::Null
+                    } else {
+                        v
+                    }
+                })
+                .map_err(|e| action_error(schema_errors(e)))
+        }
         _ => public(
             ctx,
             "ecommerceSettings.update",

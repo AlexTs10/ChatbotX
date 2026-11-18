@@ -29,6 +29,7 @@ pub mod low;
 pub mod meta_catalog;
 pub mod notification;
 pub mod order_payment;
+pub mod store_sync;
 pub mod purge;
 pub mod schedule;
 pub mod send_flow_step;

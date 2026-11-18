@@ -33,7 +33,7 @@ static ENCRYPTION: LazyLock<Option<Encryption>> = LazyLock::new(|| {
 });
 
 /// A trigger / webhook bus like the API's.
-fn bus(deps: &Deps) -> EventBus {
+pub(crate) fn bus(deps: &Deps) -> EventBus {
     let events = EventBus::new();
     events.subscribe(Arc::new(QueueEmitter::trigger(
         Arc::clone(&deps.jobs),
@@ -47,7 +47,7 @@ fn bus(deps: &Deps) -> EventBus {
 }
 
 /// The order services' side effects: the worker's jobs and realtime, `events`, the env keys.
-fn order_deps<'a>(deps: &'a Deps, events: &'a EventBus) -> OrderDeps<'a> {
+pub(crate) fn order_deps<'a>(deps: &'a Deps, events: &'a EventBus) -> OrderDeps<'a> {
     OrderDeps {
         db: &deps.db,
         jobs: Some(deps.jobs.as_ref()),

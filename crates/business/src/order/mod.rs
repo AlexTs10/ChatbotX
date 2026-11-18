@@ -10,6 +10,7 @@ mod effects;
 pub mod messages;
 
 pub use effects::{Deps, after_paid, announce_placed};
+pub(crate) use effects::{after_status_change, announce_events};
 
 use std::collections::HashMap;
 
@@ -1008,7 +1009,7 @@ fn return_stock(conn: &Connection, workspace_id: i64, order_id: i64) -> Result<(
 }
 
 /// `nextOrderNumber`: the workspace's counter, one up.
-fn next_order_number(conn: &Connection, workspace_id: i64) -> Result<i64> {
+pub(crate) fn next_order_number(conn: &Connection, workspace_id: i64) -> Result<i64> {
     Ok(conn.query_row(
         r#"INSERT INTO "EcommerceOrderCounter" ("workspaceId", "lastNumber") VALUES (?1, 1)
            ON CONFLICT ("workspaceId") DO UPDATE SET "lastNumber" = "lastNumber" + 1 RETURNING "lastNumber""#,
@@ -1025,7 +1026,7 @@ fn int(value: Option<i64>) -> Sql {
     value.map_or(Sql::Null, Sql::Integer)
 }
 
-fn insert_history(
+pub(crate) fn insert_history(
     conn: &Connection,
     workspace_id: i64,
     order_id: i64,
