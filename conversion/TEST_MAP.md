@@ -315,7 +315,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/delete-contact-action.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/delete-me-data-action.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/delete-message-action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
-| `apps/builder/__tests__/delete-mini-apps-whatsapp-flows.test.ts` | C | tbd | todo | Mini-apps; builder server code; no WhatsApp Flows Graph port; deletion reports `failed` (Q.D1m) |
+| `apps/builder/__tests__/delete-mini-apps-whatsapp-flows.test.ts` | C | `crates/api/tests/mini_apps_whatsapp_public_api.rs` | ported | Mini-apps; Q.D1m; keep / report (deprecated) / number left; the Meta-failure and concurrency cases are covered by parity `51-mini-apps-whatsapp` |
 | `apps/builder/__tests__/delete-sequence-step.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/delete-sequence.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/delete-tag-action.test.ts` | C | tbd | todo | Tags and labels; builder server code |
@@ -567,12 +567,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/meta-capi-event-dialog.test.tsx` | B | - | todo | Meta Conversions API (CAPI); builder jsdom |
 | `apps/builder/__tests__/meta-capi-oauth-callback.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
 | `apps/builder/__tests__/meta-catalog-operations.test.ts` | C | tbd | todo | Meta Catalog; builder server code |
-| `apps/builder/__tests__/mini-app-contact-variables.test.ts` | C | tbd | todo | Mini-apps; builder server code; escape cases in `crates/core/tests/mini_app_display_text.rs`; the resolve / WhatsApp publish cases left (Q.D1m) |
+| `apps/builder/__tests__/mini-app-contact-variables.test.ts` | C | `crates/core/tests/mini_app_display_text.rs`, `crates/business/src/mini_app_whatsapp.rs` (unit), `crates/api/tests/mini_apps_whatsapp_public_api.rs` | todo | Mini-apps; Q.D1m; escape and WhatsApp publish cases ported; the `resolveContactVariables` cases are covered by parity `50-mini-apps` |
 | `apps/builder/__tests__/mini-app-editor-store.test.ts` | B | - | todo | Mini-apps; builder jsdom |
 | `apps/builder/__tests__/mini-app-flow-response-labels.test.ts` | C | tbd | todo | Mini-apps; builder server code |
 | `apps/builder/__tests__/mini-app-simple-markdown.test.tsx` | B | - | todo | Mini-apps; builder jsdom |
 | `apps/builder/__tests__/mini-app-upload-route.test.ts` | C | tbd | todo | Mini-apps; builder server code; covered by parity `50-mini-apps` (server crate route; Q.D1m) |
-| `apps/builder/__tests__/mini-apps-public-api.test.ts` | C | `crates/api/tests/mini_apps_public_api.rs` | ported | Mini-apps; Q.D1m; the WhatsApp draft/publish test left (no WhatsApp Flows Graph port) |
+| `apps/builder/__tests__/mini-apps-public-api.test.ts` | C | `crates/api/tests/mini_apps_public_api.rs`, `mini_apps_whatsapp_public_api.rs` | ported | Mini-apps; Q.D1m; the WhatsApp draft/publish test runs against a local Graph server |
 | `apps/builder/__tests__/minigame-name-conflict-action.test.ts` | C | tbd | todo | Minigames; builder server code |
 | `apps/builder/__tests__/minigame-play-url.test.ts` | B | - | todo | Minigames; builder jsdom |
 | `apps/builder/__tests__/minigame-player-settings-reset-policy.test.ts` | B | - | todo | Minigames; builder node-env, client logic |
@@ -1393,7 +1393,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/meta-catalog-import.test.ts` | C | tbd | todo | Meta Catalog |
 | `apps/worker/__tests__/meta-catalog-reconciler.test.ts` | C | tbd | todo | Meta Catalog |
 | `apps/worker/__tests__/meta-catalog-sync.test.ts` | C | tbd | todo | Meta Catalog |
-| `apps/worker/__tests__/mini-app-buttons.test.ts` | C | `crates/worker/src/mini_app_buttons.rs` (unit) | ported | Mini-apps; Q.D1m; the Messenger template button case left (template send step not ported) |
+| `apps/worker/__tests__/mini-app-buttons.test.ts` | C | `crates/worker/src/mini_app_buttons.rs` (unit) | ported | Mini-apps; Q.D1m; the Messenger template resume suffix too (`apply_template_resume`) |
 | `apps/worker/__tests__/moosend-handler.test.ts` | C | tbd | todo | Moosend integration |
 | `apps/worker/__tests__/moosend-rate-limit.test.ts` | C | tbd | todo | Moosend integration |
 | `apps/worker/__tests__/moosend-step-registration.test.ts` | C | tbd | todo | Moosend integration |

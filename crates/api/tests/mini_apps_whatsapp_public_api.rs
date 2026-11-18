@@ -278,3 +278,36 @@ async fn a_refused_publish_records_the_draft_and_surfaces_metas_reason() {
     );
     assert_eq!(publication_status(&f, &id).await, Some(json!("DRAFT")));
 }
+
+/// Port of "reports Flows of a number that left the workspace as failed"
+/// (`delete-mini-apps-whatsapp-flows.test.ts`): the Mini App is still deleted.
+#[tokio::test]
+async fn a_flow_on_a_number_that_left_the_workspace_is_reported_failed() {
+    let (f, meta, id) = seeded().await;
+    assert_eq!(
+        run(&f, "miniApps.pushWhatsappDraft", &id, "72").await.0,
+        200
+    );
+    f.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                r#"UPDATE "IntegrationWhatsapp" SET "workspaceId" = ?1 WHERE "id" = 72"#,
+                params![OTHER_WS],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("move the number");
+    let calls_before = meta.lock().unwrap().calls.len();
+    let body = json!({ "ids": [id], "deleteWhatsappFlows": true });
+    let (status, out) = call(&f, "miniApps.deleteMany", WS, &[], None, Some(body)).await;
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(out["deletedCount"], 1);
+    assert_eq!(out["whatsappFlows"][0]["outcome"], "failed");
+    assert_eq!(
+        out["whatsappFlows"][0]["error"],
+        "WhatsApp number is no longer in this workspace"
+    );
+    assert_eq!(meta.lock().unwrap().calls.len(), calls_before);
+}
