@@ -214,6 +214,21 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::coexist_whatsapp::FLUSH_JOB => {
             crate::coexist_whatsapp::flush(&deps, &job.data["data"]).await?
         }
+        crate::whatsapp_call_webhook::NATIVE_RECORDING_FETCH_JOB => {
+            crate::whatsapp_call_media::native_recording_fetch(&deps, &job.data["data"]).await?
+        }
+        crate::whatsapp_call_webhook::NATIVE_TRANSCRIPT_FETCH_JOB => {
+            crate::whatsapp_call_media::native_transcript_fetch(&deps, &job.data["data"]).await?
+        }
+        crate::whatsapp_call_media::RECORDING_READY_JOB => {
+            crate::whatsapp_call_media::recording_ready(&deps, &job.data["data"]).await?
+        }
+        crate::whatsapp_call_webhook::EVENT_JOB => {
+            crate::whatsapp_call::handle_event(&deps, &job.data["data"]).await?
+        }
+        crate::coexist_messenger::JOB => {
+            crate::coexist_messenger::run(&deps, &job.data["data"]).await?
+        }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }

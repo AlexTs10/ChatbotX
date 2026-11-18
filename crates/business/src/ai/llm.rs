@@ -864,9 +864,10 @@ pub fn parse_answer(wire: Wire, body: &Value) -> Option<StepAnswer> {
     Some(answer)
 }
 
-#[cfg(test)]
-pub(crate) mod fake {
-    //! A scripted [`AiHttp`]: answers in order, records each request.
+#[doc(hidden)]
+pub mod fake {
+    //! A scripted [`AiHttp`]: answers in order, records each request (a test
+    //! helper; public for the `chatbotx-worker` tests).
 
     use std::sync::Mutex;
 

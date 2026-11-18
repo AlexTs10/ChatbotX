@@ -104,7 +104,7 @@ pub fn normalize_model_id(provider: &str, model_id: &str) -> Result<String, Stri
 }
 
 /// `secretTextAuthSchema.safeParse(auth)`.
-pub(crate) fn secret_text(auth: &Value) -> Option<String> {
+pub fn secret_text(auth: &Value) -> Option<String> {
     let auth = match auth {
         Value::String(text) => serde_json::from_str(text).ok()?,
         other => other.clone(),

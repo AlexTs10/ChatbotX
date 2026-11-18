@@ -1,10 +1,10 @@
 //! The read routes of `features/whatsapp-calls/api/public.ts` (scope
 //! `integrations`): `whatsappCalls.list` (`whatsappCallHistoryService.list`
 //! with `member: "workspace"`), `getRecording`, `getTranscript`, `getSummary`,
-//! `listSummaryProviders`.
+//! `listSummaryProviders`, `generateSummary` (`generateCallSummaryForCall`).
 //!
-//! ponytail: `generateSummary` (the AI summary writer) is not ported yet: the
-//! AI client lives in `chatbotx-worker`.
+//! ponytail: the generate locks are in-process (`LockMap`, one API process),
+//! like `email_marketing::run_exclusive`; use the KV lock when the API scales out.
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chatbotx_business::{BusinessError, tx};
@@ -30,6 +30,7 @@ pub const ROUTES: &[&str] = &[
     "whatsappCalls.getTranscript",
     "whatsappCalls.getSummary",
     "whatsappCalls.listSummaryProviders",
+    "whatsappCalls.generateSummary",
 ];
 
 /// `aiProviders` with `PROVIDER_LABELS` and the integration table
@@ -42,6 +43,32 @@ const SUMMARY_PROVIDERS: [(&str, &str, &str); 6] = [
     ("openrouter", "OpenRouter", "IntegrationOpenrouter"),
     ("muse", "Muse", "IntegrationMuse"),
 ];
+
+/// `DEFAULT_SUMMARY_MODELS`.
+fn summary_model(provider: &str) -> &'static str {
+    match provider {
+        "gemini" => "gemini-3.5-flash",
+        "claude" => "claude-sonnet-4-6",
+        "deepseek" => "deepseek-flash",
+        "openrouter" => "openai/gpt-5.4-mini",
+        "muse" => "muse-spark-1.3",
+        _ => "gpt-5.4-mini",
+    }
+}
+
+/// `possibleErrorsOnGeneratingCallSummary`.
+const GENERATING: ErrorMap = &[
+    ("notFound", 404),
+    ("businessError", 400),
+    ("callTranscriptEmpty", 422),
+    ("callSummaryProviderNotConnected", 422),
+    ("callSummaryProviderRequired", 422),
+    ("summaryAlreadyGenerating", 409),
+    ("idempotencyKeyInvalid", 422),
+    ("idempotencyKeyReused", 422),
+    ("idempotencyKeyConflict", 409),
+];
+const PROVIDER_NOT_CONNECTED: &str = "callSummaryProviderNotConnected";
 
 /// `possibleErrorsOnListingWithCursor`.
 const LISTING_WITH_CURSOR: ErrorMap = &[("businessError", 400), ("invalidCursor", 400)];
@@ -244,29 +271,17 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .map(|out| json(200, out))
                 .map_err(|e| business_error(e, FINDING))
         }
-        "whatsappCalls.listSummaryProviders" => tx::read(&state.db, move |c| {
-            let mut providers = Vec::new();
-            for (provider, label, table) in SUMMARY_PROVIDERS {
-                let id: Option<i64> = c
-                    .query_row(
-                        &format!(
-                            r#"SELECT "id" FROM "{table}" WHERE "workspaceId" = ?1 ORDER BY "id" LIMIT 1"#
-                        ),
-                        params![ws],
-                        |r| r.get(0),
-                    )
-                    .optional()?;
-                if let Some(id) = id {
-                    providers.push(
-                        json!({ "id": id.to_string(), "provider": provider, "label": label }),
-                    );
-                }
-            }
-            Ok(providers)
-        })
-        .await
-        .map(|providers| json(200, json!({ "providers": providers })))
-        .map_err(|e| business_error(e, LISTING)),
+        "whatsappCalls.listSummaryProviders" => connected_providers(state, ws)
+            .await
+            .map(|providers| {
+                let providers: Vec<Value> = providers
+                    .iter()
+                    .map(|(id, provider, label)| json!({ "id": id.to_string(), "provider": provider, "label": label }))
+                    .collect();
+                json(200, json!({ "providers": providers }))
+            })
+            .map_err(|e| business_error(e, LISTING)),
+        "whatsappCalls.generateSummary" => generate_summary(state, call).await,
         _ => {
             let id = id_input(&call)?;
             load_call(state, ws, id)
@@ -279,6 +294,274 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .map_err(|e| business_error(e, FINDING))
         }
     }
+}
+
+/// `listConnectedCallSummaryProviders`: (integration id, provider, label).
+async fn connected_providers(
+    state: &ApiState,
+    ws: i64,
+) -> Result<Vec<(i64, &'static str, &'static str)>, BusinessError> {
+    tx::read(&state.db, move |c| {
+        let mut providers = Vec::new();
+        for (provider, label, table) in SUMMARY_PROVIDERS {
+            let id: Option<i64> = c
+                .query_row(
+                    &format!(
+                        r#"SELECT "id" FROM "{table}" WHERE "workspaceId" = ?1 ORDER BY "id" LIMIT 1"#
+                    ),
+                    params![ws],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(id) = id {
+                providers.push((id, provider, label));
+            }
+        }
+        Ok(providers)
+    })
+    .await
+}
+
+fn summary_locks() -> &'static chatbotx_kv::lock::LockMap {
+    static LOCKS: std::sync::OnceLock<chatbotx_kv::lock::LockMap> = std::sync::OnceLock::new();
+    LOCKS.get_or_init(chatbotx_kv::lock::LockMap::new)
+}
+
+/// A fail-fast lock (`retryTimeoutInSeconds: 0`); a held key is `summaryAlreadyGenerating`.
+fn summary_lock(key: &str) -> Result<chatbotx_kv::lock::LockGuard, BusinessError> {
+    summary_locks().try_acquire(key).map_err(|_| {
+        BusinessError::conflict(
+            "A summary is already being generated for this call.",
+            "summaryAlreadyGenerating",
+        )
+    })
+}
+
+async fn generate_summary(state: &ApiState, call: Call<'_>) -> Reply {
+    let mut input = Input::from_body(call.params, call.body);
+    let value = input.get("id").cloned();
+    let id = digits_at(&mut input, &key("id"), value.as_ref(), true).unwrap_or_default();
+    let provider = input.get("provider").cloned();
+    let names: Vec<&str> = SUMMARY_PROVIDERS.iter().map(|p| p.0).collect();
+    let provider = input.enum_at(&key("provider"), provider.as_ref(), &names, false);
+    input.finish()?;
+    generate_call_summary(state, call.workspace_id, id, provider)
+        .await
+        .map(|summary| json(200, json!({ "summary": summary })))
+        .map_err(|e| business_error(e, GENERATING))
+}
+
+/// `generateCallSummaryForCall`: transcript, provider, the 120 s generate
+/// lock, `generateCallSummary`, `attachSummary`.
+async fn generate_call_summary(
+    state: &ApiState,
+    ws: i64,
+    id: i64,
+    provider: Option<String>,
+) -> Result<Value, BusinessError> {
+    let found = load_call(state, ws, id).await?;
+    let text = transcript_text(&found);
+    if text.trim().is_empty() {
+        return Err(BusinessError::exception(
+            "This call has no transcript to summarize",
+            "callTranscriptEmpty",
+            422,
+        ));
+    }
+    let provider = match provider {
+        Some(provider) => provider,
+        None => only_connected_provider(state, ws).await?,
+    };
+    let _generating = summary_lock(&format!("whatsapp-call-summary-generate:{id}"))?;
+    let summary = summarize(state, ws, &provider, &text).await?;
+    attach_summary(state, &found, summary.clone(), provider).await?;
+    Ok(summary)
+}
+
+/// `getTranscriptTextForCall`: the flat transcript, else the joined segments.
+fn transcript_text(call: &WhatsappCall) -> String {
+    if let Some(text) = call.transcript.as_deref().filter(|t| !t.is_empty()) {
+        return text.to_owned();
+    }
+    call.transcript_segments
+        .as_ref()
+        .and_then(|s| s.0.as_array())
+        .map(|segments| {
+            segments
+                .iter()
+                .map(|s| s["text"].as_str().unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default()
+}
+
+/// `resolveOnlyConnectedProvider`.
+async fn only_connected_provider(state: &ApiState, ws: i64) -> Result<String, BusinessError> {
+    let connected = connected_providers(state, ws).await?;
+    match connected.as_slice() {
+        [(_, only, _)] => Ok((*only).to_owned()),
+        [] => Err(BusinessError::exception(
+            "No AI integration is connected to this workspace",
+            PROVIDER_NOT_CONNECTED,
+            422,
+        )),
+        many => Err(BusinessError::exception(
+            format!(
+                "Several AI providers are connected ({}): pass `provider`",
+                many.iter().map(|p| p.1).collect::<Vec<_>>().join(", ")
+            ),
+            "callSummaryProviderRequired",
+            422,
+        )),
+    }
+}
+
+/// `generateCallSummary` (`call-summarizer.ts`): one structured-output call.
+async fn summarize(
+    state: &ApiState,
+    ws: i64,
+    provider: &str,
+    transcript: &str,
+) -> Result<Value, BusinessError> {
+    use chatbotx_business::ai::{llm, model};
+    let name = provider.to_owned();
+    let auth = tx::read(&state.db, move |c| {
+        Ok(model::native_auth(c, ws, &name, None)?)
+    })
+    .await?
+    .ok_or_else(|| {
+        BusinessError::exception(
+            format!("The {provider} integration is not connected to this workspace"),
+            PROVIDER_NOT_CONNECTED,
+            422,
+        )
+    })?;
+    let failed = |message: String| {
+        tracing::error!(workspace_id = ws, provider, %message, "[call-summarizer] Failed to generate call summary");
+        BusinessError::exception("Internal server error", "INTERNAL_SERVER_ERROR", 500)
+    };
+    let model = model::native_model(provider, &auth, summary_model(provider)).map_err(failed)?;
+    let prompt = [
+        "Summarize the following phone call transcript for a customer support agent.",
+        "Provide a concise summary, a short list of key discussion points, and any concrete action items.",
+        "If the transcript has no clear key points or action items, return null for that field rather than inventing one.",
+        "",
+        transcript,
+    ]
+    .join("\n");
+    let request = llm::Request::new(None, vec![llm::Turn::user(prompt)]);
+    let object = llm::generate_object(
+        &llm::ReqwestHttp::default(),
+        &model,
+        &request,
+        summary_schema(),
+    )
+    .await
+    .map_err(|e| failed(e.message))?;
+    parse_summary(&object)
+        .ok_or_else(|| failed("No object generated: response did not match schema.".into()))
+}
+
+/// `callSummarySchema` (nullable lists, as OpenAI strict mode needs).
+fn summary_schema() -> Value {
+    let list = json!({ "type": ["array", "null"], "items": { "type": "string" } });
+    json!({
+        "type": "object",
+        "properties": { "summary": { "type": "string" }, "keyPoints": list, "actionItems": list },
+        "required": ["summary", "keyPoints", "actionItems"],
+        "additionalProperties": false,
+    })
+}
+
+/// The schema check; a `null` list is left out.
+fn parse_summary(object: &serde_json::Map<String, Value>) -> Option<Value> {
+    let mut out = serde_json::Map::new();
+    out.insert(
+        "summary".into(),
+        Value::String(object.get("summary")?.as_str()?.to_owned()),
+    );
+    for field in ["keyPoints", "actionItems"] {
+        match object.get(field) {
+            None | Some(Value::Null) => {}
+            Some(Value::Array(items)) if items.iter().all(Value::is_string) => {
+                out.insert(field.into(), Value::Array(items.clone()));
+            }
+            Some(_) => return None,
+        }
+    }
+    Some(Value::Object(out))
+}
+
+/// `whatsappCallSummaryService.attachSummary`: first write or overwrite under
+/// its own 60 s lock, then `hasSummary` on the call card + `messageContentUpdated`.
+async fn attach_summary(
+    state: &ApiState,
+    call: &WhatsappCall,
+    summary: Value,
+    provider: String,
+) -> Result<(), BusinessError> {
+    let _writing = summary_lock(&format!("whatsapp-call-summary:{}", call.id))?;
+    let input = calls::AiSummaryInput {
+        id: call.id,
+        ai_summary: summary,
+        ai_summary_provider: provider,
+        ai_summarized_at: None,
+    };
+    let overwrite = call.ai_summarized_at.is_some();
+    let (ws, conversation_id, source) = (
+        call.workspace_id,
+        call.conversation_id,
+        format!("wacall-{}", call.id),
+    );
+    let (merged, route) = tx::write(&state.db, move |c| {
+        if overwrite {
+            calls::overwrite_ai_summary(c, &input)?;
+        } else {
+            calls::attach_ai_summary(c, &input)?;
+        }
+        let mut overlay = serde_json::Map::new();
+        overlay.insert("hasSummary".into(), Value::Bool(true));
+        let merged =
+            chatbotx_db::repo::message::merge_content_attributes_by_source_id(c, &source, ws, &overlay)?;
+        let route: Option<(Option<i64>, Option<i64>)> = c
+            .query_row(
+                r#"SELECT "assignedInboxTeamId", "assignedUserId" FROM "Conversation" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+                params![conversation_id, ws],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok((merged, route))
+    })
+    .await?;
+    let Some(merged) = merged else {
+        tracing::info!(
+            call_id = call.id,
+            "Whatsapp call: no finalize message to enrich with AI summary yet"
+        );
+        return Ok(());
+    };
+    let Some(entity) = merged
+        .content_attributes
+        .filter(|e| e["type"] == "whatsapp_call")
+    else {
+        return Ok(());
+    };
+    let route = route.map(|(team, user)| chatbotx_rt::protocol::ConversationRoute {
+        assigned_inbox_team_id: team.map(|i| i.to_string()),
+        assigned_user_id: user.map(|i| i.to_string()),
+        inbox_id: None,
+    });
+    let mut event = chatbotx_rt::Envelope::new(
+        chatbotx_rt::EventType::MessageContentUpdated,
+        json!({ "messageId": merged.id.to_string(), "contentAttributes": entity }),
+    );
+    event.route = Some(chatbotx_rt::protocol::route_for_conversation(
+        route.as_ref(),
+        None,
+    ));
+    state.queue_realtime(ws, event).await;
+    Ok(())
 }
 
 async fn list(state: &ApiState, call: Call<'_>) -> Reply {
@@ -371,6 +654,22 @@ mod tests {
         assert_eq!(
             call_kind("rejected", None, "userInitiated"),
             Some("declined")
+        );
+    }
+
+    #[test]
+    fn a_summary_object_must_match_the_schema() {
+        let object = |v: Value| v.as_object().cloned().unwrap();
+        assert_eq!(
+            parse_summary(&object(
+                json!({ "summary": "s", "keyPoints": null, "actionItems": ["a"] })
+            )),
+            Some(json!({ "summary": "s", "actionItems": ["a"] }))
+        );
+        assert_eq!(parse_summary(&object(json!({ "keyPoints": [] }))), None);
+        assert_eq!(
+            parse_summary(&object(json!({ "summary": "s", "keyPoints": [1] }))),
+            None
         );
     }
 

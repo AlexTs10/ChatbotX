@@ -14,6 +14,8 @@ pub mod appointment;
 pub mod channel;
 pub mod channels;
 pub mod chat;
+pub mod coexist_attachment;
+pub mod coexist_messenger;
 pub mod coexist_whatsapp;
 pub mod coexist_whatsapp_payload;
 pub mod condition;
@@ -47,6 +49,9 @@ pub mod variables;
 pub mod wa_template;
 pub mod webchat_guest;
 pub mod webhook;
+pub mod whatsapp_call;
+pub mod whatsapp_call_media;
+pub mod whatsapp_call_webhook;
 
 use std::sync::Arc;
 
@@ -283,6 +288,12 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
         )),
         handler(deps, |deps, job| {
             Box::pin(marketing_message::handle(deps, job))
+        }),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::CallTranscription),
+        handler(deps, |deps, job| {
+            Box::pin(whatsapp_call_media::handle_transcription(deps, job))
         }),
     )?;
     runtime.spawn_worker(

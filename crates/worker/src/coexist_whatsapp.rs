@@ -7,9 +7,8 @@
 //!
 //! ponytail: contacts are imported one by one through the inbound
 //! `detect_contact_and_conversation` (no `contactCreated` event, analytics
-//! row or usage counter); the `coexistAttachmentDownload` job (media
-//! hydration) is not ported, so synced media stay `wa-media:{id}` stubs; no
-//! `logProviderError` row on a failed chunk.
+//! row or usage counter); no `logProviderError` row on a failed chunk.
+//! Inserted attachments queue `coexistAttachmentDownload` (`coexist_attachment`).
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -58,14 +57,14 @@ const RECOVERY_BATCH: i64 = 200;
 const STRANDED_LIMIT: i64 = 50;
 const YEAR_MS: i64 = 365 * 24 * 60 * 60 * 1000;
 
-async fn read<R: Send + 'static>(
+pub(crate) async fn read<R: Send + 'static>(
     deps: &Deps,
     f: impl FnOnce(&Connection) -> chatbotx_db::repo::Result<R> + Send + 'static,
 ) -> Result<R, JobError> {
     chatbotx_db::repo::read(&deps.db, f).await.map_err(db_fail)
 }
 
-async fn write<R: Send + 'static>(
+pub(crate) async fn write<R: Send + 'static>(
     deps: &Deps,
     f: impl FnOnce(&Connection) -> chatbotx_db::repo::Result<R> + Send + 'static,
 ) -> Result<R, JobError> {
@@ -188,23 +187,25 @@ struct ImportResult {
     imported_messages: i64,
     skipped: i64,
     failed_messages: i64,
+    attachment_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Activity {
-    contact_inbox_id: i64,
-    contact_id: i64,
-    conversation_id: i64,
-    newest: Option<i64>,
-    oldest: Option<i64>,
-    newest_incoming: Option<i64>,
-    ai_marker: Option<i64>,
+pub(crate) struct Activity {
+    pub(crate) contact_inbox_id: i64,
+    pub(crate) contact_id: i64,
+    pub(crate) conversation_id: i64,
+    pub(crate) newest: Option<i64>,
+    pub(crate) oldest: Option<i64>,
+    pub(crate) newest_incoming: Option<i64>,
+    pub(crate) ai_marker: Option<i64>,
 }
 
-struct MessagesResult {
-    imported: i64,
-    skipped: i64,
-    newest_message_id: Option<i64>,
+pub(crate) struct MessagesResult {
+    pub(crate) imported: i64,
+    pub(crate) skipped: i64,
+    pub(crate) newest_message_id: Option<i64>,
+    pub(crate) attachment_ids: Vec<i64>,
 }
 
 /// One insert with the re-mint loop (`remintRow`): a primary-key collision
@@ -234,7 +235,7 @@ fn insert_one(
 }
 
 /// `bulkImportMessages` for one contact, in one transaction.
-fn import_messages(
+pub(crate) fn import_messages(
     conn: &Connection,
     workspace_id: i64,
     link: (i64, i64, i64),
@@ -244,6 +245,7 @@ fn import_messages(
     let mut ids = HistoricalIds::default();
     let fallback = now_ms();
     let (mut imported, mut newest_message_id) = (0, None::<i64>);
+    let mut attachment_ids = Vec::new();
     for m in messages {
         let created_at = m.created_at.unwrap_or(fallback);
         let outgoing = m.message_type == "outgoing";
@@ -255,7 +257,7 @@ fn import_messages(
             contact_inbox_id,
             conversation_id,
             workspace_id,
-            content_attributes: None,
+            content_attributes: m.content_attributes.clone(),
             content_type: "text".into(),
             message_type: m.message_type.into(),
             sender_type: if outgoing { "user" } else { "contact" }.into(),
@@ -272,23 +274,20 @@ fn import_messages(
         };
         imported += 1;
         newest_message_id = newest_message_id.max(Some(id));
-        if let Some(a) = &m.attachment {
-            message::bulk_create_attachments(
-                conn,
-                &[attachment_row(
-                    workspace_id,
-                    conversation_id,
-                    id,
-                    created_at,
-                    a,
-                )],
-            )?;
+        if !m.attachments.is_empty() {
+            let rows: Vec<_> = m
+                .attachments
+                .iter()
+                .map(|a| attachment_row(workspace_id, conversation_id, id, created_at, a))
+                .collect();
+            attachment_ids.extend(message::bulk_create_attachments(conn, &rows)?);
         }
     }
     Ok(MessagesResult {
         imported,
         skipped: messages.len() as i64 - imported,
         newest_message_id,
+        attachment_ids,
     })
 }
 
@@ -322,7 +321,7 @@ fn attachment_row(
 
 /// `applyCoexistActivityUpdates`: move the tracking times and the AI context
 /// marker, never backwards (`LEAST` / `GREATEST` ignore NULL, like Postgres).
-fn apply_activity(
+pub(crate) fn apply_activity(
     conn: &Connection,
     workspace_id: i64,
     updates: &[Activity],
@@ -410,6 +409,7 @@ async fn import_batch(
             Ok(res) => {
                 out.imported_messages += res.imported;
                 out.skipped += res.skipped;
+                out.attachment_ids.extend(res.attachment_ids);
                 let times = || entry.messages.iter().filter_map(|m| m.created_at);
                 let newest = times().max();
                 let ai_marker = if ai_reads_synced_history {
@@ -454,9 +454,9 @@ fn apply_patches(
     workspace_id: i64,
     inbox_id: i64,
     candidates: Vec<Patch>,
-) -> chatbotx_db::repo::Result<Vec<Patch>> {
+) -> chatbotx_db::repo::Result<(Vec<Patch>, Vec<i64>)> {
     if candidates.is_empty() {
-        return Ok(candidates);
+        return Ok((candidates, Vec::new()));
     }
     let wa_ids: Vec<String> = candidates.iter().map(|p| p.contact_wa_id.clone()).collect();
     let inboxes: HashMap<String, (i64, i64, Option<i64>)> =
@@ -479,7 +479,7 @@ fn apply_patches(
         })
         .min()
     else {
-        return Ok(candidates);
+        return Ok((candidates, Vec::new()));
     };
     let (mut ci_ids, mut source_ids) = (Vec::new(), Vec::new());
     for p in &candidates {
@@ -533,7 +533,7 @@ fn apply_patches(
                 .map(Some),
         });
     }
-    message::bulk_create_attachments(conn, &attachments)?;
+    let attachment_ids = message::bulk_create_attachments(conn, &attachments)?;
     message::bulk_patch_content_attributes(
         conn,
         &BulkPatchContentAttributesParams {
@@ -542,7 +542,7 @@ fn apply_patches(
             workspace_id,
         },
     )?;
-    Ok(unresolved)
+    Ok((unresolved, attachment_ids))
 }
 
 /// `capPendingPatches`: one entry per key (the latest), the newest 500.
@@ -879,7 +879,22 @@ async fn import_and_patch(
     let mut candidates = std::mem::take(&mut state.pending);
     candidates.extend(reduced.patches.iter().cloned());
     let (ws, inbox) = (ctx.integration.workspace_id, ctx.inbox.inbox_id);
-    let unresolved = write(deps, move |c| apply_patches(c, ws, inbox, candidates)).await?;
+    let (unresolved, patch_attachment_ids) =
+        write(deps, move |c| apply_patches(c, ws, inbox, candidates)).await?;
+    // Best effort: a failed enqueue leaves the bytes pending, never the chunk failed.
+    let mut attachment_ids = result.attachment_ids;
+    attachment_ids.extend(patch_attachment_ids);
+    if let Err(error) = crate::coexist_attachment::enqueue(
+        deps,
+        ws,
+        ctx.integration.id,
+        "whatsapp",
+        &attachment_ids,
+    )
+    .await
+    {
+        tracing::error!(%error, run_id = ctx.run.id, count = attachment_ids.len(), "[coexist] WhatsApp attachment download enqueue failed — bytes left as pending");
+    }
     let now = iso(now_ms());
     state.pending = cap_pending(
         unresolved
@@ -1116,8 +1131,8 @@ async fn enqueue_run(
                 json!({ "runId": run_id, "phoneNumberId": phone }),
             )
         }
-        // The pull syncs (Messenger / Instagram) are a later unit; the job
-        // fails as an undefined action until then, as before this port.
+        // The Instagram pull sync is a later unit; its job fails as an
+        // undefined action until then, as before this port.
         "messenger" => ("coexistMessengerSync", pull_data(run)),
         _ => ("coexistInstagramSync", pull_data(run)),
     };
