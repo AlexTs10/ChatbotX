@@ -42,7 +42,8 @@ pub async fn trigger_smb_app_data_sync(
             "{graph_url}/{version}/{phone_number_id}/smb_app_data"
         ))
         .bearer_auth(token)
-        .json(&json!({ "messaging_product": "whatsapp", "sync_type": sync_type }))
+        .header("content-type", "application/json")
+        .body(json!({ "messaging_product": "whatsapp", "sync_type": sync_type }).to_string())
         .send()
         .await
         .map_err(|e| e.to_string())?;
