@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
@@ -26,8 +26,23 @@ use crate::session::AuthState;
 
 /// The router of `/rpc/pages/*`.
 pub fn spa_router(state: Arc<AuthState>) -> Router {
+    spa_router_with(state, None)
+}
+
+/// The app services some loaders use: the job queue (the staged template
+/// installs of a first workspace) and the kv store (the template install
+/// intent). Without them those effects are skipped.
+#[derive(Clone)]
+struct SpaApi(Option<Arc<crate::handlers::ApiState>>);
+
+/// [`spa_router`] with the app services.
+pub fn spa_router_with(
+    state: Arc<AuthState>,
+    api: Option<Arc<crate::handlers::ApiState>>,
+) -> Router {
     Router::new()
         .route("/rpc/pages/{name}", post(page))
+        .layer(Extension(SpaApi(api)))
         .with_state(state)
 }
 
@@ -226,6 +241,7 @@ fn empty_quota() -> Value {
 
 async fn page(
     State(state): State<Arc<AuthState>>,
+    Extension(SpaApi(api)): Extension<SpaApi>,
     Path(name): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -243,7 +259,7 @@ async fn page(
             "signUpAllowed": !state.settings.sign_up_disabled,
         })),
         "home" => match require_session(&state, &headers).await {
-            Ok(session) => home_page(&state, session.user_id).await,
+            Ok(session) => home_page(&state, api.as_deref(), session.user_id).await,
             Err(response) => *response,
         },
         // ponytail: deletion records are a P3.x port; the list is empty until then.
@@ -252,10 +268,17 @@ async fn page(
             Err(response) => *response,
         },
         "channelsCreate" => match require_session(&state, &headers).await {
-            Ok(session) => channels_create_page(&state, session.user_id, &input).await,
+            Ok(session) => {
+                channels_create_page(&state, api.as_deref(), session.user_id, &input).await
+            }
             Err(response) => *response,
         },
         "invitation" => invitation_page(&state, &headers, &input).await,
+        "templateShare" => template_share_page(&state, &headers, &input).await,
+        "templateInstall" => match require_session(&state, &headers).await {
+            Ok(session) => template_install_page(&state, session.user_id, &input).await,
+            Err(response) => *response,
+        },
         // `app/admin/layout.tsx`: a platform admin only (else 404).
         "admin" => match require_session(&state, &headers).await {
             Ok(session) if platform_admin(&state, session.user_id).await => {
@@ -286,6 +309,69 @@ async fn page(
         }
         _ => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
     }
+}
+
+/// The `shareToken` input of the template share pages.
+fn share_token_of(input: &Value) -> String {
+    input
+        .get("shareToken")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// `app/t/[shareToken]/{layout,page}.tsx`: `findPublicTemplate` (null for
+/// every unusable link) and whether a user is signed in. No session needed.
+async fn template_share_page(state: &AuthState, headers: &HeaderMap, input: &Value) -> Response {
+    let signed_in = match find_rpc_session(state, headers).await {
+        Ok(session) => session.is_some(),
+        Err(err) => return internal(err),
+    };
+    match chatbotx_business::template::request::find_public_by_share_token(
+        &state.db,
+        share_token_of(input),
+    )
+    .await
+    {
+        Ok(template) => ok(json!({ "template": template, "isAuthenticated": signed_in })),
+        Err(err) => internal(err),
+    }
+}
+
+/// `InstallSection` of `app/t/[shareToken]/install/page.tsx`: the viewer's
+/// installable workspaces (name, logo path, `crossTenant`), the template's
+/// inboxes, the bindable inboxes and the copies already installed.
+async fn template_install_page(state: &AuthState, user_id: i64, input: &Value) -> Response {
+    use chatbotx_business::template::request::{ViewerMembership, install_page};
+    let list = match state.db.read(move |conn| memberships(conn, user_id)).await {
+        Ok(list) => list,
+        Err(err) => return internal(err),
+    };
+    let id_of = |value: &Value| value.as_str().and_then(|text| text.parse::<i64>().ok());
+    let members = list
+        .iter()
+        .filter_map(|m| {
+            Some(ViewerMembership {
+                workspace_id: id_of(&m.workspace["id"])?,
+                tenant_id: id_of(&m.workspace["tenantId"])?,
+                role: m.role.clone(),
+                permissions: m.permissions.clone(),
+            })
+        })
+        .collect();
+    let mut page = match install_page(&state.db, share_token_of(input), members).await {
+        Ok(page) => page,
+        Err(err) => return internal(err),
+    };
+    if let Some(Value::Array(workspaces)) = page.get_mut("workspaces") {
+        for workspace in workspaces.iter_mut() {
+            if let Some(m) = list.iter().find(|m| m.workspace["id"] == workspace["id"]) {
+                workspace["name"] = m.workspace["name"].clone();
+                workspace["logo"] = m.workspace["logo"].clone();
+            }
+        }
+    }
+    ok(page)
 }
 
 /// `app/(no-sidebar)/invitations/[code]/page.tsx`: `findInvitation` (null
@@ -357,7 +443,17 @@ async fn session_page(state: &AuthState, headers: &HeaderMap) -> Response {
 
 /// `app/(main)/page.tsx`: the workspace list. A user without a workspace
 /// gets a first one (`workspaceService.create`), as the builder did.
-async fn home_page(state: &AuthState, user_id: i64) -> Response {
+async fn home_page(
+    state: &AuthState,
+    api: Option<&crate::handlers::ApiState>,
+    user_id: i64,
+) -> Response {
+    use chatbotx_business::template::install_intent;
+    // The home page is no share-page flow: its default workspace gets no
+    // template choice (`createFirstWorkspaceForUser`).
+    if let Some(kv) = api.and_then(|api| api.kv.as_deref()) {
+        install_intent::clear(&kv.durable, user_id).await;
+    }
     let created = state
         .db
         .write(move |tx| {
@@ -374,7 +470,8 @@ async fn home_page(state: &AuthState, user_id: i64) -> Response {
                 params![user_id],
                 |row| row.get(0),
             )?;
-            let workspace_id = insert_workspace(tx, user_id, &format!("{label}'s workspace"))?;
+            let workspace_id =
+                insert_workspace(tx, user_id, &format!("{label}'s workspace"), None)?;
             Ok(Some(workspace_id))
         })
         .await;
@@ -382,6 +479,13 @@ async fn home_page(state: &AuthState, user_id: i64) -> Response {
         Ok(created) => created,
         Err(err) => return internal(err),
     };
+    // `dispatchStagedInstalls` after the commit: the default template starts
+    // now, not at the next installation sweep.
+    if let (Some(workspace_id), Some(api)) = (created, api)
+        && let Some(jobs) = api.jobs.as_deref()
+    {
+        install_intent::dispatch_staged_installs(&api.db, jobs, workspace_id).await;
+    }
     let loaded = state
         .db
         .read(move |conn| Ok((user_json(conn, user_id)?, memberships(conn, user_id)?)))
@@ -424,7 +528,15 @@ async fn home_page(state: &AuthState, user_id: i64) -> Response {
 
 /// `workspaceService.create`: a workspace owned by `user_id` (tenant of the
 /// user) and its owner membership with full permissions.
-pub(crate) fn insert_workspace(tx: &Connection, user_id: i64, name: &str) -> Result<i64, DbError> {
+/// A new workspace owned by `user_id`, with the pending install of the share
+/// link's template (`share_token`: the user's install intent) or else of the
+/// tenant default; the caller enqueues it after the commit.
+pub(crate) fn insert_workspace(
+    tx: &Connection,
+    user_id: i64,
+    name: &str,
+    share_token: Option<&str>,
+) -> Result<i64, DbError> {
     let tenant_id: i64 = tx.query_row(
         r#"SELECT "tenantId" FROM "User" WHERE "id" = ?1"#,
         params![user_id],
@@ -447,9 +559,21 @@ pub(crate) fn insert_workspace(tx: &Connection, user_id: i64, name: &str) -> Res
             NOTIFICATION_CHANNELS
         ],
     )?;
-    // The tenant's default template, as a pending install the template sweep runs.
-    chatbotx_business::template::tenant_default::stage_install(tx, workspace_id, tenant_id)
-        .map_err(|e| DbError::other(e.message()))?;
+    let from_share_link = match share_token {
+        Some(token) => chatbotx_business::template::install_intent::stage_shared_install(
+            tx,
+            workspace_id,
+            tenant_id,
+            user_id,
+            token,
+        )
+        .map_err(|e| DbError::other(e.message()))?,
+        None => None,
+    };
+    if from_share_link.is_none() {
+        chatbotx_business::template::tenant_default::stage_install(tx, workspace_id, tenant_id)
+            .map_err(|e| DbError::other(e.message()))?;
+    }
     Ok(workspace_id)
 }
 
@@ -523,7 +647,19 @@ async fn workspace_page(state: &AuthState, name: &str, user_id: i64, input: Valu
 /// super admin (`requireWorkspacePermission`).
 // ponytail: tenant channel visibility and platform credentials are not ported;
 // only the channels with a ported create action (webchat, API) are offered.
-async fn channels_create_page(state: &AuthState, user_id: i64, input: &Value) -> Response {
+async fn channels_create_page(
+    state: &AuthState,
+    api: Option<&crate::handlers::ApiState>,
+    user_id: i64,
+    input: &Value,
+) -> Response {
+    // `continuesInstallIntent`: server-side, so a tab that never left a
+    // dashboard can not pick up a choice made in another one.
+    let continues = input.get("fromTemplate").and_then(Value::as_str) == Some("1")
+        && workspace_id(input).is_none();
+    if !continues && let Some(kv) = api.and_then(|api| api.kv.as_deref()) {
+        chatbotx_business::template::install_intent::clear(&kv.durable, user_id).await;
+    }
     if let Some(workspace_id) = workspace_id(input) {
         let list = match state.db.read(move |conn| memberships(conn, user_id)).await {
             Ok(list) => list,

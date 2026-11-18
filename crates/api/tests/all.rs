@@ -186,6 +186,8 @@ mod rpc_session_auth;
 mod rpc_spa_procedures;
 #[path = "rpc_template_actions.rs"]
 mod rpc_template_actions;
+#[path = "rpc_template_pages.rs"]
+mod rpc_template_pages;
 #[path = "rpc_workspace.rs"]
 mod rpc_workspace;
 #[path = "rpc_workspace_members.rs"]

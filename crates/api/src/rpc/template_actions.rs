@@ -6,8 +6,8 @@
 //!
 //! ponytail: validation issues name the route's fields (`enabled`,
 //! `expiresAt`), not the action's (`shareEnabled`, `shareExpiresAt`).
-//! `rememberTemplateInstallIntent` / `clearTemplateInstallIntent` (the
-//! install-intent cookie) are not ported: no Rust install-intent store yet.
+//! `rememberTemplateInstallIntent` / `clearTemplateInstallIntent` are
+//! `authActionClient` actions (`rpc_procedures::templates::auth_action`).
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::template::permissions::{Actor, assert_can_manage, can_view_installs};
@@ -65,7 +65,34 @@ const ACTIONS: &[(&str, Gate, Client)] = &[
     ),
     ("installTemplate", Gate::Workspace, Client::Member),
     ("previewInstallCollisions", Gate::Workspace, Client::Member),
+    // The page reads of `app/space/[workspaceId]/templates/**` (P4 SPA).
+    ("listTemplates", Gate::AllowExpired, Client::Manage),
+    ("getEditableTemplate", Gate::AllowExpired, Client::Manage),
+    ("listTemplateVersions", Gate::AllowExpired, Client::Manage),
+    (
+        "listTemplateInstallations",
+        Gate::AllowExpired,
+        Client::Installer,
+    ),
+    (
+        "getTemplateInstallation",
+        Gate::AllowExpired,
+        Client::Installer,
+    ),
+    (
+        "listTemplateInstallationResources",
+        Gate::AllowExpired,
+        Client::Installer,
+    ),
+    (
+        "listTemplateSyncHistory",
+        Gate::AllowExpired,
+        Client::Installer,
+    ),
 ];
+
+/// `RESOURCES_PER_TAB`: an installation page tab shows its whole category.
+const RESOURCES_PER_TAB: i64 = 1000;
 
 /// The actions of the `templateActions` key.
 pub fn action_gate(name: &str) -> Option<Gate> {
@@ -132,6 +159,86 @@ pub async fn run_action(
         _ => {}
     }
     let id = bind(raw, 1);
+    let workspace_id = context.workspace_id();
+    let numeric_id = || id.parse::<i64>().unwrap_or(-1);
+    match name {
+        // `getEditableTemplateOrFail`: the detail with deleted picks dropped.
+        "getEditableTemplate" => {
+            let mut template = route_json(
+                api,
+                context,
+                "templates.get",
+                vec![("id", id.clone())],
+                actor,
+            )
+            .await?;
+            let selection = template["selection"].take();
+            template["selection"] = chatbotx_business::tx::read(&api.db, move |conn| {
+                chatbotx_business::template::snapshot::without_deleted_resources(
+                    conn,
+                    workspace_id,
+                    &selection,
+                )
+            })
+            .await?;
+            return Ok(Some(template));
+        }
+        "listTemplateInstallationResources" => {
+            let category = field(raw, "category").as_str().map(str::to_string);
+            return Ok(Some(
+                chatbotx_business::template::request::list_resources(
+                    &api.db,
+                    workspace_id,
+                    numeric_id(),
+                    None,
+                    Some(RESOURCES_PER_TAB),
+                    category,
+                )
+                .await?,
+            ));
+        }
+        "listTemplateSyncHistory" => {
+            return Ok(Some(Value::Array(
+                chatbotx_business::template::installations::list_history(
+                    &api.db,
+                    workspace_id,
+                    numeric_id(),
+                )
+                .await?,
+            )));
+        }
+        "listTemplates" | "listTemplateInstallations" => {
+            let route = if name == "listTemplates" {
+                "templates.list"
+            } else {
+                "templateInstallations.list"
+            };
+            let params = ["cursor", "status", "activeOnly", "limit"]
+                .into_iter()
+                .filter_map(|key| match field(raw, key) {
+                    Value::String(text) => Some((key, text)),
+                    Value::Bool(flag) => Some((key, flag.to_string())),
+                    Value::Number(n) => Some((key, n.to_string())),
+                    _ => None,
+                })
+                .collect();
+            return Ok(Some(route_json(api, context, route, params, actor).await?));
+        }
+        "listTemplateVersions" | "getTemplateInstallation" => {
+            let route = if name == "listTemplateVersions" {
+                "templates.listVersions"
+            } else {
+                "templateInstallations.get"
+            };
+            let out = route_json(api, context, route, vec![("id", id)], actor).await?;
+            return Ok(Some(if name == "listTemplateVersions" {
+                out["items"].clone()
+            } else {
+                out
+            }));
+        }
+        _ => {}
+    }
     let mut body = body_of(raw);
     let (route, params, body, shape): Plan = match name {
         "deleteTemplate" => ("templates.delete", vec![("id", id)], json!({}), |_, _| None),
@@ -313,7 +420,7 @@ pub async fn run_action(
         }
     };
     let body = body.to_string();
-    let reply = templates::handle_as(
+    let out = templates::handle_json(
         api,
         route,
         Call {
@@ -325,25 +432,51 @@ pub async fn run_action(
         actor,
         Some(context.user_id),
     )
-    .await;
-    let response = reply.map_err(|error| {
-        if error.code == "invalidRequestData" {
-            ActionError::from(error)
-        } else {
-            ActionError::Exception(BusinessError::exception(
-                error.message,
-                &error.code,
-                error.status,
-            ))
-        }
-    })?;
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .map_err(|e| ActionError::Internal(e.to_string()))?;
-    let out = if bytes.is_empty() {
-        Value::Null
+    .await
+    .map_err(action_error);
+    // Installing here settles a share page's choice, either way: no
+    // workspace is coming (`installTemplateAction`'s `finally`).
+    if name == "installTemplate"
+        && let Some(kv) = api.kv.as_deref()
+    {
+        chatbotx_business::template::install_intent::clear(&kv.durable, context.user_id).await;
+    }
+    Ok(shape(out?, raw))
+}
+
+/// A route error as the action's: input issues stay validation errors.
+fn action_error(error: crate::orpc::OrpcError) -> ActionError {
+    if error.code == "invalidRequestData" {
+        ActionError::from(error)
     } else {
-        serde_json::from_slice(&bytes).map_err(|e| ActionError::Internal(e.to_string()))?
-    };
-    Ok(shape(out, raw))
+        ActionError::Exception(BusinessError::exception(
+            error.message,
+            &error.code,
+            error.status,
+        ))
+    }
+}
+
+/// A read route (no body) as JSON.
+async fn route_json(
+    api: &ApiState,
+    context: &ActionContext,
+    route: &str,
+    params: Vec<(&'static str, String)>,
+    actor: Actor,
+) -> Result<Value, ActionError> {
+    templates::handle_json(
+        api,
+        route,
+        Call {
+            workspace_id: context.workspace_id(),
+            params: &params,
+            query: None,
+            body: b"",
+        },
+        actor,
+        Some(context.user_id),
+    )
+    .await
+    .map_err(action_error)
 }

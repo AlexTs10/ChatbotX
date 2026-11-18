@@ -171,7 +171,7 @@ export const AdminHelpItemsPage = () => (
 )
 
 // ponytail: the other console pages read data the Rust server has no
-// procedure for yet (platform credentials / channels, default template,
+// procedure for yet (platform credentials / channels,
 // deletion records, platform audit logs, SMTP, branding, email templates).
 export const AdminNotAvailablePage = () => (
   <NotAvailablePage title="Platform admin" />

@@ -76,6 +76,25 @@ pub async fn handle(
     handle_as(state, route_id, call, actor, None).await
 }
 
+/// [`handle_as`] with the answer body as JSON (`null` for a 204), for the
+/// `/rpc` template actions and procedures.
+pub async fn handle_json(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    actor: Actor,
+    user_id: Option<i64>,
+) -> Result<Value, OrpcError> {
+    let response = handle_as(state, route_id, call, actor, user_id).await?;
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .map_err(|e| super::internal_error(&e.to_string()))?;
+    if bytes.is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_slice(&bytes).map_err(|e| super::internal_error(&e.to_string()))
+}
+
 /// [`handle`] for an actor (a member for the `/rpc` template actions) and the
 /// acting user (`createdBy` / `installedBy` / `retriedBy` / `requestedBy`).
 pub async fn handle_as(

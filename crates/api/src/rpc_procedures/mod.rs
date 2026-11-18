@@ -221,6 +221,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = integrations::auth_action(ctx, name, &args).await {
         return Some(outcome);
     }
+    if let Some(outcome) = templates::auth_action(ctx, name, &args).await {
+        return Some(outcome);
+    }
     // Every other action is a `workspaceActionClient` one.
     if context.workspace.is_none() {
         return match name {

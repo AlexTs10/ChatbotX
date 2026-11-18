@@ -5,6 +5,9 @@
 //!
 //! - `listPlatformAdmins(page)`: `platformAdminService.list({ page, perPage: 50 })`
 //! - `listRootHelpItems()`: `tenantHelpItemService.listByTenant(ROOT_TENANT_ID)`
+//! - `getRootDefaultTemplateSettings()`: `app/admin/default-template/page.tsx`
+//!   (`tenantDefaultTemplateService.getSettings({ scope: root })`; not an
+//!   `(enterprise)` page)
 
 use chatbotx_business::BusinessError;
 use chatbotx_db::repo::PaginationInput;
@@ -16,7 +19,10 @@ use crate::handlers::{date, id};
 use crate::orpc::OrpcError;
 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
-    if !matches!(name, "listPlatformAdmins" | "listRootHelpItems") {
+    if !matches!(
+        name,
+        "listPlatformAdmins" | "listRootHelpItems" | "getRootDefaultTemplateSettings"
+    ) {
         return None;
     }
     Some(run(ctx, name, args).await)
@@ -31,8 +37,27 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
     .await
     .map_err(fail)?;
     // `notFound()`; the `(enterprise)` layout 404s without the features too.
-    if !is_admin || !chatbotx_business::license::has_enterprise_features(db, ctx.api.edition).await
-    {
+    if !is_admin {
+        return Err(fail(BusinessError::not_found("Not found")));
+    }
+    if name == "getRootDefaultTemplateSettings" {
+        let Some(encryption) = ctx.api.encryption.as_deref() else {
+            return Err(fail(BusinessError::exception(
+                "encryption keys are not configured",
+                "systemError",
+                500,
+            )));
+        };
+        return Ok(chatbotx_business::template::tenant_default::get_settings(
+            db,
+            encryption,
+            chatbotx_business::template::tenant_default::Scope::Root,
+        )
+        .await
+        .map_err(fail)?
+        .unwrap_or(Value::Null));
+    }
+    if !chatbotx_business::license::has_enterprise_features(db, ctx.api.edition).await {
         return Err(fail(BusinessError::not_found("Not found")));
     }
     match name {

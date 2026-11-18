@@ -274,6 +274,8 @@ mod tag_service_create;
 mod tag_service_detach_from_contact;
 #[path = "tag_service_soft_delete.rs"]
 mod tag_service_soft_delete;
+#[path = "template_install_intent.rs"]
+mod template_install_intent;
 #[path = "template_service.rs"]
 mod template_service;
 #[path = "tenant_service.rs"]

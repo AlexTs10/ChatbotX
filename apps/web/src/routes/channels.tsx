@@ -25,10 +25,15 @@ export function CreateChannelPage() {
   const workspaceId = searchParams.get("workspaceId") || undefined
   const channel = searchParams.get("channel")
   const error = searchParams.get("error")
+  // `continuesInstallIntent`: the loader ends a share page's choice otherwise.
+  const fromTemplate = searchParams.get("fromTemplate") ?? undefined
   const { data } = useSuspenseQuery({
-    queryKey: ["spa", "channelsCreate", workspaceId],
+    queryKey: ["spa", "channelsCreate", workspaceId, fromTemplate],
     queryFn: () =>
-      loadPage<ChannelsCreateData>("channelsCreate", { workspaceId }),
+      loadPage<ChannelsCreateData>("channelsCreate", {
+        workspaceId,
+        fromTemplate,
+      }),
   })
   const isVisible = (type: ChannelType) => data.offeredChannels.includes(type)
 
