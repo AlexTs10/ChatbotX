@@ -1,5 +1,9 @@
 //! All integration tests of this crate in one binary (see the guard test).
 
+// Each test file keeps its own `mod common;` / helper lookups, so a helper file
+// is loaded once per test module.
+#![allow(clippy::duplicate_mod)]
+
 #[path = "decision_config_profile.rs"]
 mod decision_config_profile;
 #[path = "encryption_appointment_tokens.rs"]

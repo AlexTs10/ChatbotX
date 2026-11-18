@@ -1,5 +1,9 @@
 //! All integration tests of this crate in one binary (see the guard test).
 
+// Each test file keeps its own `mod common;` / helper lookups, so a helper file
+// is loaded once per test module.
+#![allow(clippy::duplicate_mod)]
+
 #[path = "admin_workspaces.rs"]
 mod admin_workspaces;
 #[path = "ai_agents_public_api.rs"]
@@ -68,6 +72,8 @@ mod contacts_messages_public_api;
 mod contacts_refresh_profile_public_api;
 #[path = "conversations_public_api.rs"]
 mod conversations_public_api;
+#[path = "conversations_thread_control_public_api.rs"]
+mod conversations_thread_control_public_api;
 #[path = "custom_fields_public_api.rs"]
 mod custom_fields_public_api;
 #[path = "ecommerce_open_hours_public_api.rs"]
@@ -240,6 +246,10 @@ mod templates_public_api;
 mod triggers_public_api;
 #[path = "webchats_public_api.rs"]
 mod webchats_public_api;
+#[path = "whatsapp_flows_public_api.rs"]
+mod whatsapp_flows_public_api;
+#[path = "whatsapp_templates_public_api.rs"]
+mod whatsapp_templates_public_api;
 #[path = "working_hours_public_api.rs"]
 mod working_hours_public_api;
 #[path = "workspace_settings_public_api.rs"]
