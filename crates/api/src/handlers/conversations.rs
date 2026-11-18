@@ -4,6 +4,7 @@
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use chatbotx_business::BusinessError;
 use chatbotx_business::contact::avatar::{AvatarInbox, resolve_contact_avatar_url_with};
 use chatbotx_business::contact_filter::{parse_strict_param, to_filter_criteria};
 use chatbotx_business::conversation_actions as actions;
