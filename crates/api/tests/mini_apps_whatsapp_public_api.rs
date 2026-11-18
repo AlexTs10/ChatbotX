@@ -97,8 +97,13 @@ async fn seeded() -> (Fixture, Arc<Mutex<Meta>>, String) {
         .write(|tx| {
             let auth = json!({ "tokens": { "accessToken": "tok" }, "metadata": { "wabaId": "waba-1" } }).to_string();
             tx.execute(
-                r#"INSERT INTO "IntegrationWhatsapp" ("id", "auth", "phoneNumberId", "wabaId", "businessId", "name", "workspaceId")
-                   VALUES (72, ?1, 'p', 'waba-1', 'b', 'Number', ?2), (82, ?1, 'p2', 'waba-2', 'b', 'Far', ?3)"#,
+                r#"INSERT INTO "Inbox" ("id", "name", "channel", "sourceId", "workspaceId")
+                   VALUES (71, 'Number', 'whatsapp', 's71', ?1), (81, 'Far', 'whatsapp', 's81', ?2)"#,
+                params![WS, OTHER_WS],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "IntegrationWhatsapp" ("id", "auth", "phoneNumberId", "wabaId", "businessId", "name", "workspaceId", "inboxId")
+                   VALUES (72, ?1, 'p', 'waba-1', 'b', 'Number', ?2, 71), (82, ?1, 'p2', 'waba-2', 'b', 'Far', ?3, 81)"#,
                 params![auth, WS, OTHER_WS],
             )?;
             Ok(())
