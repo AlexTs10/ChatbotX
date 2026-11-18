@@ -10,13 +10,14 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, Uri, header};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use chatbotx_business::BusinessError;
 use chatbotx_business::connect_session::{self, SessionRow};
 use chatbotx_business::connection::credentials::HttpUpstream;
 use chatbotx_business::connection::oauth;
+use chatbotx_business::google_oauth::{self, Kind};
 
 use crate::handlers::ApiState;
 
@@ -67,20 +68,25 @@ fn return_url(session: &SessionRow) -> String {
 
 /// `appendConnectError` for a relative return URL.
 fn append_connect_error(url: &str, code: &str) -> String {
+    append_param(url, "connect_error", code)
+}
+
+/// `url` with `key=value` set (any old `key` dropped); relative only.
+fn append_param(url: &str, key: &str, code: &str) -> String {
     let base = url::Url::parse("http://relative.invalid").expect("static url");
     let Ok(mut parsed) = base.join(url) else {
-        return format!("/?connect_error={code}");
+        return format!("/?{key}={code}");
     };
     let pairs: Vec<(String, String)> = parsed
         .query_pairs()
-        .filter(|(k, _)| k != "connect_error")
+        .filter(|(k, _)| k != key)
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
     parsed
         .query_pairs_mut()
         .clear()
         .extend_pairs(pairs)
-        .append_pair("connect_error", code);
+        .append_pair(key, code);
     let mut out = parsed.path().to_string();
     if let Some(query) = parsed.query() {
         out.push('?');
@@ -92,7 +98,7 @@ fn append_connect_error(url: &str, code: &str) -> String {
     }
     // `isSafeRelativeRedirect`: never a protocol-relative URL.
     if out.starts_with("//") || out.starts_with("/\\") {
-        return format!("/?connect_error={code}");
+        return format!("/?{key}={code}");
     }
     out
 }
@@ -100,6 +106,7 @@ fn append_connect_error(url: &str, code: &str) -> String {
 async fn handle(
     State(state): State<Arc<ApiState>>,
     Path(provider): Path<String>,
+    headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let query: HashMap<String, String> =
@@ -110,14 +117,19 @@ async fn handle(
     let Some((session_id, nonce)) = split_state(raw) else {
         return not_found();
     };
+    let kind = Kind::from_slug(&provider);
+    let expected = kind.map_or(provider.as_str(), |kind| kind.provider());
     let session = match connect_session::find_by_nonce(&state.db, nonce).await {
-        Ok(Some(row)) if row.id == session_id && row.provider == provider => row,
+        Ok(Some(row)) if row.id == session_id && row.provider == expected => row,
         Ok(_) => return not_found(),
         Err(error) => {
             tracing::error!(%error, "connect session lookup failed");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+    if let Some(kind) = kind {
+        return google_callback(&state, kind, &session, &query, &headers).await;
+    }
     let return_to = return_url(&session);
     if let Some(error) = query.get("error") {
         let code = if error == "access_denied" {
@@ -211,6 +223,86 @@ async fn handle(
                 }
             }
         },
+    }
+}
+
+/// The `googleCalendar` / `googleSheets` cases: the session must belong to
+/// the signed-in user ([`google_oauth::complete`]). Calendar answers with
+/// `externalCalendarConnect=success|error` on the return URL (as the
+/// original); Sheets with `connect_error` on a failure.
+async fn google_callback(
+    state: &ApiState,
+    kind: Kind,
+    session: &SessionRow,
+    query: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Response {
+    let return_to = session.return_url.clone().unwrap_or_else(|| match kind {
+        Kind::Calendar => format!(
+            "/space/{}/appointment-calendars/external",
+            session.workspace_id
+        ),
+        Kind::Sheets => format!(
+            "/space/{}/settings/integrations/google-sheets",
+            session.workspace_id
+        ),
+    });
+    let finish = |ok: bool| match (kind, ok) {
+        (Kind::Calendar, ok) => redirect(&append_param(
+            &return_to,
+            "externalCalendarConnect",
+            if ok { "success" } else { "error" },
+        )),
+        (Kind::Sheets, true) => redirect(&return_to),
+        (Kind::Sheets, false) => redirect(&append_connect_error(&return_to, "provider_error")),
+    };
+    if let Some(error) = query.get("error") {
+        let code = if error == "access_denied" {
+            "provider_denied"
+        } else {
+            "provider_error"
+        };
+        connect_session::fail(&state.db, session, code, Some(PENDING)).await;
+        return finish(false);
+    }
+    let user_id = match state.sessions.as_deref() {
+        Some(auth) => crate::rpc::find_rpc_session(auth, headers)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.user_id),
+        None => None,
+    };
+    let google = crate::handlers::appointments::externals(state);
+    let code = query.get("code").map(String::as_str).unwrap_or_default();
+    match google_oauth::complete(&state.db, &google, &state.app_url, session, user_id, code).await {
+        Ok(_) => {
+            if kind == Kind::Sheets {
+                state
+                    .audit
+                    .record(chatbotx_business::audit::AuditRecordInput {
+                        user_id: user_id.map(|id| id.to_string()),
+                        workspace_id: Some(session.workspace_id.to_string()),
+                        ip_address: Some(crate::auth::guest_client_ip(headers)),
+                        user_agent: headers
+                            .get(header::USER_AGENT)
+                            .and_then(|v| v.to_str().ok())
+                            .map(str::to_string),
+                        ..chatbotx_business::audit::AuditRecordInput::new(
+                            "connect",
+                            "connected a new Google Sheets integration".to_string(),
+                        )
+                    })
+                    .await;
+            }
+            finish(true)
+        }
+        // A callback for another user (or a replay) is not this session's.
+        Err(error) if error.code() == Some("connectionStateMismatch") => not_found(),
+        Err(error) => {
+            tracing::error!(%error, session_id = session.id, "Failed to connect Google from OAuth callback");
+            finish(false)
+        }
     }
 }
 

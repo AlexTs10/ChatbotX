@@ -32,7 +32,7 @@ import { hasContactsAccess } from "@/lib/auth/permission-routes"
 import { NotFoundPage } from "@/routes/root"
 import { useWorkspacePage } from "@/routes/workspace"
 
-function useWorkspaceId() {
+export function useWorkspaceId() {
   return (useParams({ strict: false }) as { workspaceId: string }).workspaceId
 }
 
@@ -40,7 +40,7 @@ function useWorkspaceId() {
  * The list promise of a page, made once per search string (the table
  * suspends below, so the page keeps its memoized promise).
  */
-function useListPromise<S, T>(
+export function useListPromise<S, T>(
   // `parse` is overloaded (the last one takes a Promise): `all` gives the type.
   cache: { all: () => S; parse: (input: Record<string, string>) => unknown },
   load: (input: S & { workspaceId: string }) => Promise<T>,

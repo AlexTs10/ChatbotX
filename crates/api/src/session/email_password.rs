@@ -305,7 +305,7 @@ pub fn verify_password(hash: &str, password: &str) -> bool {
             == 0
 }
 
-fn hmac_sha256(secret: &str, value: &[u8]) -> Vec<u8> {
+pub(super) fn hmac_sha256(secret: &str, value: &[u8]) -> Vec<u8> {
     let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes())
         .expect("HMAC takes any key length");
     mac.update(value);
@@ -344,7 +344,7 @@ pub fn verify_signed_cookie(raw: &str, secret: &str) -> Option<String> {
     let decoded = decode_query_component(&raw.replace('+', "%2B"));
     let (token, signature) = decoded.rsplit_once('.')?;
     let expected = STANDARD.encode(hmac_sha256(secret, token.as_bytes()));
-    (signature == expected).then(|| token.to_string())
+    super::mcp_oauth::constant_time_eq(signature, &expected).then(|| token.to_string())
 }
 
 fn jwt_hs256(claims: &Value, secret: &str) -> String {

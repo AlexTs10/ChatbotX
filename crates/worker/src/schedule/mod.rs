@@ -31,6 +31,7 @@ pub const PORTED: &[&str] = &[
     "purgeCoexistStaging",
     "purgeExpiredOAuthTokens",
     "purgeAutomationThrottle",
+    "scanAppointmentReminders",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -117,6 +118,10 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         "purgeAutomationThrottle" => {
             purge::purge_automation_throttle(&deps.db).await?;
+            Value::Null
+        }
+        "scanAppointmentReminders" => {
+            crate::appointment::scan_reminders(&deps).await?;
             Value::Null
         }
         "materializeRecurringBroadcasts" => {

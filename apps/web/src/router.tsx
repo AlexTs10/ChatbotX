@@ -27,6 +27,8 @@ const ecommerce = () => import("@/routes/ecommerce")
 const tools = () => import("@/routes/tools")
 const toolEditors = () => import("@/routes/tool-editors")
 const comments = () => import("@/routes/comments")
+const appointments = () => import("@/routes/appointments")
+const booking = () => import("@/routes/booking")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -104,6 +106,22 @@ const publicMiniAppRoute = createRoute({
   path: "mini-apps",
   component: lazyRouteComponent(miniApps, "PublicMiniAppPage"),
 })
+// `/booking/*` is public too: the signed token is the authority.
+const bookingPages = (
+  [
+    ["booking/picker", "BookingPickerPage"],
+    ["booking/range-picker", "BookingRangePickerPage"],
+    ["booking/schedule", "BookingSchedulePage"],
+    ["booking/cancel", "BookingCancelPage"],
+    ["booking/$slug", "BookingSlugPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    component: lazyRouteComponent(booking, page),
+  }),
+)
 
 // Everything else needs a session (proxy.ts) and a current password
 // (`enforcePasswordCurrent` in every protected layout).
@@ -397,6 +415,28 @@ const pipelinesRoutes = pipelinesRoute.addChildren([
   }),
 ])
 
+const appointmentCalendarsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "appointment-calendars",
+  component: lazyRouteComponent(appointments, "AppointmentCalendarsLayout"),
+})
+const appointmentCalendarsRoutes = appointmentCalendarsRoute.addChildren(
+  (
+    [
+      ["/", "AppointmentCalendarsPage"],
+      ["$id/edit", "AppointmentCalendarEditPage"],
+      ["appointments", "AppointmentsPage"],
+      ["external", "ExternalCalendarsPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => appointmentCalendarsRoute,
+      path,
+      component: lazyRouteComponent(appointments, page),
+    }),
+  ),
+)
+
 // `(ai)`: a pathless layout (flows permission, AI integration check).
 const aiRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -451,6 +491,11 @@ const settingsRoutes = settingsRoute.addChildren([
   settingsPage(() => settingsRoute, "general", "SettingsGeneralPage"),
   settingsPage(() => settingsRoute, "admins", "SettingsAdminsPage"),
   settingsPage(() => settingsRoute, "inbox-teams", "SettingsInboxTeamsPage"),
+  createRoute({
+    getParentRoute: () => settingsRoute,
+    path: "inbox-teams/working-hours/$workingHoursId",
+    component: lazyRouteComponent(appointments, "WorkingHoursEditorPage"),
+  }),
   settingsPage(
     () => settingsRoute,
     "user-persistent-menus",
@@ -546,6 +591,7 @@ const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
   invitationRoute,
   publicMiniAppRoute,
+  ...bookingPages,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
@@ -565,6 +611,7 @@ const routeTree = rootRoute.addChildren([
       ...commentListRoutes,
       ...commentPages,
       pipelinesRoutes,
+      appointmentCalendarsRoutes,
       aiRoute.addChildren(aiPages),
       settingsRoutes,
     ]),

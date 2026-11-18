@@ -39,7 +39,7 @@ import { Outlet, useParams } from "@tanstack/react-router"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { type ReactNode, Suspense } from "react"
+import { type ReactNode, Suspense, useMemo } from "react"
 import { ChannelsAccordionShell } from "@/app/space/[workspaceId]/(settings)/settings/channels/channels-accordion-shell"
 import { IntegrationsAccordionShell } from "@/app/space/[workspaceId]/(settings)/settings/integrations/integrations-accordion-shell"
 import { SettingsTab } from "@/app/space/[workspaceId]/(settings)/settings/tab"
@@ -74,6 +74,16 @@ import { ManageWorkspaceTokens } from "@/features/workspaces/manage-workspace-to
 import { listWorkspaceTokens } from "@/features/workspaces/queries/workspace-tokens.query"
 import { UpdateWorkspaceForm } from "@/features/workspaces/update-workspace-form"
 import { hasWorkspacePermission } from "@/lib/auth/permission-routes"
+import {
+  HolidaysCard,
+  HolidaysCardFallback,
+} from "@/features/working-hours/components/holidays-card"
+import {
+  ListWorkingHours,
+  ListWorkingHoursFallback,
+} from "@/features/working-hours/components/list-working-hours"
+import { getWorkingHoursListPage } from "@/features/working-hours/queries"
+import type { WorkingHoursResource } from "@/features/working-hours/schema/resource"
 import { useQueryPromise } from "@/lib/query/use-query-promise"
 import { UserPersistentMenuForm } from "@/features/user-persistent-menus/components/user-persistent-menu-form"
 import { UserPersistentMenuList } from "@/features/user-persistent-menus/components/user-persistent-menu-list"
@@ -134,6 +144,13 @@ export function SettingsGeneralPage() {
 
 // `settings/inbox-teams/page.tsx`: the teams list; working hours, holidays
 // and the response SLA have no Rust domain yet.
+function settled<T>(value: T): Promise<T> {
+  return Object.assign(Promise.resolve(value), {
+    status: "fulfilled",
+    value,
+  })
+}
+
 export function SettingsInboxTeamsPage() {
   const workspaceId = useWorkspaceId()
   const promises = useQueryPromise(["inboxTeams", workspaceId], () =>
@@ -145,14 +162,43 @@ export function SettingsInboxTeamsPage() {
       }),
     ] as const),
   )
+  const { data: workingHours } = useSuspenseQuery({
+    queryKey: ["spa", "workingHoursList", workspaceId],
+    queryFn: () => getWorkingHoursListPage({ workspaceId }),
+  })
+  // Settled thenables: `use()` reads them without suspending again.
+  const workingHoursPromises = useMemo(
+    () =>
+      settled<[WorkingHoursResource[], { value: string; label: string }[]]>([
+        workingHours.workingHours,
+        workingHours.members,
+      ]),
+    [workingHours],
+  )
+  const holidaysPromise = useMemo(
+    () => settled(workingHours.holidays),
+    [workingHours],
+  )
   return (
     <div className="flex flex-col gap-6">
       <Suspense>
         <ListInboxTeams promises={promises} workspaceId={workspaceId} />
       </Suspense>
+      <Suspense fallback={<ListWorkingHoursFallback />}>
+        <ListWorkingHours
+          promises={workingHoursPromises}
+          workspaceId={workspaceId}
+        />
+      </Suspense>
+      <Suspense fallback={<HolidaysCardFallback />}>
+        <HolidaysCard
+          promise={holidaysPromise}
+          workspaceId={workspaceId}
+        />
+      </Suspense>
       <NotAvailablePage
-        detail="Working hours, holidays and the response SLA are not available yet in this version."
-        title="Working hours"
+        detail="The response SLA is not available yet in this version."
+        title="Response SLA"
       />
     </div>
   )

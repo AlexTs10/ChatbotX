@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 # Business services (`packages/business/src/<domain>`), one module per domain (P3.6+).
+autotests = false
 [dependencies]
 # API channel tokens (`generateApiChannelToken`: base64url of 32 random bytes).
 base64 = "0.22"
@@ -62,3 +63,7 @@ tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "all"
+path = "tests/all.rs"

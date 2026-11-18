@@ -10,6 +10,7 @@
 
 mod admin;
 mod analytics;
+mod appointments;
 mod automated_responses;
 mod broadcasts;
 mod comments;
@@ -26,12 +27,14 @@ mod mini_apps;
 mod pipeline_board;
 mod pipelines;
 mod products;
+mod rest;
 mod sequences;
 mod settings;
 mod templates;
 mod tools;
 mod triggers;
 mod user_persistent_menus;
+mod working_hours;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -169,7 +172,16 @@ pub async fn procedure(
     if let Some(outcome) = email_marketing::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = appointments::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = working_hours::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = templates::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = rest::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     if let Some(outcome) = user_persistent_menus::procedure(ctx, path).await {
@@ -220,6 +232,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || tools::ACTIONS.contains(&n)
                 || mini_apps::ACTIONS.contains(&n)
                 || comments::is_action(n)
+                || rest::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n)
                 || email_topics::ACTIONS.contains(&n)
                 || sequences::ACTIONS.contains(&n)
@@ -227,7 +240,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || automated_responses::ACTIONS.contains(&n)
                 || settings::ACTIONS.contains(&n)
                 || user_persistent_menus::ACTIONS.contains(&n)
-                || email_marketing::ACTIONS.contains(&n) =>
+                || email_marketing::ACTIONS.contains(&n)
+                || appointments::ACTIONS.contains(&n)
+                || working_hours::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -289,6 +304,15 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = user_persistent_menus::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = rest::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = appointments::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = working_hours::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");
