@@ -43,7 +43,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 # Task-local audit actor (`withAuditContext`, P3.6-X1).
-tokio = { workspace = true, features = ["rt", "time", "net", "io-util"] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "net", "io-util"] }
 tracing = { workspace = true }
 # Chat links of inboxes (`new URL` + `searchParams.set`).
 url = { workspace = true }

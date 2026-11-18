@@ -444,7 +444,10 @@ fn category_key(name: &str) -> String {
 }
 
 /// The rows of the file: CSV records as strings, XLSX cells as values.
-fn read_rows(format: &str, bytes: &[u8]) -> std::result::Result<Vec<Map<String, Value>>, String> {
+pub(super) fn read_rows(
+    format: &str,
+    bytes: &[u8],
+) -> std::result::Result<Vec<Map<String, Value>>, String> {
     if format == "xlsx" {
         return xlsx::read_records(bytes);
     }

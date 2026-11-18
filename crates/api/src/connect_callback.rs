@@ -18,6 +18,10 @@ use chatbotx_business::connect_session::{self, SessionRow};
 use chatbotx_business::connection::credentials::HttpUpstream;
 use chatbotx_business::connection::oauth;
 use chatbotx_business::google_oauth::{self, Kind};
+use chatbotx_business::{payment_provider, tenant, tx};
+use chatbotx_db::repo;
+use chatbotx_db::rusqlite::OptionalExtension as _;
+use serde_json::json;
 
 use crate::handlers::ApiState;
 
@@ -129,6 +133,9 @@ async fn handle(
     };
     if let Some(kind) = kind {
         return google_callback(&state, kind, &session, &query, &headers).await;
+    }
+    if session.provider == "stripe" {
+        return stripe_callback(&state, session, &query, &headers).await;
     }
     let return_to = return_url(&session);
     if let Some(error) = query.get("error") {
@@ -306,6 +313,150 @@ async fn google_callback(
     }
 }
 
+/// `app/integrations/stripe/callback/route.ts`: the state is taken once
+/// (Stripe revokes a connection whose code is used twice); only the member
+/// who pressed Connect, still a super admin, finishes it. Answers on the
+/// Stripe row with `stripe=connected|error|expired`.
+async fn stripe_callback(
+    state: &ApiState,
+    session: SessionRow,
+    query: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Response {
+    let ws = session.workspace_id;
+    let return_to = return_url(&session);
+    let Ok(session) = connect_session::claim_authorization(&state.db, session.id, ws).await else {
+        return redirect(&with_outcome(&return_to, &[("stripe", "expired")]));
+    };
+    let refuse = |reason: &str| stripe_refuse(state, &session, &return_to, reason.to_string());
+    let code = query.get("code").filter(|c| !c.is_empty());
+    let (Some(code), None) = (code, query.get("error")) else {
+        let reason = query.get("error").map_or("missingCode", String::as_str);
+        return refuse(reason).await;
+    };
+    let user_id = match state.sessions.as_deref() {
+        Some(auth) => crate::rpc::find_rpc_session(auth, headers)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.user_id),
+        None => None,
+    };
+    let Some(user_id) = user_id else {
+        return refuse("signInRequired").await;
+    };
+    // A callback URL someone approved with their own Stripe account and
+    // passed on never connects it here.
+    if session.actor_user_id != Some(user_id) {
+        return refuse("startedByAnotherUser").await;
+    }
+    if !is_workspace_super_admin(state, ws, user_id).await {
+        return refuse("superAdminRequired").await;
+    }
+    let Some(encryption) = state.encryption.as_deref() else {
+        return refuse("connectionFailed").await;
+    };
+    let ctx = payment_provider::Ctx {
+        db: &state.db,
+        encryption,
+        app_url: &state.app_url,
+    };
+    let credential = session
+        .next_action
+        .as_ref()
+        .and_then(|a| a["platformCredentialId"].as_str())
+        .map(str::to_string);
+    let connected = match tenant::resolve_credential_owner_id_for_workspace(&state.db, ws, None)
+        .await
+    {
+        Ok(owner) => {
+            payment_provider::complete_stripe_connect(ctx, ws, owner, credential.as_deref(), code)
+                .await
+        }
+        Err(error) => Err(error),
+    };
+    let view = match connected {
+        Ok(view) => view,
+        Err(error) => {
+            if error.code().is_none() {
+                tracing::error!(%error, workspace_id = ws, "[stripe-connect] the connection could not be completed");
+            }
+            return refuse(error.code().unwrap_or("connectionFailed")).await;
+        }
+    };
+    let result = json!({ "provider": "stripe", "accountId": view["accountId"] });
+    let completed = tx::write(&state.db, {
+        let session = session.clone();
+        move |conn| {
+            connect_session::complete_authorized(conn, &session, result, None, repo::now_ms())
+        }
+    })
+    .await;
+    if let Err(error) = completed {
+        tracing::warn!(%error, session_id = session.id, "[stripe-connect] could not complete the connect session");
+    }
+    state
+        .audit
+        .record(chatbotx_business::audit::AuditRecordInput {
+            user_id: Some(user_id.to_string()),
+            workspace_id: Some(ws.to_string()),
+            ip_address: Some(crate::auth::guest_client_ip(headers)),
+            user_agent: headers
+                .get(header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string),
+            ..chatbotx_business::audit::AuditRecordInput::new(
+                "connect",
+                "connected Stripe for the web shop".to_string(),
+            )
+        })
+        .await;
+    // Test mode takes test payments before the account is activated.
+    let outcome: &[(&str, &str)] = if view["livemode"] == true && view["chargesEnabled"] == false {
+        &[("stripe", "connected"), ("chargesEnabled", "false")]
+    } else {
+        &[("stripe", "connected")]
+    };
+    redirect(&with_outcome(&return_to, outcome))
+}
+
+/// `withOutcome`: `return_to` with the outcome params set.
+fn with_outcome(return_to: &str, outcome: &[(&str, &str)]) -> String {
+    outcome.iter().fold(return_to.to_string(), |url, (k, v)| {
+        append_param(&url, k, v)
+    })
+}
+
+/// A refused Stripe callback: the session fails; `stripe=error&reason=…`.
+async fn stripe_refuse(
+    state: &ApiState,
+    session: &SessionRow,
+    return_to: &str,
+    reason: String,
+) -> Response {
+    connect_session::fail(&state.db, session, "provider_error", None).await;
+    redirect(&with_outcome(
+        return_to,
+        &[("stripe", "error"), ("reason", &reason)],
+    ))
+}
+
+/// `assertWorkspaceSuperAdmin` for the signed-in member.
+async fn is_workspace_super_admin(state: &ApiState, workspace_id: i64, user_id: i64) -> bool {
+    let permissions = tx::read(&state.db, move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT "permissions" FROM "WorkspaceMember" WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+                [workspace_id, user_id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    })
+    .await;
+    matches!(permissions, Ok(Some(p)) if serde_json::from_str::<serde_json::Value>(&p)
+        .is_ok_and(|p| p["superAdmin"] == true))
+}
+
 enum Outcome {
     /// `isBenignReplay`.
     Ignore,
@@ -337,6 +488,21 @@ mod tests {
         assert_eq!(split_state("1a.ab"), None);
         assert_eq!(split_state("12.a.b"), None);
         assert_eq!(split_state("{\"x\":1}"), None);
+    }
+
+    #[test]
+    fn stripe_outcome_stays_relative() {
+        assert_eq!(
+            with_outcome(
+                "/space/1/settings/integrations/stripe",
+                &[("stripe", "error"), ("reason", "a&b=//evil")]
+            ),
+            "/space/1/settings/integrations/stripe?stripe=error&reason=a%26b%3D%2F%2Fevil"
+        );
+        assert_eq!(
+            with_outcome("//evil.example", &[("stripe", "connected")]),
+            "/?stripe=connected"
+        );
     }
 
     #[test]

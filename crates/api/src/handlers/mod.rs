@@ -35,7 +35,10 @@ pub mod contact_sequences;
 pub mod contacts;
 pub mod contacts_bulk;
 pub mod conversations;
+pub mod coupons;
 pub mod custom_fields;
+pub mod discount_codes;
+pub mod ecommerce_analytics;
 pub mod ecommerce_settings;
 pub mod email_topics;
 pub mod error_logs;
@@ -61,6 +64,8 @@ pub mod messenger_templates;
 pub mod meta_catalog;
 pub mod minigames;
 pub mod open_hours;
+pub mod orders;
+pub mod payment_providers;
 pub mod pipelines;
 pub mod places;
 pub mod polls;
@@ -76,11 +81,13 @@ pub mod saved_replies;
 pub mod sequences;
 pub mod smtp_integrations;
 pub mod spreadsheets;
+pub mod store_connections;
 pub mod tags;
 pub mod templates;
 pub mod triggers;
 pub mod webchats;
 pub mod webhooks;
+pub mod webshop;
 pub mod whatsapp_flows;
 pub mod whatsapp_templates;
 pub mod working_hours;
@@ -657,6 +664,12 @@ async fn route(
         keywords::handle(state, route_id, call).await
     } else if templates::ROUTES.contains(&route_id) {
         templates::handle(state, route_id, call, principal).await
+    } else if store_connections::ROUTES.contains(&route_id) {
+        store_connections::handle(state, route_id, call).await
+    } else if coupons::ROUTES.contains(&route_id) {
+        coupons::handle(state, route_id, call).await
+    } else if webshop::ROUTES.contains(&route_id) {
+        webshop::handle(state, route_id, call, principal).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
     } else if contacts_bulk::ROUTES.contains(&route_id) {
@@ -665,6 +678,14 @@ async fn route(
         contacts::handle(state, route_id, call).await
     } else if custom_fields::ROUTES.contains(&route_id) {
         custom_fields::handle(state, route_id, call).await
+    } else if orders::ROUTES.contains(&route_id) {
+        orders::handle(state, route_id, call).await
+    } else if payment_providers::ROUTES.contains(&route_id) {
+        payment_providers::handle(state, route_id, call).await
+    } else if ecommerce_analytics::ROUTES.contains(&route_id) {
+        ecommerce_analytics::handle(state, route_id, call).await
+    } else if discount_codes::ROUTES.contains(&route_id) {
+        discount_codes::handle(state, route_id, call).await
     } else if ecommerce_settings::ROUTES.contains(&route_id) {
         ecommerce_settings::handle(state, route_id, call).await
     } else if folders::ROUTES.contains(&route_id) {

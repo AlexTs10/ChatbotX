@@ -397,7 +397,13 @@ async fn products_page(ctx: &Ctx<'_>, search: &Value) -> Result<Value, OrpcError
         "categories": categories(ctx).await?,
         "importHistory": imports,
         "metaCatalog": meta,
-        "externalStoreLinks": null,
+        "externalStoreLinks": chatbotx_business::external_store::store_links(
+            &ctx.api.db,
+            &ctx.api.app_url,
+            ctx.workspace_id,
+        )
+        .await
+        .map_err(super::fail)?,
     }))
 }
 
