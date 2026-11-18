@@ -29,6 +29,7 @@ pub const PORTED: &[&str] = &[
     "purgeExpiredConnectSessions",
     "purgeWhatsappSignupSessions",
     "purgeCoexistStaging",
+    "scanCoexistRuns",
     "purgeExpiredOAuthTokens",
     "purgeAutomationThrottle",
     "expireUnpaidOrders",
@@ -110,6 +111,10 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         "purgeWhatsappSignupSessions" => {
             purge::purge_whatsapp_signup_sessions(&deps.db).await?;
+            Value::Null
+        }
+        crate::coexist_whatsapp::SCAN_JOB => {
+            crate::coexist_whatsapp::scan_runs(&deps).await?;
             Value::Null
         }
         "purgeCoexistStaging" => {

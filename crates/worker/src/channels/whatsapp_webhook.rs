@@ -141,8 +141,18 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             .into_iter()
             .flatten()
         {
+            jobs.extend(coexist_job(change));
             if change.get("field").and_then(Value::as_str) == Some("messaging_handovers") {
                 jobs.extend(handover_job(change.get("value"), pinned));
+                continue;
+            }
+            if change.get("field").and_then(Value::as_str) == Some("standby") {
+                jobs.extend(standby_jobs(
+                    object,
+                    entry.get("id"),
+                    change.get("value"),
+                    pinned,
+                ));
                 continue;
             }
             if change.get("field").and_then(Value::as_str) != Some("messages") {
@@ -290,9 +300,40 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             }
         }
     }
-    // ponytail: coexist history, automatic events, calls, identity changes,
-    // account updates and the `standby` routing field are not ported yet.
+    // ponytail: automatic events, calls, identity changes and account
+    // updates are not ported yet.
     jobs
+}
+
+/// `extractCoexistPayloads` + `enqueueCoexistPayloads`: a history,
+/// state-sync or echo slice goes whole to `coexistWhatsappBuffer` (not
+/// pinned: the buffer checks the integration).
+///
+/// ponytail: the hash is of serde_json's key order, as in [`handover_job`].
+fn coexist_job(change: &Value) -> Option<WebhookJob> {
+    let value = change.get("value").filter(|v| v.is_object())?;
+    let field_key = match change.get("field").and_then(Value::as_str) {
+        Some("history") => Some("history"),
+        Some("smb_app_state_sync") => Some("state_sync"),
+        Some("smb_message_echoes") => Some("message_echoes"),
+        _ => None,
+    };
+    let is_array = |key: &str| value.get(key).is_some_and(Value::is_array);
+    if !(field_key.is_some_and(is_array) || is_array("history") || is_array("smb_app_state_sync")) {
+        return None;
+    }
+    let phone = value
+        .pointer("/metadata/phone_number_id")
+        .and_then(Value::as_str)?;
+    Some(WebhookJob {
+        name: crate::coexist_whatsapp::BUFFER_JOB,
+        data: json!({ "type": crate::coexist_whatsapp::BUFFER_JOB, "data": { "phoneNumberId": phone, "payload": value } }),
+        job_id: format!(
+            "wa-coexist-{}-{}",
+            safe_id_segment(phone),
+            chatbotx_core::utils::crypto::sha256_hex(&value.to_string())
+        ),
+    })
 }
 
 /// `splitHandoverChange` + `enqueueConversationRoutingPayloads`: one
@@ -328,6 +369,123 @@ fn handover_job(value: Option<&Value>, pinned: Option<&str>) -> Option<WebhookJo
         }}),
         job_id: format!("wa-tc-{}-{hash}", safe_id_segment(phone_id)),
     })
+}
+
+/// `splitStandbyChange`: one `threadControlEvent` job per standby message
+/// (`wa-sb-`) and echo (`wa-sbe-`), each a single-item `receiveMessage` body that
+/// keeps `field: "standby"`. Standby statuses are dropped.
+fn standby_jobs(
+    object: &Value,
+    entry_id: Option<&Value>,
+    value: Option<&Value>,
+    pinned: Option<&str>,
+) -> Vec<WebhookJob> {
+    let mut jobs = Vec::new();
+    let value = value.filter(|v| v.is_object());
+    let phone_id = value
+        .and_then(|v| v.pointer("/metadata/phone_number_id"))
+        .and_then(Value::as_str);
+    let standby = value
+        .and_then(|v| v.get("standby"))
+        .filter(|s| s.is_object());
+    let (Some(value), Some(phone_id), Some(standby)) = (value, phone_id, standby) else {
+        tracing::warn!("Whatsapp standby change dropped: malformed payload");
+        return jobs;
+    };
+    if pinned.is_some_and(|pinned| pinned != phone_id) {
+        tracing::warn!(
+            pinned,
+            received = phone_id,
+            "Whatsapp conversationRouting item dropped: phone_number_id does not match the route-loaded integration"
+        );
+        return jobs;
+    }
+    // `buildStandbyRawBody`.
+    let raw = |part: Value, contacts: Option<&Value>| {
+        let mut single = value.clone();
+        let mut standby_part = part;
+        if let Some(c) = contacts {
+            single["contacts"] = c.clone();
+            standby_part["contacts"] = c.clone();
+        }
+        single["standby"] = standby_part;
+        json!({ "object": object, "entry": [{ "id": entry_id, "changes": [{ "field": "standby", "value": single }] }] })
+    };
+    let job = |kind: &str, prefix: &str, id: &str, payload: Value| WebhookJob {
+        name: "threadControlEvent",
+        data: json!({ "type": "threadControlEvent", "data": {
+            "integrationType": "whatsapp",
+            "integrationIdentifier": phone_id,
+            "payload": { "kind": kind, "body": payload },
+        }}),
+        job_id: format!(
+            "{prefix}-{}-{}",
+            safe_id_segment(phone_id),
+            safe_id_segment(id)
+        ),
+    };
+    let contact_list = standby.get("contacts").and_then(Value::as_array);
+    for (index, message) in standby
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let Some(id) = text(message, "id") else {
+            tracing::warn!("Whatsapp standby message dropped: message id missing");
+            continue;
+        };
+        let contacts = contact_for(contact_list, message, index).map(|c| json!([c]));
+        let from = text(message, "from")
+            .or_else(|| contacts.as_ref().and_then(|c| text(&c[0], "wa_id")))
+            .unwrap_or_default();
+        let name = contacts
+            .as_ref()
+            .and_then(|c| c.pointer("/0/profile/name"))
+            .and_then(Value::as_str);
+        jobs.push(job(
+            "standbyMessage",
+            "wa-sb",
+            &id,
+            json!({
+                "phoneID": phone_id,
+                "from": from,
+                "message": message,
+                "name": name,
+                "raw": raw(json!({ "messages": [message] }), contacts.as_ref()),
+            }),
+        ));
+    }
+    for echo in standby
+        .get("message_echoes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let (Some(id), Some(sent)) = (
+            text(echo, "id"),
+            echo.get("message").filter(|m| m.is_object()),
+        ) else {
+            tracing::warn!("Whatsapp standby echo dropped: id or message missing");
+            continue;
+        };
+        let from = text(sent, "to")
+            .or_else(|| text(sent, "recipient"))
+            .unwrap_or_default();
+        jobs.push(job(
+            "standbyEcho",
+            "wa-sbe",
+            &id,
+            json!({
+                "phoneID": phone_id,
+                "from": from,
+                "message": echo,
+                "raw": raw(json!({ "message_echoes": [echo] }), None),
+            }),
+        ));
+    }
+    jobs
 }
 
 /// Queues the jobs of one verified delivery (`REDELIVERABLE_JOB_OPTIONS`).

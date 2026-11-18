@@ -14,6 +14,8 @@ pub mod appointment;
 pub mod channel;
 pub mod channels;
 pub mod chat;
+pub mod coexist_whatsapp;
+pub mod coexist_whatsapp_payload;
 pub mod condition;
 pub mod contact_scan;
 pub mod datetime_sweep;

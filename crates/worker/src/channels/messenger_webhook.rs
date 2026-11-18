@@ -227,48 +227,77 @@ pub fn webhook_jobs(body: &str) -> Result<Vec<WebhookJob>, String> {
             .into_iter()
             .flatten()
             .collect();
-        // `extractConversationRoutingPayloads`: a handover (pass / take / the AI
-        // hand-back notice) is a `threadControlEvent` job.
-        // ponytail: requests, app roles and standby deliveries are dropped with a
-        // log (their handlers are not ported).
-        let messaging: Vec<&Value> = entry
-            .get("messaging")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter(|i| is_routing_item(i))
-            .collect();
-        let mut skipped = entry
-            .get("standby")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len);
-        for item in messaging {
-            if item.get("pass_thread_control").is_none()
-                && item.get("take_thread_control").is_none()
-                && !is_ai_handback_notice(item)
-            {
-                skipped += 1;
-                continue;
-            }
-            let hash = chatbotx_core::utils::crypto::sha256_hex(&item.to_string());
+        // `extractConversationRoutingPayloads`: handover (pass / take / the AI
+        // hand-back notice), request and app-roles items of `messaging[]`, and
+        // the `standby[]` deliveries, each a `threadControlEvent` job.
+        let seg = crate::channels::whatsapp_webhook::safe_id_segment(page_id);
+        let mut routing = |kind: &str, prefix: &str, key: Option<String>, body: Value| {
+            let suffix = key.map_or_else(
+                || chatbotx_core::utils::crypto::sha256_hex(&body.to_string()),
+                |k| crate::channels::whatsapp_webhook::safe_id_segment(&k),
+            );
             jobs.push(WebhookJob {
                 name: "threadControlEvent",
                 data: json!({ "type": "threadControlEvent", "data": {
                     "integrationType": "messenger",
                     "integrationIdentifier": page_id,
-                    "payload": { "kind": "handover", "body": item },
+                    "payload": { "kind": kind, "body": body },
                 }}),
-                job_id: format!(
-                    "fb-tc-{}-{hash}",
-                    crate::channels::whatsapp_webhook::safe_id_segment(page_id)
-                ),
+                job_id: format!("{prefix}-{seg}-{suffix}"),
             });
+        };
+        for item in entry
+            .get("messaging")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let (kind, prefix) = if item.get("pass_thread_control").is_some()
+                || item.get("take_thread_control").is_some()
+                || is_ai_handback_notice(item)
+            {
+                ("handover", "fb-tc")
+            } else if item.get("request_thread_control").is_some() {
+                ("handoverRequest", "fb-tcr")
+            } else if item.get("app_roles").is_some() {
+                ("appRoles", "fb-ar")
+            } else {
+                continue;
+            };
+            routing(kind, prefix, None, item.clone());
         }
-        if skipped > 0 {
-            tracing::info!(
-                page_id,
-                skipped,
-                "Messenger conversation routing items not processed (not ported)"
+        for item in entry
+            .get("standby")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            // `isStandbyRoutingItem`: receipts and the AI notice's standby copy
+            // carry nothing to store.
+            if is_ai_handback_notice(item)
+                || (item.get("message").is_none() && item.get("postback").is_none())
+            {
+                tracing::debug!("Messenger standby receipt dropped");
+                continue;
+            }
+            if id_of(item, "/sender/id").is_none() || id_of(item, "/recipient/id").is_none() {
+                tracing::warn!("Messenger standby item skipped: malformed payload");
+                continue;
+            }
+            let mid = item
+                .pointer("/message/mid")
+                .or_else(|| item.pointer("/postback/mid"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let mut rewrap = json!({ "id": page_id, "time": time, "standby": [item] });
+            if let Some(hop) = entry.get("hop_context") {
+                rewrap["hop_context"] = hop.clone();
+            }
+            routing(
+                "standbyMessage",
+                "fb-sb",
+                mid,
+                json!({ "object": "page", "entry": [rewrap] }),
             );
         }
         if changes
@@ -621,6 +650,34 @@ mod tests {
         // An echo is routed by its sender (the page).
         assert_eq!(jobs[7].data["data"]["integrationIdentifier"], "page-1");
         assert!(jobs[0].job_id.starts_with("fb-tc-page-1-"));
+    }
+
+    #[test]
+    fn routing_requests_app_roles_and_standby_items() {
+        let body = json!({ "object": "page", "entry": [
+            { "id": "page-1", "time": 5, "hop_context": { "is_ai_thread_owner": true },
+              "messaging": [
+                { "sender": { "id": "psid" }, "recipient": { "id": "page-1" }, "timestamp": 1, "request_thread_control": { "requested_owner_app_id": "9" } },
+                { "recipient": { "id": "page-1" }, "timestamp": 1, "app_roles": { "123": ["primary_receiver"] } },
+              ],
+              "standby": [
+                { "sender": { "id": "psid" }, "recipient": { "id": "page-1" }, "timestamp": 2, "message": { "mid": "m.1", "text": "hi" } },
+                { "sender": { "id": "psid" }, "recipient": { "id": "page-1" }, "timestamp": 2, "read": { "watermark": 1 } },
+              ] },
+        ]})
+        .to_string();
+        let jobs = webhook_jobs(&body).unwrap();
+        let kinds: Vec<_> = jobs
+            .iter()
+            .map(|j| j.data["data"]["payload"]["kind"].as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(kinds, ["handoverRequest", "appRoles", "standbyMessage"]);
+        assert!(jobs[0].job_id.starts_with("fb-tcr-page-1-"));
+        assert!(jobs[1].job_id.starts_with("fb-ar-page-1-"));
+        assert_eq!(jobs[2].job_id, "fb-sb-page-1-m.1");
+        let rewrap = &jobs[2].data["data"]["payload"]["body"]["entry"][0];
+        assert_eq!(rewrap["standby"][0]["message"]["mid"], "m.1");
+        assert_eq!(rewrap["hop_context"]["is_ai_thread_owner"], true);
     }
 
     #[test]

@@ -1037,6 +1037,16 @@ pub async fn resolve_current_state(
     }))
 }
 
+/// `resolveCurrentState` with the row (owner role, last event, previous owner).
+pub async fn resolve_current_row(
+    db: &Db,
+    workspace_id: i64,
+    contact_inbox_id: i64,
+) -> Result<Option<(String, ContactInbox)>> {
+    let row = find_contact_inbox(db, workspace_id, contact_inbox_id).await?;
+    Ok(row.and_then(|row| stored_state(&row, now_ms()).map(|state| (state, row))))
+}
+
 /// The service futures run inside axum handlers and jobs, so they must be `Send`.
 #[cfg(test)]
 #[allow(dead_code)]

@@ -640,5 +640,7 @@ mod send_checks {
     fn whatsapp_handler_futures_are_send(state: &ApiState, a: Call<'_>, b: Call<'_>) {
         assert_send(crate::handlers::whatsapp_flows::handle(state, "", a));
         assert_send(crate::handlers::whatsapp_templates::handle(state, "", b));
+        assert_send(crate::handlers::whatsapp_coexist::handle(state, "", a));
+        assert_send(crate::handlers::whatsapp_calls::handle(state, "", a));
     }
 }
