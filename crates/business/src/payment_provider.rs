@@ -192,7 +192,7 @@ pub async fn resolve_stripe_platform(
             platform_credential::resolve_for_owner(conn, &encryption, owner_id, "stripe", false)?;
         credential
             .and_then(|c| {
-                let text = |f| c.text(f).filter(|s| !s.is_empty()).map(str::to_string);
+                let text = |f: &str| c.text(f).filter(|s| !s.is_empty()).map(str::to_string);
                 Some(StripePlatform {
                     credential_id: c.id,
                     secret_key: text("secretKey")?,
