@@ -20,8 +20,8 @@ use chatbotx_db::rusqlite::{Connection, OptionalExtension as _, params};
 use serde_json::{Value, json};
 
 use super::credentials::{Upstream, UpstreamRequest};
-use super::oauth_channels;
 use super::{COLUMNS, ConnectionRow, find_or_fail, providers, repo_err, row};
+use super::{oauth_channels, oauth_google_ads};
 use crate::connect_session::{self, NewSession, SessionRow};
 use crate::{BusinessError, Result, tx};
 
@@ -112,7 +112,22 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
             },
             multi_account: false,
         }),
+        "googleAds" => Some(Adapter {
+            provider: "googleAds",
+            credential_type: "googleAds",
+            slug: "google-ads",
+            multi_account: true,
+        }),
         _ => None,
+    }
+}
+
+/// The provider of a callback path slug (`OAUTH_CALLBACK_SLUG`; else the
+/// slug is the provider).
+pub fn provider_for_slug(slug: &str) -> &str {
+    match slug {
+        "google-ads" => "googleAds",
+        other => other,
     }
 }
 
@@ -263,6 +278,9 @@ fn authorize_url(provider: &str, credential: &OAuthCredential, state: &str) -> S
     if oauth_channels::handles(provider) {
         return oauth_channels::authorize_url(provider, config, &credential.callback_url, state);
     }
+    if provider == oauth_google_ads::PROVIDER {
+        return oauth_google_ads::authorize_url(config, &credential.callback_url, state);
+    }
     query_url(
         &format!("{FACEBOOK}/{}/dialog/oauth", version(config)),
         &[
@@ -319,6 +337,10 @@ async fn exchange_code(
         )
         .await;
     }
+    if provider == oauth_google_ads::PROVIDER {
+        return oauth_google_ads::exchange_code(upstream, config, &credential.callback_url, code)
+            .await;
+    }
     let endpoint = format!("{GRAPH}/{}/oauth/access_token", version(config));
     let short = call(
         upstream,
@@ -372,6 +394,9 @@ async fn list_candidates(
         return Ok(oauth_channels::describe(provider, auth)
             .map(|(id, name)| vec![candidate(&id, &name, auth.clone())])
             .unwrap_or_default());
+    }
+    if provider == oauth_google_ads::PROVIDER {
+        return oauth_google_ads::list_candidates(upstream, auth).await;
     }
     if auth["authType"] != "oauth2" {
         return Ok(Vec::new());
@@ -939,6 +964,8 @@ async fn complete_reconnect(
     let provider = session.provider.clone();
     let (page_id, _) = if oauth_channels::handles(&provider) {
         oauth_channels::describe(&provider, &page_auth)?
+    } else if provider == oauth_google_ads::PROVIDER {
+        oauth_google_ads::describe(&page_auth)?
     } else {
         describe(&page_auth)?
     };
@@ -947,15 +974,24 @@ async fn complete_reconnect(
     let saved_auth = page_auth.clone();
     let result = tx::write(db, move |conn| {
         let now = repo::now_ms();
-        let updated = conn
-            .execute(
+        let updated = if provider == oauth_google_ads::PROVIDER {
+            usize::from(oauth_google_ads::save_reconnect_auth(
+                conn,
+                connection.integration_id,
+                connection.workspace_id,
+                &saved_auth,
+                now,
+            )?)
+        } else {
+            conn.execute(
                 &format!(
                     r#"UPDATE "{table}" SET "auth" = ?3, "tokenRefreshError" = NULL, "updatedAt" = ?4
                        WHERE "inboxId" = ?1 AND "workspaceId" = ?2"#
                 ),
                 params![connection.inbox_id, connection.workspace_id, saved_auth.to_string(), now],
             )
-            .map_err(repo_err)?;
+            .map_err(repo_err)?
+        };
         if updated == 0 {
             return Err(not_configured(&provider));
         }
@@ -1072,6 +1108,8 @@ pub async fn connect_targets(
             let now = repo::now_ms();
             if oauth_channels::handles(&provider) {
                 oauth_channels::persist(conn, &provider, workspace_id, &saved, actor_user_id, now)
+            } else if provider == oauth_google_ads::PROVIDER {
+                oauth_google_ads::persist(conn, workspace_id, &saved, actor_user_id, now)
             } else {
                 persist_messenger(conn, workspace_id, &saved, actor_user_id, now)
             }

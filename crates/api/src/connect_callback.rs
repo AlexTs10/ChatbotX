@@ -118,7 +118,7 @@ async fn handle(
         return not_found();
     };
     let kind = Kind::from_slug(&provider);
-    let expected = kind.map_or(provider.as_str(), |kind| kind.provider());
+    let expected = kind.map_or(oauth::provider_for_slug(&provider), |kind| kind.provider());
     let session = match connect_session::find_by_nonce(&state.db, nonce).await {
         Ok(Some(row)) if row.id == session_id && row.provider == expected => row,
         Ok(_) => return not_found(),

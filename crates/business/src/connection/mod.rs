@@ -6,6 +6,7 @@ pub mod api_key;
 pub mod credentials;
 pub mod oauth;
 pub mod oauth_channels;
+pub mod oauth_google_ads;
 pub mod providers;
 pub mod state;
 

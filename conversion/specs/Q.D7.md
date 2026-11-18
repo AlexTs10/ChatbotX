@@ -2,8 +2,9 @@
 
 Branch `feat/conversion-d7` (from `conversion` at `1b7521097`). Follows
 P3.6-D2. Slice 1 of the unit: the read and connection routes with parity
-tests, the lead-ads job and the ad-touch log. Marketing messages, the ad
-campaign writes and the web pages are left (see "Not done").
+tests, the lead-ads job and the ad-touch log. Later slices: marketing
+messages, the ad campaign writes, the Google Ads connect and conversion
+delivery. The web pages and the Google Ads producers are left (see "Not done").
 
 ## Slices
 
@@ -17,6 +18,10 @@ campaign writes and the web pages are left (see "Not done").
 | 6 | `ads.getAnalyticsOverview` / `getAnalyticsTimeseries` / `listChannelAdAccounts` / `listCustomAudiences` | `business::ads::{analytics,graph}` | `facebook-ads` analytics, `messaging-ads-connection` |
 | 7 | `ads.checkCampaignPrerequisites` / `listConnections` / `disconnectConnection` | `business::ads::graph` | `features/ads-campaign/api/public.ts`, `messaging-ads-connection/service.ts` |
 | 8 | Ad-touch log of inbound referrals (`recordAdTouches`: Meta + Google touch, `adClicked` activity) | `business::contact_referral_event::record_ad_touches_contained`, `worker::inbound` | `contact-referral-event/ad-touch.ts`, `service.ts` |
+| 9 | Facebook marketing messages (16 routes, delivery, worker) | `business::marketing_messages` | `features/facebook-marketing-messages` |
+| 10 | `ads.*` campaign writes (create / list / retry / publish / pause / delete / insights, ad accounts, pages, image / video upload, video status) and `ads.startRetargetAudienceSync` + the `syncRetargetAudience` job | `business::ads::{campaigns,retarget}`, `api::handlers::ads_campaigns`, `worker::integration` | `features/ads-campaign`, `messaging-ads` |
+| 11 | Google Ads OAuth connect (adapter `googleAds`), the settings actions (start / reconnect / pick / cancel / disconnect / sync) and `googleAdsAPI.getIntegration` / `getInFlightConnectSession` | `business::{google_ads_api,google_ads_setup}`, `connection::oauth_google_ads`, `api::rpc_procedures::google_ads` | `integrations/google-ads`, `integration-google-ads/service.ts`, `features/integration-google-ads/actions` |
+| 12 | Google Ads conversion record + delivery (Data Manager `events:ingest`, legacy `uploadClickConversions`) and the `sendGoogleAdsConversion` job | `business::google_ads_conversion`, `worker::integration` | `google-ads/{record-conversion,delivery}.ts`, `apis/*` |
 
 ## Security
 
@@ -60,16 +65,14 @@ runs parity).
 
 ## Not done
 
-- Marketing messages: the 16 `facebookMarketingMessages.*` routes, the
-  delivery service and the worker `processMarketingMessageWebhook` (about
-  5k lines of TS; p1-08 `30`–`34`). The Rust p1-08 fixtures for them are in.
-- Ad campaign writes: `ads.createCampaign` / `listCampaigns` / retry /
-  publish / pause / delete / insights, campaign ad accounts, ad account
-  details, image / video upload, video status, messenger pages, and
-  `ads.startRetargetAudienceSync` (202 + upload job).
-- Google Ads conversion upload (the flow step) and the Google Ads OAuth
-  connect.
-- Web SPA ads dashboard pages (`specs/P4-web.md` §6): still "not available
-  yet".
+- Google Ads producers: the `sendGoogleAdsConversion` flow step and trigger
+  action (template resolution, consent setting, error branches) still skip
+  as `notPorted`; `record` has no caller yet.
+- Google Ads housekeeping: the processing-status poll
+  (`requestStatus:retrieve`), the stranded / stale-claim sweeps, the daily
+  conversion-action sync, `googleAdsAPI.listEvents` (procedure) and
+  customer matching (hashed e-mail / phone at delivery).
+- Web SPA ads pages (`specs/P4-web.md` §6): `dashboard/ads/*` still shows
+  "not available yet".
 - A `messaging_referrals` event without a message records no ad touch: the
   Rust `Received` has no provider time (`occurredAt`) to key it.

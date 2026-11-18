@@ -56,6 +56,8 @@ mod comment_automation_post_lists;
 mod connection_credentials;
 #[path = "connection_oauth_channels.rs"]
 mod connection_oauth_channels;
+#[path = "connection_oauth_google_ads.rs"]
+mod connection_oauth_google_ads;
 #[path = "contact_bulk_tag_stats.rs"]
 mod contact_bulk_tag_stats;
 #[path = "contact_create_with_inbox.rs"]
@@ -158,6 +160,8 @@ mod flow_version_service;
 mod flow_version_service_publish;
 #[path = "folder_service_create.rs"]
 mod folder_service_create;
+#[path = "google_ads_conversion.rs"]
+mod google_ads_conversion;
 #[path = "google_oauth_connect.rs"]
 mod google_oauth_connect;
 #[path = "import_column_map_and_template.rs"]

@@ -207,6 +207,38 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
                 .await
                 .map_err(|e| JobError::retryable(e.to_string()))?
         }
+        // `handleSendGoogleAdsConversion` (no blocked-owner guard in Rust yet).
+        "sendGoogleAdsConversion" => {
+            let data = &job.data["data"];
+            let id = |key: &str| match &data[key] {
+                Value::String(s) => s.parse::<i64>().ok(),
+                other => other.as_i64(),
+            };
+            let (Some(event_id), Some(workspace_id)) =
+                (id("googleAdsConversionEventId"), id("workspaceId"))
+            else {
+                return Err(JobError::unrecoverable(
+                    "sendGoogleAdsConversion: bad job data",
+                ));
+            };
+            let input = chatbotx_business::google_ads_conversion::DeliverInput {
+                event_id,
+                workspace_id,
+                attempt: data["attempt"].as_i64().unwrap_or_default(),
+                is_last_in_job_attempt: job.is_final_attempt(),
+            };
+            let up = chatbotx_business::connection::credentials::HttpUpstream;
+            let delivery = chatbotx_business::google_ads_conversion::DeliverDeps {
+                db: &deps.db,
+                up: &up,
+                jobs: deps.jobs.as_ref(),
+                events: deps.events.as_ref(),
+                app_url: &deps.app_url,
+            };
+            chatbotx_business::google_ads_conversion::deliver(&delivery, input)
+                .await
+                .map_err(JobError::retryable)?
+        }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }
