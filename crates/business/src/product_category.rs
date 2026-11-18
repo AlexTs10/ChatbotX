@@ -308,6 +308,12 @@ pub async fn create(db: &Db, input: CreateCategory) -> Result<ProductCategory> {
 /// `update`.
 pub async fn update(db: &Db, input: UpdateCategory) -> Result<ProductCategory> {
     tx::write(db, move |conn| {
+        crate::template::guard::assert_content_editable(
+            conn,
+            input.workspace_id,
+            "productCategory",
+            &[input.category_id],
+        )?;
         let only_visibility = input.name.is_none()
             && input.parent_id.is_none()
             && input.image_url.is_none()
@@ -360,6 +366,12 @@ pub async fn update(db: &Db, input: UpdateCategory) -> Result<ProductCategory> {
 /// category discount codes of the subtree first.
 pub async fn delete(db: &Db, workspace_id: i64, category_id: i64) -> Result<()> {
     tx::write(db, move |conn| {
+        crate::template::guard::assert_deletable(
+            conn,
+            workspace_id,
+            "productCategory",
+            &[category_id],
+        )?;
         assert_managed_here(conn, workspace_id, category_id)?;
         let mut guarded = vec![category_id];
         guarded.extend(

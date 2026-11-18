@@ -1240,6 +1240,7 @@ pub async fn delete(deps: &AiFileDeps<'_>, workspace_id: i64, id: i64) -> Result
 /// `deleteInTx`: deletes the workspace's rows among `ids` (chunks cascade;
 /// the stored objects are not touched). Returns the deleted ids.
 pub fn delete_in(conn: &Connection, workspace_id: i64, ids: &[i64]) -> Result<Vec<i64>> {
+    crate::template::guard::assert_deletable(conn, workspace_id, "aiFile", ids)?;
     let mut stmt = conn
         .prepare_cached(
             r#"DELETE FROM "AIFile" WHERE "workspaceId" = ?1 AND "id" IN (SELECT value FROM json_each(?2)) RETURNING "id""#,

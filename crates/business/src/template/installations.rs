@@ -3,6 +3,7 @@
 //! grant switches and the sync history (`templateSyncRequestService`).
 
 use chatbotx_db::Db;
+use chatbotx_db::repo::template_uninstall;
 use chatbotx_db::rusqlite::{
     Connection, OptionalExtension, params, params_from_iter, types::Value as Sql,
 };
@@ -303,8 +304,7 @@ pub async fn set_auto_update(
 }
 
 /// `setPublisherUninstallGrant` for every copy of the (workspace, template)
-/// pair. Withdrawing while a publisher uninstall waits needs the uninstall
-/// engine (`cancelPublisherUninstalls`): 501 `notPorted` until it is ported.
+/// pair. Withdrawing it skips a publisher uninstall that still waits.
 pub async fn set_publisher_uninstall_grant(
     db: &Db,
     workspace_id: i64,
@@ -364,21 +364,16 @@ pub async fn set_publisher_uninstall_grant(
                 ));
             }
         } else {
-            let waiting: bool = tx
-                .query_row(
-                    r#"SELECT EXISTS (SELECT 1 FROM "TemplateInstallation" WHERE "workspaceId" = ?1
-                         AND "sourceTemplateId" = ?2 AND "uninstallState" = 'pending'
-                         AND "uninstallRequestedByKind" = 'publisher')"#,
-                    params![workspace_id, source],
-                    |row| row.get(0),
-                )
-                .map_err(db_error)?;
-            if waiting {
-                return Err(BusinessError::exception(
-                    "Cancelling a publisher uninstall is not ported yet",
-                    "notPorted",
-                    501,
-                ));
+            // `cancelPublisherUninstalls`: a publisher uninstall nobody claimed
+            // yet is skipped (the single-transaction uninstall commits nothing
+            // before it runs; one a worker holds finishes).
+            for (pending, operation) in
+                template_uninstall::list_pending_publisher_uninstalls(tx, workspace_id, source)?
+            {
+                template_uninstall::skip_pending(tx, pending, "templateUninstallNotGranted")?;
+                if let Some(operation) = operation {
+                    template_uninstall::finalize_operation_if_complete(tx, operation)?;
+                }
             }
         }
         tx.execute(

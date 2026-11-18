@@ -109,7 +109,8 @@ async fn resolve_workspace(
 ) -> Result<(i64, bool), OrpcError> {
     let user_id = ctx.user_id;
     let name = name.to_string();
-    ctx.api
+    let resolved = ctx
+        .api
         .db
         .write(move |tx| {
             if let Some(workspace_id) = workspace_id {
@@ -134,7 +135,35 @@ async fn resolve_workspace(
                 "notFound",
                 404,
             ))
+        })?;
+    if resolved.1 {
+        enqueue_staged_installs(ctx, resolved.0).await;
+    }
+    Ok(resolved)
+}
+
+/// Enqueues the tenant default install staged with a new workspace (best
+/// effort: the template sweep re-dispatches a miss).
+async fn enqueue_staged_installs(ctx: &Ctx<'_>, workspace_id: i64) {
+    let Some(jobs) = ctx.api.jobs.as_deref() else {
+        return;
+    };
+    let pending = ctx
+        .api
+        .db
+        .read(move |conn| {
+            chatbotx_db::repo::template_installation::list_pending_ids(conn, workspace_id)
+                .map_err(|e| chatbotx_db::DbError::other(e.message()))
         })
+        .await
+        .unwrap_or_default();
+    for id in pending {
+        if let Err(error) =
+            chatbotx_business::template::save::enqueue_install(jobs, id, workspace_id).await
+        {
+            tracing::warn!(%error, id, "Could not enqueue the tenant default install");
+        }
+    }
 }
 
 /// The caller's `(role, permissions)` in the workspace.

@@ -142,6 +142,7 @@ pub async fn update(
     data: UpdateSequence,
 ) -> Result<Option<String>> {
     tx::write(db, move |tx| {
+        crate::template::guard::assert_content_editable(tx, workspace_id, "sequence", &[id])?;
         let sequence = find_sequence(tx, workspace_id, id)?;
         if let Some(folder_id) = data.folder_id
             && folder_id != sequence.folder_id
@@ -191,6 +192,7 @@ pub async fn update(
 /// `delete`: 404 "Sequence not found"; the steps and enrollments cascade.
 pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
     tx::write(db, move |tx| {
+        crate::template::guard::assert_deletable(tx, workspace_id, "sequence", &[id])?;
         find_sequence(tx, workspace_id, id)?;
         tx.execute(
             r#"DELETE FROM "Sequence" WHERE "id" = ?1 AND "workspaceId" = ?2"#,

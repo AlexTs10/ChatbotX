@@ -210,8 +210,24 @@ pub async fn create(
     app_url: &str,
     now: i64,
 ) -> Result<(WebchatRow, ConnectionRow)> {
-    let menus = brand_webchat_menus(data.persistent_menus.clone(), app_url);
+    let app_url = app_url.to_string();
     tx::write(db, move |tx| {
+        create_in(tx, workspace_id, created_by, data, &app_url, now)
+    })
+    .await
+}
+
+/// [`create`] on the caller's transaction (the template install).
+pub fn create_in(
+    tx: &Connection,
+    workspace_id: i64,
+    created_by: Option<i64>,
+    data: WebchatData,
+    app_url: &str,
+    now: i64,
+) -> Result<(WebchatRow, ConnectionRow)> {
+    let menus = brand_webchat_menus(data.persistent_menus.clone(), app_url);
+    {
         let welcome_flow_id = resolve_welcome_flow_id(tx, data.welcome_flow_id, workspace_id)?;
         let webchat_id: i64 = chatbotx_core::utils::id::create_id()
             .parse()
@@ -257,8 +273,7 @@ pub async fn create(
             ))
         })?;
         Ok((webchat, connection))
-    })
-    .await
+    }
 }
 
 /// `findByIdForWorkspace` (`404 Integration Webchat not found`).
@@ -319,6 +334,7 @@ pub async fn update(
         .map(|menus| brand_webchat_menus(menus, app_url));
     let now = chatbotx_db::repo::now_ms();
     tx::write(db, move |tx| {
+        crate::template::guard::assert_content_editable(tx, workspace_id, "integrationWebchat", &[id])?;
         let mut sets: Vec<(&str, SqlValue)> = Vec::new();
         if let Some(name) = &patch.name {
             sets.push(("name", name.clone().into()));
@@ -386,16 +402,22 @@ pub async fn update(
 pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
     let now = chatbotx_db::repo::now_ms();
     tx::write(db, move |tx| {
-        let webchat = find(tx, id, workspace_id)?
-            .ok_or_else(|| BusinessError::not_found("Integration Webchat not found"))?;
-        tx.execute(
-            r#"DELETE FROM "IntegrationWebchat" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
-            params![id, workspace_id],
-        )
-        .map_err(repo_err)?;
-        connection::disconnect_inbox(tx, webchat.inbox_id, workspace_id, now)
+        crate::template::guard::assert_deletable(tx, workspace_id, "integrationWebchat", &[id])?;
+        delete_in(tx, workspace_id, id, now)
     })
     .await
+}
+
+/// `deleteInTx`: the webchat and its inbox connection, in the caller's transaction.
+pub fn delete_in(tx: &Connection, workspace_id: i64, id: i64, now: i64) -> Result<()> {
+    let webchat = find(tx, id, workspace_id)?
+        .ok_or_else(|| BusinessError::not_found("Integration Webchat not found"))?;
+    tx.execute(
+        r#"DELETE FROM "IntegrationWebchat" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+        params![id, workspace_id],
+    )
+    .map_err(repo_err)?;
+    connection::disconnect_inbox(tx, webchat.inbox_id, workspace_id, now)
 }
 
 // ---- guest access (`webchat-access-token.ts`, `authorized-domain.ts`,

@@ -1,0 +1,466 @@
+//! Q.D4 slice 3: `templatePreviews.get`, `templateInstallations.install`, the
+//! install job, `templateInstallations.get` and `listResources` on real rows;
+//! sync, restore and uninstall (slices 4 and 5).
+
+mod handlers_common;
+
+use chatbotx_api::handlers::{Call, Principal, dispatch_as};
+use chatbotx_db::rusqlite::params;
+use handlers_common::{Fixture, OTHER_WS, WS, fixture};
+use serde_json::{Value, json};
+
+async fn run(
+    fixture: &Fixture,
+    route: &str,
+    read_only: bool,
+    params: &[(&'static str, &str)],
+    body: Option<Value>,
+) -> (u16, Value) {
+    let params: Vec<(&'static str, String)> =
+        params.iter().map(|(k, v)| (*k, (*v).to_string())).collect();
+    let body = body.map(|b| b.to_string()).unwrap_or_default();
+    let principal = Principal {
+        read_only,
+        ..Principal::default()
+    };
+    let response = dispatch_as(
+        &fixture.state,
+        route,
+        Call {
+            workspace_id: WS,
+            params: &params,
+            query: None,
+            body: body.as_bytes(),
+        },
+        &principal,
+    )
+    .await
+    .expect("ported route");
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).expect("json")
+    };
+    (status, json)
+}
+
+async fn count(fixture: &Fixture, sql: &'static str) -> i64 {
+    fixture
+        .state
+        .db
+        .read(move |conn| Ok(conn.query_row(sql, params![WS], |r| r.get(0))?))
+        .await
+        .unwrap()
+}
+
+/// Saves keyword 21 (fires flow 11, which tags `vip`) as a template, then
+/// moves the template to the other workspace and shares it.
+async fn shared_template(fixture: &Fixture) -> String {
+    fixture
+        .state
+        .db
+        .write(|tx| {
+            tx.execute(r#"INSERT INTO "Tag" ("id", "name", "workspaceId") VALUES (31, 'vip', ?1)"#, params![WS])?;
+            tx.execute(r#"INSERT INTO "Flow" ("id", "name", "workspaceId") VALUES (11, 'Welcome', ?1)"#, params![WS])?;
+            let nodes = json!([{ "id": "1", "type": "message", "data": { "details": { "steps": [
+                { "id": "s1", "stepType": "addContactTag", "tags": ["vip"] }
+            ] } } }]);
+            tx.execute(
+                r#"INSERT INTO "FlowVersion" ("id", "workspaceId", "flowId", "nodes", "edges", "isDraft", "startNodeId")
+                   VALUES (111, ?1, 11, ?2, '[]', 1, 1)"#,
+                params![WS, nodes.to_string()],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "AutomatedResponse" ("id", "workspaceId", "type", "keywords", "status", "flowId")
+                   VALUES (21, ?1, 'inbound', '["hi"]', 1, 11)"#,
+                params![WS],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("seed");
+    let (status, out) = run(
+        fixture,
+        "templates.create",
+        false,
+        &[],
+        Some(json!({
+            "name": "Starter",
+            "selection": { "keywords": { "mode": "ids", "ids": ["21"] } },
+            "defaultPermissions": { "allowEdit": true },
+            "createInstallFolder": false,
+            "defaultAutoUpdate": false,
+        })),
+    )
+    .await;
+    assert_eq!(status, 200, "{out}");
+    let id: i64 = out["id"].as_str().unwrap().parse().unwrap();
+    fixture
+        .state
+        .db
+        .write(move |tx| {
+            tx.execute(
+                r#"UPDATE "Template" SET "workspaceId" = ?1, "shareEnabled" = 1 WHERE "id" = ?2"#,
+                params![OTHER_WS, id],
+            )?;
+            Ok(tx.query_row(
+                r#"SELECT "shareToken" FROM "Template" WHERE "id" = ?1"#,
+                [id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn preview_install_and_detail_copy_the_template_into_the_workspace() {
+    let fixture = fixture().await;
+    let token = shared_template(&fixture).await;
+
+    let (status, preview) = run(
+        &fixture,
+        "templatePreviews.get",
+        false,
+        &[("id", &token)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{preview}");
+    assert_eq!(preview["installable"], true, "{preview}");
+    let (_, read_only) = run(
+        &fixture,
+        "templatePreviews.get",
+        true,
+        &[("id", &token)],
+        None,
+    )
+    .await;
+    assert_eq!(read_only["installable"], false, "{read_only}");
+    let (status, denied) = run(
+        &fixture,
+        "templateInstallations.install",
+        true,
+        &[],
+        Some(json!({ "shareToken": token })),
+    )
+    .await;
+    assert_eq!(status, 403, "{denied}");
+
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.install",
+        false,
+        &[],
+        Some(json!({ "shareToken": token })),
+    )
+    .await;
+    assert_eq!(status, 202, "{out}");
+    let installation = out["installationId"].as_str().unwrap().to_string();
+    chatbotx_business::template::request::run_install_job(
+        &fixture.state.db,
+        WS,
+        installation.parse().unwrap(),
+        "http://localhost",
+    )
+    .await
+    .expect("install job");
+
+    let (status, detail) = run(
+        &fixture,
+        "templateInstallations.get",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{detail}");
+    assert!(
+        matches!(detail["status"].as_str(), Some("completed" | "partial")),
+        "{detail}"
+    );
+    assert_eq!(
+        count(
+            &fixture,
+            r#"SELECT COUNT(*) FROM "AutomatedResponse" WHERE "workspaceId" = ?1"#
+        )
+        .await,
+        2
+    );
+    assert_eq!(
+        count(
+            &fixture,
+            r#"SELECT COUNT(*) FROM "Flow" WHERE "workspaceId" = ?1"#
+        )
+        .await,
+        2
+    );
+    // The tag is reused by name, not copied.
+    assert_eq!(
+        count(
+            &fixture,
+            r#"SELECT COUNT(*) FROM "Tag" WHERE "workspaceId" = ?1"#
+        )
+        .await,
+        1
+    );
+    let (status, resources) = run(
+        &fixture,
+        "templateInstallations.listResources",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{resources}");
+    assert!(
+        resources["items"].as_array().unwrap().len() >= 2,
+        "{resources}"
+    );
+
+    // Slice 6 guard: the template does not allow delete, so the flow copy stays.
+    let copy = count(
+        &fixture,
+        r#"SELECT "id" FROM "Flow" WHERE "workspaceId" = ?1 AND "id" <> 11"#,
+    )
+    .await;
+    let refused = chatbotx_business::flow::delete_many(&fixture.state.db, WS, vec![copy])
+        .await
+        .expect_err("guarded");
+    assert_eq!(refused.code(), Some("templateAllowDeleteViolation"));
+}
+
+async fn text_of_copy(fixture: &Fixture) -> Option<String> {
+    fixture
+        .state
+        .db
+        .read(|conn| {
+            Ok(conn.query_row(
+                r#"SELECT "text" FROM "AutomatedResponse" WHERE "workspaceId" = ?1 AND "id" <> 21"#,
+                params![WS],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn sync_backs_up_an_edited_copy_overwrites_it_and_restore_puts_it_back() {
+    let fixture = fixture().await;
+    let token = shared_template(&fixture).await;
+    let (_, out) = run(
+        &fixture,
+        "templateInstallations.install",
+        false,
+        &[],
+        Some(json!({ "shareToken": token })),
+    )
+    .await;
+    let installation = out["installationId"].as_str().unwrap().to_string();
+    chatbotx_business::template::request::run_install_job(
+        &fixture.state.db,
+        WS,
+        installation.parse().unwrap(),
+        "http://localhost",
+    )
+    .await
+    .expect("install job");
+
+    // The installer edits the copy; the publisher saves version 2.
+    let token_for_version = token.clone();
+    fixture
+        .state
+        .db
+        .write(move |tx| {
+            tx.execute(
+                r#"UPDATE "AutomatedResponse" SET "text" = 'edited' WHERE "workspaceId" = ?1 AND "id" <> 21"#,
+                params![WS],
+            )?;
+            let (id, payload): (i64, String) = tx.query_row(
+                r#"SELECT "id", "payload" FROM "Template" WHERE "shareToken" = ?1"#,
+                [&token_for_version],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let mut payload: Value = serde_json::from_str(&payload).unwrap();
+            payload["resources"]["keywords"][0]["text"] = json!("v2 text");
+            tx.execute(
+                r#"INSERT INTO "TemplateVersion" ("id", "templateId", "workspaceId", "version", "payload", "payloadHash", "formatVersion")
+                   VALUES (?1, ?2, ?3, 2, ?4, 'v2', 1)"#,
+                params![id + 1, id, OTHER_WS, payload.to_string()],
+            )?;
+            tx.execute(
+                r#"UPDATE "Template" SET "version" = 2, "payload" = ?1 WHERE "id" = ?2"#,
+                params![payload.to_string(), id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.sync",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 202, "{out}");
+    let sync = out["syncId"].as_str().unwrap().to_string();
+    chatbotx_business::template::syncs::run_sync_job(
+        &fixture.state.db,
+        WS,
+        sync.parse().unwrap(),
+        "http://localhost",
+    )
+    .await
+    .expect("sync job");
+    assert_eq!(text_of_copy(&fixture).await.as_deref(), Some("v2 text"));
+
+    let (status, detail) = run(
+        &fixture,
+        "templateInstallations.getSync",
+        false,
+        &[("id", &installation), ("syncId", &sync)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{detail}");
+    // The keyword and the flow it fires.
+    assert_eq!(detail["counts"]["updated"], 2, "{detail}");
+    assert_eq!(detail["counts"]["overwrittenModified"], 1, "{detail}");
+    let backup: i64 = fixture
+        .state
+        .db
+        .read(|conn| {
+            Ok(
+                conn.query_row(r#"SELECT "id" FROM "TemplateResourceBackup""#, [], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .await
+        .unwrap();
+
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.restoreBackup",
+        false,
+        &[("id", &installation), ("backupId", &backup.to_string())],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(text_of_copy(&fixture).await.as_deref(), Some("edited"));
+
+    // Reinstalling the same template is a sync of the copy, not a second install.
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.install",
+        false,
+        &[],
+        Some(json!({ "shareToken": token })),
+    )
+    .await;
+    assert_eq!(status, 202, "{out}");
+    assert_eq!(out["installationId"].as_str(), Some(installation.as_str()));
+    assert!(out["syncId"].is_string(), "{out}");
+}
+
+#[tokio::test]
+async fn uninstall_deletes_the_copies_and_keeps_what_was_there_before() {
+    let fixture = fixture().await;
+    let token = shared_template(&fixture).await;
+    let (_, out) = run(
+        &fixture,
+        "templateInstallations.install",
+        false,
+        &[],
+        Some(json!({ "shareToken": token })),
+    )
+    .await;
+    let installation = out["installationId"].as_str().unwrap().to_string();
+    let installation_id: i64 = installation.parse().unwrap();
+    chatbotx_business::template::request::run_install_job(
+        &fixture.state.db,
+        WS,
+        installation_id,
+        "http://localhost",
+    )
+    .await
+    .expect("install job");
+
+    let (status, preview) = run(
+        &fixture,
+        "templateInstallations.previewUninstall",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{preview}");
+    assert_eq!(preview["deleted"], 2, "{preview}");
+    let (status, denied) = run(
+        &fixture,
+        "templateInstallations.uninstall",
+        true,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 403, "{denied}");
+    // Nothing stopped yet: nothing to cancel.
+    let (status, _) = run(
+        &fixture,
+        "templateInstallations.cancelUninstall",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 409);
+
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.uninstall",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 202, "{out}");
+    assert_eq!(out["uninstallState"], "pending", "{out}");
+    chatbotx_business::template::uninstall::run_uninstall_job(
+        &fixture.state.db,
+        WS,
+        installation_id,
+    )
+    .await
+    .expect("uninstall job");
+
+    let (status, detail) = run(
+        &fixture,
+        "templateInstallations.get",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{detail}");
+    assert_eq!(detail["status"], "uninstalled", "{detail}");
+    for (sql, left) in [
+        (
+            r#"SELECT COUNT(*) FROM "AutomatedResponse" WHERE "workspaceId" = ?1"#,
+            1,
+        ),
+        (r#"SELECT COUNT(*) FROM "Flow" WHERE "workspaceId" = ?1"#, 1),
+        (r#"SELECT COUNT(*) FROM "Tag" WHERE "workspaceId" = ?1"#, 1),
+    ] {
+        assert_eq!(count(&fixture, sql).await, left, "{sql}");
+    }
+}

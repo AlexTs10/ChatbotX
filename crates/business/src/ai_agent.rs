@@ -494,6 +494,7 @@ pub async fn update(
     data: AiAgentInput,
 ) -> Result<AiAgent> {
     let (updated, detail) = tx::write(db, move |tx| {
+        crate::template::guard::assert_content_editable(tx, workspace_id, "aiAgent", &[id])?;
         let before = find_in(tx, workspace_id, id)?
             .ok_or_else(|| BusinessError::not_found("AI agent not found"))?;
         if data.is_empty() {
@@ -579,6 +580,7 @@ pub async fn delete(
 
 /// `deleteInTx`: the deleted ids.
 pub fn delete_in(conn: &Connection, workspace_id: i64, ids: &[i64]) -> Result<Vec<i64>> {
+    crate::template::guard::assert_deletable(conn, workspace_id, "aiAgent", ids)?;
     let mut out = Vec::new();
     for id in ids {
         let n = conn

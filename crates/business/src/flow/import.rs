@@ -388,7 +388,7 @@ pub fn flow_import_reference_kinds() -> Vec<String> {
 /// `sanitizeUnresolvedReferences` (clear mode) with `verifyKinds`: a
 /// `naturalKey` / `strip` id no map resolved is removed; a `verifyInTarget`
 /// (or verified-kind) id is removed unless it exists in the workspace.
-fn sanitize_unresolved(
+pub(crate) fn sanitize_unresolved(
     conn: &Connection,
     workspace_id: i64,
     graph: &Value,

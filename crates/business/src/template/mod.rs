@@ -2,13 +2,24 @@
 //!
 //! Ported: permissions, the view-only / undeletable lookups, the publisher
 //! reads and share settings ([`service`]) and the installer's installation
-//! reads and settings ([`installations`]). The snapshot save, install, sync,
-//! uninstall engines and their worker jobs are not ported yet (specs/Q.D4.md).
+//! reads and settings ([`installations`]), the snapshot save ([`save`],
+//! [`collect`], [`snapshot`]) and the install engine, preview and install job
+//! ([`install`], [`request`]). Sync, uninstall and the tenant default are not
+//! ported yet (specs/Q.D4.md).
 //! Postgres advisory locks are the one SQLite writer.
 
+pub mod collect;
+pub mod guard;
+pub mod install;
 pub mod installations;
 pub mod permissions;
+pub mod request;
+pub mod save;
 pub mod service;
+pub mod snapshot;
+pub mod syncs;
+pub mod tenant_default;
+pub mod uninstall;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -104,6 +115,22 @@ pub async fn list_blocking_ids(
     resource_ids: &[i64],
     blocking: Blocking,
 ) -> Result<Vec<String>> {
+    let resource_kind = resource_kind.to_string();
+    let resource_ids = resource_ids.to_vec();
+    tx::read(db, move |conn| {
+        blocking_ids_in(conn, workspace_id, &resource_kind, &resource_ids, blocking)
+    })
+    .await
+}
+
+/// [`list_blocking_ids`] on one connection.
+pub(crate) fn blocking_ids_in(
+    conn: &chatbotx_db::rusqlite::Connection,
+    workspace_id: i64,
+    resource_kind: &str,
+    resource_ids: &[i64],
+    blocking: Blocking,
+) -> Result<Vec<String>> {
     if resource_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -125,16 +152,13 @@ pub async fn list_blocking_ids(
         Sql::Text(resource_kind.to_string()),
     ];
     values.extend(resource_ids.iter().map(|id| Sql::Integer(*id)));
-    tx::read(db, move |conn| {
-        let mut stmt = conn.prepare(&sql).map_err(db_error)?;
-        stmt.query_map(params_from_iter(values), |row| {
-            Ok(row.get::<_, i64>(0)?.to_string())
-        })
-        .map_err(db_error)?
-        .collect::<chatbotx_db::rusqlite::Result<Vec<_>>>()
-        .map_err(db_error)
+    let mut stmt = conn.prepare(&sql).map_err(db_error)?;
+    stmt.query_map(params_from_iter(values), |row| {
+        Ok(row.get::<_, i64>(0)?.to_string())
     })
-    .await
+    .map_err(db_error)?
+    .collect::<chatbotx_db::rusqlite::Result<Vec<_>>>()
+    .map_err(db_error)
 }
 
 /// `listLockedTemplateResourceIds`: `(lockedIds, undeletableIds)`.

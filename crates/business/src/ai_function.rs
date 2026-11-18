@@ -195,6 +195,7 @@ pub async fn update(
     input: AiFunctionInput,
 ) -> Result<AiFunction> {
     let (updated, changed) = tx::write(db, move |tx| {
+        crate::template::guard::assert_content_editable(tx, workspace_id, "aiFunction", &[id])?;
         let existing = find_in(tx, workspace_id, id)?
             .ok_or_else(|| BusinessError::not_found("AI Function not found"))?;
         if is_name_taken(tx, workspace_id, &input.name, Some(id))? {
@@ -259,6 +260,7 @@ pub async fn delete(db: &Db, audit: &AuditService, workspace_id: i64, id: i64) -
 
 /// `deleteInTx`: the deleted ids of `ids` in the workspace.
 pub fn delete_in(conn: &Connection, workspace_id: i64, ids: &[i64]) -> Result<Vec<i64>> {
+    crate::template::guard::assert_deletable(conn, workspace_id, "aiFunction", ids)?;
     let mut out = Vec::new();
     for id in ids {
         let n = conn

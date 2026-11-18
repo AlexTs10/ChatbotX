@@ -38,6 +38,7 @@ pub const ACTION_KEYS: &[&str] = &[
     "platformSettingsActions",
     "billingActions",
     "adminWorkspaceActions",
+    "templateActions",
 ];
 
 /// next-safe-action `DEFAULT_SERVER_ERROR_MESSAGE`.
@@ -248,6 +249,7 @@ fn gate_of(key: &str, name: &str) -> Option<Gate> {
         "billingActions" => super::platform_settings::billing_action_gate(name),
         "adminWorkspaceActions" => super::admin_workspaces::action_gate(name),
         "platformCredentialActions" => super::platform_credentials::action_gate(name),
+        "templateActions" => super::template_actions::action_gate(name),
         _ => None,
     }
 }
@@ -278,6 +280,7 @@ async fn run(
         "platformSettingsActions" | "billingActions" => {
             super::platform_settings::run_action(api, name, context, input).await
         }
+        "templateActions" => super::template_actions::run_action(api, name, context, input).await,
         _ => Err(ActionError::Internal(format!("unknown action key {key}"))),
     }
 }
@@ -310,6 +313,10 @@ pub fn spa_input(input: &Value) -> Value {
             Value::Object(fields) => out.extend(fields.clone()),
             _ => {}
         }
+    }
+    if binds.len() > 2 {
+        // A third bind arg (a template installer's publisher ref).
+        out.insert("bindArgs".to_string(), Value::Array(binds.clone()));
     }
     for (name, value) in ["workspaceId", "id"].into_iter().zip(binds) {
         out.insert(name.to_string(), value);

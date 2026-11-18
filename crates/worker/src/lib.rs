@@ -41,6 +41,7 @@ pub mod smart_delay;
 pub mod steps;
 pub mod store_sync;
 pub mod story_automation;
+pub mod template;
 pub mod thread_control;
 pub mod trigger;
 pub mod variables;
@@ -288,6 +289,10 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     runtime.spawn_worker(
         spec_of(QueueName::Schedule),
         handler(deps, |deps, job| Box::pin(schedule::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::Template),
+        handler(deps, |deps, job| Box::pin(template::handle(deps, job))),
     )?;
     Ok(())
 }

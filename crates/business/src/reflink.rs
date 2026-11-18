@@ -190,6 +190,7 @@ pub async fn update(db: &Db, workspace_id: i64, id: i64, data: ReflinkData) -> R
         return find_or_fail(db, workspace_id, id).await;
     }
     tx::write(db, move |conn| {
+        crate::template::guard::assert_content_editable(conn, workspace_id, "reflink", &[id])?;
         find_typed(conn, workspace_id, id, "refLink")?.ok_or_else(not_found)?;
         if let Some(flow_id) = data.flow_id {
             assert_parent_flows_in_workspace(conn, workspace_id, &[flow_id])?;
@@ -316,6 +317,7 @@ pub fn delete_in_tx(
     ids: &[i64],
     kind: Option<&str>,
 ) -> Result<Vec<i64>> {
+    crate::template::guard::assert_deletable(conn, workspace_id, "reflink", ids)?;
     if ids.is_empty() {
         return Ok(Vec::new());
     }

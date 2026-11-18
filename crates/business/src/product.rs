@@ -376,6 +376,12 @@ pub async fn create_full(db: &Db, workspace_id: i64, data: FullData) -> Result<P
 /// `update`: a patch (only the sent fields).
 pub async fn update(db: &Db, workspace_id: i64, product_id: i64, data: ProductData) -> Result<()> {
     tx::write(db, move |conn| {
+        crate::template::guard::assert_content_editable(
+            conn,
+            workspace_id,
+            "product",
+            &[product_id],
+        )?;
         assert_managed_here(conn, workspace_id, Some(&[product_id]))?;
         let data = with_consistent_subcategory(conn, workspace_id, product_id, data)?;
         let expected = expected_parent_id(conn, workspace_id, product_id, &data)?;
@@ -393,6 +399,12 @@ pub async fn update_full(
     data: FullData,
 ) -> Result<()> {
     tx::write(db, move |conn| {
+        crate::template::guard::assert_content_editable(
+            conn,
+            workspace_id,
+            "product",
+            &[product_id],
+        )?;
         assert_managed_here(conn, workspace_id, Some(&[product_id]))?;
         let product =
             with_consistent_subcategory(conn, workspace_id, product_id, data.product.clone())?;
@@ -438,6 +450,7 @@ pub fn create_from_import(
 /// workspaces' ids are ignored).
 pub async fn delete(db: &Db, workspace_id: i64, ids: Vec<i64>) -> Result<()> {
     tx::write(db, move |conn| {
+        crate::template::guard::assert_deletable(conn, workspace_id, "product", &ids)?;
         assert_managed_here(conn, workspace_id, Some(&ids))?;
         discount_code::remove_product_ids(conn, workspace_id, &ids)?;
         repo::delete_by_ids(conn, workspace_id, &ids)?;

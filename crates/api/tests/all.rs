@@ -184,6 +184,8 @@ mod rpc_procedures;
 mod rpc_session_auth;
 #[path = "rpc_spa_procedures.rs"]
 mod rpc_spa_procedures;
+#[path = "rpc_template_actions.rs"]
+mod rpc_template_actions;
 #[path = "rpc_workspace.rs"]
 mod rpc_workspace;
 #[path = "rpc_workspace_members.rs"]
@@ -238,8 +240,12 @@ mod spa_pages;
 mod spreadsheets_public_api;
 #[path = "tags_public_api.rs"]
 mod tags_public_api;
+#[path = "templates_install_api.rs"]
+mod templates_install_api;
 #[path = "templates_public_api.rs"]
 mod templates_public_api;
+#[path = "templates_save_api.rs"]
+mod templates_save_api;
 #[path = "triggers_public_api.rs"]
 mod triggers_public_api;
 #[path = "webchats_public_api.rs"]

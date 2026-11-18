@@ -39,6 +39,11 @@ pub fn category_permission(category: &str) -> &'static str {
     }
 }
 
+/// `canViewTemplateInstalls`: any category permission.
+pub fn can_view_installs(actor: &Actor) -> bool {
+    CATEGORIES.iter().any(|c| actor.has(category_permission(c)))
+}
+
 /// `TEMPLATE_MANAGE_PERMISSION`.
 const MANAGE_PERMISSION: &str = "flows";
 

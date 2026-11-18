@@ -37,6 +37,7 @@ pub const PORTED: &[&str] = &[
     "enqueueMarketingMessages",
     "dispatchMarketingMessages",
     "finalizeMarketingMessages",
+    "redispatchTemplateJobs",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -91,6 +92,10 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         "cleanupWebhookExecutions" => {
             crate::datetime_sweep::cleanup(&deps, true).await?;
+            Value::Null
+        }
+        "redispatchTemplateJobs" => {
+            crate::template::redispatch(&deps).await?;
             Value::Null
         }
         "purgeErrorLogs" => {

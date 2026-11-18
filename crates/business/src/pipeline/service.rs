@@ -452,6 +452,7 @@ pub async fn update(db: &Db, input: UpdatePipeline) -> Result<PipelineView> {
     } = input;
     require_access(db, workspace_id, id, scope, PipelineAction::ManageSettings).await?;
     let updated = tx::write(db, move |tx| {
+        crate::template::guard::assert_content_editable(tx, workspace_id, "pipeline", &[id])?;
         let conn: &Connection = tx;
         let existing = pipeline_repo::find_by_id(conn, workspace_id, id)?
             .ok_or_else(|| BusinessError::not_found(NOT_FOUND))?;
@@ -494,6 +495,7 @@ pub async fn delete(db: &Db, workspace_id: i64, id: i64, scope: PipelineAccessSc
     for items in [true, false] {
         loop {
             let removed = tx::write(db, move |tx| {
+                crate::template::guard::assert_deletable(tx, workspace_id, "pipeline", &[id])?;
                 let conn: &Connection = tx;
                 require_access_in(
                     conn,
