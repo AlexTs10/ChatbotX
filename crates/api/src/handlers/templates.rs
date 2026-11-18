@@ -8,7 +8,7 @@ use chatbotx_business::template::collect::CATEGORIES;
 use chatbotx_business::template::permissions::Actor;
 use chatbotx_business::template::{
     RESOURCE_KINDS, installations, list_locked_resource_ids, request as install_request,
-    save as template_save, service,
+    save as template_save, service, syncs as template_syncs,
 };
 use serde_json::{Value, json};
 
@@ -40,6 +40,8 @@ pub const ROUTES: &[&str] = &[
     "templateInstallations.getSync",
     "templateInstallations.install",
     "templateInstallations.retry",
+    "templateInstallations.sync",
+    "templateInstallations.restoreBackup",
     "templateInstallations.get",
     "templateInstallations.listResources",
     "templatePreviews.get",
@@ -85,6 +87,8 @@ pub async fn handle(
         "templateInstallations.getSync" => get_sync(state, call).await,
         "templateInstallations.install" => install(state, call, actor).await,
         "templateInstallations.retry" => retry(state, call, actor).await,
+        "templateInstallations.sync" => sync(state, call, actor).await,
+        "templateInstallations.restoreBackup" => restore_backup(state, call, actor).await,
         "templateInstallations.get" => get_installation(state, call, actor).await,
         "templateInstallations.listResources" => list_resources(state, call).await,
         "templatePreviews.get" => preview(state, call, principal).await,
@@ -701,6 +705,44 @@ async fn install(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
         out["syncId"] = json!(id(sync_id));
     }
     Ok(json(202, out))
+}
+
+/// `templateInstallations.sync`: queues a sync to the newest version (202).
+async fn sync(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
+    let installation_id = path_id(call, "id")?;
+    let requested = template_syncs::request(
+        &state.db,
+        state.jobs.as_deref(),
+        template_syncs::SyncRequest {
+            workspace_id: call.workspace_id,
+            installation_id,
+            trigger: "manual",
+            requested_by: None,
+            auto_update: None,
+            accept_publisher_uninstall: None,
+            inbox_bindings: None,
+        },
+        &actor,
+    )
+    .await
+    .map_err(|e| business_error(e, MUTATING))?;
+    Ok(json(202, json!({ "syncId": id(requested.sync_id) })))
+}
+
+/// `templateInstallations.restoreBackup`.
+async fn restore_backup(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {
+    let installation_id = path_id(call, "id")?;
+    let backup_id = path_id(call, "backupId")?;
+    template_syncs::restore_backup(
+        &state.db,
+        call.workspace_id,
+        installation_id,
+        backup_id,
+        &actor,
+    )
+    .await
+    .map_err(|e| business_error(e, MUTATING))?;
+    Ok(json(200, json!({ "ok": true })))
 }
 
 async fn retry(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {

@@ -178,7 +178,15 @@ pub struct Requested {
 
 enum Outcome {
     Install(TemplateInstallation, bool),
-    Reinstall(TemplateInstallation),
+    /// The installed copy and the reinstall choices: consent, inbox bindings,
+    /// installer, auto-update.
+    Reinstall(
+        TemplateInstallation,
+        Option<bool>,
+        Option<Value>,
+        Option<i64>,
+        Option<bool>,
+    ),
 }
 
 /// `validateInboxBindings`.
@@ -240,7 +248,13 @@ pub async fn request(
             && let Some(installed) = installs::find_installed_by_source_template(conn, ws, source)?
             && !input.allow_duplicate
         {
-            return Ok(Outcome::Reinstall(installed));
+            return Ok(Outcome::Reinstall(
+                installed,
+                accept,
+                bindings.clone(),
+                input.installed_by,
+                input.auto_update,
+            ));
         }
         if let Some(accepted) = accept {
             installs::set_publisher_uninstall_grant(conn, ws, source, accepted)?;
@@ -313,14 +327,29 @@ pub async fn request(
                 sync_id: None,
             })
         }
-        Outcome::Reinstall(row) => {
-            // ponytail: the reinstall sync is slice 4 (`templateSyncRequestService`).
-            let _ = row;
-            Err(BusinessError::exception(
-                "Reinstalling an installed template is not available yet",
-                "notPorted",
-                501,
-            ))
+        Outcome::Reinstall(row, accept, bindings, installed_by, auto_update) => {
+            // A reinstall is a sync of the installed copy.
+            let sync = super::syncs::request(
+                db,
+                jobs,
+                super::syncs::SyncRequest {
+                    workspace_id: row.workspace_id,
+                    installation_id: row.id,
+                    trigger: "reinstall",
+                    requested_by: installed_by,
+                    auto_update,
+                    accept_publisher_uninstall: accept,
+                    inbox_bindings: bindings,
+                },
+                &actor,
+            )
+            .await?;
+            Ok(Requested {
+                installation_id: row.id,
+                workspace_id: row.workspace_id,
+                created: false,
+                sync_id: Some(sync.sync_id),
+            })
         }
     }
 }

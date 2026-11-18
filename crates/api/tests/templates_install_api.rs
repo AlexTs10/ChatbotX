@@ -221,3 +221,141 @@ async fn preview_install_and_detail_copy_the_template_into_the_workspace() {
         "{resources}"
     );
 }
+
+async fn text_of_copy(fixture: &Fixture) -> Option<String> {
+    fixture
+        .state
+        .db
+        .read(|conn| {
+            Ok(conn.query_row(
+                r#"SELECT "text" FROM "AutomatedResponse" WHERE "workspaceId" = ?1 AND "id" <> 21"#,
+                params![WS],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn sync_backs_up_an_edited_copy_overwrites_it_and_restore_puts_it_back() {
+    let fixture = fixture().await;
+    let token = shared_template(&fixture).await;
+    let (_, out) = run(
+        &fixture,
+        "templateInstallations.install",
+        false,
+        &[],
+        Some(json!({ "shareToken": token })),
+    )
+    .await;
+    let installation = out["installationId"].as_str().unwrap().to_string();
+    chatbotx_business::template::request::run_install_job(
+        &fixture.state.db,
+        WS,
+        installation.parse().unwrap(),
+        "http://localhost",
+    )
+    .await
+    .expect("install job");
+
+    // The installer edits the copy; the publisher saves version 2.
+    let token_for_version = token.clone();
+    fixture
+        .state
+        .db
+        .write(move |tx| {
+            tx.execute(
+                r#"UPDATE "AutomatedResponse" SET "text" = 'edited' WHERE "workspaceId" = ?1 AND "id" <> 21"#,
+                params![WS],
+            )?;
+            let (id, payload): (i64, String) = tx.query_row(
+                r#"SELECT "id", "payload" FROM "Template" WHERE "shareToken" = ?1"#,
+                [&token_for_version],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let mut payload: Value = serde_json::from_str(&payload).unwrap();
+            payload["resources"]["keywords"][0]["text"] = json!("v2 text");
+            tx.execute(
+                r#"INSERT INTO "TemplateVersion" ("id", "templateId", "workspaceId", "version", "payload", "payloadHash", "formatVersion")
+                   VALUES (?1, ?2, ?3, 2, ?4, 'v2', 1)"#,
+                params![id + 1, id, OTHER_WS, payload.to_string()],
+            )?;
+            tx.execute(
+                r#"UPDATE "Template" SET "version" = 2, "payload" = ?1 WHERE "id" = ?2"#,
+                params![payload.to_string(), id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.sync",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 202, "{out}");
+    let sync = out["syncId"].as_str().unwrap().to_string();
+    chatbotx_business::template::syncs::run_sync_job(
+        &fixture.state.db,
+        WS,
+        sync.parse().unwrap(),
+        "http://localhost",
+    )
+    .await
+    .expect("sync job");
+    assert_eq!(text_of_copy(&fixture).await.as_deref(), Some("v2 text"));
+
+    let (status, detail) = run(
+        &fixture,
+        "templateInstallations.getSync",
+        false,
+        &[("id", &installation), ("syncId", &sync)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{detail}");
+    // The keyword and the flow it fires.
+    assert_eq!(detail["counts"]["updated"], 2, "{detail}");
+    assert_eq!(detail["counts"]["overwrittenModified"], 1, "{detail}");
+    let backup: i64 = fixture
+        .state
+        .db
+        .read(|conn| {
+            Ok(
+                conn.query_row(r#"SELECT "id" FROM "TemplateResourceBackup""#, [], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .await
+        .unwrap();
+
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.restoreBackup",
+        false,
+        &[("id", &installation), ("backupId", &backup.to_string())],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(text_of_copy(&fixture).await.as_deref(), Some("edited"));
+
+    // Reinstalling the same template is a sync of the copy, not a second install.
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.install",
+        false,
+        &[],
+        Some(json!({ "shareToken": token })),
+    )
+    .await;
+    assert_eq!(status, 202, "{out}");
+    assert_eq!(out["installationId"].as_str(), Some(installation.as_str()));
+    assert!(out["syncId"].is_string(), "{out}");
+}

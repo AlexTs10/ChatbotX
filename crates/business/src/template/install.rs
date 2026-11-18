@@ -38,6 +38,8 @@ use crate::flow::import::{
 pub const INSTALL_LEASE_MS: i64 = 15 * 60 * 1000;
 const MAX_STORED_WARNINGS: usize = 200;
 
+pub mod sync;
+
 /// `TEMPLATE_INSTALL_ORDER`.
 pub const INSTALL_ORDER: &[&str] = &[
     "couponTopics",
@@ -528,13 +530,7 @@ pub fn run(ctx: &mut Ctx<'_>, input: &RunInput<'_>) -> Result<Outcome> {
 
     let resources = rewrite_field_tokens_deep(&payload["resources"], &ctx.field_name_bindings);
     let entries_of = |ctx: &Ctx<'_>, category: &str| -> Vec<Value> {
-        let entries = Value::Array(entries_for_category(&resources, category));
-        let empty = BTreeMap::new();
-        let coupons = ctx.id_maps.get("couponTopic").unwrap_or(&empty);
-        let bots = ctx.id_maps.get("botField").unwrap_or(&empty);
-        let out =
-            rewrite_bot_field_tokens_deep(&rewrite_coupon_tokens_deep(&entries, coupons), bots);
-        out.as_array().cloned().unwrap_or_default()
+        prepared_entries(ctx, &resources, category)
     };
 
     // Coupon topics first, then the early bot fields, then every category.
@@ -573,6 +569,17 @@ pub fn run(ctx: &mut Ctx<'_>, input: &RunInput<'_>) -> Result<Outcome> {
         install_folder_id,
         published_flows: ctx.published_flows.clone(),
     })
+}
+
+/// The entries of `category` with the `{{coupon:..}}` / `{{bot_field:..}}`
+/// tokens rewritten to the copies (read at use time: they are inserted first).
+fn prepared_entries(ctx: &Ctx<'_>, resources: &Value, category: &str) -> Vec<Value> {
+    let entries = Value::Array(entries_for_category(resources, category));
+    let empty = BTreeMap::new();
+    let coupons = ctx.id_maps.get("couponTopic").unwrap_or(&empty);
+    let bots = ctx.id_maps.get("botField").unwrap_or(&empty);
+    let out = rewrite_bot_field_tokens_deep(&rewrite_coupon_tokens_deep(&entries, coupons), bots);
+    out.as_array().cloned().unwrap_or_default()
 }
 
 /// `lockFor` + `flushTracked`: the provenance rows with their copied lock.
@@ -1353,65 +1360,8 @@ fn insert_category(ctx: &mut Ctx<'_>, category: &'static str, entries: &[Value])
                 );
             }
             "aiAgents" => {
-                let mut unresolved: Vec<UnresolvedReference> = Vec::new();
-                let mut collect = |r: &UnresolvedReference| unresolved.push(r.clone());
-                let tools = remap_references(
-                    &json!({ "tools": entry["tools"] }),
-                    &ctx.id_maps,
-                    RemapOptions {
-                        kinds: Some(vec![
-                            "aiFunction".into(),
-                            "aiFile".into(),
-                            "aiMcpServer".into(),
-                        ]),
-                        on_unresolved: Some(&mut collect),
-                    },
-                )["tools"]
-                    .clone();
-                for r in unresolved {
-                    ctx.warn(
-                        category,
-                        &r.entity_kind,
-                        format!("aiAgents.{source}.tools"),
-                        r.value,
-                    );
-                }
-                let mut models = Vec::new();
-                for model in entry["models"].as_array().into_iter().flatten() {
-                    if model["kind"] == "openaiCompatible" {
-                        let integration = text_of(&model["integrationId"]).unwrap_or_default();
-                        ctx.warn(
-                            category,
-                            "integration",
-                            format!("aiAgents.{source}.models.integrationId"),
-                            integration,
-                        );
-                    } else {
-                        models.push(model.clone());
-                    }
-                }
-                let mut fields = pick(
-                    entry,
-                    &[
-                        "name",
-                        "prompt",
-                        "messages",
-                        "temperature",
-                        "maxOutputTokens",
-                        "isRichResponse",
-                    ],
-                );
-                fields.insert("tools".into(), tools);
-                fields.insert("models".into(), json!(models));
+                let mut fields = agent_fields(ctx, entry, &source);
                 fields.insert("isDefault".into(), json!(false));
-                fields.insert(
-                    "webSearchAuthorizedDomains".into(),
-                    if entry["webSearchAuthorizedDomains"].is_array() {
-                        entry["webSearchAuthorizedDomains"].clone()
-                    } else {
-                        json!([])
-                    },
-                );
                 fields.insert("actionRules".into(), json!([]));
                 let id = ctx.insert("AIAgent", fields)?;
                 ctx.record(category, "aiAgent", &source, id, Some("aiAgent"));
@@ -1566,33 +1516,10 @@ fn insert_category(ctx: &mut Ctx<'_>, category: &'static str, entries: &[Value])
             }
             "flows" => insert_flow(ctx, entry, &source)?,
             "keywords" => {
-                let flow = ctx.resolve(
-                    category,
-                    "flow",
-                    format!("keywords.{source}.flowId"),
-                    &entry["flowId"],
-                );
+                let mut fields = keyword_fields(ctx, entry, &source);
                 let folder = ctx.folder(category, entry);
-                let mut fields = pick(entry, &["type", "text"]);
-                let conditions = entry["conditions"].as_array().filter(|c| !c.is_empty());
-                match conditions {
-                    Some(c) => {
-                        fields.insert("conditions".into(), json!(c));
-                        fields.insert("keywords".into(), entry["keywords"].clone());
-                    }
-                    None => {
-                        fields.insert(
-                            "keywords".into(),
-                            if entry["keywords"].is_array() {
-                                entry["keywords"].clone()
-                            } else {
-                                json!([])
-                            },
-                        );
-                    }
-                }
+                fields.insert("type".into(), entry["type"].clone());
                 fields.insert("status".into(), json!(true));
-                fields.insert("flowId".into(), json!(flow));
                 fields.insert("folderId".into(), json!(folder));
                 let id = ctx.insert("AutomatedResponse", fields)?;
                 ctx.record(category, "automatedResponse", &source, id, None);
@@ -1703,6 +1630,99 @@ fn insert_category(ctx: &mut Ctx<'_>, category: &'static str, entries: &[Value])
     Ok(())
 }
 
+/// The template-owned columns of a keyword (`text`, the match, `flowId`).
+fn keyword_fields(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Map<String, Value> {
+    let flow = ctx.resolve(
+        "keywords",
+        "flow",
+        format!("keywords.{source}.flowId"),
+        &entry["flowId"],
+    );
+    let mut fields = pick(entry, &["text"]);
+    match entry["conditions"].as_array().filter(|c| !c.is_empty()) {
+        Some(c) => {
+            fields.insert("conditions".into(), json!(c));
+            fields.insert("keywords".into(), entry["keywords"].clone());
+        }
+        None => {
+            fields.insert(
+                "keywords".into(),
+                if entry["keywords"].is_array() {
+                    entry["keywords"].clone()
+                } else {
+                    json!([])
+                },
+            );
+        }
+    }
+    fields.insert("flowId".into(), json!(flow));
+    fields
+}
+
+/// The template-owned columns of an AI agent (tools and models resolved; an
+/// `openaiCompatible` model is dropped with an `integration` warning).
+fn agent_fields(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Map<String, Value> {
+    let mut unresolved: Vec<UnresolvedReference> = Vec::new();
+    let mut collect = |r: &UnresolvedReference| unresolved.push(r.clone());
+    let tools = remap_references(
+        &json!({ "tools": entry["tools"] }),
+        &ctx.id_maps,
+        RemapOptions {
+            kinds: Some(vec![
+                "aiFunction".into(),
+                "aiFile".into(),
+                "aiMcpServer".into(),
+            ]),
+            on_unresolved: Some(&mut collect),
+        },
+    )["tools"]
+        .clone();
+    for r in unresolved {
+        ctx.warn(
+            "aiAgents",
+            &r.entity_kind,
+            format!("aiAgents.{source}.tools"),
+            r.value,
+        );
+    }
+    let mut models = Vec::new();
+    for model in entry["models"].as_array().into_iter().flatten() {
+        if model["kind"] == "openaiCompatible" {
+            let integration = text_of(&model["integrationId"]).unwrap_or_default();
+            ctx.warn(
+                "aiAgents",
+                "integration",
+                format!("aiAgents.{source}.models.integrationId"),
+                integration,
+            );
+        } else {
+            models.push(model.clone());
+        }
+    }
+    let mut fields = pick(
+        entry,
+        &[
+            "name",
+            "prompt",
+            "messages",
+            "temperature",
+            "maxOutputTokens",
+            "isRichResponse",
+        ],
+    );
+    fields.insert("tools".into(), tools);
+    fields.insert("models".into(), json!(models));
+    fields.insert(
+        "webSearchAuthorizedDomains".into(),
+        if entry["webSearchAuthorizedDomains"].is_array() {
+            entry["webSearchAuthorizedDomains"].clone()
+        } else {
+            json!([])
+        },
+    );
+    fields
+}
+
 fn strings(value: &Value) -> Vec<String> {
     value
         .as_array()
@@ -1789,9 +1809,16 @@ fn insert_product(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Result<()> 
 
 /// `insertFlows`: the graph remapped through the maps so far; references to
 /// flows, nodes and triggers are remapped in Phase 2.
-fn insert_flow(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Result<()> {
+/// The flow's graph remapped over `kinds` and sanitized; `false` when a
+/// reference did not resolve (each one is warned).
+fn flow_graph(
+    ctx: &mut Ctx<'_>,
+    entry: &Value,
+    source: &str,
+    kinds: &[&str],
+) -> Result<(Vec<Value>, Vec<Value>, bool)> {
     let graph = json!({ "nodes": entry["nodes"], "edges": entry["edges"] });
-    let kinds: Vec<String> = FLOW_INSERT_KINDS.iter().map(|k| (*k).to_string()).collect();
+    let kinds: Vec<String> = kinds.iter().map(|k| (*k).to_string()).collect();
     let mut unresolved: Vec<UnresolvedReference> = Vec::new();
     let mut collect = |r: &UnresolvedReference| unresolved.push(r.clone());
     let remapped = remap_flow_graph_references(
@@ -1811,14 +1838,19 @@ fn insert_flow(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Result<()> {
             r.value.clone(),
         );
     }
-    let folder = ctx.folder("flows", entry);
     let nodes = sanitized["nodes"].as_array().cloned().unwrap_or_default();
     let edges = sanitized["edges"].as_array().cloned().unwrap_or_default();
+    Ok((nodes, edges, unresolved.is_empty()))
+}
+
+fn insert_flow(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Result<()> {
+    let (nodes, edges, all_resolved) = flow_graph(ctx, entry, source, FLOW_INSERT_KINDS)?;
+    let folder = ctx.folder("flows", entry);
     let start: i64 = text_of(&entry["startNodeId"])
         .and_then(|s| s.parse().ok())
         .unwrap_or_default();
     let publishable = entry["published"] == true
-        && unresolved.is_empty()
+        && all_resolved
         && crate::flow::assert_flow_graph_publishable(&json!(nodes), &json!(edges)).is_ok();
     if !publishable && entry["published"] == true {
         ctx.warn(
@@ -1871,6 +1903,34 @@ fn insert_flow(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Result<()> {
 
 /// Triggers: actions remapped (flows are in), conditions rewritten by kind.
 fn insert_trigger(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Result<()> {
+    let (actions, all_resolved) = trigger_actions(ctx, entry, source);
+    let folder = ctx.folder("triggers", entry);
+    let name = ctx.free_name(
+        "Trigger",
+        "name",
+        entry["name"].as_str().unwrap_or_default(),
+        "",
+    )?;
+    let mut fields = Map::new();
+    fields.insert("name".into(), json!(name));
+    fields.insert(
+        "active".into(),
+        json!(entry["active"] == true && all_resolved),
+    );
+    fields.insert("actions".into(), actions);
+    fields.insert("folderId".into(), json!(folder));
+    let id = ctx.insert("Trigger", fields)?;
+    if write_conditions(ctx, entry, source, id)? {
+        ctx.conn
+            .execute(r#"UPDATE "Trigger" SET "active" = 0 WHERE "id" = ?1"#, [id])
+            .map_err(db_err)?;
+    }
+    ctx.record("triggers", "trigger", source, id, Some("trigger"));
+    Ok(())
+}
+
+/// The trigger's actions remapped; `false` when a reference did not resolve.
+fn trigger_actions(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> (Value, bool) {
     let mut unresolved: Vec<UnresolvedReference> = Vec::new();
     let mut collect = |r: &UnresolvedReference| unresolved.push(r.clone());
     let actions = remap_references(
@@ -1889,29 +1949,17 @@ fn insert_trigger(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Result<()> 
             r.value.clone(),
         );
     }
-    let folder = ctx.folder("triggers", entry);
-    let name = ctx.free_name(
-        "Trigger",
-        "name",
-        entry["name"].as_str().unwrap_or_default(),
-        "",
-    )?;
-    let mut fields = Map::new();
-    fields.insert("name".into(), json!(name));
-    fields.insert(
-        "active".into(),
-        json!(entry["active"] == true && unresolved.is_empty()),
-    );
-    fields.insert(
-        "actions".into(),
-        if actions.is_null() {
-            json!([])
-        } else {
-            actions
-        },
-    );
-    fields.insert("folderId".into(), json!(folder));
-    let id = ctx.insert("Trigger", fields)?;
+    let actions = if actions.is_null() {
+        json!([])
+    } else {
+        actions
+    };
+    (actions, unresolved.is_empty())
+}
+
+/// Inserts the trigger's `Condition` rows; `true` when a row was lost (its
+/// source did not resolve), so the trigger must not stay active.
+fn write_conditions(ctx: &mut Ctx<'_>, entry: &Value, source: &str, id: i64) -> Result<bool> {
     let mut lost = false;
     for (i, condition) in entry["conditions"]
         .as_array()
@@ -1956,13 +2004,7 @@ fn insert_trigger(ctx: &mut Ctx<'_>, entry: &Value, source: &str) -> Result<()> 
         fields.insert("triggerId".into(), json!(id));
         ctx.insert("Condition", fields)?;
     }
-    if lost {
-        ctx.conn
-            .execute(r#"UPDATE "Trigger" SET "active" = 0 WHERE "id" = ?1"#, [id])
-            .map_err(db_err)?;
-    }
-    ctx.record("triggers", "trigger", source, id, Some("trigger"));
-    Ok(())
+    Ok(lost)
 }
 
 // ---------------------------------------------------------------------------
