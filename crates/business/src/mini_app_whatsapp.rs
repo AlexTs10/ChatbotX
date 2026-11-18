@@ -780,20 +780,18 @@ pub async fn remove_flows(
     ws: i64,
     publications: Vec<MiniAppPublication>,
 ) -> Vec<Value> {
+    let ids: std::collections::HashSet<i64> = publications
+        .iter()
+        .map(|p| p.integration_whatsapp_id)
+        .collect();
     let mut numbers = std::collections::HashMap::new();
-    for p in &publications {
-        if numbers.contains_key(&p.integration_whatsapp_id) {
-            continue;
-        }
+    for integration_whatsapp_id in ids {
         let t = Target {
             workspace_id: ws,
-            mini_app_id: p.mini_app_id,
-            integration_whatsapp_id: p.integration_whatsapp_id,
+            mini_app_id: 0,
+            integration_whatsapp_id,
         };
-        numbers.insert(
-            p.integration_whatsapp_id,
-            load_integration(db, t).await.ok(),
-        );
+        numbers.insert(integration_whatsapp_id, load_integration(db, t).await.ok());
     }
     let numbers = &numbers;
     futures::stream::iter(publications)
