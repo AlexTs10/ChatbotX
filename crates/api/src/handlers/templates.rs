@@ -1,14 +1,13 @@
-//! `features/templates/api/public/{templates,installations}.ts` (Q.D4 slice 1):
-//! the publisher reads, share settings and delete, the locked-resource check,
-//! and the installer's list, settings and sync history. The routes that need
-//! the snapshot save, install, sync, uninstall or preview engines answer the
-//! "not ported" 404 (specs/Q.D4.md).
+//! `features/templates/api/public/{templates,installations,previews}.ts`
+//! (Q.D4 slices 1-5): the publisher reads, save, share settings and delete,
+//! the locked-resource check, the installer routes (install, sync, restore,
+//! uninstall, cancel) and the publisher's installer list and uninstall.
 
 use chatbotx_business::template::collect::CATEGORIES;
 use chatbotx_business::template::permissions::Actor;
 use chatbotx_business::template::{
     RESOURCE_KINDS, installations, list_locked_resource_ids, request as install_request,
-    save as template_save, service, syncs as template_syncs,
+    save as template_save, service, syncs as template_syncs, uninstall as template_uninstall,
 };
 use serde_json::{Value, json};
 
@@ -42,6 +41,13 @@ pub const ROUTES: &[&str] = &[
     "templateInstallations.retry",
     "templateInstallations.sync",
     "templateInstallations.restoreBackup",
+    "templateInstallations.previewUninstall",
+    "templateInstallations.uninstall",
+    "templateInstallations.cancelUninstall",
+    "templates.listInstallers",
+    "templates.getInstallerIssues",
+    "templates.previewUninstallInstaller",
+    "templates.uninstallInstaller",
     "templateInstallations.get",
     "templateInstallations.listResources",
     "templatePreviews.get",
@@ -89,6 +95,15 @@ pub async fn handle(
         "templateInstallations.retry" => retry(state, call, actor).await,
         "templateInstallations.sync" => sync(state, call, actor).await,
         "templateInstallations.restoreBackup" => restore_backup(state, call, actor).await,
+        "templateInstallations.previewUninstall" => preview_uninstall(state, call, &actor).await,
+        "templateInstallations.uninstall" => uninstall(state, call, &actor).await,
+        "templateInstallations.cancelUninstall" => cancel_uninstall(state, call, &actor).await,
+        "templates.listInstallers" => list_installers(state, call, &actor).await,
+        "templates.getInstallerIssues" => installer_issues(state, call, &actor).await,
+        "templates.previewUninstallInstaller" => {
+            preview_uninstall_installer(state, call, &actor).await
+        }
+        "templates.uninstallInstaller" => uninstall_installer(state, call, &actor).await,
         "templateInstallations.get" => get_installation(state, call, actor).await,
         "templateInstallations.listResources" => list_resources(state, call).await,
         "templatePreviews.get" => preview(state, call, principal).await,
@@ -743,6 +758,151 @@ async fn restore_backup(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply
     .await
     .map_err(|e| business_error(e, MUTATING))?;
     Ok(json(200, json!({ "ok": true })))
+}
+
+/// `templateInstallations.previewUninstall`.
+async fn preview_uninstall(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let installation_id = path_id(call, "id")?;
+    let counts = template_uninstall::preview_as_installer(
+        &state.db,
+        call.workspace_id,
+        installation_id,
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, FINDING))?;
+    Ok(json(200, counts))
+}
+
+/// `templateInstallations.uninstall`: 202, runs in the background.
+async fn uninstall(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let installation_id = path_id(call, "id")?;
+    let requested = template_uninstall::uninstall_as_installer(
+        &state.db,
+        state.jobs.as_deref(),
+        call.workspace_id,
+        installation_id,
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, MUTATING))?;
+    Ok(json(
+        202,
+        json!({
+            "installationId": id(installation_id),
+            "operationId": id(requested.operation_id),
+            "uninstallState": requested.state,
+        }),
+    ))
+}
+
+/// `templateInstallations.cancelUninstall`.
+async fn cancel_uninstall(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let installation_id = path_id(call, "id")?;
+    let mut out = template_uninstall::cancel_as_installer(
+        &state.db,
+        call.workspace_id,
+        installation_id,
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, MUTATING))?;
+    out["installationId"] = id(installation_id);
+    Ok(json(200, out))
+}
+
+fn is_publisher_ref(text: &str) -> bool {
+    (16..=64).contains(&text.len())
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The `{ id, installerId }` path params (`publisherInstallerRequest`).
+fn installer_params(call: Call<'_>) -> Result<(i64, String), OrpcError> {
+    let mut input = Input::from_query(call.params, None);
+    let template_id = input.digits_id("id");
+    let installer = input.string(
+        "installerId",
+        Str {
+            trim: true,
+            pattern: Some(is_publisher_ref),
+            ..Str::default()
+        },
+    );
+    input.finish()?;
+    Ok((template_id.unwrap_or(-1), installer.unwrap_or_default()))
+}
+
+/// `templates.listInstallers`.
+async fn list_installers(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let mut input = Input::from_query(call.params, call.query);
+    let template_id = input.digits_id("id");
+    let search = input.opt_string("search", Str::trimmed(0, 255));
+    let cursor = input.opt_string("cursor", Str::max(512));
+    let limit = input.opt_coerce_int("limit", Num::int(1.0, 100.0));
+    input.finish()?;
+    let page = template_uninstall::list_installers(
+        &state.db,
+        call.workspace_id,
+        template_id.unwrap_or(-1),
+        actor,
+        search,
+        cursor,
+        limit,
+    )
+    .await
+    .map_err(|e| business_error(e, LISTING))?;
+    Ok(json(200, page))
+}
+
+/// `templates.getInstallerIssues`.
+async fn installer_issues(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let (template_id, installer) = installer_params(call)?;
+    let out = template_uninstall::installer_issues(
+        &state.db,
+        call.workspace_id,
+        template_id,
+        installer,
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, FINDING))?;
+    Ok(json(200, out))
+}
+
+/// `templates.previewUninstallInstaller`.
+async fn preview_uninstall_installer(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let (template_id, installer) = installer_params(call)?;
+    let out = template_uninstall::preview_as_publisher(
+        &state.db,
+        call.workspace_id,
+        template_id,
+        installer,
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, FINDING))?;
+    Ok(json(200, out))
+}
+
+/// `templates.uninstallInstaller`: 202, runs in the installer's workspace.
+async fn uninstall_installer(state: &ApiState, call: Call<'_>, actor: &Actor) -> Reply {
+    let (template_id, installer) = installer_params(call)?;
+    let requested = template_uninstall::uninstall_as_publisher(
+        &state.db,
+        state.jobs.as_deref(),
+        call.workspace_id,
+        template_id,
+        installer.clone(),
+        actor,
+    )
+    .await
+    .map_err(|e| business_error(e, MUTATING))?;
+    Ok(json(
+        202,
+        json!({ "publisherRef": installer, "uninstallState": requested.state }),
+    ))
 }
 
 async fn retry(state: &ApiState, call: Call<'_>, actor: Actor) -> Reply {

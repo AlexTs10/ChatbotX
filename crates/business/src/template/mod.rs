@@ -17,6 +17,7 @@ pub mod save;
 pub mod service;
 pub mod snapshot;
 pub mod syncs;
+pub mod uninstall;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;

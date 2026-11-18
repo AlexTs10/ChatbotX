@@ -1,8 +1,8 @@
 //! `apps/worker` template queue: `installTemplate` (Q.D4 slice 3),
-//! `syncTemplateInstallation` and `fanOutTemplateUpdate` (slice 4). The
-//! uninstall jobs fail as "not defined" until slice 5.
+//! `syncTemplateInstallation` and `fanOutTemplateUpdate` (slice 4) and
+//! `uninstallTemplate` (slice 5).
 
-use chatbotx_business::template::{install::INSTALL_LEASE_MS, request, syncs};
+use chatbotx_business::template::{install::INSTALL_LEASE_MS, request, syncs, uninstall};
 use chatbotx_db::repo::{now_ms, template_installation, template_installation_sync};
 use chatbotx_jobs::{JobCtx, JobError};
 use serde_json::Value;
@@ -72,6 +72,18 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             )
             .await
             .map_err(failed)?;
+        }
+        "uninstallTemplate" => {
+            let installation_id = id_of(&data["installationId"]).ok_or_else(bad)?;
+            if crate::is_blocked_workspace(&deps.db, &workspace_id.to_string()).await? {
+                uninstall::skip_blocked(&deps.db, installation_id)
+                    .await
+                    .map_err(failed)?;
+                return Ok(Value::Null);
+            }
+            uninstall::run_uninstall_job(&deps.db, workspace_id, installation_id)
+                .await
+                .map_err(failed)?;
         }
         other => {
             return Err(JobError::unrecoverable(format!(

@@ -1,5 +1,6 @@
 //! Q.D4 slice 3: `templatePreviews.get`, `templateInstallations.install`, the
-//! install job, `templateInstallations.get` and `listResources` on real rows.
+//! install job, `templateInstallations.get` and `listResources` on real rows;
+//! sync, restore and uninstall (slices 4 and 5).
 
 mod handlers_common;
 
@@ -358,4 +359,97 @@ async fn sync_backs_up_an_edited_copy_overwrites_it_and_restore_puts_it_back() {
     assert_eq!(status, 202, "{out}");
     assert_eq!(out["installationId"].as_str(), Some(installation.as_str()));
     assert!(out["syncId"].is_string(), "{out}");
+}
+
+#[tokio::test]
+async fn uninstall_deletes_the_copies_and_keeps_what_was_there_before() {
+    let fixture = fixture().await;
+    let token = shared_template(&fixture).await;
+    let (_, out) = run(
+        &fixture,
+        "templateInstallations.install",
+        false,
+        &[],
+        Some(json!({ "shareToken": token })),
+    )
+    .await;
+    let installation = out["installationId"].as_str().unwrap().to_string();
+    let installation_id: i64 = installation.parse().unwrap();
+    chatbotx_business::template::request::run_install_job(
+        &fixture.state.db,
+        WS,
+        installation_id,
+        "http://localhost",
+    )
+    .await
+    .expect("install job");
+
+    let (status, preview) = run(
+        &fixture,
+        "templateInstallations.previewUninstall",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{preview}");
+    assert_eq!(preview["deleted"], 2, "{preview}");
+    let (status, denied) = run(
+        &fixture,
+        "templateInstallations.uninstall",
+        true,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 403, "{denied}");
+    // Nothing stopped yet: nothing to cancel.
+    let (status, _) = run(
+        &fixture,
+        "templateInstallations.cancelUninstall",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 409);
+
+    let (status, out) = run(
+        &fixture,
+        "templateInstallations.uninstall",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 202, "{out}");
+    assert_eq!(out["uninstallState"], "pending", "{out}");
+    chatbotx_business::template::uninstall::run_uninstall_job(
+        &fixture.state.db,
+        WS,
+        installation_id,
+    )
+    .await
+    .expect("uninstall job");
+
+    let (status, detail) = run(
+        &fixture,
+        "templateInstallations.get",
+        false,
+        &[("id", &installation)],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{detail}");
+    assert_eq!(detail["status"], "uninstalled", "{detail}");
+    for (sql, left) in [
+        (
+            r#"SELECT COUNT(*) FROM "AutomatedResponse" WHERE "workspaceId" = ?1"#,
+            1,
+        ),
+        (r#"SELECT COUNT(*) FROM "Flow" WHERE "workspaceId" = ?1"#, 1),
+        (r#"SELECT COUNT(*) FROM "Tag" WHERE "workspaceId" = ?1"#, 1),
+    ] {
+        assert_eq!(count(&fixture, sql).await, left, "{sql}");
+    }
 }

@@ -400,17 +400,19 @@ pub async fn update(
 /// `delete`: the webchat row and the connection / inbox disconnect.
 pub async fn delete(db: &Db, workspace_id: i64, id: i64) -> Result<()> {
     let now = chatbotx_db::repo::now_ms();
-    tx::write(db, move |tx| {
-        let webchat = find(tx, id, workspace_id)?
-            .ok_or_else(|| BusinessError::not_found("Integration Webchat not found"))?;
-        tx.execute(
-            r#"DELETE FROM "IntegrationWebchat" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
-            params![id, workspace_id],
-        )
-        .map_err(repo_err)?;
-        connection::disconnect_inbox(tx, webchat.inbox_id, workspace_id, now)
-    })
-    .await
+    tx::write(db, move |tx| delete_in(tx, workspace_id, id, now)).await
+}
+
+/// `deleteInTx`: the webchat and its inbox connection, in the caller's transaction.
+pub fn delete_in(tx: &Connection, workspace_id: i64, id: i64, now: i64) -> Result<()> {
+    let webchat = find(tx, id, workspace_id)?
+        .ok_or_else(|| BusinessError::not_found("Integration Webchat not found"))?;
+    tx.execute(
+        r#"DELETE FROM "IntegrationWebchat" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+        params![id, workspace_id],
+    )
+    .map_err(repo_err)?;
+    connection::disconnect_inbox(tx, webchat.inbox_id, workspace_id, now)
 }
 
 // ---- guest access (`webchat-access-token.ts`, `authorized-domain.ts`,
