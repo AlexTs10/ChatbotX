@@ -33,6 +33,7 @@ pub mod contact_sequences;
 pub mod contacts;
 pub mod contacts_bulk;
 pub mod conversations;
+pub mod coupons;
 pub mod custom_fields;
 pub mod discount_codes;
 pub mod ecommerce_analytics;
@@ -74,8 +75,8 @@ pub mod response_sla;
 pub mod saved_replies;
 pub mod sequences;
 pub mod smtp_integrations;
-pub mod store_connections;
 pub mod spreadsheets;
+pub mod store_connections;
 pub mod tags;
 pub mod templates;
 pub mod triggers;
@@ -654,8 +655,10 @@ async fn route(
         templates::handle(state, route_id, call, principal).await
     } else if store_connections::ROUTES.contains(&route_id) {
         store_connections::handle(state, route_id, call).await
+    } else if coupons::ROUTES.contains(&route_id) {
+        coupons::handle(state, route_id, call).await
     } else if webshop::ROUTES.contains(&route_id) {
-        webshop::handle(state, call, principal).await
+        webshop::handle(state, route_id, call, principal).await
     } else if tags::ROUTES.contains(&route_id) {
         tags::handle(state, route_id, call).await
     } else if contacts_bulk::ROUTES.contains(&route_id) {

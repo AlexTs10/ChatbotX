@@ -1,5 +1,5 @@
-//! `features/webshop/api/public.ts`: `webshop.getLink` (`createWebshopLink`).
-//! `carts.get` is not ported (the cart lives with the public shop pages).
+//! `features/webshop/api/public.ts`: `webshop.getLink` (`createWebshopLink`)
+//! and `carts.get` (`webshopService.getCart`).
 
 use chatbotx_business::contact::service::resolve_id_by_identifier;
 use chatbotx_business::{BusinessError, tx, vendor};
@@ -13,7 +13,7 @@ use super::{ApiState, Call, Principal, Reply, business_error, json};
 use crate::orpc::OrpcError;
 
 /// The routes of this module.
-pub const ROUTES: &[&str] = &["webshop.getLink"];
+pub const ROUTES: &[&str] = &["webshop.getLink", "carts.get"];
 
 /// `buildWebshopUrl`: `token` may be `{{shop_token}}`, kept as is.
 pub fn build_url(
@@ -44,8 +44,28 @@ pub fn build_url(
 }
 
 /// Runs one of [`ROUTES`].
-pub async fn handle(state: &ApiState, call: Call<'_>, principal: &Principal) -> Reply {
+pub async fn handle(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    principal: &Principal,
+) -> Reply {
     let ws = call.workspace_id;
+    if route_id == "carts.get" {
+        let identifier = call
+            .params
+            .iter()
+            .find(|(name, _)| *name == "identifier")
+            .map(|(_, value)| value.clone())
+            .unwrap_or_default();
+        let contact_id = resolve_id_by_identifier(&state.db, ws, &identifier)
+            .await
+            .map_err(|e| business_error(e, super::FINDING))?;
+        let cart = chatbotx_business::cart::get_cart(&state.db, ws, contact_id, None, true)
+            .await
+            .map_err(|e| business_error(e, super::FINDING))?;
+        return Ok(json(200, cart));
+    }
     let mut input = Input::from_query(call.params, call.query);
     let contact = input.opt_string(
         "contact",

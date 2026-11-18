@@ -372,6 +372,66 @@ pub fn resolve(
     Ok(best)
 }
 
+/// `listAvailable`: the typed codes the cart can offer (at most 20), usable
+/// ones first (most taken off, then soonest to end), then the greyed-out
+/// ones (latest ended first).
+pub fn list_available(conn: &Connection, order: &OrderContext, now: i64) -> Result<Vec<Value>> {
+    let candidates: Vec<DiscountCode> = find_many(
+        conn,
+        r#"WHERE "workspaceId" = ?1 AND "source" = ?2 AND "autoApply" = 0 AND "isActive" = 1
+           AND "startsAt" <= ?3
+           ORDER BY CASE WHEN ("endsAt" IS NULL OR "endsAt" > ?3)
+                          AND ("usageLimit" IS NULL OR "usedCount" < "usageLimit")
+                     THEN 0 ELSE 1 END,
+                    "createdAt" DESC, "id" DESC
+           LIMIT 20"#,
+        &[&order.workspace_id, &order.source, &now],
+    )?;
+    let mut listed: Vec<(&DiscountCode, f64, &'static str)> = Vec::new();
+    for candidate in &candidates {
+        match price(conn, candidate, order, now) {
+            Ok(applied) if applied.amount > 0.0 => {
+                listed.push((candidate, applied.amount, "available"));
+            }
+            Ok(_) => {}
+            Err(BusinessError::Exception { code, .. }) => {
+                let status = match code.as_str() {
+                    "discountCodeExpired" => "expired",
+                    "discountCodeUsageLimitReached" | "discountCodeAlreadyUsed" => "usedUp",
+                    "discountCodeNotEligible" => "notEligible",
+                    _ => continue,
+                };
+                listed.push((candidate, 0.0, status));
+            }
+            Err(other) => return Err(other),
+        }
+    }
+    let end = |c: &DiscountCode| c.ends_at.unwrap_or(i64::MAX);
+    listed.sort_by(|a, b| {
+        let (a_usable, b_usable) = (a.2 == "available", b.2 == "available");
+        if a_usable != b_usable {
+            return b_usable.cmp(&a_usable);
+        }
+        if a_usable {
+            return b.1.total_cmp(&a.1).then(end(a.0).cmp(&end(b.0)));
+        }
+        end(b.0).cmp(&end(a.0))
+    });
+    Ok(listed
+        .into_iter()
+        .map(|(code, amount, status)| {
+            json!({
+                "code": code.code,
+                "discountType": code.discount_type,
+                "discountValue": major(code.discount_value),
+                "amount": amount,
+                "endsAt": code.ends_at.map(chatbotx_db::repo::iso),
+                "status": status,
+            })
+        })
+        .collect())
+}
+
 /// `redeem`: counted against the limit, one redemption row.
 pub fn redeem(
     conn: &Connection,
