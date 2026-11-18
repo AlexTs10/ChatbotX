@@ -2,6 +2,7 @@
 //! one module per builder router. [`dispatch`] runs the handler of a route after
 //! its auth; `None` = the route has no Rust handler yet (the "not ported" answer).
 
+pub mod ads;
 pub mod ai_agents;
 pub mod ai_files;
 pub mod ai_functions;
@@ -12,6 +13,7 @@ pub mod appointments;
 pub mod bot_fields;
 pub mod broadcasts;
 pub mod capabilities;
+pub mod capi;
 pub mod channel_integrations;
 pub mod channel_settings;
 pub mod channels;
@@ -38,8 +40,10 @@ pub mod ecommerce_settings;
 pub mod email_topics;
 pub mod error_logs;
 pub mod external_webhooks;
+pub mod facebook_lead_ads;
 pub mod flows;
 pub mod folders;
+pub mod google_ads;
 pub mod inbound_webhooks;
 pub mod inbox_teams;
 pub mod inboxes;
@@ -47,6 +51,7 @@ pub mod input;
 pub mod integrations_ai;
 pub mod keywords;
 pub mod magic_links;
+pub mod marketing_messages;
 pub mod me;
 pub mod media_library;
 pub mod member_scope;
@@ -686,6 +691,16 @@ async fn route(
         product_vendors::handle(state, route_id, call).await
     } else if products::ROUTES.contains(&route_id) {
         products::handle(state, route_id, call).await
+    } else if ads::ROUTES.contains(&route_id) {
+        ads::handle(state, route_id, call).await
+    } else if capi::ROUTES.contains(&route_id) {
+        capi::handle(state, route_id, call).await
+    } else if facebook_lead_ads::ROUTES.contains(&route_id) {
+        facebook_lead_ads::handle(state, route_id, call).await
+    } else if google_ads::ROUTES.contains(&route_id) {
+        google_ads::handle(state, route_id, call).await
+    } else if marketing_messages::ROUTES.contains(&route_id) {
+        marketing_messages::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
     } else if meta_catalog::ROUTES.contains(&route_id) {

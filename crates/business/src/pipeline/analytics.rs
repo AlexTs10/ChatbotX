@@ -205,7 +205,7 @@ pub fn parse_analytics_date_range(from: &str, to: &str, tz: &str, now_ms: i64) -
 }
 
 /// `enumerateDateKeys`.
-fn day_keys(from: &str, to: &str) -> Vec<String> {
+pub fn day_keys(from: &str, to: &str) -> Vec<String> {
     let (Some(mut day), Some(end)) = (date_key(from), date_key(to)) else {
         return Vec::new();
     };

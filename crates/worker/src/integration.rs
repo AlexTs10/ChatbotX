@@ -197,6 +197,10 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         chatbotx_business::thread_control::RELEASE_JOB => {
             crate::thread_control::release_owned_thread(&deps, &job.data["data"]).await?
         }
+        crate::lead_ads::PROCESS_LEADGEN => crate::lead_ads::process_leadgen(&deps, &job).await?,
+        crate::marketing_message::PROCESS_MARKETING_MESSAGE_WEBHOOK => {
+            crate::marketing_message::process_webhook(&deps, &job.data["data"]).await?
+        }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }

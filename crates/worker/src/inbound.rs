@@ -691,6 +691,28 @@ fn save_message_tx(
                     ci.contact_id
                 ],
             )?;
+    if let Some(raw) = received.referral.as_ref() {
+        // `referralEventKey: message.sourceId ?? message.id`.
+        let key = stored
+            .message
+            .source_id
+            .clone()
+            .unwrap_or_else(|| stored.message.id.to_string());
+        chatbotx_business::contact_referral_event::record_ad_touches_contained(
+            tx,
+            chatbotx_business::contact_referral_event::TouchOwner {
+                workspace_id,
+                contact_id: ci.contact_id,
+                contact_inbox_id: ci.id,
+                channel: &ci.channel,
+            },
+            raw,
+            chatbotx_business::contact_referral_event::ReferralOccurrence {
+                occurred_at: at,
+                event_key: Some(&key),
+            },
+        );
+    }
     tx.execute(
                 r#"UPDATE "Conversation" SET
                      "lastActivityAt" = ?1,

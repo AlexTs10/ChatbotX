@@ -439,6 +439,15 @@ pub async fn subscribe_webhook(
     upstream: &impl Upstream,
     auth: &Value,
 ) -> std::result::Result<(), ProviderFailure> {
+    subscribe_webhook_fields(upstream, auth, &[]).await
+}
+
+/// [`subscribe_webhook`] with `extra` base fields (`LEAD_ADS_PAGE_SUBSCRIBE_FIELDS` = `["leadgen"]`).
+pub async fn subscribe_webhook_fields(
+    upstream: &impl Upstream,
+    auth: &Value,
+    extra: &[&str],
+) -> std::result::Result<(), ProviderFailure> {
     let version = auth["metadata"]["version"]
         .as_str()
         .unwrap_or(MESSENGER_DEFAULT_VERSION);
@@ -449,8 +458,8 @@ pub async fn subscribe_webhook(
         headers: vec![("authorization".into(), format!("Bearer {token}"))],
         body: Some(json!({ "subscribed_fields": fields }).to_string()),
     };
-    let base = PAGE_SUBSCRIBE_FIELDS.join(",");
-    let all = [PAGE_SUBSCRIBE_FIELDS, MARKETING_SUBSCRIBE_FIELDS]
+    let base = [PAGE_SUBSCRIBE_FIELDS, extra].concat().join(",");
+    let all = [PAGE_SUBSCRIBE_FIELDS, extra, MARKETING_SUBSCRIBE_FIELDS]
         .concat()
         .join(",");
     if call(upstream, post(all)).await.is_ok() {
