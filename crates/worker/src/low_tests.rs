@@ -117,7 +117,7 @@ fn mentions_and_hide_rules() {
 
 async fn add_automation(deps: &Deps, sql: &'static str) {
     deps.db
-        .write(move |tx| Ok(tx.execute(sql, [])?))
+        .write(move |tx| Ok(tx.execute_batch(sql)?))
         .await
         .unwrap();
 }
@@ -266,4 +266,129 @@ async fn an_incoming_comment_queues_the_run_and_a_miss_is_recorded() {
         .await
         .unwrap();
     assert_eq!(reason, "keywordsNotMatched");
+}
+
+/// AI moderation: the reply waits for the `commentModeration` job, which
+/// classifies through the agent's auto-reply model and hides the comment
+/// (log row, miss, hide job); with no agent it resumes the automation.
+#[tokio::test]
+async fn ai_moderation_holds_the_reply_and_hides_a_flagged_comment() {
+    use crate::ai::llm::fake::FakeHttp;
+    let (mut deps, jobs) = setup().await;
+    let channel = RecordingChannel::new();
+    deps.channels =
+        crate::Channels::builtin().with("messenger", channel.clone() as Arc<dyn Channel>);
+    let http = Arc::new(FakeHttp::new(vec![FakeHttp::openai_text(
+        r#"{"flagged":true,"categories":["spam","hate"],"reason":"An ad"}"#,
+    )]));
+    deps.ai = Arc::new(crate::ai::Ai {
+        http: http.clone(),
+        embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
+    });
+    add_automation(
+        &deps,
+        r#"INSERT INTO "CommentAutomation" ("id", "name", "workspaceId", "type", "post", "publicReply", "hideComments")
+           VALUES (9, 'C', 2, 'messenger', '{"type":"all","value":[]}', '{"type":"text","value":"Hi"}',
+                   '{"aiModeration":{"enabled":true,"aiAgentId":"90","categories":["spam"],"action":"hide"}}')"#,
+    )
+    .await;
+    let graph = Graph(Default::default(), json!({}));
+    replay_missed_comment(&deps, &graph, &comment(Some("9")))
+        .await
+        .unwrap();
+    {
+        let queued = jobs.0.lock().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].0, COMMENT_MODERATION);
+        assert!(
+            queued[0]
+                .1
+                .job_id
+                .as_deref()
+                .unwrap()
+                .starts_with("comment-moderation-9-55_9-replay-")
+        );
+    }
+    assert!(channel.calls().is_empty());
+
+    let (message_id, conversation, contact_inbox): (i64, i64, i64) = deps
+        .db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT "id", "conversationId", "contactInboxId" FROM "Message" WHERE "sourceId" = '55_9'"#,
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    let data = json!({
+        "automationId": "9", "workspaceId": "2", "commentId": "55_9",
+        "messageId": message_id.to_string(), "messageCreatedAt": 1,
+        "commentAutomation": {
+            "integrationType": "messenger", "integrationIdentifier": "p1", "workspaceId": "2",
+            "conversationId": conversation.to_string(), "contactInboxId": contact_inbox.to_string(),
+            "commentId": "55_9", "postId": "p1_55", "message": "Buy now", "createdTime": 1,
+        },
+    });
+    // No agent yet: fails open and re-runs this automation past moderation.
+    comment_moderation(&deps, &data).await.unwrap();
+    assert_eq!(
+        jobs.0.lock().unwrap()[1].1.job_id.as_deref(),
+        Some("comment-auto-55_9-9-moderated")
+    );
+    add_automation(
+        &deps,
+        r#"INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (71, 2, 'openaiCompatible');
+           INSERT INTO "IntegrationOpenaiCompatible" ("id", "auth", "baseURL", "defaultModel", "enabled", "autoReply", "integrationId", "name", "preset", "workspaceId")
+             VALUES (73, NULL, 'http://llm.test/v1', 'local', 1, 1, 71, 'Local', 'lmstudio', 2);
+           INSERT INTO "AIAgent" ("id", "workspaceId", "name", "prompt", "messages", "models", "tools", "temperature", "maxOutputTokens")
+             VALUES (90, 2, 'Agent', 'x', '[]', '[{"kind":"openaiCompatible","integrationId":"73","model":"local"}]', '[]', 0.5, 300)"#,
+    )
+    .await;
+    comment_moderation(&deps, &data).await.unwrap();
+    let request = &http.requests()[0].1;
+    assert_eq!(request["temperature"], 0.0);
+    assert!(
+        request
+            .to_string()
+            .contains("<<<COMMENT\\nBuy now\\nCOMMENT>>>")
+    );
+    {
+        let queued = jobs.0.lock().unwrap();
+        assert_eq!(queued.len(), 3);
+        assert_eq!(queued[2].0, crate::chat::CHANGE_CHANNEL_MESSAGE_STATE);
+        assert_eq!(
+            queued[2].1.job_id.as_deref(),
+            Some("moderate-comment-9-55_9")
+        );
+    }
+    let row: (String, String, String, String) = deps
+        .db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT "source", "categories", "reason", (SELECT "reason" FROM "CommentAutomationMiss" WHERE "automationId" = 9)
+                   FROM "CommentModerationLog" WHERE "automationId" = 9"#,
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        row,
+        (
+            "ai".into(),
+            r#"["spam"]"#.into(),
+            "An ad".into(),
+            "moderated".into()
+        )
+    );
+    // The cached verdict is reused; a still-pending hide joins its job id.
+    comment_moderation(&deps, &data).await.unwrap();
+    assert_eq!(http.requests().len(), 1);
+    assert_eq!(
+        jobs.0.lock().unwrap()[3].1.job_id.as_deref(),
+        Some("moderate-comment-9-55_9")
+    );
 }

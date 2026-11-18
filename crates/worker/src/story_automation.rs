@@ -3,8 +3,7 @@
 //! queues `processStoryReplyAutomation` / `processStoryMentionAutomation` on
 //! the AI queue, which answers through the chat / integration queues.
 //!
-//! ponytail: an `AIAgent` reply (`generateAIReplyText`) is not ported; it is
-//! logged as skipped.
+//! An `AIAgent` reply runs `generateAIReplyText` (`low::comment_ai`).
 
 use chatbotx_core::utils::normalize_for_match::normalize_for_match as norm;
 use chatbotx_db::rusqlite::{OptionalExtension as _, params};
@@ -293,12 +292,56 @@ pub async fn process(deps: &Deps, data: &Value, trigger: &'static str) -> Result
                 .await?;
                 true
             }
-            (Some("AIAgent"), Some(_)) => {
-                tracing::warn!(
-                    automation_id = automation.id,
-                    "{trigger} automation skipped: AI agent replies are not ported"
-                );
-                false
+            (Some("AIAgent"), Some(agent_id)) => {
+                // A mention usually has no text: the agent is told what happened.
+                let ai_message = if trigger == STORY_MENTION {
+                    STORY_MENTION_AI_MESSAGE
+                } else {
+                    message.unwrap_or("")
+                };
+                match crate::low::story_reply_text(
+                    deps,
+                    ws,
+                    conversation_id,
+                    contact_inbox_id,
+                    agent_id,
+                    ai_message,
+                )
+                .await
+                {
+                    Ok(Ok(text)) => {
+                        add_job(
+                            deps,
+                            QueueName::Chat,
+                            crate::chat::SEND_CHAT_MESSAGE,
+                            json!({ "type": crate::chat::SEND_CHAT_MESSAGE, "data": {
+                                "conversation": { "id": conversation_id.to_string(), "workspaceId": ws.to_string() },
+                                "contactInbox": { "id": contact_inbox_id.to_string() },
+                                "text": text,
+                            }}),
+                            JobOptions::default(),
+                        )
+                        .await?;
+                        true
+                    }
+                    Ok(Err(reason)) => {
+                        tracing::info!(
+                            automation_id = automation.id,
+                            reason,
+                            "{trigger} automation skipped"
+                        );
+                        false
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            ?err,
+                            automation_id = automation.id,
+                            workspace_id = ws,
+                            "Failed to process {trigger} automation"
+                        );
+                        false
+                    }
+                }
             }
             _ => false,
         };
@@ -317,6 +360,10 @@ pub async fn process(deps: &Deps, data: &Value, trigger: &'static str) -> Result
     }
     Ok(())
 }
+
+/// `STORY_MENTION_AI_MESSAGE`.
+const STORY_MENTION_AI_MESSAGE: &str =
+    "The contact mentioned your account in their Instagram story.";
 
 /// The `trigger` column values.
 pub const STORY_REPLY: &str = "storyReply";

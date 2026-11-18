@@ -137,3 +137,20 @@ Left in slice 1 (before 1b): `aiAnalyzeImage`, `aiEditImage` / `aiGenerateImage`
 - `broadcasts.listContacts` (`/v1/broadcasts/{id}/contacts`) and `privateListBroadcastContactsAPI` (`business::broadcast::list_contacts_page`; test `broadcast_list_contacts.rs`).
 - Inbound: `sanitizeFlowAction` of postbacks / quick replies (bare flow id on Messenger only), the contact-hint quick reply, value quick replies, Skip taps (`resolveStepInput` job, not routed as a typed reply), third-party echo drops for unknown contacts. Hooks for Q.D9 (appointment-cancel postback) and Q.D13 (leaderboard award) are comments at their call sites in `inbound::receive_message`.
 - Left: the Zalo / Telegram tap labels, profile lookups (channel profile fetcher unit), Google click, commerce enrichment, thread-control recording; the heavy AI steps (item 3 of "Left": the heavy-step runner with its outcome / resume lease state, `resumeHeavyStep`, image generation / editing / segmentation and text to speech).
+
+## `aiSpeechToText` (2026-11-18, Q.D10 agent)
+
+`worker::heavy` runs `aiSpeechToText` like the other heavy steps
+(`speech-to-text.ts`): the input field's URL is downloaded through
+`download_checked` (SSRF check on every hop). OpenAI: the content type must
+be a supported audio type, at most `HEAVY_MAX_AUDIO_BYTES` (25 MiB), then
+`POST /audio/transcriptions` (multipart, `response_format=json`). Muse: at
+most `MUSE_TRANSCRIBE_MAX_AUDIO_BYTES`, the bytes must pass `inspectMuseWav`
+(WAV PCM 16-bit mono 16 / 24 kHz, at most 600 s), then `POST
+/v1/asr/transcribe?sessionId=<heavy job id>` with the `request` JSON part and
+the WAV; only 408 / 429 / 5xx and transport failures retry. A Muse step's
+completion deadline uses `max(HEAVY_JOB_WAIT_TIMEOUT_MS,
+MUSE_TRANSCRIBE_TIMEOUT_MS)`; the heavy lease covers the longest attempt.
+The key is the workspace's integration row. Tests: `heavy::provider` WAV /
+error / retry unit tests. Not tested against the live providers.
+

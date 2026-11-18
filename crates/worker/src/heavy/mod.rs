@@ -1,5 +1,5 @@
 //! Q.W2 run 4: the heavy AI flow steps (`aiGenerateImage`, `aiEditImage`,
-//! `aiSegmentImage`, `aiTextToSpeech`).
+//! `aiSegmentImage`, `aiSpeechToText`, `aiTextToSpeech`).
 //!
 //! - The flow step (`runViaHeavyWorker`) records a pending outcome, queues
 //!   the heavy job and a fallback `resumeHeavyStep` at the completion
@@ -10,9 +10,6 @@
 //!   resume.
 //! - `resumeHeavyStep` claims the resume lease and re-enters the flow at the
 //!   step, which then routes on the recorded outcome.
-//!
-//! `aiSpeechToText` is not here (its Meta / OpenAI transcription client is
-//! not ported); it stays an implicit success.
 
 pub mod outcome;
 pub mod provider;
@@ -21,7 +18,8 @@ use std::sync::{Arc, LazyLock};
 
 use chatbotx_core::flow_config::{
     AI_EDIT_IMAGE_FALLBACK_OPENAI_MODEL, ai_edit_image_schema, ai_generate_image_schema,
-    ai_segment_image_schema, ai_text_to_speech_schema, get_ai_generated_image_path,
+    ai_segment_image_schema, ai_speech_to_text_schema, ai_text_to_speech_schema,
+    get_ai_generated_image_path,
 };
 use chatbotx_core::utils::channel_safe_image::{
     self as images, NormalizeError, sniff_format, to_channel_safe_image,
@@ -65,6 +63,33 @@ pub fn wait_timeout_ms() -> u64 {
     env_num("HEAVY_JOB_WAIT_TIMEOUT_MS", 120_000, 5000, 9 * 60_000)
 }
 
+/// `MUSE_TRANSCRIBE_TIMEOUT_MS`: one Muse Speech to Text attempt.
+pub fn muse_transcribe_timeout_ms() -> u64 {
+    env_num("MUSE_TRANSCRIBE_TIMEOUT_MS", 9 * 60_000, 5000, 9 * 60_000)
+}
+
+/// `HEAVY_MAX_AUDIO_BYTES`.
+fn max_audio_bytes() -> u64 {
+    env_num("HEAVY_MAX_AUDIO_BYTES", 25 << 20, 1, 100 << 20)
+}
+
+/// `MUSE_TRANSCRIBE_MAX_AUDIO_BYTES` (a 10-minute 24 kHz WAV is over
+/// `HEAVY_MAX_AUDIO_BYTES`).
+fn muse_max_audio_bytes() -> u64 {
+    let max = provider::MUSE_TRANSCRIBE_MAX_REQUEST_BYTES
+        - provider::MUSE_TRANSCRIBE_MULTIPART_OVERHEAD_BYTES;
+    env_num("MUSE_TRANSCRIBE_MAX_AUDIO_BYTES", max, 1, max)
+}
+
+/// `getHeavyStepAttemptBudgetMs`: a Muse transcription may run longer than
+/// one heavy wait.
+fn attempt_budget_ms(action: HeavyJobAction, provider: &str) -> u64 {
+    if action == HeavyJobAction::AiSpeechToText && provider == "muse" {
+        return wait_timeout_ms().max(muse_transcribe_timeout_ms());
+    }
+    wait_timeout_ms()
+}
+
 /// `HEAVY_MAX_IMAGE_BYTES`.
 pub fn max_image_bytes() -> u64 {
     env_num("HEAVY_MAX_IMAGE_BYTES", 10 << 20, 1, 25 << 20)
@@ -73,7 +98,8 @@ pub fn max_image_bytes() -> u64 {
 /// The heavy worker lease: the longest attempt plus a handoff margin, so a
 /// slow provider is not redelivered while it runs.
 pub fn worker_lease_ms() -> u64 {
-    (wait_timeout_ms() + 60_000).max(5 * 60_000)
+    // `getMaxHeavyStepAttemptBudgetMs`.
+    (wait_timeout_ms().max(muse_transcribe_timeout_ms()) + 60_000).max(5 * 60_000)
 }
 
 fn kv(deps: &Deps) -> DurableKv {
@@ -86,6 +112,7 @@ pub fn action_of(step_type: &str) -> Option<HeavyJobAction> {
         "aiEditImage" => HeavyJobAction::AiEditImage,
         "aiGenerateImage" => HeavyJobAction::AiGenerateImage,
         "aiSegmentImage" => HeavyJobAction::AiSegmentImage,
+        "aiSpeechToText" => HeavyJobAction::AiSpeechToText,
         "aiTextToSpeech" => HeavyJobAction::AiTextToSpeech,
         _ => return None,
     })
@@ -95,6 +122,7 @@ fn step_schema(action: HeavyJobAction) -> chatbotx_core::flow_config::z::Schema 
     match action {
         HeavyJobAction::AiEditImage => ai_edit_image_schema(),
         HeavyJobAction::AiSegmentImage => ai_segment_image_schema(),
+        HeavyJobAction::AiSpeechToText => ai_speech_to_text_schema(),
         HeavyJobAction::AiTextToSpeech => ai_text_to_speech_schema(),
         _ => ai_generate_image_schema(),
     }
@@ -117,7 +145,7 @@ pub(crate) async fn run_step(
         step_id: &step_id,
     };
     let key = identity.outcome_key();
-    let wait = wait_timeout_ms();
+    let wait = attempt_budget_ms(action, ctx.str("provider").unwrap_or(""));
     let completion = heavy_completion_wait_timeout_ms(action, wait);
     let kv = kv(run.deps);
     let recorded = outcome::ensure_pending(
@@ -330,6 +358,7 @@ pub async fn handle_step_job(deps: &Deps, job: &JobCtx) -> Result<Value, JobErro
         HeavyJobData::AiEditImage(d) => (HeavyJobAction::AiEditImage, d),
         HeavyJobData::AiGenerateImage(d) => (HeavyJobAction::AiGenerateImage, d),
         HeavyJobData::AiSegmentImage(d) => (HeavyJobAction::AiSegmentImage, d),
+        HeavyJobData::AiSpeechToText(d) => (HeavyJobAction::AiSpeechToText, d),
         HeavyJobData::AiTextToSpeech(d) => (HeavyJobAction::AiTextToSpeech, d),
         _ => {
             return Err(JobError::unrecoverable(format!(
@@ -494,6 +523,7 @@ async fn compute(c: &Compute<'_>, action: HeavyJobAction) -> Result<HeavyStepRes
         HeavyJobAction::AiGenerateImage => generate_image_output(c).await.map(output),
         HeavyJobAction::AiEditImage => edit_image_output(c).await.map(output),
         HeavyJobAction::AiTextToSpeech => text_to_speech_output(c).await.map(output),
+        HeavyJobAction::AiSpeechToText => speech_to_text_output(c).await.map(output),
         _ => segment_image_output(c).await,
     }
 }
@@ -560,13 +590,24 @@ async fn store(
 /// `downloadWithByteLimit({ label: "image" })`: SSRF-checked on every hop,
 /// at most `HEAVY_MAX_IMAGE_BYTES`.
 async fn download_image(url: &str) -> Result<Vec<u8>, HeavyError> {
+    download_limited(url, max_image_bytes(), "image")
+        .await
+        .map(|(bytes, _)| bytes)
+}
+
+/// `downloadWithByteLimit`: SSRF-checked on every hop (`download_checked`),
+/// at most `max` bytes; `(bytes, content type)`.
+async fn download_limited(
+    url: &str,
+    max: u64,
+    label: &str,
+) -> Result<(Vec<u8>, String), HeavyError> {
     static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(media_client);
-    let max = max_image_bytes();
-    match download_checked(&CLIENT, url, None, max, "image URL").await {
-        Ok((bytes, _)) => Ok(bytes.to_vec()),
-        Err(DownloadError::Unsafe(_)) => Err(HeavyError::expected("Unsafe image URL")),
+    match download_checked(&CLIENT, url, None, max, &format!("{label} URL")).await {
+        Ok((bytes, content_type)) => Ok((bytes.to_vec(), content_type.unwrap_or_default())),
+        Err(DownloadError::Unsafe(_)) => Err(HeavyError::expected(format!("Unsafe {label} URL"))),
         Err(DownloadError::Status(status)) => {
-            let message = format!("image download failed with status {}", status.as_u16());
+            let message = format!("{label} download failed with status {}", status.as_u16());
             if status.is_server_error() {
                 Err(HeavyError::transient(message))
             } else {
@@ -574,7 +615,7 @@ async fn download_image(url: &str) -> Result<Vec<u8>, HeavyError> {
             }
         }
         Err(DownloadError::TooLarge) => Err(HeavyError::expected(format!(
-            "image exceeds size limit (max {max})"
+            "{label} exceeds size limit (max {max})"
         ))),
         Err(DownloadError::Other(message)) => Err(HeavyError::transient(message)),
     }
@@ -785,6 +826,133 @@ async fn text_to_speech_output(c: &Compute<'_>) -> Result<String, HeavyError> {
         chatbotx_db::repo::new_id()
     );
     store(c.deps, &path, audio.bytes, &audio.media_type).await
+}
+
+/// `supportedAudioMimeTypes` (OpenAI transcription input).
+const SUPPORTED_AUDIO_MIME_TYPES: &[&str] = &[
+    "audio/flac",
+    "audio/mpeg",
+    "audio/mpga",
+    "audio/m4a",
+    "audio/mp4",
+    "audio/x-m4a",
+    "audio/wav",
+    "audio/webm",
+    "audio/ogg",
+    "audio/x-wav",
+    "audio/mp3",
+];
+
+/// `MUSE_FORMAT_HINT`.
+const MUSE_FORMAT_HINT: &str =
+    "Muse Voice Transcribe requires WAV PCM 16-bit mono 16/24 kHz ≤ 10 min";
+
+/// `speechToTextOutput`: one attempt under its provider deadline
+/// (`getSpeechToTextAttemptTimeoutMs`).
+async fn speech_to_text_output(c: &Compute<'_>) -> Result<String, HeavyError> {
+    let provider = c.str("provider");
+    let timeout = if provider == "muse" {
+        std::time::Duration::from_millis(muse_transcribe_timeout_ms())
+    } else {
+        provider::AI_TOTAL
+    };
+    tokio::time::timeout(timeout, async {
+        let auth = integration_auth(c.deps, c.conversation.workspace_id, provider)
+            .await?
+            .ok_or_else(|| HeavyError::expected("AI integration not found"))?;
+        let audio_url = crate::condition::find_custom_field_value(
+            &c.deps.db,
+            &c.conversation.contact_id.to_string(),
+            c.str("inputFieldId"),
+        )
+        .await
+        .map_err(HeavyError::transient)?
+        .filter(|url| !url.is_empty())
+        .ok_or_else(|| HeavyError::expected("No audio URL provided"))?;
+        match provider {
+            "openai" => transcribe_openai(c, &auth, &audio_url).await,
+            "muse" => transcribe_muse(c, &auth, &audio_url, timeout).await,
+            other => Err(HeavyError::transient(format!(
+                "Unsupported speech-to-text step: {other}"
+            ))),
+        }
+    })
+    .await
+    .map_err(|_| HeavyError::transient("Speech to Text attempt timed out"))?
+}
+
+/// `transcribeOpenAI`.
+async fn transcribe_openai(
+    c: &Compute<'_>,
+    auth: &Value,
+    audio_url: &str,
+) -> Result<String, HeavyError> {
+    let model =
+        model::native_model("openai", auth, c.str("model")).map_err(HeavyError::expected)?;
+    let (audio, content_type) = download_limited(audio_url, max_audio_bytes(), "audio").await?;
+    let media_type = content_type.split(';').next().unwrap_or("").trim();
+    if !SUPPORTED_AUDIO_MIME_TYPES.contains(&media_type) {
+        return Err(HeavyError::expected(format!(
+            "Unsupported audio format: {}",
+            if content_type.is_empty() {
+                "unknown"
+            } else {
+                &content_type
+            }
+        )));
+    }
+    provider::transcribe_openai(&model, &audio, media_type).await
+}
+
+/// `transcribeMuse`: the bytes decide (storage serves WAV as octet-stream).
+async fn transcribe_muse(
+    c: &Compute<'_>,
+    auth: &Value,
+    audio_url: &str,
+    timeout: std::time::Duration,
+) -> Result<String, HeavyError> {
+    let (audio, _) = download_limited(audio_url, muse_max_audio_bytes(), "audio").await?;
+    if let Err(provider::WavFormatError(reason, message)) = provider::inspect_muse_wav(&audio) {
+        tracing::info!(
+            conversation_id = c.conversation.id,
+            provider = "muse",
+            reason,
+            session_id = c.job_id,
+            workspace_id = c.conversation.workspace_id,
+            "Muse speech-to-text rejected the audio format"
+        );
+        return Err(HeavyError::expected(format!(
+            "{MUSE_FORMAT_HINT}: {message}"
+        )));
+    }
+    let api_key = model::secret_text(auth)
+        .ok_or_else(|| HeavyError::expected("Muse integration credentials are invalid"))?;
+    let list = |key: &str| c.step[key].as_array().cloned().unwrap_or_default();
+    let result = provider::transcribe_with_muse(
+        &api_key,
+        &audio,
+        c.str("model"),
+        &list("languageBias"),
+        &list("keywords"),
+        c.job_id,
+        timeout,
+    )
+    .await?;
+    let text = result.text.trim().to_owned();
+    if text.is_empty() {
+        return Err(HeavyError::expected("Muse returned an empty transcript"));
+    }
+    tracing::info!(
+        audio_duration_ms = result.audio_duration_ms,
+        conversation_id = c.conversation.id,
+        muse_session_id = result.session_id,
+        provider = "muse",
+        session_id = c.job_id,
+        transcript_chars = text.chars().count(),
+        workspace_id = c.conversation.workspace_id,
+        "Muse speech-to-text completed"
+    );
+    Ok(text)
 }
 
 /// `resolveMuseApiKey`.

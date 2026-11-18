@@ -19,6 +19,26 @@ e2d16a491). Follows Q.D2c (`commentAutomations.*`), Q.W2 (`low`
 | 9 | Threads / TikTok answers reshaped (`toThreadsResource`, `toTiktokResource`) | `comment_automation_crud::channel_resource` | `features/{threads,tiktok}-comments/api/resource.ts` |
 | 10 | `/rpc` queries, actions and private procedures of the five screens, and the SPA routes | `api::rpc_procedures::comments`, `apps/web/src/routes/comments.tsx` | `features/*-comments`, `features/ig-stories`, `features/shared/comment-automation` |
 
+## AI moderation and AI replies (2026-11-18, `worker::low::comment_ai`)
+
+| Part | Rust | Original |
+|------|------|----------|
+| `moderateCommentWithAI`: before the reply filters; queues `commentModeration` on the AI queue (`comment-moderation-<automation>-<comment>`, a replay adds `-replay-<id>`) and the automation waits (`pendingAI`, not a miss); fails open | `Run::moderate_with_ai` | `moderation.ts` |
+| `processCommentModeration`: active automation + workspace agent, verdict cache (10 min, key = comment + agent + sorted categories + instruction), the agent's auto-reply models in order (`generateText` + `Output.object`, temperature 0), blocked categories only; a block records the `moderated` miss, the `ai` moderation log row and the hide / delete job (`showCommentsAfter` = none); anything else resumes `processCommentAutomation` for this automation with `moderationChecked` | `comment_moderation` | `moderation.ts` |
+| `deleteChannelMessage` settles the moderation log row as the hide does | `chat::delete_message_from_channel` | `chat` handlers |
+| AI-agent replies: the event row first (`replyText` null), then `commentAIReply` (`comment-ai-reply-<automation>-<comment>-<channel>`, the reply delay); a failed enqueue settles the row `failed` | `Run::dispatch_ai_reply` | `public-reply.ts`, `private-reply.ts`, `record.ts` |
+| `processCommentAIReply`: skips (no text, outside active hours: dedup rollback + event dropped), failures (agent / conversation / contact inbox missing, no text: dedup rollback + event `failed`), Threads / TikTok comments in the untrusted-data envelope, public reply row + chat send, private DM on the channel (`markDelivered`, settle, inbox row; none of these fails the job); a terminal throw settles `failed` with the generated text | `comment_ai_reply` | `ai-reply.ts`, `dedup.ts` |
+| `generateAIReplyText`: agent prompt with contact variables + the generate-only injection policy, auto-reply integrations only, no tools, one step | `generate_reply_text` | `automated-response/replies.ts`, `lib/ai/reply-model.ts` |
+| Story `AIAgent` reply (mention: the fixed "mentioned your account" message) | `story_automation::process` | `story-reply-automation/index.ts` |
+
+Security: the agent, automation, conversation and contact inbox are read
+with the job's workspace id; a private reply's integration must belong to
+that workspace; keys stay in the integration rows.
+
+Tests: `comment_ai` unit tests (prompt / guard / cache key / verdict) and
+`low_tests::ai_moderation_holds_the_reply_and_hides_a_flagged_comment`
+(scripted provider).
+
 ## Rules kept
 
 - Request schemas as zod: unknown keys dropped, issues as `422
@@ -73,10 +93,13 @@ integration queues.
 
 ## Left
 
-- AI moderation (`commentModeration` on the AI queue): an automation with
-  `aiModeration.enabled` runs as "clear" (logged). AI-agent comment replies
-  (`commentAIReply`) are recorded as failed events; AI-agent story replies
-  are skipped (logged). Both need the AI reply port (Q.D6).
+- The AI-reply analytics keep the Rust counter rule of `record_event`
+  (every channel counts its public replies; the original counts public
+  replies only where the channel has no DM, `countsTowardStats`). The public
+  AI reply is not settled by the chat worker on a terminal send failure
+  (`settleCommentAutomationFailure`), as the other public replies.
+- No replay priority (`withReplayPriority`) and no orphaned-integration
+  cleanup (`runWithOrphanedIntegrationCleanup`) on the AI jobs.
 - The deferred TikTok private reply (`deferredCommentPrivateReply`): a
   TikTok private reply is sent only when the high-intent flag is already on
   the comment; else it is logged and not sent.

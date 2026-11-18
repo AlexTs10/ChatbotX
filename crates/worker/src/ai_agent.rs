@@ -1,5 +1,6 @@
-//! The `ai-agent` queue (`apps/worker/src/ai-agent/worker.ts`). Only
-//! `processAutomatedResponse` is ported, and only its keyword step
+//! The `ai-agent` queue (`apps/worker/src/ai-agent/worker.ts`): the story
+//! automations, the comment AI jobs (`low::comment_ai`), the embeddings and
+//! `processAutomatedResponse`, of which only the keyword step is ported
 //! (`automatedResponseService.process`: `process-messages.ts` +
 //! `dispatch-reply.ts`).
 
@@ -39,7 +40,11 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::story_automation::process(&deps, data, crate::story_automation::STORY_MENTION)
                 .await?
         }
-        // ponytail: handoff re-entry and comment AI replies / moderation are Q.D6.
+        crate::low::COMMENT_MODERATION => {
+            crate::low::comment_moderation(&deps, &job.data["data"]).await?
+        }
+        crate::low::COMMENT_AI_REPLY => crate::low::comment_ai_reply(&deps, &job).await?,
+        // ponytail: handoff re-entry is Q.D6.
         other => {
             return Err(JobError::unrecoverable(format!(
                 "AIJobAction action is not defined: {other}"
