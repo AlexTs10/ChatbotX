@@ -263,9 +263,11 @@ mod tests {
         assert_eq!(
             screens[0],
             json!({ "id": "A", "title": "Start", "terminal": false, "output": [
+                // ponytail: serde_json maps are sorted (no `preserve_order`), so a
+                // payload's keys come in key order, not the Flow JSON's order.
                 { "value": "first_name", "label": "First name", "kind": "value" },
-                { "value": "photo", "label": "Photo", "kind": "file" },
                 { "value": "orderId", "label": "Order Id", "kind": "value" },
+                { "value": "photo", "label": "Photo", "kind": "file" },
             ] })
         );
         assert_eq!(screens[1]["title"], "B");
