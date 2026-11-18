@@ -29,8 +29,17 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     match kind.as_str() {
         PROCESS_AUTOMATED_RESPONSE => process_automated_response(&deps, &job.data["data"]).await?,
         "processPendingEmbedding" => return crate::ai_file::handle_ai_agent(deps, job).await,
-        // ponytail: handoff re-entry, comment AI replies / moderation and
-        // story automations are Q.D6.
+        crate::story_automation::PROCESS_STORY_REPLY => {
+            let data = &job.data["data"];
+            crate::story_automation::process(&deps, data, crate::story_automation::STORY_REPLY)
+                .await?
+        }
+        crate::story_automation::PROCESS_STORY_MENTION => {
+            let data = &job.data["data"];
+            crate::story_automation::process(&deps, data, crate::story_automation::STORY_MENTION)
+                .await?
+        }
+        // ponytail: handoff re-entry and comment AI replies / moderation are Q.D6.
         other => {
             return Err(JobError::unrecoverable(format!(
                 "AIJobAction action is not defined: {other}"

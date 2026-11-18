@@ -63,6 +63,15 @@ pub fn generate_workspace_token() -> ApiChannelCredentials {
     generate_bearer_token(WORKSPACE_TOKEN_PREFIX)
 }
 
+/// `generateInboundWebhookToken`: `iwh_` + base64url (no padding) of 32
+/// random bytes (the webhook URL's only credential).
+pub fn generate_inbound_webhook_token() -> String {
+    format!(
+        "iwh_{}",
+        URL_SAFE_NO_PAD.encode(random_bytes::<TOKEN_BYTES>())
+    )
+}
+
 /// `generateSigningSecret`: hex of 32 random bytes.
 pub fn generate_signing_secret() -> String {
     to_hex(&random_bytes::<SIGNING_SECRET_BYTES>())

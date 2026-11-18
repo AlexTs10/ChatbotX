@@ -78,6 +78,19 @@ fn same_origin(a: &str, b: &str) -> bool {
     }
 }
 
+/// Why [`download_checked`] failed.
+#[derive(Debug)]
+pub(crate) enum DownloadError {
+    /// A hop is not a public URL (the `assertPublicUrl` message).
+    Unsafe(String),
+    /// A final answer that is not a 2xx.
+    Status(reqwest::StatusCode),
+    /// The declared length or the body passed `max_bytes`.
+    TooLarge,
+    /// Transport, redirect or body read failure.
+    Other(String),
+}
+
 /// GET `url` by hand: every hop is SSRF-checked, the token goes only to hops
 /// on the first URL's origin, and the body stops at `max_bytes`.
 async fn download(
@@ -86,28 +99,57 @@ async fn download(
     token: Option<&str>,
     max_bytes: u64,
 ) -> Result<(Bytes, Option<String>), String> {
+    download_checked(client, url, token, max_bytes, "WhatsApp media URL")
+        .await
+        .map_err(|err| match err {
+            DownloadError::Unsafe(message) | DownloadError::Other(message) => message,
+            DownloadError::Status(status) => format!("media download answered {status}"),
+            DownloadError::TooLarge => format!("media is larger than {max_bytes} bytes"),
+        })
+}
+
+/// [`download`] with a typed error; `context` names the URL in the SSRF
+/// message. A declared `Content-Length` over `max_bytes` fails before the
+/// body is read.
+pub(crate) async fn download_checked(
+    client: &reqwest::Client,
+    url: &str,
+    token: Option<&str>,
+    max_bytes: u64,
+    context: &str,
+) -> Result<(Bytes, Option<String>), DownloadError> {
     let mut current = url.to_owned();
     for _ in 0..=MAX_REDIRECTS {
-        assert_public_url(&current, "WhatsApp media URL").await?;
+        assert_public_url(&current, context)
+            .await
+            .map_err(DownloadError::Unsafe)?;
         let mut request = client.get(&current).header("User-Agent", "node");
         if let Some(token) = token.filter(|_| same_origin(url, &current)) {
             request = request.bearer_auth(token);
         }
-        let mut response = request.send().await.map_err(|e| e.to_string())?;
+        let mut response = request
+            .send()
+            .await
+            .map_err(|e| DownloadError::Other(e.to_string()))?;
         if response.status().is_redirection() {
             let location = response
                 .headers()
                 .get(reqwest::header::LOCATION)
                 .and_then(|v| v.to_str().ok())
-                .ok_or("Redirect response has no Location header")?;
+                .ok_or_else(|| {
+                    DownloadError::Other("Redirect response has no Location header".into())
+                })?;
             current = url::Url::parse(&current)
                 .and_then(|base| base.join(location))
-                .map_err(|e| e.to_string())?
+                .map_err(|e| DownloadError::Other(e.to_string()))?
                 .to_string();
             continue;
         }
         if !response.status().is_success() {
-            return Err(format!("media download answered {}", response.status()));
+            return Err(DownloadError::Status(response.status()));
+        }
+        if response.content_length().is_some_and(|len| len > max_bytes) {
+            return Err(DownloadError::TooLarge);
         }
         let declared = response
             .headers()
@@ -115,15 +157,21 @@ async fn download(
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
         let mut out = BytesMut::new();
-        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| DownloadError::Other(e.to_string()))?
+        {
             if (out.len() + chunk.len()) as u64 > max_bytes {
-                return Err(format!("media is larger than {max_bytes} bytes"));
+                return Err(DownloadError::TooLarge);
             }
             out.extend_from_slice(&chunk);
         }
         return Ok((out.freeze(), declared));
     }
-    Err("Too many redirects while fetching media".into())
+    Err(DownloadError::Other(
+        "Too many redirects while fetching media".into(),
+    ))
 }
 
 /// The redirect-free client [`download`] needs.

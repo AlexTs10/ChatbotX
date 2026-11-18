@@ -229,17 +229,25 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             None
         }
     };
-    let auth = Arc::new(LiveAuthDeps {
-        db: Arc::clone(&shared.db),
-        kv: Arc::clone(&shared.kv),
-        clock: Arc::clone(&shared.clock),
-        is_cloud: is_cloud(),
-    });
     let sessions = Arc::new(AuthState {
         db: Arc::clone(&shared.db),
         settings: auth_settings(),
         mailer: mailer(),
         now_ms,
+    });
+    let auth = Arc::new(LiveAuthDeps {
+        db: Arc::clone(&shared.db),
+        kv: Arc::clone(&shared.kv),
+        clock: Arc::clone(&shared.clock),
+        is_cloud: is_cloud(),
+        auth_base_url: format!(
+            "{}/api/auth",
+            sessions.settings.base_url.trim_end_matches('/')
+        ),
+        mcp_resource_url: chatbotx_api::session::mcp_resource_url(&sessions),
+        // Q.A1 §3: mobile access tokens on `/v1` (member allowlist + member
+        // scope in every allowlisted handler, specs/Q.A1.md §3).
+        mobile_audience: Some(chatbotx_api::session::mobile_api_audience(&sessions)),
     });
     // `assertLicenseAtStartup`: enterprise / cloud need a valid or lapsed license.
     let edition_now = chatbotx_business::keys::Edition::from_env();
@@ -259,13 +267,40 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             (None, None)
         }
     };
+    let redirect_buses = buses.clone();
     let (shutdown, exited, worker_deps) = start_workers(&shared, &jobs, realtime.as_ref(), buses)?;
     let jobs_admin =
         chatbotx_api::jobs_admin::router(Arc::new(chatbotx_api::jobs_admin::JobsAdminState {
             auth: Arc::clone(&sessions),
             store: Arc::clone(&jobs),
         }));
-    let api = Arc::new(api_state(&shared, Arc::clone(&jobs), realtime.as_ref()));
+    let api = Arc::new({
+        let mut api = api_state(&shared, Arc::clone(&jobs), realtime.as_ref());
+        api.sessions = Some(Arc::clone(&sessions));
+        api
+    });
+    // The `/api/auth/*` routes behind the auth rate limits (Q.A1).
+    let auth_routes = chatbotx_api::session::oauth_router(Arc::new(
+        chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,
+    ))
+    .merge(chatbotx_api::session::mcp_oauth_router(Arc::new(
+        chatbotx_api::session::McpOAuth {
+            auth: Arc::clone(&sessions),
+            kv: Arc::clone(&shared.kv),
+        },
+    )))
+    .merge(chatbotx_api::session::auth_router(Arc::clone(&sessions)))
+    .merge(chatbotx_api::session::invitation_start_router(
+        Arc::clone(&sessions),
+        Arc::clone(&shared.kv),
+    ))
+    .layer(axum::middleware::from_fn_with_state(
+        chatbotx_api::session::AuthRateLimit {
+            kv: Arc::clone(&shared.kv),
+            now_ms: sessions.now_ms,
+        },
+        chatbotx_api::session::auth_rate_limit,
+    ));
     let mut app = chatbotx_api::router()
         .merge(chatbotx_api::spa::spa_router(Arc::clone(&sessions)))
         .merge(chatbotx_api::rpc::rpc_router_with(
@@ -275,9 +310,6 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
                 realtime_secret: realtime_secret(),
             },
         ))
-        .merge(chatbotx_api::session::oauth_router(Arc::new(
-            chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,
-        )))
         .merge(jobs_admin)
         .merge(chatbotx_api::presigned_upload::router(
             chatbotx_api::presigned_upload::UploadState {
@@ -286,10 +318,21 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
                 is_cloud: is_cloud(),
             },
         ))
-        .merge(chatbotx_api::session::auth_router(sessions))
+        .merge(auth_routes)
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
+        .merge(chatbotx_api::store_webhooks::router(Arc::clone(&api)))
         .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)))
-        .merge(chatbotx_api::payment_webhooks::router(Arc::clone(&api)));
+        .merge(chatbotx_api::payment_webhooks::router(Arc::clone(&api)))
+        .merge(chatbotx_api::booking_public::router(Arc::clone(&api)))
+        .merge(chatbotx_api::inbound_webhook_intake::router(Arc::clone(
+            &api,
+        )))
+        .merge(chatbotx_api::magic_link_redirect::router(
+            chatbotx_api::magic_link_redirect::RedirectState {
+                api: Arc::clone(&api),
+                buses: redirect_buses,
+            },
+        ));
     if let Some(realtime) = &realtime {
         app = app.merge(chatbotx_rt::router(realtime.clone()));
     }

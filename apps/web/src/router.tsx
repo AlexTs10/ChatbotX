@@ -26,6 +26,9 @@ const dashboard = () => import("@/routes/dashboard")
 const ecommerce = () => import("@/routes/ecommerce")
 const tools = () => import("@/routes/tools")
 const toolEditors = () => import("@/routes/tool-editors")
+const comments = () => import("@/routes/comments")
+const appointments = () => import("@/routes/appointments")
+const booking = () => import("@/routes/booking")
 
 type RouterContext = { queryClient: QueryClient }
 
@@ -95,6 +98,23 @@ const invitationRoute = createRoute({
     "InvitationsPage",
   ),
 })
+
+// `/booking/*` is public too: the signed token is the authority.
+const bookingPages = (
+  [
+    ["booking/picker", "BookingPickerPage"],
+    ["booking/range-picker", "BookingRangePickerPage"],
+    ["booking/schedule", "BookingSchedulePage"],
+    ["booking/cancel", "BookingCancelPage"],
+    ["booking/$slug", "BookingSlugPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    component: lazyRouteComponent(booking, page),
+  }),
+)
 
 // Everything else needs a session (proxy.ts) and a current password
 // (`enforcePasswordCurrent` in every protected layout).
@@ -257,6 +277,55 @@ const productFormPages = (
   }),
 )
 
+// Comment / story automations: `(has-folder)/<x>/layout.tsx` is a pathless
+// folder layout around the list; the create / edit / analytics pages sit
+// outside it.
+const commentListRoutes = (
+  [
+    ["fb-comments", "FbCommentsLayout", "FbCommentsPage"],
+    ["ig-comments", "IgCommentsLayout", "IgCommentsPage"],
+    ["ig-stories", "IgStoriesLayout", "IgStoriesPage"],
+  ] as const
+).map(([path, layout, page]) => {
+  const folder = createRoute({
+    getParentRoute: () => workspaceRoute,
+    id: `${path}-folder`,
+    component: lazyRouteComponent(comments, layout),
+  })
+  return folder.addChildren([
+    createRoute({
+      getParentRoute: () => folder,
+      path,
+      component: lazyRouteComponent(comments, page),
+    }),
+  ])
+})
+const commentPages = (
+  [
+    ["fb-comments/create", "CreateFbCommentPage"],
+    ["fb-comments/$id", "EditFbCommentPage"],
+    ["fb-comments/$id/analytics", "FbCommentAnalyticsPage"],
+    ["ig-comments/create", "CreateIgCommentPage"],
+    ["ig-comments/$id", "EditIgCommentPage"],
+    ["ig-comments/$id/analytics", "IgCommentAnalyticsPage"],
+    ["ig-stories/create", "CreateIgStoryPage"],
+    ["ig-stories/$id", "EditIgStoryPage"],
+    ["threads-comments", "ThreadsCommentsPage"],
+    ["threads-comments/create", "CreateThreadsCommentPage"],
+    ["threads-comments/$id", "EditThreadsCommentPage"],
+    ["tiktok-comments", "TiktokCommentsPage"],
+    ["tiktok-comments/create", "CreateTiktokCommentPage"],
+    ["tiktok-comments/$id", "EditTiktokCommentPage"],
+    ["tiktok-comments/$id/analytics", "TiktokCommentAnalyticsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(comments, page),
+  }),
+)
+
 // The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
 const logs = () => import("@/routes/logs")
 const logPages = (
@@ -326,6 +395,28 @@ const pipelinesRoutes = pipelinesRoute.addChildren([
   }),
 ])
 
+const appointmentCalendarsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "appointment-calendars",
+  component: lazyRouteComponent(appointments, "AppointmentCalendarsLayout"),
+})
+const appointmentCalendarsRoutes = appointmentCalendarsRoute.addChildren(
+  (
+    [
+      ["/", "AppointmentCalendarsPage"],
+      ["$id/edit", "AppointmentCalendarEditPage"],
+      ["appointments", "AppointmentsPage"],
+      ["external", "ExternalCalendarsPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => appointmentCalendarsRoute,
+      path,
+      component: lazyRouteComponent(appointments, page),
+    }),
+  ),
+)
+
 // `(ai)`: a pathless layout (flows permission, AI integration check).
 const aiRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -380,6 +471,11 @@ const settingsRoutes = settingsRoute.addChildren([
   settingsPage(() => settingsRoute, "general", "SettingsGeneralPage"),
   settingsPage(() => settingsRoute, "admins", "SettingsAdminsPage"),
   settingsPage(() => settingsRoute, "inbox-teams", "SettingsInboxTeamsPage"),
+  createRoute({
+    getParentRoute: () => settingsRoute,
+    path: "inbox-teams/working-hours/$workingHoursId",
+    component: lazyRouteComponent(appointments, "WorkingHoursEditorPage"),
+  }),
   settingsPage(
     () => settingsRoute,
     "user-persistent-menus",
@@ -474,6 +570,7 @@ const adminPages = (
 const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
   invitationRoute,
+  ...bookingPages,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
@@ -489,7 +586,10 @@ const routeTree = rootRoute.addChildren([
       ...toolPages,
       ...logPages,
       ...toolEditorPages,
+      ...commentListRoutes,
+      ...commentPages,
       pipelinesRoutes,
+      appointmentCalendarsRoutes,
       aiRoute.addChildren(aiPages),
       settingsRoutes,
     ]),

@@ -41,6 +41,7 @@ pub const ROUTES: &[&str] = &[
     "broadcasts.list",
     "broadcasts.get",
     "broadcasts.getAudience",
+    "broadcasts.listContacts",
     "broadcasts.previewAudience",
     "broadcasts.create",
     "broadcasts.update",
@@ -537,6 +538,37 @@ async fn resolve_template_params(
     Ok(data)
 }
 
+/// `broadcastEventType` (message + flow event types).
+pub(crate) const BROADCAST_EVENT_TYPES: &[&str] = &[
+    "message:sent",
+    "message:delivered",
+    "message:seen",
+    "message:failed",
+    "message:received",
+    "flow:clicked",
+    "flow:ref",
+];
+
+/// `eventType` (required), `page`, `perPage` (≤ 50) of the contacts lists.
+pub(crate) fn contacts_input(input: &mut Input) -> (Option<String>, Option<i64>, Option<i64>) {
+    let value = input.get("eventType").cloned();
+    let event_type = input.enum_at(
+        &key("eventType"),
+        value.as_ref(),
+        BROADCAST_EVENT_TYPES,
+        true,
+    );
+    let page = input.opt_coerce_int(
+        "page",
+        Num {
+            min: Some(1.0),
+            ..Num::default()
+        },
+    );
+    let per_page = input.opt_coerce_int("perPage", Num::int(1.0, 50.0));
+    (event_type, page, per_page)
+}
+
 fn broadcast_id(input: &mut Input) -> i64 {
     input.digits_id("id").unwrap_or_default()
 }
@@ -867,6 +899,23 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let out = service::list_audience(db, ws, id_or_name, page, per_page)
                 .await
                 .map_err(|e| business_error(e, FINDING))?;
+            Ok(json(200, out))
+        }
+        "broadcasts.listContacts" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id = input.digits_id("id");
+            let (event_type, page, per_page) = contacts_input(&mut input);
+            input.finish()?;
+            let out = service::list_contacts_page(
+                db,
+                ws,
+                id.unwrap_or_default(),
+                event_type.unwrap_or_default(),
+                page.unwrap_or(1),
+                per_page.unwrap_or(50),
+            )
+            .await
+            .map_err(|e| business_error(e, FINDING))?;
             Ok(json(200, out))
         }
         "broadcasts.previewAudience" => {

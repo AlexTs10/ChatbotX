@@ -84,7 +84,7 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
 }
 
 /// `?page=&perPage=&<keys>&sort[i][id]=&sort[i][desc]=` of a list search.
-fn list_query(search: &Value, keys: &[&str]) -> String {
+pub(super) fn list_query(search: &Value, keys: &[&str]) -> String {
     let mut all = vec!["page", "perPage"];
     all.extend_from_slice(keys);
     let mut query = query_of(search, &all);

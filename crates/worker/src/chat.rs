@@ -313,7 +313,7 @@ pub async fn send_message_to_channel(
                     inbox_id: contact_inbox.inbox_id,
                     source_id: contact_inbox.source_id.clone(),
                 },
-                message_id,
+                crate::events::message_action(message_id),
                 crate::events::parsed_error(&error),
                 metadata,
                 will_retry,
@@ -639,12 +639,53 @@ pub async fn edit_message_from_channel(deps: &Deps, data: &Value) -> Result<(), 
 /// `changeMessageStateOnChannel`: stores `{ liked, hidden }`, then likes /
 /// hides the comment on the channel.
 pub async fn change_message_state_on_channel(deps: &Deps, data: &Value) -> Result<(), JobError> {
+    let outcome = change_state(deps, data).await;
+    settle_moderation(deps, data, &outcome).await;
+    outcome.map(|_| ())
+}
+
+/// `settleCommentModeration` / `failCommentModeration` of a comment
+/// automation hide (`data.moderation`); never fails the job.
+async fn settle_moderation(deps: &Deps, data: &Value, outcome: &Result<bool, JobError>) {
+    let moderation = &data["moderation"];
+    let (Some(automation_id), Some(comment_id)) = (
+        id_of(&moderation["automationId"]),
+        str_of(moderation, "commentId").map(str::to_owned),
+    ) else {
+        return;
+    };
+    let workspace_id = id_of(&data["conversation"]["workspaceId"]);
+    let (status, detail) = match outcome {
+        Ok(true) => ("done", None),
+        Ok(false) => ("failed", Some("Comment message not found".to_owned())),
+        Err(err) => (
+            "failed",
+            Some(err.to_string().chars().take(1000).collect::<String>()),
+        ),
+    };
+    let result = deps
+        .db
+        .write(move |tx| {
+            Ok(tx.execute(
+                r#"UPDATE "CommentModerationLog" SET "status" = ?1, "errorDetail" = ?2, "updatedAt" = ?3
+                   WHERE "automationId" = ?4 AND "commentId" = ?5 AND (?6 IS NULL OR "workspaceId" = ?6)"#,
+                params![status, detail, now_ms(), automation_id, comment_id, workspace_id],
+            )?)
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::warn!(%err, automation_id, "failed to settle moderation");
+    }
+}
+
+/// The state change; `Ok(false)` = skipped (no such comment).
+async fn change_state(deps: &Deps, data: &Value) -> Result<bool, JobError> {
     let Some((conversation, contact_inbox)) = load_pair(deps, data).await? else {
-        return Ok(());
+        return Ok(false);
     };
     let Some(found) = comment_of(deps, &conversation, data, "changeMessageStateOnChannel").await?
     else {
-        return Ok(());
+        return Ok(false);
     };
     let liked = data.get("liked").and_then(Value::as_bool);
     let hidden = data.get("hidden").and_then(Value::as_bool);
@@ -708,7 +749,7 @@ pub async fn change_message_state_on_channel(deps: &Deps, data: &Value) -> Resul
             .await
             .map_err(channel_fail)?;
     }
-    Ok(())
+    Ok(true)
 }
 
 /// `sendTypingToChannel`: best effort; an unregistered channel is skipped.

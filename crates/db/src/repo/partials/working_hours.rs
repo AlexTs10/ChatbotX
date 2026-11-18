@@ -112,3 +112,83 @@ pub fn parse_working_hours_intervals(
     }
     issues.finish(intervals)
 }
+
+/// `WORKING_HOURS_MAX_DATE_OVERRIDES`.
+pub const WORKING_HOURS_MAX_DATE_OVERRIDES: usize = 400;
+/// `WORKING_HOURS_MAX_NAME_LENGTH`.
+pub const WORKING_HOURS_MAX_NAME_LENGTH: usize = 100;
+
+/// `workingHoursDateRangesSchema.safeParse`: the ranges as stored
+/// (`[{ startMinute, endMinute }]`).
+pub fn parse_working_hours_date_ranges(
+    value: &serde_json::Value,
+) -> Result<serde_json::Value, ZodError> {
+    let items: Vec<serde_json::Value> = deserialize(value)?;
+    let mut issues = Issues::default();
+    let mut ranges = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        // A minute range is an interval without the weekday.
+        let mut with_day = item.clone();
+        if let Some(obj) = with_day.as_object_mut() {
+            obj.insert("weekday".into(), 0.into());
+        }
+        match parse_working_hours_interval(&with_day) {
+            Ok(range) => ranges.push(range),
+            Err(error) => issues
+                .0
+                .extend(error.issues.into_iter().map(|issue| ZodIssue {
+                    path: format!("{index}.{}", issue.path),
+                    message: issue.message,
+                })),
+        }
+    }
+    if ranges.len() > WORKING_HOURS_MAX_INTERVALS_PER_WEEKDAY {
+        issues.add(
+            "",
+            format!(
+                "Too big: expected array to have <={WORKING_HOURS_MAX_INTERVALS_PER_WEEKDAY} items"
+            ),
+        );
+    }
+    if !issues.0.is_empty() {
+        return Err(ZodError { issues: issues.0 });
+    }
+    ranges.sort_by_key(|r| r.start_minute);
+    if ranges
+        .windows(2)
+        .any(|pair| pair[1].start_minute < pair[0].end_minute)
+    {
+        issues.add("", "Intervals overlap on this date");
+    }
+    let json = items
+        .iter()
+        .map(|item| {
+            serde_json::json!({
+                "startMinute": item["startMinute"],
+                "endMinute": item["endMinute"],
+            })
+        })
+        .collect();
+    issues.finish(serde_json::Value::Array(json))
+}
+
+/// `workingHoursLocalDateSchema.safeParse` (`YYYY-MM-DD`, a real date).
+pub fn parse_working_hours_local_date(value: &str) -> Result<(), ZodError> {
+    let b = value.as_bytes();
+    let shape = b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b.iter()
+            .enumerate()
+            .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
+    if !shape {
+        return Err(ZodError::one("", "Expected YYYY-MM-DD"));
+    }
+    let year: i32 = value[0..4].parse().unwrap_or(0);
+    let month: u32 = value[5..7].parse().unwrap_or(0);
+    let day: u32 = value[8..10].parse().unwrap_or(0);
+    if chrono::NaiveDate::from_ymd_opt(year, month, day).is_none() {
+        return Err(ZodError::one("", "Not a real calendar date"));
+    }
+    Ok(())
+}

@@ -16,7 +16,7 @@ pub use table::PUBLIC_ROUTES;
 
 use crate::auth::{
     TokenAuthRequest, WorkspaceTokenDeps, authenticate_channel_api_token,
-    authorize_workspace_token_for_scope, invalid_access_token_error,
+    authorize_workspace_token_for_scope,
 };
 use crate::handlers::channels::{self, ChannelCall};
 use crate::handlers::{ApiState, Call, Principal, dispatch_as};
@@ -30,6 +30,8 @@ enum Caller {
     Workspace(i64, Principal, String, AuditActor),
     /// A channel (`cbx_api_`) token and `apiCredentialId`.
     Channel(ChannelCall, String),
+    /// A mobile user (`/v1/me*`) and whether the route is idempotent.
+    MobileUser(crate::auth::MobileUser, bool),
 }
 use crate::orpc::OrpcError;
 
@@ -256,6 +258,7 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                     token_id: context.api_token.id.parse().ok(),
                     scopes: context.api_token.scopes.clone(),
                     read_only: context.api_token.permission == "read_only",
+                    mobile: context.mobile.as_ref().map(|m| Arc::clone(&m.member)),
                 };
                 // `withAuditContext` of `workspaceTokenAuthMiddleware`.
                 let actor = AuditActor {
@@ -286,9 +289,12 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                     },
                 )
         }
-        // Mobile access JWTs are verified in P3.5e; until then no token opens these routes.
+        // `mobileUserAPI` (+ idempotency) / `mobileUserPasswordChangeAPI`.
         RouteAuth::MobileUser | RouteAuth::MobileUserPasswordChange => {
-            Err(invalid_access_token_error())
+            let password_change = matches!(route.auth, RouteAuth::MobileUserPasswordChange);
+            crate::auth::authenticate_mobile_user(deps, headers, password_change, &mut res_headers)
+                .await
+                .map(|user| Some(Caller::MobileUser(user, !password_change)))
         }
     };
     let mut response = match outcome {
@@ -331,6 +337,39 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                         },
                     )
                     .await
+                }
+                (Some(state), Some(Caller::MobileUser(user, idempotent))) => {
+                    let call = Call {
+                        workspace_id: 0,
+                        params: &matched.params,
+                        query: uri.query(),
+                        body,
+                    };
+                    // `mobileCredentialId(principal)` (no workspace).
+                    let credential_id = format!(
+                        "mobile:{}:{}",
+                        user.id,
+                        user.device_id.as_deref().unwrap_or("-")
+                    );
+                    let run = move || async move {
+                        Some(
+                            crate::handlers::me::handle(state, route.id, call, &user, headers)
+                                .await
+                                .unwrap_or_else(IntoResponse::into_response),
+                        )
+                    };
+                    if idempotent {
+                        let input = procedure_input(&matched.params, body);
+                        let store = DurableKv::new(Arc::clone(&state.db), Arc::new(SystemClock));
+                        api_idempotency_middleware(
+                            &store,
+                            idempotency_call(headers, route, &credential_id, &input),
+                            run,
+                        )
+                        .await
+                    } else {
+                        run().await
+                    }
                 }
                 _ => None,
             };

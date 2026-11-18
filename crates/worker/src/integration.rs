@@ -152,6 +152,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::steps::delay::RESUME_FOLLOW_UP => {
             crate::steps::delay::run_follow_up_resume(&deps, &job.data["data"]).await?;
         }
+        crate::heavy::RESUME_HEAVY_STEP => {
+            crate::heavy::resume_heavy_step(&deps, &job.data["data"]).await?;
+        }
         "aiHandoverBulkToggle" => {
             crate::ai_handover::run_bulk_toggle(&deps, &job.data["data"]).await?;
         }
@@ -172,6 +175,13 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::inbound_events::DELETE_INCOMING_COMMENT => {
             crate::inbound_events::delete_incoming(&deps, &job.data["data"], "commentId").await?
         }
+        "incomingComment" => crate::low::incoming_comment(&deps, &job.data["data"]).await?,
+        "tiktokHighIntentComment" => {
+            crate::low::tiktok_high_intent_comment(&deps, &job.data["data"]).await?
+        }
+        crate::low::PROCESS_COMMENT_AUTOMATION => {
+            crate::low::process_comment_automation_job(&deps, &job.data["data"]).await?
+        }
         crate::inbound_events::UPDATE_INCOMING_COMMENT => {
             crate::inbound_events::update_incoming_comment(&deps, &job.data["data"]).await?
         }
@@ -186,6 +196,14 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
+        }
+        // Queued by the Q.I4 store webhook receivers; the job side
+        // (`processShopifyWebhook` / `processWooCommerceWebhook`) is the
+        // Q.D8 store sync. Failed jobs stay in the failed set for a retry.
+        "shopifyWebhook" | "woocommerceWebhook" => {
+            return Err(JobError::unrecoverable(format!(
+                "{kind}: the store sync (Q.D8) is not ported yet"
+            )));
         }
         other => {
             // ponytail: every other integration action is a later unit

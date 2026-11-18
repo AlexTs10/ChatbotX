@@ -289,6 +289,7 @@ pub async fn create_message(
         message_id: Some(message_id),
         received,
         is_new_contact,
+        step_input_skip: skip_challenge_id.is_some(),
     };
     if let Some(postback) = postback.as_deref().filter(|_| skip_challenge_id.is_none())
         && let Err(err) =

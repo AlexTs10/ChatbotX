@@ -871,3 +871,104 @@ async fn delete_error_log_validates_the_ids() {
         json!(["Invalid string: must match pattern /^\\d+$/"])
     );
 }
+
+// --- mcp-oauth-revoke-action.test.ts (Q.A1) ---
+
+async fn with_grant(fx: &rpc_common::Fixture, user: i64) {
+    fx.db()
+        .write(move |tx| {
+            tx.execute(
+                r#"INSERT OR IGNORE INTO "OAuthClient" ("clientId", "redirectUris", "name", "icon")
+                   VALUES ('claude', '[]', 'Claude', 'http://insecure.example/icon.png')"#,
+                [],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "OAuthConsent" ("clientId", "userId", "scopes") VALUES ('claude', ?1, '["openid"]')"#,
+                [user],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("grant");
+}
+
+#[tokio::test]
+async fn revoke_mcp_oauth_grant_revokes_only_the_current_users_grant() {
+    let fx = fixture().await;
+    with_grant(&fx, rpc_common::OWNER).await;
+    let (status, out) = action(
+        &fx,
+        "workspaceActions",
+        "listMcpOAuthGrants",
+        OWNER_TOKEN,
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["json"][0]["clientId"], "claude");
+    assert_eq!(out["json"][0]["clientName"], "Claude");
+    // A non-https icon is dropped.
+    assert_eq!(out["json"][0]["clientIcon"], Value::Null);
+
+    // Another member cannot revoke the owner's grant.
+    let (status, out) = action(
+        &fx,
+        "workspaceActions",
+        "revokeMcpOAuthGrant",
+        AGENT_TOKEN,
+        json!({ "workspaceId": ws(), "clientId": "claude" }),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK, "{out}");
+
+    let (status, out) = action(
+        &fx,
+        "workspaceActions",
+        "revokeMcpOAuthGrant",
+        OWNER_TOKEN,
+        json!({ "workspaceId": ws(), "clientId": "claude" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        scalar(
+            &fx,
+            r#"SELECT count(*) FROM "OAuthConsent" WHERE "userId" = ?1"#,
+            rpc_common::OWNER
+        )
+        .await,
+        json!(0)
+    );
+}
+
+#[tokio::test]
+async fn revoke_mcp_oauth_grant_reports_an_absent_grant() {
+    let fx = fixture().await;
+    let (status, out) = action(
+        &fx,
+        "workspaceActions",
+        "revokeMcpOAuthGrant",
+        OWNER_TOKEN,
+        json!({ "workspaceId": ws(), "clientId": "missing" }),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK, "{out}");
+    assert!(
+        out.to_string().contains("OAuth grant no longer exists"),
+        "{out}"
+    );
+}
+
+#[tokio::test]
+async fn revoke_mcp_oauth_grant_rejects_an_empty_client_id() {
+    let fx = fixture().await;
+    let (status, out) = action(
+        &fx,
+        "workspaceActions",
+        "revokeMcpOAuthGrant",
+        OWNER_TOKEN,
+        json!({ "workspaceId": ws(), "clientId": "" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+}

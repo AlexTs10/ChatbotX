@@ -469,7 +469,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/integration-webhook-threads.test.ts` | C | tbd | todo | Threads channel; builder server code |
 | `apps/builder/__tests__/integrations-public-api.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/integrations-public-scope.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
-| `apps/builder/__tests__/invitation-start-route.test.ts` | C | tbd | todo | Workspace members, roles and invitations; builder server code |
+| `apps/builder/__tests__/invitation-start-route.test.ts` | C | `crates/api/tests/session_invitation_start.rs` | ported | Workspace members, roles and invitations; builder server code; Q.A1 |
 | `apps/builder/__tests__/keywords-public-api.test.ts` | C | tbd | todo | Automated responses and keywords; builder server code |
 | `apps/builder/__tests__/lang-selector.test.tsx` | B | - | todo | i18n (UI translations); builder jsdom |
 | `apps/builder/__tests__/last-message-window.test.ts` | B | - | todo | Automated responses and keywords; builder jsdom |
@@ -520,7 +520,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/marketing-messages-update-action.test.ts` | C | tbd | todo | Facebook Marketing Messages; builder server code |
 | `apps/builder/__tests__/mcp-oauth-connect-snippets.test.ts` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
 | `apps/builder/__tests__/mcp-oauth-grants-table.test.tsx` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
-| `apps/builder/__tests__/mcp-oauth-revoke-action.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
+| `apps/builder/__tests__/mcp-oauth-revoke-action.test.ts` | C | `crates/api/tests/rpc_workspace.rs` | ported | Channel connection and OAuth connect flow; builder server code; Q.A1 |
 | `apps/builder/__tests__/me-extension-download-route.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/media-library-actions.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/media-library-public-api.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
@@ -580,13 +580,13 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/minigames-public-api.test.ts` | C | tbd | todo | Minigames; builder server code |
 | `apps/builder/__tests__/minigames-public-scope.test.ts` | C | tbd | todo | Minigames; builder server code |
 | `apps/builder/__tests__/missed-comments-scanners.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
-| `apps/builder/__tests__/mobile-contacts-member-scope.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
-| `apps/builder/__tests__/mobile-conversations-member-scope.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
-| `apps/builder/__tests__/mobile-jwt-middleware.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
-| `apps/builder/__tests__/mobile-me-api.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
-| `apps/builder/__tests__/mobile-member-allowlist.test.ts` | C | tbd | todo | Workspace members, roles and invitations; builder server code |
-| `apps/builder/__tests__/mobile-password-grant-rate-limit.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
-| `apps/builder/__tests__/mobile-user-auth-middleware.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
+| `apps/builder/__tests__/mobile-contacts-member-scope.test.ts` | C | `crates/api/tests/mobile_member_scope.rs` | ported | Contacts (profiles, notes, activity); builder server code; Q.A1 (real DB instead of mocked services) |
+| `apps/builder/__tests__/mobile-conversations-member-scope.test.ts` | C | `crates/api/tests/mobile_member_scope.rs` | ported | Inbox and live chat (conversations, messages); builder server code; Q.A1 (real DB; attribution `userId` of archive/follow/bot actions not ported) |
+| `apps/builder/__tests__/mobile-jwt-middleware.test.ts` | C | `crates/api/tests/mobile_member_scope.rs` (e2e) | ported | Authentication (sign-in, social, mobile, magic links); builder server code; Q.A1 (signed JWT through the `/api/v1` router) |
+| `apps/builder/__tests__/mobile-me-api.test.ts` | C | `crates/api/tests/mobile_member_scope.rs` (e2e) | ported | Authentication (sign-in, social, mobile, magic links); builder server code; Q.A1 (password change covered by `session_mobile_auth.rs`) |
+| `apps/builder/__tests__/mobile-member-allowlist.test.ts` | C | `crates/api/src/auth/mobile_member.rs` (unit), `crates/api/tests/mobile_member_scope.rs` | ported | Workspace members, roles and invitations; builder server code; Q.A1 (the source-scan cases are TS-only) |
+| `apps/builder/__tests__/mobile-password-grant-rate-limit.test.ts` | C | `crates/api/tests/session_auth_rate_limit.rs` | ported | Authentication (sign-in, social, mobile, magic links); builder server code; Q.A1 (main cases) |
+| `apps/builder/__tests__/mobile-user-auth-middleware.test.ts` | C | `crates/api/tests/mobile_member_scope.rs` (e2e) | ported | Authentication (sign-in, social, mobile, magic links); builder server code; Q.A1 |
 | `apps/builder/__tests__/move-broadcast-to-draft-dialog.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/nav-main-mobile.test.tsx` | B | - | todo | Builder app shell and shared components; builder jsdom |
 | `apps/builder/__tests__/navigation-pending.test.tsx` | B | - | todo | Builder app shell and shared components; builder jsdom |
@@ -2052,7 +2052,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/broadcast-service-create.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-drafts.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-lifecycle.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
-| `packages/business/__tests__/broadcast-service-list-contacts.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
+| `packages/business/__tests__/broadcast-service-list-contacts.test.ts` | C | `crates/business/tests/broadcast_list_contacts.rs` | done | Broadcasts (incl. recurring) |
 | `packages/business/__tests__/broadcast-service-payment-request.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | WhatsApp message templates; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/broadcast-service-prepare.test.ts` | C | tbd | todo | Broadcasts (incl. recurring) |
 | `packages/business/__tests__/broadcast-service-resend.test.ts` | C | `crates/business/tests/broadcast_service.rs` | ported | Broadcasts (incl. recurring); Q.D5 (see specs/Q.D5-test-map.tsv) |
@@ -2316,7 +2316,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/live-counter-store.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/__tests__/magic-link.service.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/business/__tests__/map-stats-contact-row.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/business/__tests__/mcp-oauth.service.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
+| `packages/business/__tests__/mcp-oauth.service.test.ts` | C | `crates/business/tests/mcp_oauth_service.rs` | ported | Channel connection and OAuth connect flow; Q.A1 (not ported: synthetic support membership, mocked-logger assertions) |
 | `packages/business/__tests__/media-library-file-service.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/business/__tests__/media-library-read-image.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/business/__tests__/media-library.service.test.ts` | C | tbd | todo | Media library and file storage |

@@ -1820,3 +1820,236 @@ async fn user_persistent_menus_crud() {
     .await;
     assert!(found.is_null());
 }
+
+#[tokio::test]
+async fn comment_automation_screens_run_the_public_routes() {
+    let (router, _) = router().await;
+    let options = json!({
+        "replyToNewContactsOnly": false, "replyOncePerUserPerPost": true,
+        "likeUserComment": false, "replyToUsersWhoCommentedOnOtherPosts": true,
+        "ignoreCommentReplies": true, "trackUserTags": false,
+    });
+    let hide = json!({
+        "all": false, "hasPhoneNumber": true, "hasImage": false, "hasVideo": false,
+        "hasLink": true, "hasKeywords": true, "keywords": ["spam"], "showCommentsAfter": "none",
+    });
+    let body = json!({
+        "name": "Price replies",
+        "post": { "type": "postIds", "value": ["111_222"] },
+        "privateReply": { "type": "text", "value": "Check your inbox" },
+        "publicReply": { "type": "text", "value": "Thanks!" },
+        "includeKeywords": { "type": "contain", "value": ["price"] },
+        "excludeKeywords": [],
+        "options": options,
+        "hideComments": hide,
+        "replyAfter": { "type": "seconds", "value": 30 },
+    });
+    let (status, created) = act(
+        &router,
+        "admintoken",
+        "createFbCommentAction",
+        json!([ws(), body]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+
+    // Schema issues come back as next-safe-action `validationErrors`.
+    let (status, error) = act(
+        &router,
+        "admintoken",
+        "createFbCommentAction",
+        json!([ws(), { "name": "" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(error["data"]["validationErrors"].is_object(), "{error}");
+
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "updateFbCommentAction",
+        json!([ws(), id, { "name": "Renamed" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, list) = act(
+        &router,
+        "admintoken",
+        "listFbComments",
+        json!([{ "workspaceId": ws(), "page": 1, "perPage": 10, "name": "renamed" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["data"][0]["id"], id);
+    let (status, row) = act(&router, "admintoken", "getFbComment", json!([{ "id": id }])).await;
+    assert_eq!(status, StatusCode::OK, "{row}");
+    assert_eq!(row["name"], "Renamed");
+    // Not an Instagram automation.
+    let (status, _) = act(&router, "admintoken", "getIgComment", json!([{ "id": id }])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, accounts, _) = post(
+        &router,
+        "commentAutomationsAPI/automationAccountsAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "type": "messenger" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accounts}");
+    assert_eq!(accounts, json!({ "accounts": [] }));
+
+    let (status, _) = act(
+        &router,
+        "admintoken",
+        "bulkDeleteFbCommentsAction",
+        json!([ws(), { "ids": [id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = act(&router, "admintoken", "getFbComment", json!([{ "id": id }])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn saved_reply_sla_and_rest_actions_are_wired() {
+    let (router, _) = router().await;
+    let act = |name: &'static str, args: Value| {
+        let router = router.clone();
+        async move {
+            post(
+                &router,
+                &format!("actions/{name}"),
+                "admintoken",
+                json!({ "workspaceId": ws(), "args": args }),
+            )
+            .await
+        }
+    };
+    let (status, reply, _) = act(
+        "createSavedReplyAction",
+        json!([ws(), { "shortcut": "hi", "text": "Hello" }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    let id = reply["id"].as_str().unwrap().to_string();
+    // The form refine is a `validationErrors.text` entry.
+    let (status, error, _) =
+        act("createSavedReplyAction", json!([ws(), { "shortcut": "x" }])).await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(
+        error["data"]["validationErrors"]["text"]["_errors"][0].is_string(),
+        "{error}"
+    );
+    let (status, out, _) = act(
+        "editSavedReplyAction",
+        json!([ws(), id.clone(), { "shortcut": "hey" }]),
+    )
+    .await;
+    assert_eq!(
+        (status, out["text"].clone()),
+        (StatusCode::OK, json!("Hello")),
+        "{out}"
+    );
+    let (_, list, _) = post(
+        &router,
+        "savedRepliesAPI/listSavedRepliesAuthorizedAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(list["data"][0]["shortcut"], "hey", "{list}");
+    let (status, _, _) = act("deleteSavedReplyAction", json!([ws(), id])).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, sla, _) = act(
+        "updateResponseSlaAction",
+        json!([ws(), { "firstResponseTargetSeconds": 300, "nextResponseTargetSeconds": 600, "enabled": false }]),
+    )
+    .await;
+    assert_eq!(
+        (status, sla["enabled"].clone()),
+        (StatusCode::OK, json!(false)),
+        "{sla}"
+    );
+    let (_, status_out, _) = post(
+        &router,
+        "responseSlaAPI/getResponseSlaStatusWorkspaceAuthAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(status_out, json!({ "enabled": false }));
+
+    // Working hours: create, holiday, the options procedure.
+    let (status, wh, _) = act(
+        "createWorkingHoursAction",
+        json!([ws(), { "name": "Day", "intervals": [{ "weekday": 1, "startMinute": 0, "endMinute": 60 }] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{wh}");
+    let (status, out, _) = act(
+        "createHolidayAction",
+        json!([ws(), { "date": "2026-05-01", "ranges": [] }]),
+    )
+    .await;
+    assert_eq!(
+        (status, out["date"].clone()),
+        (StatusCode::OK, json!("2026-05-01")),
+        "{out}"
+    );
+    let (_, options, _) = post(
+        &router,
+        "workingHoursAPI/listWorkingHoursOptionsWorkspaceAuthAPI",
+        "admintoken",
+        json!({ "workspaceId": ws() }),
+    )
+    .await;
+    assert_eq!(options["data"][0]["name"], "Day", "{options}");
+    let (status, _, _) = act("deleteWorkingHoursAction", json!([ws(), wh["id"].clone()])).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Magic links: a taken name is `validationErrors.name`.
+    let link = json!({ "name": "promo", "url": "https://example.com" });
+    let (status, out, _) = act("createMagicLinkAction", json!([ws(), link.clone()])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, error, _) = act("createMagicLinkAction", json!([ws(), link])).await;
+    assert_ne!(status, StatusCode::OK);
+    assert_eq!(
+        error["data"]["validationErrors"]["name"]["_errors"][0], "Name is already taken",
+        "{error}"
+    );
+
+    // Spreadsheets: no Google Sheets integration is `validationErrors.url`.
+    let (status, error, _) = act(
+        "createSpreadsheetAction",
+        json!([ws(), { "name": "S", "url": "https://docs.google.com/spreadsheets/d/x/edit" }]),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(
+        error["data"]["validationErrors"]["url"]["_errors"][0].is_string(),
+        "{error}"
+    );
+
+    // The flow-editor reads of the domains whose CRUD waits.
+    for (path, expected) in [
+        ("decisionProfilesAPI/listActiveForFlow", json!([])),
+        (
+            "leaderboardsAPI/listLeaderboardOptionsAPI",
+            json!({ "data": [] }),
+        ),
+    ] {
+        let (status, out, _) =
+            post(&router, path, "admintoken", json!({ "workspaceId": ws() })).await;
+        assert_eq!((status, out), (StatusCode::OK, expected), "{path}");
+    }
+    let (status, _, _) = post(
+        &router,
+        "dynamicImagesAPI/getDynamicImageAPI",
+        "admintoken",
+        json!({ "workspaceId": ws(), "id": "1" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
