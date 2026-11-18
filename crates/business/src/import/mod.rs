@@ -5,6 +5,7 @@
 //! is part two.
 
 pub mod contacts;
+pub mod coupons;
 pub mod csv;
 pub mod products;
 pub mod template;

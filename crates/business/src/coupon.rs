@@ -132,6 +132,15 @@ pub async fn list_topics(
     .await
 }
 
+/// A live topic of the workspace.
+pub fn get_topic_in(
+    conn: &Connection,
+    workspace_id: i64,
+    topic_id: i64,
+) -> Result<Option<CouponTopic>> {
+    find_topic(conn, workspace_id, topic_id)
+}
+
 fn find_topic(conn: &Connection, workspace_id: i64, topic_id: i64) -> Result<Option<CouponTopic>> {
     Ok(find_one(
         conn,
@@ -708,6 +717,149 @@ pub fn issued_code(
     Ok(find_issued(conn, workspace_id, topic_id, contact_id)?
         .map(|c| c.code)
         .unwrap_or_default())
+}
+
+// ---- export ------------------------------------------------------------------
+
+/// The workspace owner (the public routes act as the owner).
+pub fn owner_id(conn: &Connection, workspace_id: i64) -> Result<Option<i64>> {
+    conn.query_row(
+        r#"SELECT "ownerId" FROM "Workspace" WHERE "id" = ?1"#,
+        params![workspace_id],
+        |r| r.get(0),
+    )
+    .optional()
+    .map(Option::flatten)
+    .map_err(|e| BusinessError::Repo(e.into()))
+}
+
+/// `coupons.export` + the worker's `exportCoupons`, run in the request: a
+/// BOM-prefixed, always-quoted CSV of the matching coupons (by id); an empty
+/// result is a failed file. Returns the file id.
+pub async fn export(
+    db: &chatbotx_db::Db,
+    uploader: Option<&chatbotx_files::Uploader>,
+    workspace_id: i64,
+    filter: CouponFilter,
+) -> Result<i64> {
+    use chatbotx_core::utils::csv::{CsvCell, CsvDialect, UTF8_BOM, to_csv_row};
+    let file_id = new_id();
+    let path = format!("workspaces/{workspace_id}/exports/coupons/coupon_{file_id}.csv");
+    let file_name = format!("coupons-{}.csv", &iso(now_ms())[..10]);
+    let (body, total) = tx::write(db, move |tx| {
+        let conn: &Connection = tx;
+        let owner = owner_id(conn, workspace_id)?;
+        let now = now_ms();
+        conn.execute(
+            r#"INSERT INTO "File" ("id", "createdAt", "updatedAt", "workspaceId", "userId", "contextType", "subType", "path", "fileName", "mimeType", "status")
+               VALUES (?1, ?2, ?2, ?3, ?4, 'export', 'coupons', ?5, ?6, 'text/csv', 'pending')"#,
+            params![file_id, now, workspace_id, owner, path, file_name],
+        )
+        .map_err(|e| BusinessError::Repo(e.into()))?;
+        let header: Vec<CsvCell> = ["Name", "Code", "Used", "Date"].map(CsvCell::from).to_vec();
+        let mut body = format!("{UTF8_BOM}{}", to_csv_row(&header, CsvDialect::Always));
+        let rows = list_for_export(conn, workspace_id, &filter)?;
+        // ponytail: one in-memory CSV; the original's 500k-row cap never binds a 10k-per-topic pool here.
+        for (c, topic_name) in &rows {
+            let used = if c.issued_contact_id.is_some() {
+                "Published"
+            } else {
+                "Unpublished"
+            };
+            body.push_str(&to_csv_row(
+                &[
+                    CsvCell::from(topic_name.as_str()),
+                    CsvCell::from(c.code.as_str()),
+                    CsvCell::from(used),
+                    CsvCell::from(iso(c.created_at).as_str()),
+                ],
+                CsvDialect::Always,
+            ));
+        }
+        Ok((body, rows.len() as i64))
+    })
+    .await?;
+    let path = format!("workspaces/{workspace_id}/exports/coupons/coupon_{file_id}.csv");
+    let size = body.len() as i64;
+    let uploaded = match uploader {
+        Some(uploader) if total > 0 => uploader
+            .put_object(
+                &path,
+                body.into_bytes(),
+                chatbotx_files::PutOptions {
+                    content_type: Some("text/csv; charset=utf-8".into()),
+                    ..chatbotx_files::PutOptions::default()
+                },
+                None,
+            )
+            .await
+            .map_err(|e| tracing::error!(error = %e, file_id, "coupon export upload failed"))
+            .is_ok(),
+        _ => false,
+    };
+    tx::write(db, move |tx| {
+        let conn: &Connection = tx;
+        let now = now_ms();
+        conn.execute(
+            r#"UPDATE "File" SET "status" = ?2, "fileSize" = ?3, "meta" = ?4, "uploadedAt" = ?5, "updatedAt" = ?6 WHERE "id" = ?1"#,
+            params![
+                file_id,
+                if uploaded { "uploaded" } else { "failed" },
+                uploaded.then_some(size),
+                json!({ "totalRecords": total }).to_string(),
+                uploaded.then_some(now),
+                now,
+            ],
+        )
+        .map_err(|e| BusinessError::Repo(e.into()))?;
+        Ok(())
+    })
+    .await?;
+    Ok(file_id)
+}
+
+/// `getExportFile` (the owner's coupon export) with a 300 s download URL
+/// once uploaded.
+pub async fn get_export(
+    db: &chatbotx_db::Db,
+    uploader: Option<&chatbotx_files::Uploader>,
+    workspace_id: i64,
+    file_id: i64,
+) -> Result<Value> {
+    let row: Option<(String, String, String, Option<String>)> = tx::read(db, move |conn| {
+        let owner = owner_id(conn, workspace_id)?;
+        conn.query_row(
+            r#"SELECT "status", "fileName", "path", "meta" FROM "File"
+               WHERE "id" = ?1 AND "workspaceId" = ?2 AND "userId" IS ?3 AND "contextType" = 'export' AND "subType" = 'coupons'"#,
+            params![file_id, workspace_id, owner],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()
+        .map_err(|e| BusinessError::Repo(e.into()))
+    })
+    .await?;
+    let Some((status, file_name, path, meta)) = row else {
+        return Err(BusinessError::not_found("Export file not found"));
+    };
+    let total = meta
+        .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+        .and_then(|m| m["totalRecords"].as_i64())
+        .unwrap_or(0);
+    let download_url = match uploader {
+        Some(uploader) if status == "uploaded" => Some(
+            uploader
+                .get_presigned_download(&path, Some(300))
+                .await
+                .map_err(|e| BusinessError::Repo(chatbotx_db::repo::Error::msg(e.to_string())))?,
+        ),
+        _ => None,
+    };
+    Ok(json!({
+        "status": status,
+        "fileName": file_name,
+        "downloadUrl": download_url,
+        "totalRecords": total,
+    }))
 }
 
 #[cfg(test)]

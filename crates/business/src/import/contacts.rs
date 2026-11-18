@@ -701,6 +701,13 @@ pub async fn run_import(db: &Db, uploader: &Uploader, import_id: i64) -> Result<
         }
         return Ok(());
     }
+    if row.import_type == "coupons" {
+        if let Err(error) = super::coupons::run_coupons(db, uploader, import_id, &row, &path).await
+        {
+            fail(db, import_id, &error.to_string(), None, None).await?;
+        }
+        return Ok(());
+    }
     if row.import_type != "contacts" {
         return fail(
             db,

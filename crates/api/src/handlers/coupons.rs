@@ -10,7 +10,8 @@ use super::input::{Input, Num, Seg, Str, key};
 use super::{ApiState, Call, ErrorMap, Reply, business_error, json};
 use crate::orpc::OrpcError;
 
-/// The routes of this module (the import / export ones are not ported).
+/// The routes of this module. The import and the export run in the request
+/// (the contact export precedent), not on a worker queue.
 pub const ROUTES: &[&str] = &[
     "coupons.listTopics",
     "coupons.createTopic",
@@ -24,6 +25,23 @@ pub const ROUTES: &[&str] = &[
     "coupons.markCouponUsed",
     "coupons.listContactCoupons",
     "coupons.bulkCreate",
+    "coupons.createImportUploadUrl",
+    "coupons.import",
+    "coupons.export",
+    "coupons.getExport",
+];
+
+/// The `couponImportErrors` a route declares.
+const IMPORTING: ErrorMap = &[
+    ("notFound", 404),
+    ("businessError", 400),
+    ("idempotencyKeyInvalid", 422),
+    ("idempotencyKeyReused", 422),
+    ("idempotencyKeyConflict", 409),
+    ("couponImportFileNotFound", 404),
+    ("couponImportUnsupportedFile", 400),
+    ("couponImportFileTooLarge", 400),
+    ("couponTopicInactive", 400),
 ];
 
 /// `possibleErrorsOnMutatingResource` + the bulk refusals.
@@ -296,6 +314,108 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .await
                 .map_err(|e| business_error(e, super::FINDING))?;
             Ok(json(200, json!({ "data": data })))
+        }
+        "coupons.createImportUploadUrl" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let file_name = input.string("fileName", Str::trimmed(1, 255));
+            if file_name
+                .as_deref()
+                .is_some_and(|n| !n.to_lowercase().ends_with(".csv"))
+            {
+                input.issue(
+                    &key("fileName"),
+                    "custom",
+                    "Coupon import files must use the .csv extension",
+                );
+            }
+            if input.get("mimeType").and_then(Value::as_str) != Some("text/csv") {
+                input.issue(
+                    &key("mimeType"),
+                    "invalid_value",
+                    "Invalid input: expected \"text/csv\"",
+                );
+            }
+            let size = input.number("size", Num::int(1.0, 10.0 * 1024.0 * 1024.0));
+            input.finish()?;
+            let files = state
+                .files
+                .as_deref()
+                .ok_or_else(|| super::internal_error("file storage is not configured"))?;
+            let storage_url = super::contacts::tenant_urls(state).storage_url;
+            let upload = chatbotx_business::import::create_import_upload(
+                db,
+                files,
+                &storage_url,
+                chatbotx_business::import::CreateImportUpload {
+                    workspace_id: ws,
+                    user_id: None,
+                    import_type: chatbotx_business::import::ImportType::Coupons,
+                    file_name: file_name.unwrap_or_default(),
+                    mime_type: "text/csv".into(),
+                    file_size: size.unwrap_or_default() as i64,
+                },
+            )
+            .await
+            .map_err(|e| business_error(e, super::CREATING))?;
+            Ok(json(
+                201,
+                json!({ "fileId": upload.file_id.to_string(), "uploadUrl": upload.presigned_post_url }),
+            ))
+        }
+        "coupons.import" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let topic_id = input.id("topicId");
+            let file_id = input.id("fileId");
+            input.finish()?;
+            let files = state
+                .files
+                .as_deref()
+                .ok_or_else(|| super::internal_error("file storage is not configured"))?;
+            let import_id = chatbotx_business::import::coupons::start(
+                db,
+                files,
+                ws,
+                None,
+                file_id.unwrap_or_default(),
+                topic_id.unwrap_or_default(),
+            )
+            .await
+            .map_err(|e| business_error(e, IMPORTING))?;
+            if let Err(error) =
+                chatbotx_business::import::contacts::run_import(db, files, import_id).await
+            {
+                tracing::error!(%error, import_id, "coupon import run failed");
+            }
+            Ok(json(201, json!({ "importId": import_id.to_string() })))
+        }
+        "coupons.export" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let topic_id = if input.has("topicId") {
+                input.id("topicId")
+            } else {
+                None
+            };
+            let issue_status = opt_enum(&mut input, "issueStatus", ISSUE_STATUSES);
+            let usage_status = opt_enum(&mut input, "usageStatus", USAGE_STATUSES);
+            let search = input.opt_string("search", Str::trimmed(1, 255));
+            input.finish()?;
+            let filter = CouponFilter {
+                topic_id,
+                issue_status,
+                usage_status,
+                search,
+            };
+            let file_id = coupon::export(db, state.files.as_deref(), ws, filter)
+                .await
+                .map_err(|e| business_error(e, super::CREATING))?;
+            Ok(json(201, json!({ "fileId": file_id.to_string() })))
+        }
+        "coupons.getExport" => {
+            let file_id = path_id(&call, "fileId")?;
+            let file = coupon::get_export(db, state.files.as_deref(), ws, file_id)
+                .await
+                .map_err(|e| business_error(e, super::FINDING))?;
+            Ok(json(200, file))
         }
         _ => {
             let mut input = Input::from_body(call.params, call.body);
