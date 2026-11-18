@@ -201,6 +201,12 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::marketing_message::PROCESS_MARKETING_MESSAGE_WEBHOOK => {
             crate::marketing_message::process_webhook(&deps, &job.data["data"]).await?
         }
+        // `handleSyncRetargetAudience` (a failure is retried).
+        "syncRetargetAudience" => {
+            chatbotx_business::ads::retarget::sync(&deps.db, &job.data["data"])
+                .await
+                .map_err(|e| JobError::retryable(e.to_string()))?
+        }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }

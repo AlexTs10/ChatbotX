@@ -256,6 +256,30 @@ impl Upstream for HttpUpstream {
     }
 }
 
+/// A POST of raw bytes (the Graph multipart uploads: `postForm` has no
+/// timeout; 5 minutes here).
+pub async fn send_bytes(url: &str, content_type: &str, body: Vec<u8>) -> UpstreamReply {
+    static CLIENT: OnceLock<std::result::Result<reqwest::Client, String>> = OnceLock::new();
+    let client = CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(300))
+                .build()
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(Clone::clone)?;
+    let response = client
+        .post(url)
+        .header("content-type", content_type)
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    Ok((status, response.text().await.unwrap_or_default()))
+}
+
 /// `AiKeyValidation`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyValidation {

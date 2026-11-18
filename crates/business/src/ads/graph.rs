@@ -80,6 +80,13 @@ where
     Ok(value)
 }
 
+/// Drops one cached key (a `forceRefresh` read).
+pub(crate) fn forget(key: &str) {
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.remove(key);
+    }
+}
+
 fn decrypt(raw: &Value) -> Option<AdsAuth> {
     let data: EncryptedData = serde_json::from_value(raw.clone()).ok()?;
     let auth: Value = process_encryption().decrypt_object(&data, None).ok()?;
@@ -145,7 +152,7 @@ pub fn integration_ref(workspace_id: i64, channel: &str, integration_id: i64) ->
     out
 }
 
-async fn mark_invalid(db: &Db, reference: IntegrationRef) {
+pub(crate) async fn mark_invalid(db: &Db, reference: IntegrationRef) {
     let result = tx::write(db, move |tx| {
         connections::update_status(tx, reference, "invalid")?;
         Ok(())
@@ -534,7 +541,7 @@ pub async fn source_auth(
 
 /// `invalidateMessagingAdsCache`: drops the cached Graph reads of one
 /// integration.
-fn invalidate(workspace_id: i64, channel: &str, integration_id: i64) {
+pub(crate) fn invalidate(workspace_id: i64, channel: &str, integration_id: i64) {
     let suffix = format!(":{workspace_id}:{channel}:{integration_id}");
     if let Ok(mut cache) = CACHE.lock() {
         cache.retain(|key, _| !(key.starts_with("msgads:") && key.ends_with(&suffix)));
