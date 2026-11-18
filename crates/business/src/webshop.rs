@@ -1228,6 +1228,105 @@ pub async fn rate_order(
     Ok(json!({ "rating": rating, "ratingComment": comment }))
 }
 
+// ---- inbound (WhatsApp catalog) carts --------------------------------------------
+
+/// `replaceFromInboundCart`'s lines: items not linked to a product here
+/// cannot be ordered and are left out (the count is returned).
+pub fn inbound_cart_lines(cart: &Value) -> (Vec<PlaceItem>, usize) {
+    let mut lines = Vec::new();
+    let mut skipped = 0;
+    for item in cart["items"].as_array().into_iter().flatten() {
+        let product_id = item["product"]["productId"]
+            .as_str()
+            .and_then(|id| id.parse::<i64>().ok());
+        let Some(product_id) = product_id else {
+            skipped += 1;
+            continue;
+        };
+        let quantity = item["quantity"].as_f64().unwrap_or(0.0) as i64;
+        lines = change_line(
+            &lines,
+            &PlaceItem {
+                product_id,
+                variant_id: None,
+                quantity,
+            },
+            Mode::Add,
+        );
+    }
+    (lines, skipped)
+}
+
+/// `buildInboundCartReply`: a cart sent through WhatsApp's own catalog
+/// becomes the contact's shop cart, and the reply sums it up above a CHECK
+/// OUT button (`{ text, buttonLabel, buttonUrl }`). `None` when the store
+/// takes no orders or none of the items is sold here.
+pub async fn build_inbound_cart_reply(
+    db: &chatbotx_db::Db,
+    app_url: &str,
+    shopper: Shopper,
+    cart: &Value,
+) -> Result<Option<Value>> {
+    let ws = shopper.workspace_id;
+    let (settings, language) = tx::read(db, move |conn| {
+        let language = workspace_row(conn, ws)?.map(|w| w.language);
+        Ok((ecommerce_settings::get_in(conn, ws)?, language))
+    })
+    .await?;
+    if settings["general"]["orderingAvailable"] != true {
+        return Ok(None);
+    }
+    let (lines, skipped) = inbound_cart_lines(cart);
+    tx::write(db, move |tx| upsert_lines(tx, &shopper, &lines)).await?;
+    let priced = cart::get_cart(db, ws, shopper.contact_id, None, false).await?;
+    let priced_lines = priced["lines"].as_array().cloned().unwrap_or_default();
+    if priced_lines.is_empty() {
+        return Ok(None);
+    }
+    let language = order::messages::language(language.as_deref());
+    let totals = &priced["totals"];
+    let number = |key: &str| totals[key].as_f64().unwrap_or(0.0);
+    let discount = priced["discount"]["code"]
+        .as_str()
+        .map(|code| (code, priced["discount"]["amount"].as_f64().unwrap_or(0.0)));
+    let text = order::messages::cart_summary_text(
+        &order::messages::CartSummary {
+            item_count: priced_lines
+                .iter()
+                .map(|l| l["quantity"].as_i64().unwrap_or(0))
+                .sum(),
+            currency: priced["currency"].as_str().unwrap_or(""),
+            subtotal: number("subtotal"),
+            discount_total: number("discountTotal"),
+            shipping_total: number("shippingTotal"),
+            service_fee_total: number("serviceFeeTotal"),
+            tax_total: number("taxTotal"),
+            total: number("total"),
+            discount,
+            skipped: skipped + priced["unavailable"].as_array().map_or(0, Vec::len),
+        },
+        language,
+        &order::messages::Payments::of(&settings["payments"]),
+    );
+    let external = (settings["checkout"]["checkoutMode"] == "externalLink")
+        .then(|| settings["checkout"]["checkoutLink"].as_str())
+        .flatten();
+    let button_url = external.map_or_else(
+        || {
+            chatbotx_core::utils::web_url::join_app_url(
+                app_url,
+                &format!("/shop/{ws}/cart?token={{{{shop_token}}}}"),
+            )
+        },
+        str::to_string,
+    );
+    Ok(Some(json!({
+        "text": text,
+        "buttonLabel": order::messages::strings(language).check_out,
+        "buttonUrl": button_url,
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1313,6 +1412,18 @@ mod tests {
         form.shipping_address = None;
         form.shipping_type = Some("pickup".into());
         assert!(assert_checkout_form(&settings, &form).is_ok());
+    }
+
+    #[test]
+    fn inbound_cart_keeps_linked_items() {
+        let cart = json!({ "items": [
+            { "product": { "productId": "5" }, "quantity": 2 },
+            { "product": null, "quantity": 1 },
+            { "product": { "productId": "5" }, "quantity": 1 },
+        ] });
+        let (lines, skipped) = inbound_cart_lines(&cart);
+        assert_eq!(lines, vec![line(5, None, 3)]);
+        assert_eq!(skipped, 1);
     }
 
     #[test]

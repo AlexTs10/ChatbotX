@@ -155,9 +155,12 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         }
     }
     // ponytail: the Zalo / Telegram tap label (`resolvePostbackButtonLabel`,
-    // `resolveStepInputSkipLabel`), profile lookups, Google click, commerce
-    // enrichment and thread-control recording are not ported: they need the
-    // channel profile fetcher / ads / commerce units.
+    // `resolveStepInputSkipLabel`), profile lookups, Google click and
+    // thread-control recording are not ported: they need the channel
+    // profile fetcher / ads units.
+    // A cart or product question is named before the save, so the stored
+    // message already carries it.
+    crate::inbound_cart::enrich(deps, &inbox, &mut received).await;
     let source = contact_source(received.referral_source.as_deref());
     // Orchestrator decision (DECISIONS 2026-11-17): the contact lookup /
     // creation, the contact updates and the message insert are one write
@@ -774,6 +777,9 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
     let can_automate = workspace_active && !suppress;
     if stored.step_input_skip {
         return Ok(());
+    }
+    if can_automate {
+        crate::inbound_cart::announce(deps, stored, message, message_id).await?;
     }
 
     // The appointment cancel postback replaces the flow action.
