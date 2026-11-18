@@ -68,6 +68,7 @@ fn now_secs() -> i64 {
 }
 
 /// `toReceiptOrThrow`: a bad signature is 400, any other failure 500.
+#[allow(clippy::result_large_err)] // ponytail: an early-return reply, built once per request
 fn parsed(result: PResult<WebhookEvent>) -> Result<WebhookEvent, Response> {
     result.map_err(|error| {
         if error.kind == ErrorKind::SignatureInvalid {
