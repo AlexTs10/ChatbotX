@@ -289,6 +289,21 @@ pub async fn update_topic(
             Some(at) => Some(normalize_expires_at(conn, workspace_id, at, false)?),
             None => None,
         };
+        // `withEditGuard` (`changedKeysOf`): only what actually changes
+        // counts, a form re-submits every field.
+        let empty_as_none = |v: &Option<String>| v.clone().filter(|t| !t.is_empty());
+        let changed = name.as_ref().is_some_and(|n| *n != existing.name)
+            || description
+                .as_ref()
+                .is_some_and(|d| empty_as_none(d) != empty_as_none(&existing.description))
+            || expires_at.is_some_and(|e| e != existing.expires_at);
+        crate::template::assert_editable_in(
+            conn,
+            workspace_id,
+            "couponTopic",
+            &[topic_id],
+            changed,
+        )?;
         conn.execute(
             r#"UPDATE "CouponTopic" SET
                  "name" = COALESCE(?3, "name"),
@@ -341,6 +356,7 @@ pub async fn delete_topic(
 ) -> Result<CouponTopic> {
     tx::write(db, move |tx| {
         let conn: &Connection = tx;
+        crate::template::assert_deletable_in(conn, workspace_id, "couponTopic", &[topic_id])?;
         let topic = find_topic(conn, workspace_id, topic_id)?
             .filter(|t| t.status == "archived")
             .ok_or_else(|| BusinessError::not_found("Archived coupon topic not found"))?;

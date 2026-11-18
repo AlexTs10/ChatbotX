@@ -205,6 +205,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::marketing_message::PROCESS_MARKETING_MESSAGE_WEBHOOK => {
             crate::marketing_message::process_webhook(&deps, &job.data["data"]).await?
         }
+        crate::inbound_cart::REPLY_TO_INBOUND_CART => {
+            crate::inbound_cart::reply_to_inbound_cart(&deps, &job.data["data"]).await?
+        }
         crate::order_payment::CONFIRM_ORDER_PAYMENT => {
             crate::order_payment::confirm_order_payment(&deps, &job.data["data"]).await?
         }

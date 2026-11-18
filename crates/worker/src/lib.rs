@@ -24,6 +24,7 @@ pub mod events;
 pub mod flow;
 pub mod heavy;
 pub mod inbound;
+pub mod inbound_cart;
 pub mod inbound_events;
 pub mod inbox_labels;
 pub mod integration;

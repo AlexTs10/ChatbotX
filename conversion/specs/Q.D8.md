@@ -12,7 +12,8 @@ Branch `feat/conversion-d8` (after P3.6-D1o).
 | 4 | SPA: orders (list, detail, status moves, cancel, delete, export), discount codes (list, form, on/off, delete, generate), settings sections, analytics | `api::rpc_procedures::ecommerce`, `apps/web/src/routes/ecommerce.tsx` + copied builder features | `app/space/[workspaceId]/(e-commerce)/*` | done |
 | 5 | Shopify / WooCommerce sync (`shopifyWebhook` / `woocommerceWebhook` jobs, catalog and order mirror, connect / status / sync routes, SPA status and actions) | `business::{shopify,woocommerce}`, `worker::store_sync`, `api::handlers::store_connections` | `packages/business/src/{shopify,woocommerce}/*` | done |
 | 6a | `carts.get`, discount `listAvailable`, coupons (`coupons.*`, 16 routes incl. CSV import / export) | `business::{cart,coupon,import::coupons}`, `api::handlers::{webshop,coupons}` | `webshop/service.ts` (`getCart`), `coupon/service.ts` | done |
-| 6b | Public web shop pages and their actions, commerce enrichment | — | `app/(webshop)/*`, `webshop/service.ts` | not ported |
+| 6b | Public web shop pages (`shopHome`, `shopCategories`, `shopProduct`, `shopCart`, `shopOrder`) and their 6 actions; WhatsApp cart / product-question enrichment, `shoppingCartSent` / `userAskedAboutProduct`, `replyToInboundCart` | `business::webshop`, `api::shop_public`, `worker::inbound_cart`, `apps/web/src/routes/shop.tsx` | `app/(webshop)/*`, `webshop/service.ts`, `inbound-commerce.ts`, `reply-to-inbound-cart.ts` | done (external-store checkout not ported) |
+| 6c | Coupon-template edit / delete guards; Stripe settings page (`paymentProvidersPage`, connect key, disconnect, Connect button) | `business::template`, `business::coupon`, `api::rpc_procedures::ecommerce`, `routes/settings.tsx` | `withEditGuard` / `withDeleteGuard`, `features/payment-providers/*` | done |
 | 7 | Stripe Connect OAuth (`stripeAvailable`, `startStripeConnectAction`, `/integrations/stripe/callback`) | `business::payment_provider`, `api::connect_callback`, `api::rpc_procedures::ecommerce` | `payment-provider/service.ts`, `integrations/stripe/callback/route.ts` | done |
 
 ## Security
@@ -51,11 +52,12 @@ Not run in this unit: p1-07 `10-coupon-topics`, `11-coupons`,
 `12-coupon-import-export`, `15-discount-codes`; p1-04 `08-carts`; p1-08
 `02-ecommerce-settings`, `03-ecommerce-analytics`; p1-12
 `20-payment-providers`, `30-orders`; the Shopify / WooCommerce receiver
-suites.
+suites; p1-04 / p1-12 webshop public page and action suites, WhatsApp
+inbound order / `replyToInboundCart` worker suites.
 
 ## Not ported (left for a later unit)
 
-- Slice 6b: the public web shop pages (5 Next pages, 6 actions, about 1700
-  lines of `webshop/service.ts`) and commerce enrichment: too large for
-  this unit.
-- The coupon-template guards on message-template edit / delete.
+- Checkout of a Shopify / WooCommerce store from the public shop
+  (`placeExternalOrder`): answers `webshopClosed` / `orderingUnavailable`.
+- The blocked-owner part of the workspace freeze check of `orderingState`
+  (only trial expiry / scheduled deletion are checked).

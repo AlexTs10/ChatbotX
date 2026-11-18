@@ -805,6 +805,49 @@ fn interactive_reply(
 }
 
 /// `receiveMessage`: one `whatsapp-api-js` `OnMessageArgs` payload.
+fn non_empty(v: &Value, key: &str) -> Option<String> {
+    v[key].as_str().filter(|s| !s.is_empty()).map(str::to_owned)
+}
+
+/// `readOrderCommerce`: one malformed item does not drop the others; a cart
+/// with no catalog or no usable item reports nothing.
+fn order_commerce(order: &Value) -> Option<Value> {
+    let catalog_id = non_empty(order, "catalog_id")?;
+    let note = match &order["text"] {
+        Value::Null => None,
+        Value::String(text) => Some(text.clone()).filter(|t| !t.is_empty()),
+        _ => return None,
+    };
+    let items: Vec<Value> = order["product_items"]
+        .as_array()?
+        .iter()
+        .filter_map(|item| {
+            let number = |key: &str| item[key].is_number().then(|| item[key].clone());
+            Some(json!({
+                "catalogId": catalog_id,
+                "retailerId": non_empty(item, "product_retailer_id")?,
+                "quantity": number("quantity")?,
+                "itemPrice": number("item_price")?,
+                "currency": item["currency"].as_str()?,
+            }))
+        })
+        .collect();
+    (!items.is_empty()).then(
+        || json!({ "kind": "cartSent", "catalogId": catalog_id, "note": note, "items": items }),
+    )
+}
+
+/// `readReferredProductCommerce`: "Message business" on a catalog message.
+fn referred_product_commerce(referred: &Value) -> Option<Value> {
+    Some(json!({
+        "kind": "productInquiry",
+        "product": {
+            "catalogId": non_empty(referred, "catalog_id")?,
+            "retailerId": non_empty(referred, "product_retailer_id")?,
+        },
+    }))
+}
+
 pub fn parse_incoming(payload: &Value) -> Received {
     let info = crate::thread_control::whatsapp_receive_info(&payload["raw"]);
     // A standby echo is a partner's outgoing message (its Send API body), never a
@@ -892,6 +935,7 @@ pub fn parse_incoming(payload: &Value) -> Received {
             }
             incoming.text = Some(lines.join("\n"));
             incoming.content_attributes = Some(order.clone());
+            received.commerce = order_commerce(order);
         }
         "interactive" => {
             let context = message
@@ -939,7 +983,10 @@ pub fn parse_incoming(payload: &Value) -> Received {
             "videoUrl": s(r, "video_url"), "raw": r,
         }));
     }
-    // ponytail: commerce events and the `deriveAdSourcePlatform` field are not ported.
+    if kind == "text" {
+        received.commerce = referred_product_commerce(&message["context"]["referred_product"]);
+    }
+    // ponytail: the `deriveAdSourcePlatform` field is not ported.
     received.message = Some(incoming);
     received.contact = contact;
     received.thread_control = Some(info);
@@ -1066,6 +1113,28 @@ impl Channel for Whatsapp {
             .await
             .map(|_| ())
         })
+    }
+}
+
+#[cfg(test)]
+mod commerce_tests {
+    use super::*;
+
+    #[test]
+    fn order_keeps_usable_items_only() {
+        let order = json!({ "catalog_id": "c1", "text": "", "product_items": [
+            { "product_retailer_id": "sku", "quantity": 2, "item_price": 9.5, "currency": "EUR" },
+            { "product_retailer_id": "", "quantity": 1, "item_price": 1, "currency": "EUR" },
+        ] });
+        let event = order_commerce(&order).expect("cart");
+        assert_eq!(event["note"], Value::Null);
+        assert_eq!(event["items"].as_array().map(Vec::len), Some(1));
+        assert_eq!(event["items"][0]["quantity"], json!(2));
+        assert_eq!(
+            order_commerce(&json!({ "catalog_id": "", "product_items": [] })),
+            None
+        );
+        assert_eq!(referred_product_commerce(&Value::Null), None);
     }
 }
 

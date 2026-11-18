@@ -91,7 +91,9 @@ import {
   findUserPersistentMenu,
   listUserPersistentMenus,
 } from "@/features/user-persistent-menus/queries"
-import { loadPage } from "@/lib/server-action"
+import { ManageStripe } from "@/features/payment-providers/components/manage-stripe"
+import type { PaymentProviderResource } from "@/features/payment-providers/schema/public"
+import { loadPage, serverQuery } from "@/lib/server-action"
 import { workspaceSettingsGeneralPath } from "@/lib/workspace/settings-paths"
 import { NotAvailablePage, NotFoundPage } from "@/routes/root"
 import { useWorkspacePage } from "@/routes/workspace"
@@ -446,10 +448,32 @@ export function SettingsIntegrationPage() {
       return <OpenaiCompatibleIntegration />
     case "workspace-token":
       return <WorkspaceTokens />
+    case "stripe":
+      return <StripeIntegration />
     default:
       // ponytail: the other integrations wait for their domain units.
       return null
   }
+}
+
+// page: app/space/[workspaceId]/(settings)/settings/integrations/stripe/page.tsx
+function StripeIntegration() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "paymentProvidersPage", workspaceId],
+    queryFn: () =>
+      serverQuery<{
+        data: PaymentProviderResource[]
+        stripeAvailable: boolean
+      }>("paymentProvidersPage", workspaceId, [workspaceId]),
+  })
+  return (
+    <ManageStripe
+      available={data.stripeAvailable}
+      connection={data.data.find((row) => row.provider === "stripe") ?? null}
+      workspaceId={workspaceId}
+    />
+  )
 }
 
 function WorkspaceTokens() {

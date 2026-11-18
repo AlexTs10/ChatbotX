@@ -121,12 +121,35 @@ pub async fn get_cart(
         .as_ref()
         .map_or_else(|| json!([]), |c| c.items.0.clone());
     let code = cart.as_ref().and_then(|c| c.discount_code.clone());
+    price(
+        db,
+        workspace_id,
+        stored,
+        code,
+        Some(contact_id),
+        shipping_type,
+        list_available,
+    )
+    .await
+}
+
+/// A cart's stored `items` and code priced as an order would be now; a
+/// preview cart (`getPreviewCart`) is priced for no contact.
+pub async fn price(
+    db: &chatbotx_db::Db,
+    workspace_id: i64,
+    stored: Value,
+    code: Option<String>,
+    contact_id: Option<i64>,
+    shipping_type: Option<String>,
+    list_available: bool,
+) -> Result<Value> {
     let quote = order::quote(
         db,
         workspace_id,
         items_of(&stored),
         shipping_type,
-        Some(contact_id),
+        contact_id,
         code.clone(),
         true,
     )

@@ -120,6 +120,8 @@ mod conversation_contact_inboxes;
 mod copy_name;
 #[path = "count_mode.rs"]
 mod count_mode;
+#[path = "coupon_template_guards.rs"]
+mod coupon_template_guards;
 #[path = "custom_field_service_update.rs"]
 mod custom_field_service_update;
 #[path = "ecommerce_open_hours_is_open.rs"]
