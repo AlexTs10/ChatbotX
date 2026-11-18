@@ -72,8 +72,22 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let data = payment_provider::list(&state.db, ws)
                 .await
                 .map_err(|e| business_error(e, super::LISTING))?;
-            // ponytail: Stripe Connect (OAuth) is not ported, so it is never offered.
-            Ok(json(200, json!({ "data": data, "stripeAvailable": false })))
+            let available = match state.encryption.as_deref() {
+                Some(encryption) => {
+                    let owner =
+                        chatbotx_business::tenant::resolve_credential_owner_id_for_workspace(
+                            &state.db, ws, None,
+                        )
+                        .await
+                        .map_err(|e| business_error(e, super::LISTING))?;
+                    payment_provider::is_stripe_available(&state.db, encryption, owner).await
+                }
+                None => false,
+            };
+            Ok(json(
+                200,
+                json!({ "data": data, "stripeAvailable": available }),
+            ))
         }
         "paymentProviders.getConnectLink" => {
             let mut input = Input::from_query(call.params, call.query);

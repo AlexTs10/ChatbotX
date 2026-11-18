@@ -2,10 +2,10 @@
 //! Stripe and PayPal connections (`EcommercePaymentProvider`), their
 //! encrypted secrets and the gateway that takes its payments.
 //!
-//! ponytail: Stripe Connect through the platform app (OAuth link, callback,
-//! `saveStripeConnect`) is not ported: no `/v1` route reaches it and the SPA
-//! connects Stripe with a key. A row it left behind (no secret) still loads
-//! its gateway and is deauthorized on disconnect.
+//! Stripe Connect through the platform app rides a `ConnectSession`
+//! (`provider = "stripe"`): [`create_stripe_connect_link`] opens it and the
+//! `/integrations/stripe/callback` route finishes it with
+//! [`complete_stripe_connect`].
 
 use std::sync::LazyLock;
 
@@ -173,19 +173,42 @@ pub async fn list(db: &Db, workspace_id: i64) -> Result<Vec<Value>> {
     .await
 }
 
-/// `isStripeAvailable`: the owner's platform has a Stripe Connect app.
-pub async fn is_stripe_available(db: &Db, encryption: &Encryption, owner_id: i64) -> bool {
+/// `resolveStripePlatform`: the owner's Stripe Connect app (a reseller's own,
+/// else the platform's); both the secret key and the client id are needed.
+pub struct StripePlatform {
+    pub credential_id: i64,
+    pub secret_key: String,
+    pub client_id: String,
+}
+
+pub async fn resolve_stripe_platform(
+    db: &Db,
+    encryption: &Encryption,
+    owner_id: i64,
+) -> Result<StripePlatform> {
     let encryption = encryption.clone();
     tx::read(db, move |conn| {
         let credential =
             platform_credential::resolve_for_owner(conn, &encryption, owner_id, "stripe", false)?;
-        Ok(credential.is_some_and(|c| {
-            c.text("secretKey").is_some_and(|s| !s.is_empty())
-                && c.text("connectClientId").is_some_and(|s| !s.is_empty())
-        }))
+        credential
+            .and_then(|c| {
+                let text = |f| c.text(f).filter(|s| !s.is_empty()).map(str::to_string);
+                Some(StripePlatform {
+                    credential_id: c.id,
+                    secret_key: text("secretKey")?,
+                    client_id: text("connectClientId")?,
+                })
+            })
+            .ok_or_else(platform_not_configured)
     })
     .await
-    .unwrap_or(false)
+}
+
+/// `isStripeAvailable`: the owner's platform has a Stripe Connect app.
+pub async fn is_stripe_available(db: &Db, encryption: &Encryption, owner_id: i64) -> bool {
+    resolve_stripe_platform(db, encryption, owner_id)
+        .await
+        .is_ok()
 }
 
 /// `countOrdersNeedingProvider`.
@@ -223,19 +246,21 @@ struct Upsert {
     livemode: bool,
     account_label: Option<String>,
     external_account_id: Option<String>,
+    /// `Some` only for a Stripe Connect row.
+    platform_credential_id: Option<i64>,
     secret: Option<Value>,
     webhook_endpoint_id: Option<String>,
 }
 
-/// `paymentProviderRepository.upsert` (`platformCredentialId` NULL: key rows).
+/// `paymentProviderRepository.upsert`.
 fn upsert(conn: &Connection, v: &Upsert) -> repo::Result<EcommercePaymentProvider> {
     let now = now_ms();
     conn.execute(
         r#"INSERT INTO "EcommercePaymentProvider" ("id","createdAt","updatedAt","workspaceId","provider","livemode","accountLabel","externalAccountId","platformCredentialId","secret","webhookEndpointId")
-           VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9)
+           VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?10, ?8, ?9)
            ON CONFLICT ("workspaceId","provider") DO UPDATE SET "livemode" = excluded."livemode",
              "accountLabel" = excluded."accountLabel", "externalAccountId" = excluded."externalAccountId",
-             "platformCredentialId" = NULL, "secret" = excluded."secret",
+             "platformCredentialId" = excluded."platformCredentialId", "secret" = excluded."secret",
              "webhookEndpointId" = excluded."webhookEndpointId", "updatedAt" = excluded."updatedAt""#,
         params![
             new_id(),
@@ -247,6 +272,7 @@ fn upsert(conn: &Connection, v: &Upsert) -> repo::Result<EcommercePaymentProvide
             v.external_account_id,
             v.secret.as_ref().map(Value::to_string),
             v.webhook_endpoint_id,
+            v.platform_credential_id,
         ],
     )?;
     find(conn, v.workspace_id, v.provider)?
@@ -348,6 +374,7 @@ pub async fn connect_stripe_key(
         livemode: account.livemode,
         account_label: account.label.clone(),
         external_account_id: Some(account.account_id.clone()),
+        platform_credential_id: None,
         secret: Some(encrypt(
             ctx.encryption,
             &connection,
@@ -421,6 +448,7 @@ pub async fn connect_paypal(
         livemode: secret.livemode,
         account_label: Some(mask_client_id(&secret.client_id)),
         external_account_id: None,
+        platform_credential_id: None,
         secret: Some(encrypt(ctx.encryption, &secret, &paypal_aad(workspace_id))?),
         webhook_endpoint_id: Some(secret.webhook_id.clone()),
     };
@@ -633,6 +661,169 @@ async fn remove_paypal_webhook_quietly(encryption: &Encryption, row: &EcommerceP
     {
         tracing::warn!(%error, workspace_id = row.workspace_id, "[payments] could not remove the PayPal webhook");
     }
+}
+
+// ---- Stripe Connect -----------------------------------------------------------
+
+pub fn already_connected() -> BusinessError {
+    BusinessError::exception(
+        "This Stripe account is already connected to another workspace.",
+        "stripeAccountAlreadyConnected",
+        409,
+    )
+}
+
+/// `STRIPE_CONNECT_CALLBACK_PATH`.
+pub const STRIPE_CONNECT_CALLBACK_PATH: &str = "/integrations/stripe/callback";
+
+/// `stripeIntegrationPath`: the workspace's Stripe row on Settings ->
+/// Integrations.
+pub fn stripe_integration_path(workspace_id: i64) -> String {
+    format!("/space/{workspace_id}/settings/integrations/stripe")
+}
+
+/// `createStripeConnectLink`: a `pending` connect session bound to the
+/// member who pressed Connect; the Stripe page to open. The session's
+/// single-use `{id}.{nonce}` is the OAuth `state`; it remembers the
+/// platform app it started with (`nextAction.platformCredentialId`).
+pub async fn create_stripe_connect_link(
+    ctx: Ctx<'_>,
+    workspace_id: i64,
+    user_id: i64,
+    email: Option<&str>,
+) -> Result<String> {
+    let owner =
+        crate::tenant::resolve_credential_owner_id_for_workspace(ctx.db, workspace_id, None)
+            .await?;
+    let platform = resolve_stripe_platform(ctx.db, ctx.encryption, owner).await?;
+    let redirect =
+        chatbotx_core::utils::web_url::join_app_url(ctx.app_url, STRIPE_CONNECT_CALLBACK_PATH);
+    let email = email.map(str::to_string);
+    let session = crate::connect_session::create(
+        ctx.db,
+        crate::connect_session::NewSession {
+            workspace_id,
+            provider: "stripe".to_string(),
+            purpose: "connect".to_string(),
+            actor_user_id: Some(user_id),
+            platform_owner_id: Some(owner.to_string()),
+            return_url: Some(stripe_integration_path(workspace_id)),
+            ..Default::default()
+        },
+        move |id, nonce| {
+            json!({
+                "type": "open_url",
+                "url": stripe::authorize_url(
+                    &platform.client_id,
+                    &redirect,
+                    &format!("{id}.{nonce}"),
+                    email.as_deref(),
+                ),
+                "platformCredentialId": platform.credential_id.to_string(),
+            })
+        },
+    )
+    .await?;
+    session
+        .next_action
+        .as_ref()
+        .and_then(|action| action["url"].as_str())
+        .map(str::to_string)
+        .ok_or_else(|| BusinessError::Repo(repo::Error::msg("connect session has no URL")))
+}
+
+/// `completeStripeConnect` + `saveStripeConnect`: the code is exchanged once
+/// with the app the connect started with, then the account saved for the
+/// workspace. Returns the view with `chargesEnabled` (null when unread).
+pub async fn complete_stripe_connect(
+    ctx: Ctx<'_>,
+    workspace_id: i64,
+    owner_id: i64,
+    platform_credential_id: Option<&str>,
+    code: &str,
+) -> Result<Value> {
+    let platform = resolve_stripe_platform(ctx.db, ctx.encryption, owner_id).await?;
+    if platform_credential_id != Some(platform.credential_id.to_string().as_str()) {
+        return Err(platform_not_configured());
+    }
+    let (account_id, livemode) = stripe::exchange_code(&platform.secret_key, code)
+        .await
+        .map_err(|e| to_exception("stripe", &e))?;
+    let pid = platform.credential_id;
+    let lookup = account_id.clone();
+    let holder = tx::read(ctx.db, move |conn| {
+        Ok(find_by_stripe_account(conn, pid, &lookup)?)
+    })
+    .await?;
+    if holder.is_some_and(|row| row.workspace_id != workspace_id) {
+        return Err(already_connected());
+    }
+    let account = match stripe::read_connected_account(&platform.secret_key, &account_id).await {
+        Ok(account) => Some(account),
+        Err(error) => {
+            tracing::warn!(%error, workspace_id, "[payments] could not read the connected Stripe account");
+            None
+        }
+    };
+
+    let key = format!("payment-provider-connect:{workspace_id}:stripe");
+    let _guard = CONNECT_LOCKS
+        .acquire(&key, CONNECT_LOCK)
+        .await
+        .map_err(|e| BusinessError::Repo(repo::Error::msg(e.to_string())))?;
+    let previous = load(ctx.db, workspace_id, "stripe").await?;
+    let changes_account = previous.as_ref().is_some_and(|p| {
+        p.external_account_id.as_deref() != Some(account_id.as_str()) || p.livemode != livemode
+    });
+    if changes_account
+        && let Err(error) = assert_not_needed_by_orders(ctx.db, workspace_id, "stripe").await
+    {
+        // The new account was just connected to the platform: let it go.
+        if let Err(e) =
+            stripe::deauthorize(&platform.secret_key, &platform.client_id, &account_id).await
+        {
+            tracing::warn!(error = %e, workspace_id, "[payments] could not deauthorize the Stripe account");
+        }
+        return Err(error);
+    }
+    let values = Upsert {
+        workspace_id,
+        provider: "stripe",
+        livemode,
+        account_label: account.as_ref().and_then(|(label, _)| label.clone()),
+        external_account_id: Some(account_id.clone()),
+        platform_credential_id: Some(pid),
+        secret: None,
+        webhook_endpoint_id: None,
+    };
+    let row = match tx::write(ctx.db, move |tx| Ok(upsert(tx, &values)?)).await {
+        Ok(row) => row,
+        Err(BusinessError::Repo(e)) if repo::is_unique_violation_error(&e, None) => {
+            return Err(already_connected());
+        }
+        Err(error) => return Err(error),
+    };
+    if let Some(previous) = previous {
+        if is_stripe_key_row(&previous) {
+            // A key connection replaced: its webhook would keep calling us.
+            let old = stripe_secret(ctx.encryption, &previous);
+            let webhook = old
+                .as_ref()
+                .map(|s| s.webhook_id.clone())
+                .or(previous.webhook_endpoint_id.clone());
+            if let (Some(old), Some(webhook)) = (&old, webhook) {
+                remove_stripe_webhook_quietly(workspace_id, &[&old.secret_key], &webhook).await;
+            }
+        } else if previous.external_account_id.as_deref() != Some(account_id.as_str())
+            || previous.platform_credential_id != Some(pid)
+        {
+            // Another account or app replaced: it no longer belongs here.
+            deauthorize_quietly(ctx, &previous).await;
+        }
+    }
+    let mut view = to_view(&row);
+    view["chargesEnabled"] = json!(account.map(|(_, charges)| charges));
+    Ok(view)
 }
 
 #[cfg(test)]

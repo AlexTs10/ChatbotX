@@ -49,6 +49,7 @@ pub(super) const ACTIONS: &[&str] = &[
     "connectWooCommerceAction",
     "syncWooCommerceAction",
     "disconnectWooCommerceAction",
+    "startStripeConnectAction",
 ];
 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
@@ -65,6 +66,52 @@ fn require_ecommerce(ctx: &Ctx<'_>) -> Result<(), OrpcError> {
     } else {
         Err(fail(BusinessError::not_found("Page not found")))
     }
+}
+
+/// `startStripeConnectAction`: the Stripe Connect page for this workspace
+/// (super admins only); the callback lands back on its Stripe row.
+async fn start_stripe_connect(ctx: &Ctx<'_>) -> Result<Value, OrpcError> {
+    if ctx.permissions.get("superAdmin") != Some(&Value::Bool(true)) {
+        return Err(action_fail(BusinessError::exception(
+            "You need to be a workspace super admin to do this.",
+            "systemError",
+            400,
+        )));
+    }
+    let encryption = ctx.api.encryption.as_deref().ok_or_else(|| {
+        action_fail(BusinessError::exception(
+            "ENCRYPTION_KEY is not set",
+            "systemError",
+            500,
+        ))
+    })?;
+    let user_id = ctx.user_id;
+    let email: Option<String> = tx::read(&ctx.api.db, move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT "email" FROM "User" WHERE "id" = ?1"#,
+                [user_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten())
+    })
+    .await
+    .map_err(action_fail)?;
+    let pctx = payment_provider::Ctx {
+        db: &ctx.api.db,
+        encryption,
+        app_url: &ctx.api.app_url,
+    };
+    let url = payment_provider::create_stripe_connect_link(
+        pctx,
+        ctx.workspace_id,
+        user_id,
+        email.as_deref(),
+    )
+    .await
+    .map_err(action_fail)?;
+    Ok(json!({ "url": url }))
 }
 
 /// The id bound at `index` (`zodBigintAsString()`).
@@ -346,6 +393,7 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             .await
             .map(|code| json!({ "code": code }))
             .map_err(action_fail),
+        "startStripeConnectAction" => start_stripe_connect(ctx).await,
         // The same calls `shopify.*` / `woocommerce.*` make.
         "connectShopifyAction"
         | "syncShopifyAction"

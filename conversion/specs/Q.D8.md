@@ -10,8 +10,10 @@ Branch `feat/conversion-d8` (after P3.6-D1o).
 | 2 | E-commerce analytics: lifetime / period sales, orders, items, hourly or daily series, top products and vendors | `business::ecommerce_analytics`, `api::handlers::ecommerce_analytics` | `packages/business/src/ecommerce-analytics/service.ts` | done |
 | 3 | `webshop.getLink` (signed customer link, preview link, `{{shop_token}}` button link) | `api::handlers::webshop` | `packages/business/src/webshop/link.ts` | done |
 | 4 | SPA: orders (list, detail, status moves, cancel, delete, export), discount codes (list, form, on/off, delete, generate), settings sections, analytics | `api::rpc_procedures::ecommerce`, `apps/web/src/routes/ecommerce.tsx` + copied builder features | `app/space/[workspaceId]/(e-commerce)/*` | done |
-| 5 | Shopify / WooCommerce sync (`shopifyWebhook` / `woocommerceWebhook` jobs, catalog and order mirror, connect / status / sync routes) | — | `packages/business/src/{shopify,woocommerce}/*` | not ported |
-| 6 | Public web shop pages, carts (`carts.get`), commerce enrichment, coupons (`coupons.*`, 16 routes) | — | `webshop/service.ts`, `coupon/service.ts` | not ported |
+| 5 | Shopify / WooCommerce sync (`shopifyWebhook` / `woocommerceWebhook` jobs, catalog and order mirror, connect / status / sync routes, SPA status and actions) | `business::{shopify,woocommerce}`, `worker::store_sync`, `api::handlers::store_connections` | `packages/business/src/{shopify,woocommerce}/*` | done |
+| 6a | `carts.get`, discount `listAvailable`, coupons (`coupons.*`, 16 routes incl. CSV import / export) | `business::{cart,coupon,import::coupons}`, `api::handlers::{webshop,coupons}` | `webshop/service.ts` (`getCart`), `coupon/service.ts` | done |
+| 6b | Public web shop pages and their actions, commerce enrichment | — | `app/(webshop)/*`, `webshop/service.ts` | not ported |
+| 7 | Stripe Connect OAuth (`stripeAvailable`, `startStripeConnectAction`, `/integrations/stripe/callback`) | `business::payment_provider`, `api::connect_callback`, `api::rpc_procedures::ecommerce` | `payment-provider/service.ts`, `integrations/stripe/callback/route.ts` | done |
 
 ## Security
 
@@ -22,11 +24,18 @@ Branch `feat/conversion-d8` (after P3.6-D1o).
   quantities (`order::quote`), never from client amounts.
 - `webshop.getLink` for a contact refuses a read-only token (403), as the
   original; tokens are signed with `chatbotx_core::encryption`.
-- No outbound fetch is added.
+- Store webhooks: Shopify HMAC and WooCommerce signatures are compared in
+  constant time (i34 receivers); store secrets are stored encrypted
+  (`shopify:<ws>` / `woocommerce:<ws>` AAD); the WooCommerce site URL goes
+  through the SSRF guard with pinned IPs.
+- Stripe Connect: the state is a single-use connect session bound to the
+  member and workspace; the callback checks the signed-in user, the
+  super-admin role and the platform app; redirects stay relative.
+- Coupons and carts: workspace-scoped; cart prices come from `order::quote`.
 
 ## Decisions
 
-See `conversion/DECISIONS.md` (2026-11-17 "Q.D8" lines).
+See `conversion/DECISIONS.md` (2026-11-17 and 2026-11-18 "Q.D8" lines).
 
 ## Tests
 
@@ -38,13 +47,15 @@ See `conversion/DECISIONS.md` (2026-11-17 "Q.D8" lines).
 
 ## Parity
 
-p1-07 `15-discount-codes`, p1-08 `03-ecommerce-analytics` (not run in this
-unit); p1-12 `30-orders` for the SPA order actions' services.
+Not run in this unit: p1-07 `10-coupon-topics`, `11-coupons`,
+`12-coupon-import-export`, `15-discount-codes`; p1-04 `08-carts`; p1-08
+`02-ecommerce-settings`, `03-ecommerce-analytics`; p1-12
+`20-payment-providers`, `30-orders`; the Shopify / WooCommerce receiver
+suites.
 
 ## Not ported (left for a later unit)
 
-- Shopify and WooCommerce (slice 5): the i34 receivers queue jobs the
-  worker still fails as unrecoverable. The SPA settings show both as not
-  connected; their connect actions are not served.
-- Slice 6: the public shop pages and carts, `carts.get`, commerce
-  enrichment and the coupon pools.
+- Slice 6b: the public web shop pages (5 Next pages, 6 actions, about 1700
+  lines of `webshop/service.ts`) and commerce enrichment: too large for
+  this unit.
+- The coupon-template guards on message-template edit / delete.
