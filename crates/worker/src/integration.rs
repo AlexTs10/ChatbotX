@@ -200,11 +200,8 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::store_sync::SHOPIFY_SYNC | crate::store_sync::SHOPIFY_WEBHOOK => {
             crate::store_sync::shopify(&deps, &kind, &job.data["data"]).await?
         }
-        // The job side of the WooCommerce receiver is the next Q.D8 slice.
-        "woocommerceWebhook" | "woocommerceSync" => {
-            return Err(JobError::unrecoverable(format!(
-                "{kind}: the WooCommerce sync (Q.D8) is not ported yet"
-            )));
+        crate::store_sync::WOOCOMMERCE_SYNC | crate::store_sync::WOOCOMMERCE_WEBHOOK => {
+            crate::store_sync::woocommerce(&deps, &kind, &job.data["data"]).await?
         }
         other => {
             // ponytail: every other integration action is a later unit

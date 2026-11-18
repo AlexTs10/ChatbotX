@@ -46,6 +46,9 @@ pub(super) const ACTIONS: &[&str] = &[
     "connectShopifyAction",
     "syncShopifyAction",
     "disconnectShopifyAction",
+    "connectWooCommerceAction",
+    "syncWooCommerceAction",
+    "disconnectWooCommerceAction",
 ];
 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
@@ -245,18 +248,20 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             let flows = flow::list_published_options(db, ws).await.map_err(fail)?;
             let open_hours = public(ctx, "openHours.list", &[], None, None).await?["data"].take();
             let providers = payment_provider::list(db, ws).await.map_err(fail)?;
-            // ponytail: WooCommerce is the next Q.D8 slice: never connected here.
-            let disconnected = json!({ "connected": false });
             let shopify_status = chatbotx_business::shopify::get_status(db, &ctx.api.app_url, ws)
                 .await
                 .map_err(fail)?;
+            let woocommerce_status =
+                chatbotx_business::woocommerce::get_status(db, &ctx.api.app_url, ws)
+                    .await
+                    .map_err(fail)?;
             Ok(json!({
                 "settings": settings,
                 "flowOptions": flows.iter().map(|f| json!({ "id": f.id.to_string(), "name": f.name })).collect::<Vec<_>>(),
                 "openHours": open_hours,
                 "connectedProviders": providers.iter().map(|p| p["provider"].clone()).collect::<Vec<_>>(),
                 "shopifyStatus": shopify_status,
-                "wooCommerceStatus": disconnected,
+                "wooCommerceStatus": woocommerce_status,
             }))
         }
         "ecommerceAnalyticsPage" => {
@@ -341,23 +346,30 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             .await
             .map(|code| json!({ "code": code }))
             .map_err(action_fail),
-        // The same calls `shopify.connect` / `sync` / `disconnect` make.
-        "connectShopifyAction" | "syncShopifyAction" | "disconnectShopifyAction" => {
-            let route = match name {
-                "connectShopifyAction" => "shopify.connect",
-                "syncShopifyAction" => "shopify.sync",
-                _ => "shopify.disconnect",
+        // The same calls `shopify.*` / `woocommerce.*` make.
+        "connectShopifyAction"
+        | "syncShopifyAction"
+        | "disconnectShopifyAction"
+        | "connectWooCommerceAction"
+        | "syncWooCommerceAction"
+        | "disconnectWooCommerceAction" => {
+            let store = if name.contains("Shopify") {
+                "shopify"
+            } else {
+                "woocommerce"
             };
-            let body = (route != "shopify.disconnect").then(|| arg(args, 1));
-            public(ctx, route, &[], None, body)
+            let verb = if name.starts_with("connect") {
+                "connect"
+            } else if name.starts_with("sync") {
+                "sync"
+            } else {
+                "disconnect"
+            };
+            let route = format!("{store}.{verb}");
+            let body = (verb != "disconnect").then(|| arg(args, 1));
+            public(ctx, &route, &[], None, body)
                 .await
-                .map(|v| {
-                    if route == "shopify.disconnect" {
-                        Value::Null
-                    } else {
-                        v
-                    }
-                })
+                .map(|v| if verb == "disconnect" { Value::Null } else { v })
                 .map_err(|e| action_error(schema_errors(e)))
         }
         _ => public(

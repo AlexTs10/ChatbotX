@@ -112,6 +112,7 @@ pub mod user_quota;
 pub mod vendor;
 pub mod webhook;
 pub mod whatsapp;
+pub mod woocommerce;
 pub mod working_hours;
 pub mod workspace;
 pub mod workspace_api_token;

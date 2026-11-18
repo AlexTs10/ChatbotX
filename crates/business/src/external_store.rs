@@ -328,6 +328,21 @@ pub async fn store_links(db: &chatbotx_db::Db, app_url: &str, workspace_id: i64)
                 "adminUrl": status["adminUrl"],
             }));
         }
+    } else if source == crate::woocommerce::SOURCE {
+        let status = crate::woocommerce::get_status(db, app_url, workspace_id).await?;
+        if status["connected"] == true {
+            let label = if status["storeName"].is_null() {
+                status["siteUrl"].clone()
+            } else {
+                status["storeName"].clone()
+            };
+            return Ok(serde_json::json!({
+                "source": "woocommerce",
+                "storeName": "WooCommerce",
+                "shopLabel": label,
+                "adminUrl": status["adminUrl"],
+            }));
+        }
     }
     Ok(Value::Null)
 }

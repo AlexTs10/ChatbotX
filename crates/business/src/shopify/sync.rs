@@ -500,30 +500,40 @@ async fn save_discount(db: &chatbotx_db::Db, context: &Context, node: &Value) ->
     let ws = context.row.workspace_id;
     tx::write(db, move |tx| {
         let conn: &Connection = tx;
-        let mut product_ids = Vec::new();
-        if mapped.applies_to_products {
-            product_ids = store_repo::find_products_by_external_ids(
-                conn,
-                ws,
-                SOURCE,
-                &mapped.product_external_ids,
-            )?
-            .into_iter()
-            .map(|p| Value::String(p.id.to_string()))
-            .collect();
-            if product_ids.is_empty() {
-                return Ok(false);
-            }
-        }
-        let mut values = mapped.values;
-        values.push((
-            "productIds",
-            Sql::Text(Value::Array(product_ids).to_string()),
-        ));
-        store_repo::upsert_discount(conn, ws, SOURCE, &mapped.external_id, &values)?;
-        Ok(true)
+        save_mapped_discount(conn, ws, SOURCE, mapped)
     })
     .await
+}
+
+/// Writes a mapped discount; false when none of its products is mirrored.
+pub(crate) fn save_mapped_discount(
+    conn: &Connection,
+    ws: i64,
+    source: &str,
+    mapped: mappers::MappedDiscount,
+) -> Result<bool> {
+    let mut product_ids = Vec::new();
+    if mapped.applies_to_products {
+        product_ids = store_repo::find_products_by_external_ids(
+            conn,
+            ws,
+            source,
+            &mapped.product_external_ids,
+        )?
+        .into_iter()
+        .map(|p| Value::String(p.id.to_string()))
+        .collect();
+        if product_ids.is_empty() {
+            return Ok(false);
+        }
+    }
+    let mut values = mapped.values;
+    values.push((
+        "productIds",
+        Sql::Text(Value::Array(product_ids).to_string()),
+    ));
+    store_repo::upsert_discount(conn, ws, source, &mapped.external_id, &values)?;
+    Ok(true)
 }
 
 async fn map_order_items(
