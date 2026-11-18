@@ -2,10 +2,6 @@
 // Each test file keeps its own copy of its helper modules, as before.
 #![allow(clippy::duplicate_mod)]
 
-// Each test file keeps its own `mod common;` / helper lookups, so a helper file
-// is loaded once per test module.
-#![allow(clippy::duplicate_mod)]
-
 #[path = "ai_agent_service.rs"]
 mod ai_agent_service;
 #[path = "ai_file_service.rs"]
