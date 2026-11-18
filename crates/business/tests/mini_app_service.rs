@@ -90,8 +90,8 @@ async fn submission_db(
     setup(&db, move |tx| {
         contact(tx, CONTACT, WS)?;
         custom_field(tx, CF_NAME, WS, "name", name_kind)?;
-        custom_field(tx, CF_TOPICS, WS, "topics", "text")?;
-        custom_field(tx, CF_PHOTO, WS, "photo", "text")?;
+        custom_field(tx, CF_TOPICS, WS, "topics", "shortText")?;
+        custom_field(tx, CF_PHOTO, WS, "photo", "shortText")?;
         Ok(())
     })
     .await;
@@ -124,7 +124,7 @@ fn changed(changes: &[chatbotx_business::contact_custom_field::FieldChange]) -> 
 
 #[tokio::test]
 async fn create_writes_mapped_answers_to_the_contacts_custom_fields() {
-    let (db, app) = submission_db("text").await;
+    let (db, app) = submission_db("shortText").await;
     let answers = json!({ "full_name": "Ana", "topics": ["a", "b"], "note": "unmapped" });
     let submitted = service::create_submission(
         &db,
@@ -157,7 +157,7 @@ async fn create_one_rejected_value_does_not_drop_the_other_fields_or_fail_the_su
 
 #[tokio::test]
 async fn create_does_not_write_anything_for_an_anonymous_submission() {
-    let (db, app) = submission_db("text").await;
+    let (db, app) = submission_db("shortText").await;
     let submitted = service::create_submission(
         &db,
         STORAGE,
@@ -174,7 +174,7 @@ async fn create_does_not_write_anything_for_an_anonymous_submission() {
 
 #[tokio::test]
 async fn create_swaps_upload_ids_for_files_and_saves_their_public_urls() {
-    let (db, app) = submission_db("text").await;
+    let (db, app) = submission_db("shortText").await;
     let (a, b) = ("AAAAAAAAAAAAAAAAAAAAAA", "BBBBBBBBBBBBBBBBBBBBBB");
     let app_id = app.id;
     setup(&db, move |tx| {
@@ -221,7 +221,7 @@ async fn create_swaps_upload_ids_for_files_and_saves_their_public_urls() {
 
 #[tokio::test]
 async fn save_screen_answers_saves_a_screens_mapped_answers_right_away_without_files() {
-    let (db, app) = submission_db("text").await;
+    let (db, app) = submission_db("shortText").await;
     let answers = json!({ "full_name": "Ana", "photo": ["AAAAAAAAAAAAAAAAAAAAAA"] });
     let saved = service::save_screen_answers(&db, &app, Some(CONTACT), "s1".into(), answers, None)
         .await
@@ -232,7 +232,7 @@ async fn save_screen_answers_saves_a_screens_mapped_answers_right_away_without_f
 
 #[tokio::test]
 async fn save_screen_answers_saves_nothing_for_an_anonymous_visitor_or_an_unknown_screen() {
-    let (db, app) = submission_db("text").await;
+    let (db, app) = submission_db("shortText").await;
     let answers = || json!({ "full_name": "Ana" });
     assert!(
         service::save_screen_answers(&db, &app, None, "s1".into(), answers(), None)
