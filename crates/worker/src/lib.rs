@@ -35,6 +35,7 @@ pub mod sequence;
 pub mod smart_delay;
 pub mod steps;
 pub mod story_automation;
+pub mod thread_control;
 pub mod trigger;
 pub mod variables;
 pub mod wa_template;

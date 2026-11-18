@@ -76,6 +76,8 @@ pub mod templates;
 pub mod triggers;
 pub mod webchats;
 pub mod webhooks;
+pub mod whatsapp_flows;
+pub mod whatsapp_templates;
 pub mod working_hours;
 pub mod workspace_members;
 pub mod workspace_settings;
@@ -131,6 +133,9 @@ pub struct ApiState {
     /// The query embedding client (`aiFiles.search`); the provider APIs by
     /// default.
     pub embedder: Arc<dyn chatbotx_business::ai::knowledge::Embedder>,
+    /// The Meta Graph API base (thread control, WhatsApp templates / flows / calls);
+    /// tests point it at a local server.
+    pub graph_url: String,
     /// The auth state (`POST /v1/me/password`); `None` = off (tests).
     pub sessions: Option<Arc<crate::session::AuthState>>,
 }
@@ -154,6 +159,7 @@ impl ApiState {
             license_token: std::env::var("LICENSE_KEY").ok(),
             license_keys: chatbotx_business::license::LICENSE_PUBLIC_KEYS,
             embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
+            graph_url: chatbotx_business::whatsapp::GRAPH_API_URL.to_owned(),
             sessions: None,
         }
     }
@@ -716,6 +722,10 @@ async fn route(
         messenger_menus::handle(state, route_id, call).await
     } else if messenger_templates::ROUTES.contains(&route_id) {
         messenger_templates::handle(state, route_id, call).await
+    } else if whatsapp_templates::ROUTES.contains(&route_id) {
+        whatsapp_templates::handle(state, route_id, call).await
+    } else if whatsapp_flows::ROUTES.contains(&route_id) {
+        whatsapp_flows::handle(state, route_id, call).await
     } else if saved_replies::ROUTES.contains(&route_id) {
         saved_replies::handle(state, route_id, call).await
     } else if response_sla::ROUTES.contains(&route_id) {

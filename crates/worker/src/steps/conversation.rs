@@ -30,9 +30,15 @@ pub(super) async fn run(
     let (ws, id) = (ctx.workspace_id(), ctx.run.conversation.id);
     let status = match step_type {
         "archiveConversation" | "unarchiveConversation" => {
-            conversation_actions::set_archived(db, ws, id, step_type == "archiveConversation")
-                .await
-                .map_err(biz_fail)?;
+            conversation_actions::set_archived(
+                db,
+                Some(&*ctx.run.deps.jobs),
+                ws,
+                id,
+                step_type == "archiveConversation",
+            )
+            .await
+            .map_err(biz_fail)?;
             StepStatus::Success
         }
         "assignConversation" => {

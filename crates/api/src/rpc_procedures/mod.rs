@@ -33,6 +33,7 @@ mod templates;
 mod tools;
 mod triggers;
 mod user_persistent_menus;
+mod whatsapp;
 mod working_hours;
 mod workspaces;
 
@@ -141,6 +142,9 @@ pub async fn procedure(
     if let Some(outcome) = sequences::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = whatsapp::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
         return Some(outcome.map(|output| output.json));
     }
@@ -237,7 +241,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || user_persistent_menus::ACTIONS.contains(&n)
                 || email_marketing::ACTIONS.contains(&n)
                 || appointments::ACTIONS.contains(&n)
-                || working_hours::ACTIONS.contains(&n) =>
+                || working_hours::ACTIONS.contains(&n)
+                || whatsapp::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -305,6 +310,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = working_hours::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = whatsapp::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");
@@ -604,4 +612,28 @@ fn percent(text: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+/// The procedure futures run inside the axum `/rpc` handler, so they must be `Send`.
+#[cfg(test)]
+#[allow(dead_code)]
+mod send_checks {
+    use super::*;
+
+    fn assert_send<T: Send>(_: T) {}
+
+    fn procedure_futures_are_send(ctx: &Ctx<'_>, args: &[Value], input: &Value) {
+        assert_send(conversations::action(ctx, "threadControlAction", args));
+        assert_send(whatsapp::procedure(ctx, "", input));
+        assert_send(whatsapp::action(ctx, "", args));
+    }
+
+    fn handler_futures_are_send(state: &ApiState, call: Call<'_>) {
+        assert_send(crate::handlers::conversations::handle(state, "", call));
+    }
+
+    fn whatsapp_handler_futures_are_send(state: &ApiState, a: Call<'_>, b: Call<'_>) {
+        assert_send(crate::handlers::whatsapp_flows::handle(state, "", a));
+        assert_send(crate::handlers::whatsapp_templates::handle(state, "", b));
+    }
 }

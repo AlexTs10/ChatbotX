@@ -46,7 +46,7 @@ const STATUSES: &[&str] = &["APPROVED", "PENDING", "REJECTED"];
 // --- errors ---------------------------------------------------------------------------
 
 /// A failed call: an `SdkException` (Meta, 4xx / its status) or a business error.
-pub(super) enum Fail {
+pub(crate) enum Fail {
     Sdk(String, u16),
     Business(BusinessError),
 }
@@ -63,7 +63,7 @@ impl From<chatbotx_db::repo::Error> for Fail {
     }
 }
 
-pub(super) fn reply_error(fail: Fail, errors: super::ErrorMap) -> OrpcError {
+pub(crate) fn reply_error(fail: Fail, errors: super::ErrorMap) -> OrpcError {
     match fail {
         // `SdkException` = `BAD_REQUEST` with Meta's status (`orpc.ts`).
         Fail::Sdk(message, status) => OrpcError::new("BAD_REQUEST", Some(status), Some(&message)),

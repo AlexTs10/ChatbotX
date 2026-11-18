@@ -307,7 +307,7 @@ fn contact_source(referral_source: Option<&str>) -> &'static str {
 
 /// `resolveSourceScopedIdentityMatch` over `contactInboxRepository.findWithContact`:
 /// `sourceId`, then `sourceUserId`, then `sourceParentUserId`.
-fn find_existing_contact_inbox(
+pub(crate) fn find_existing_contact_inbox(
     conn: &Connection,
     inbox: &InboundInbox,
     contact: &IncomingContact,

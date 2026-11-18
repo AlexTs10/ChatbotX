@@ -7,6 +7,7 @@
 //! routes); without `emailAndPhone` the keyword search and the contact
 //! filter cannot match email / phone (`includeEmailAndPhone`).
 
+use chatbotx_business::BusinessError;
 use chatbotx_business::conversation_actions as actions;
 use chatbotx_business::conversation_list as list;
 use chatbotx_business::message::{self, ListForConversation, message_json};
@@ -36,6 +37,8 @@ pub const ACTIONS: &[&str] = &[
     "editMessageAction",
     "deleteMessageAction",
     "changeMessageAttributesAction",
+    "threadControlAction",
+    "syncThreadOwnerAction",
 ];
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
@@ -123,6 +126,7 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                             "archiveConversationAction" | "unarchiveConversationAction" => {
                                 actions::set_archived(
                                     db,
+                                    ctx.api.jobs.as_deref(),
                                     ws,
                                     id,
                                     name == "archiveConversationAction",
@@ -163,11 +167,98 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                     Ok(Value::Null)
                 }
                 "createMessageAction" => create_message(ctx, args).await,
+                "threadControlAction" | "syncThreadOwnerAction" => {
+                    thread_control(ctx, name, args).await
+                }
                 _ => message_route(ctx, name, args).await,
             }
         }
         .await,
     )
+}
+
+/// `threadControlAction` (`[workspaceId, conversationId]` + take / release / pass) and
+/// `syncThreadOwnerAction` (`[workspaceId]` + `{ contactInboxId, conversationId }`).
+async fn thread_control(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcError> {
+    use chatbotx_business::thread_control as tc;
+    let sync = name == "syncThreadOwnerAction";
+    let raw = arg(args, if sync { 1 } else { 2 });
+    let mut input = Input::from_object(raw.as_object().cloned().ok_or_else(invalid)?);
+    let (contact_inbox, action, target_role, metadata, conversation_id) = if sync {
+        let ci = input.digits_id("contactInboxId");
+        (
+            ci,
+            Some("sync".to_owned()),
+            None,
+            None,
+            input.digits_id("conversationId"),
+        )
+    } else {
+        let request = crate::handlers::conversations::thread_control_request(
+            &mut input,
+            &["take", "release", "pass"],
+        );
+        let id = conversation_id(args)?;
+        (
+            request.contact_inbox,
+            request.action,
+            request.target_role,
+            request.metadata,
+            Some(id),
+        )
+    };
+    input.finish()?;
+    let (db, ws) = (&ctx.api.db, ctx.workspace_id);
+    let conversation = list::find_or_fail(db, ws, conversation_id.unwrap_or(-1))
+        .await
+        .map_err(action_fail)?;
+    // `requireContactAccessForMember`.
+    let member = ctx.require_contact_scope()?;
+    if super::contacts::scoped_ids(ctx, member, vec![conversation.contact_id])
+        .await?
+        .is_empty()
+    {
+        return Err(action_fail(BusinessError::not_found("Contact not found")));
+    }
+    let (action, contact_inbox) = (action.unwrap_or_default(), contact_inbox.unwrap_or(-1));
+    let (graph, rt) = (ctx.api.graph_url.as_str(), ctx.api.realtime.as_ref());
+    let result = if sync {
+        tc::sync_conversation_owner(db, rt, graph, &conversation, contact_inbox).await
+    } else {
+        tc::request_conversation_action(
+            db,
+            rt,
+            graph,
+            &conversation,
+            contact_inbox,
+            &action,
+            target_role.as_deref(),
+            metadata.as_deref(),
+        )
+        .await
+    };
+    let not_found = || {
+        action_fail(BusinessError::not_found(
+            "This conversation is not on that channel",
+        ))
+    };
+    match result {
+        Ok(row) => Ok(json!({
+            "status": if sync { "synced" } else { "applied" },
+            "snapshot": tc::snapshot_json(&row),
+        })),
+        Err(tc::ThreadControlError::Business(error)) if error.code() == Some("notFound") => {
+            Err(not_found())
+        }
+        Err(error) if sync => Err(action_fail(match error {
+            tc::ThreadControlError::Business(error) => error,
+            other => BusinessError::exception(other.to_string(), "systemError", 500),
+        })),
+        Err(error) => match tc::map_error(error, &action, &tc::INBOX_COPY) {
+            Ok(status) => Ok(json!({ "status": status })),
+            Err(error) => Err(action_fail(error)),
+        },
+    }
 }
 
 /// The second bind arg (`[workspaceId, conversationId]`).
