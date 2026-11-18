@@ -552,7 +552,6 @@ const adminPages = (
     ["platform-credentials", "AdminNotAvailablePage"],
     ["workspaces/deleted", "AdminNotAvailablePage"],
     ["platform-channels", "AdminNotAvailablePage"],
-    ["default-template", "AdminNotAvailablePage"],
     ["audit-logs", "AdminNotAvailablePage"],
     ["smtp", "AdminNotAvailablePage"],
     ["branding", "AdminNotAvailablePage"],
@@ -567,15 +566,72 @@ const adminPages = (
   }),
 )
 
+// The template screens (`routes/templates.tsx`).
+const templates = () => import("@/routes/templates")
+const adminDefaultTemplateRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "default-template",
+  component: lazyRouteComponent(templates, "AdminDefaultTemplatePage"),
+})
+const templatePages = (
+  [
+    ["templates", "TemplatesPage"],
+    ["templates/create", "CreateTemplatePage"],
+    ["templates/$id/edit", "EditTemplatePage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(templates, page),
+  }),
+)
+const templateInstallsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "templates/installs",
+  component: lazyRouteComponent(templates, "TemplateInstallsLayout"),
+})
+const templateInstallsRoutes = templateInstallsRoute.addChildren([
+  createRoute({
+    getParentRoute: () => templateInstallsRoute,
+    path: "/",
+    component: lazyRouteComponent(templates, "TemplateInstallsPage"),
+  }),
+  createRoute({
+    getParentRoute: () => templateInstallsRoute,
+    path: "$id",
+    component: lazyRouteComponent(templates, "TemplateInstallationPage"),
+  }),
+])
+// `/t/*` is public (lib/public-routes.ts); the install page asks for a sign-in.
+const shareRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "t/$shareToken",
+  component: lazyRouteComponent(templates, "PublicTemplateLayout"),
+})
+const shareRoutes = shareRoute.addChildren([
+  createRoute({
+    getParentRoute: () => shareRoute,
+    path: "/",
+    component: lazyRouteComponent(templates, "PublicTemplatePage"),
+  }),
+  createRoute({
+    getParentRoute: () => shareRoute,
+    path: "install",
+    component: lazyRouteComponent(templates, "PublicTemplateInstallPage"),
+  }),
+])
+
 const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
   invitationRoute,
+  shareRoutes,
   ...bookingPages,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
     createChannelRoute,
-    adminRoute.addChildren(adminPages),
+    adminRoute.addChildren([...adminPages, adminDefaultTemplateRoute]),
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
@@ -584,6 +640,8 @@ const routeTree = rootRoute.addChildren([
       ecommerceRoute.addChildren(ecommercePages),
       productFormsRoute.addChildren(productFormPages),
       ...toolPages,
+      ...templatePages,
+      templateInstallsRoutes,
       ...logPages,
       ...toolEditorPages,
       ...commentListRoutes,

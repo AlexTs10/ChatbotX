@@ -109,6 +109,14 @@ async fn resolve_workspace(
 ) -> Result<(i64, bool), OrpcError> {
     let user_id = ctx.user_id;
     let name = name.to_string();
+    // `workspaceService.create` takes the install intent first, so a creation
+    // refused below still ends the choice.
+    let intent = match (workspace_id, ctx.api.kv.as_deref()) {
+        (None, Some(kv)) => {
+            chatbotx_business::template::install_intent::take(&kv.durable, user_id).await
+        }
+        _ => None,
+    };
     let resolved = ctx
         .api
         .db
@@ -124,7 +132,7 @@ async fn resolve_workspace(
                     .optional()?;
                 return Ok(member.map(|_| (workspace_id, false)));
             }
-            let id = crate::spa::insert_workspace(tx, user_id, &name)?;
+            let id = crate::spa::insert_workspace(tx, user_id, &name, intent.as_deref())?;
             Ok(Some((id, true)))
         })
         .await
@@ -142,27 +150,16 @@ async fn resolve_workspace(
     Ok(resolved)
 }
 
-/// Enqueues the tenant default install staged with a new workspace (best
-/// effort: the template sweep re-dispatches a miss).
+/// Enqueues the template install staged with a new workspace (best effort:
+/// the template sweep re-dispatches a miss).
 async fn enqueue_staged_installs(ctx: &Ctx<'_>, workspace_id: i64) {
-    let Some(jobs) = ctx.api.jobs.as_deref() else {
-        return;
-    };
-    let pending = ctx
-        .api
-        .db
-        .read(move |conn| {
-            chatbotx_db::repo::template_installation::list_pending_ids(conn, workspace_id)
-                .map_err(|e| chatbotx_db::DbError::other(e.message()))
-        })
-        .await
-        .unwrap_or_default();
-    for id in pending {
-        if let Err(error) =
-            chatbotx_business::template::save::enqueue_install(jobs, id, workspace_id).await
-        {
-            tracing::warn!(%error, id, "Could not enqueue the tenant default install");
-        }
+    if let Some(jobs) = ctx.api.jobs.as_deref() {
+        chatbotx_business::template::install_intent::dispatch_staged_installs(
+            &ctx.api.db,
+            jobs,
+            workspace_id,
+        )
+        .await;
     }
 }
 

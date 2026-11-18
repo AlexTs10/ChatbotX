@@ -415,6 +415,46 @@ pub fn resolve_selection(
     })
 }
 
+/// `withoutDeletedResources`: the selection without the picked ids that no
+/// longer exist, so the editor does not offer (and the save does not refuse)
+/// a resource deleted since the last save.
+pub fn without_deleted_resources(
+    conn: &Connection,
+    workspace_id: i64,
+    selection: &Value,
+) -> Result<Value> {
+    let Value::Object(categories) = selection else {
+        return Ok(selection.clone());
+    };
+    let mut out = categories.clone();
+    for (category, chosen) in categories {
+        let ids = selection_ids(chosen);
+        if chosen["mode"].as_str() != Some("ids") || ids.is_empty() {
+            continue;
+        }
+        let existing: BTreeSet<String> =
+            collect::verify_ownership(conn, workspace_id, category, &dedupe(&ids))?
+                .into_iter()
+                .collect();
+        let keep = |key: &str| -> Value {
+            Value::Array(
+                selection_ids(&json!({ "ids": chosen[key] }))
+                    .into_iter()
+                    .filter(|id| existing.contains(id))
+                    .map(Value::String)
+                    .collect(),
+            )
+        };
+        let mut next = chosen.clone();
+        next["ids"] = keep("ids");
+        if chosen.get("lockedIds").is_some_and(Value::is_array) {
+            next["lockedIds"] = keep("lockedIds");
+        }
+        out.insert(category.clone(), next);
+    }
+    Ok(Value::Object(out))
+}
+
 pub type CollectedByCategory = BTreeMap<&'static str, Collected>;
 
 fn collected_count(results: &CollectedByCategory) -> usize {

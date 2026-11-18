@@ -703,6 +703,143 @@ pub async fn list_resources(
 }
 
 // ---------------------------------------------------------------------------
+// Share pages (`app/t/[shareToken]`)
+// ---------------------------------------------------------------------------
+
+/// `findPublicByShareToken`: the public projection of a live share link;
+/// `None` for every unusable link (never a token-existence oracle).
+pub async fn find_public_by_share_token(db: &Db, share_token: String) -> Result<Option<Value>> {
+    tx::read(db, move |conn| {
+        Ok(templates::find_live_by_share_token(conn, &share_token)?
+            .filter(|t| is_share_live(t, now_ms()))
+            .map(|t| {
+                json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "imageUrl": t.image_url,
+                    "publisherName": t.publisher_name,
+                    "youtubeVideoId": t.youtube_video_id,
+                    "testLink": t.test_link,
+                    "categoryCounts": t.category_counts.0,
+                })
+            }))
+    })
+    .await
+}
+
+/// One membership of the viewer, for [`install_page`].
+#[derive(Debug, Clone)]
+pub struct ViewerMembership {
+    pub workspace_id: i64,
+    pub tenant_id: i64,
+    pub role: String,
+    pub permissions: Value,
+}
+
+/// The install section of `/t/{key}/install`: `filterInstallableWorkspaces`
+/// (owner or super admin, not the source workspace, same tenant or a root
+/// template, every category permission), `findInboxManifestByShareToken`,
+/// `listBindableInboxes` and `listInstalledCopies`. UI convenience only:
+/// `installTemplate` re-checks all of it.
+pub async fn install_page(
+    db: &Db,
+    share_token: String,
+    members: Vec<ViewerMembership>,
+) -> Result<Value> {
+    tx::read(db, move |conn| {
+        let Some(template) = templates::find_live_by_share_token(conn, &share_token)?
+            .filter(|t| is_share_live(t, now_ms()))
+        else {
+            return Ok(json!({ "workspaces": [], "requiredInboxes": [], "inboxOptions": {}, "installedCopies": {} }));
+        };
+        let used: Vec<&str> = template
+            .category_counts
+            .0
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(_, n)| n.as_u64().unwrap_or(0) > 0)
+            .map(|(k, _)| k.as_str())
+            .collect();
+        let installable: Vec<(i64, bool)> = members
+            .iter()
+            .filter(|m| {
+                (m.role == "owner" || m.permissions["superAdmin"] == Value::Bool(true))
+                    && m.workspace_id != template.workspace_id
+                    && can_install_from_tenant(template.tenant_id, m.tenant_id)
+                    && assert_can_use_categories(
+                        &Actor::Member(m.permissions.clone()),
+                        used.iter().copied(),
+                    )
+                    .is_ok()
+            })
+            .map(|m| (m.workspace_id, m.tenant_id != template.tenant_id))
+            .collect();
+        let workspace_ids: Vec<i64> = installable.iter().map(|(id, _)| *id).collect();
+        let required: Vec<Value> = if workspace_ids.is_empty() {
+            Vec::new()
+        } else {
+            templates::find_inbox_manifest_by_share_token(conn, &share_token)?
+                .and_then(|m| m.inboxes)
+                .and_then(|inboxes| inboxes.as_object().cloned())
+                .and_then(|inboxes| {
+                    // `inboxManifestSchema`: one bad entry drops the manifest.
+                    inboxes
+                        .into_iter()
+                        .map(|(source_id, entry)| {
+                            let channel = entry["channelType"].as_str().filter(|c| !c.is_empty())?;
+                            let name = entry["name"].as_str()?;
+                            Some(json!({ "sourceId": source_id, "channelType": channel, "name": name }))
+                        })
+                        .collect::<Option<Vec<_>>>()
+                })
+                .unwrap_or_default()
+        };
+        let mut channels: Vec<String> = required
+            .iter()
+            .filter_map(|r| r["channelType"].as_str().map(str::to_string))
+            .collect();
+        channels.sort();
+        channels.dedup();
+        let channel_refs: Vec<&str> = channels.iter().map(String::as_str).collect();
+        let mut inbox_options: serde_json::Map<String, Value> = workspace_ids
+            .iter()
+            .map(|id| (id.to_string(), json!([])))
+            .collect();
+        for row in chatbotx_db::repo::inbox::list_connected_identities_by_channels(
+            conn,
+            &workspace_ids,
+            &channel_refs,
+        )? {
+            if let Some(Value::Array(list)) = inbox_options.get_mut(&row.workspace_id.to_string()) {
+                list.push(json!({
+                    "id": row.identity.id.to_string(),
+                    "name": row.identity.name,
+                    "channel": row.identity.channel,
+                }));
+            }
+        }
+        let copies: serde_json::Map<String, Value> =
+            installs::list_installed_by_share_token(conn, &share_token, &workspace_ids)?
+                .into_iter()
+                .map(|(ws, (id, auto))| {
+                    (ws.to_string(), json!({ "id": id.to_string(), "autoUpdate": auto }))
+                })
+                .collect();
+        Ok(json!({
+            "workspaces": installable
+                .iter()
+                .map(|(id, cross)| json!({ "id": id.to_string(), "crossTenant": cross }))
+                .collect::<Vec<_>>(),
+            "requiredInboxes": required,
+            "inboxOptions": inbox_options,
+            "installedCopies": copies,
+        }))
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
 

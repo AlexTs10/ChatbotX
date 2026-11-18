@@ -458,6 +458,134 @@ pub async fn list_syncs(db: &Db, workspace_id: i64, installation_id: i64) -> Res
     .await
 }
 
+/// `SYNC_HISTORY_PAGE`: syncs shown with their backups on the installation page.
+const SYNC_HISTORY_PAGE: i64 = 10;
+
+/// `templateSyncRequestService.listHistory`: the newest syncs with the
+/// version changes they applied and the backups of the edited copies they
+/// overwrote (the installation page).
+pub async fn list_history(db: &Db, workspace_id: i64, installation_id: i64) -> Result<Vec<Value>> {
+    use chatbotx_db::repo::template_installed_resource_meta::load_resource_labels;
+    use chatbotx_db::repo::{template_resource_backup as backups, template_version};
+    tx::read(db, move |conn| {
+        let installation = find_installation(conn, workspace_id, installation_id)?;
+        let mut stmt = conn
+            .prepare(&format!(
+                r#"SELECT {SYNC_COLUMNS} FROM "TemplateInstallationSync"
+                   WHERE "installationId" = ?1 AND "workspaceId" = ?2 ORDER BY "id" DESC LIMIT ?3"#
+            ))
+            .map_err(db_error)?;
+        let mut syncs = stmt
+            .query_map(
+                params![installation_id, workspace_id, SYNC_HISTORY_PAGE],
+                |row| Ok(sync_of(row)?.0),
+            )
+            .map_err(db_error)?
+            .collect::<chatbotx_db::rusqlite::Result<Vec<_>>>()
+            .map_err(db_error)?;
+        let sync_id = |sync: &Value| sync["id"].as_str().and_then(|id| id.parse::<i64>().ok());
+        let with_backups: Vec<i64> = syncs
+            .iter()
+            .filter(|sync| {
+                sync["counts"]["overwrittenModified"]
+                    .as_i64()
+                    .is_some_and(|n| n > 0)
+            })
+            .filter_map(sync_id)
+            .collect();
+        let backups = backups::list_by_syncs(conn, &with_backups)?;
+        let keys: Vec<(String, i64)> = backups
+            .iter()
+            .map(|b| (b.resource_kind.clone(), b.resource_id))
+            .collect();
+        let labels = load_resource_labels(conn, workspace_id, &keys)?;
+        // `loadSyncChanges`: only when every version of the range recorded them.
+        let ranges: Vec<(i64, i64)> = syncs
+            .iter()
+            .filter_map(|s| Some((s["fromVersion"].as_i64()?, s["appliedVersion"].as_i64()?)))
+            .filter(|(from, to)| to > from)
+            .collect();
+        let versions = match (installation.template_id, ranges.iter().map(|r| r.0).min()) {
+            (Some(template_id), Some(after)) => template_version::list_changes_between(
+                conn,
+                template_id,
+                after,
+                ranges.iter().map(|r| r.1).max().unwrap_or(after),
+            )?,
+            _ => Vec::new(),
+        };
+        for sync in &mut syncs {
+            let id = sync_id(sync);
+            let changes = match (
+                sync["fromVersion"].as_i64(),
+                sync["appliedVersion"].as_i64(),
+            ) {
+                (Some(from), Some(to)) if installation.template_id.is_some() && to > from => {
+                    let recorded: Vec<&Value> = versions
+                        .iter()
+                        .filter(|v| v.version > from && v.version <= to)
+                        .filter_map(|v| v.changes.as_ref().map(|c| &c.0))
+                        .collect();
+                    if recorded.len() as i64 == to - from {
+                        merge_version_changes(&recorded)
+                    } else {
+                        Value::Null
+                    }
+                }
+                _ => Value::Null,
+            };
+            let backups: Vec<Value> = backups
+                .iter()
+                .filter(|b| Some(b.sync_id) == id)
+                .map(|b| {
+                    json!({
+                        "id": b.id.to_string(),
+                        "resourceKind": b.resource_kind,
+                        "label": labels.get(&format!("{}:{}", b.resource_kind, b.resource_id)),
+                    })
+                })
+                .collect();
+            sync["changes"] = changes;
+            sync["backups"] = Value::Array(backups);
+        }
+        Ok(syncs)
+    })
+    .await
+}
+
+/// `mergeVersionChanges`: one entry per category, each list deduplicated in
+/// first-seen order.
+fn merge_version_changes(versions: &[&Value]) -> Value {
+    let mut merged: Vec<(String, [Vec<Value>; 3])> = Vec::new();
+    for change in versions.iter().filter_map(|v| v.as_array()).flatten() {
+        let Some(category) = change["category"].as_str() else {
+            continue;
+        };
+        let index = merged
+            .iter()
+            .position(|(c, _)| c == category)
+            .unwrap_or_else(|| {
+                merged.push((category.to_string(), Default::default()));
+                merged.len() - 1
+            });
+        for (slot, key) in ["added", "changed", "removed"].iter().enumerate() {
+            for item in change[*key].as_array().into_iter().flatten() {
+                if !merged[index].1[slot].contains(item) {
+                    merged[index].1[slot].push(item.clone());
+                }
+            }
+        }
+    }
+    Value::Array(
+        merged
+            .into_iter()
+            .map(|(category, [added, changed, removed])| {
+                json!({ "category": category, "added": added, "changed": changed, "removed": removed })
+            })
+            .collect(),
+    )
+}
+
 /// `templateInstallations.getSync`: the summary with warnings and backups.
 pub async fn get_sync(
     db: &Db,
@@ -530,5 +658,21 @@ mod tests {
         assert!(counts.get("extra").is_none());
         assert_eq!(uninstall_counts(&json!({ "deleted": -1 })), Value::Null);
         assert_eq!(uninstall_counts(&Value::Null), Value::Null);
+    }
+
+    #[test]
+    fn merge_version_changes_dedupes_per_category() {
+        let a = json!([{ "category": "flows", "added": ["A"], "changed": [], "removed": ["B"] }]);
+        let b = json!([
+            { "category": "tags", "added": ["T"], "changed": [], "removed": [] },
+            { "category": "flows", "added": ["A", "C"], "changed": ["D"], "removed": [] },
+        ]);
+        assert_eq!(
+            merge_version_changes(&[&a, &b]),
+            json!([
+                { "category": "flows", "added": ["A", "C"], "changed": ["D"], "removed": ["B"] },
+                { "category": "tags", "added": ["T"], "changed": [], "removed": [] },
+            ])
+        );
     }
 }

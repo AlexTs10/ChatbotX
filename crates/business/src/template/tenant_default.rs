@@ -75,6 +75,36 @@ pub fn status(
     }
 }
 
+/// `getSettings`: the configured default template (`templateId`, `status`,
+/// the decrypted `templateKey`), or `None` when nothing is configured.
+pub async fn get_settings(
+    db: &Db,
+    encryption: &Encryption,
+    scope: Scope,
+) -> Result<Option<serde_json::Value>> {
+    let found = tx::read(db, move |conn| {
+        let Some(tenant_id) = tenant_of(conn, scope)? else {
+            return Ok(None);
+        };
+        Ok(tenant::find_with_template(conn, tenant_id)?.map(|config| (tenant_id, config)))
+    })
+    .await?;
+    let Some((tenant_id, config)) = found else {
+        return Ok(None);
+    };
+    let system = |e: String| BusinessError::exception(e, "systemError", 500);
+    let encrypted = serde_json::from_value(config.encrypted_key.0.clone())
+        .map_err(|e| system(e.to_string()))?;
+    let key = encryption
+        .decrypt_text(&encrypted, Some(&key_aad(tenant_id)))
+        .map_err(|e| system(e.to_string()))?;
+    Ok(Some(serde_json::json!({
+        "templateId": config.template.id.to_string(),
+        "status": status(tenant_id, &config, now_ms()),
+        "templateKey": key,
+    })))
+}
+
 /// `set`: one answer (404 `tenantDefaultTemplateUnavailable`) for a missing,
 /// deleted, other-tenant template or a wrong key; 409 when its share is off.
 pub async fn set(

@@ -302,7 +302,10 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         chatbotx_api::session::auth_rate_limit,
     ));
     let mut app = chatbotx_api::router()
-        .merge(chatbotx_api::spa::spa_router(Arc::clone(&sessions)))
+        .merge(chatbotx_api::spa::spa_router_with(
+            Arc::clone(&sessions),
+            Some(Arc::clone(&api)),
+        ))
         .merge(chatbotx_api::rpc::rpc_router_with(
             chatbotx_api::rpc::RpcState {
                 auth: Arc::clone(&sessions),

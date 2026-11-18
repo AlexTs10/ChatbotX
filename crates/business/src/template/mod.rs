@@ -11,6 +11,7 @@
 pub mod collect;
 pub mod guard;
 pub mod install;
+pub mod install_intent;
 pub mod installations;
 pub mod permissions;
 pub mod request;
