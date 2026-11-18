@@ -1,9 +1,8 @@
 //! `chat/utils/mini-app-buttons.ts` (Q.D1m): an "Open Mini App" flow button
 //! becomes an `openWebsite` button whose link opens the Mini App for this
 //! contact, with a signed `resume` token so the submit continues the flow.
-//!
-//! ponytail: `messenger-template-mini-app.ts` (the template's resume suffix)
-//! waits for the Messenger template send step, which is not ported.
+//! A Messenger template step keeps its buttons; its Mini App URL buttons get
+//! the resume token as their suffix (`messenger-template-mini-app.ts`).
 
 use std::collections::HashSet;
 
@@ -243,9 +242,169 @@ pub async fn resolve_mini_app_links(
     );
 }
 
+/// `applyMiniAppResumeToTemplateParams`: pairs the template's Mini App URL
+/// buttons, in order, with the step's Open Mini App buttons; each sendable
+/// pair's URL suffix becomes that button's signed resume token. A button
+/// whose Mini App is not sendable keeps the contact token.
+pub fn apply_template_resume(
+    params: &mut Value,
+    components: &[Value],
+    flow_buttons: &[Value],
+    sendable: &HashSet<String>,
+    sign_resume: &mut dyn FnMut(&str, &str) -> Option<String>,
+) {
+    let flow_mini_app_buttons: Vec<&Value> = flow_buttons
+        .iter()
+        .filter(|b| is_open_mini_app(b))
+        .collect();
+    let template_buttons =
+        chatbotx_core::flow_config::steps::read_messenger_mini_app_buttons(components);
+    let mut suffix_by_index = std::collections::HashMap::new();
+    for (template_button, flow_button) in template_buttons.iter().zip(flow_mini_app_buttons) {
+        let target = template_button["miniAppId"].as_str().unwrap_or_default();
+        let button_id = flow_button
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !sendable.contains(target) {
+            tracing::warn!(
+                button_id,
+                mini_app_id = target,
+                "Messenger template Mini App cannot be sent; the flow will not continue on submit"
+            );
+            continue;
+        }
+        if let Some(token) = sign_resume(button_id, target) {
+            let index = template_button["index"].as_i64().unwrap_or_default();
+            suffix_by_index.insert(index, chatbotx_core::js::encode_uri_component(&token));
+        }
+    }
+    let Some(Value::Array(buttons)) = params.get_mut("button") else {
+        return;
+    };
+    for (position, button) in buttons.iter_mut().enumerate() {
+        let index = button
+            .get("index")
+            .and_then(Value::as_i64)
+            .unwrap_or(position as i64);
+        if button.get("sub_type").and_then(Value::as_str) == Some("url")
+            && let Some(suffix) = suffix_by_index.get(&index)
+        {
+            button["text"] = json!(suffix);
+        }
+    }
+}
+
+/// The resume suffix of a `sendMessengerTemplateMessage` step: reads the
+/// template's components (of the contact's inbox) and signs one resume token
+/// per paired Mini App button. Sent only: the stored message keeps the params
+/// as they were.
+pub async fn resolve_template_mini_app_resume(
+    deps: &Deps,
+    ctx: &LinkContext<'_>,
+    inbox_id: i64,
+    step: &mut Value,
+) {
+    let Some(template_id) = step
+        .pointer("/template/id")
+        .and_then(|v| {
+            v.as_str()
+                .map(str::to_owned)
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+        })
+        .and_then(|id| id.parse::<i64>().ok())
+    else {
+        return;
+    };
+    if mini_app_ids(step, None).is_empty() || step.pointer("/template/params/button").is_none() {
+        return;
+    }
+    let components = deps
+        .db
+        .read(move |conn| {
+            use chatbotx_db::rusqlite::OptionalExtension as _;
+            Ok(conn
+                .query_row(
+                    r#"SELECT t."components" FROM "MessengerMessageTemplate" t
+                       JOIN "IntegrationMessenger" i ON i."id" = t."integrationMessengerId"
+                       WHERE t."id" = ?1 AND i."inboxId" = ?2"#,
+                    chatbotx_db::rusqlite::params![template_id, inbox_id],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?)
+        })
+        .await;
+    let components: Vec<Value> = match components {
+        Ok(Some(text)) => serde_json::from_str(&text).unwrap_or_default(),
+        _ => return,
+    };
+    let template_ids: Vec<String> =
+        chatbotx_core::flow_config::steps::read_messenger_mini_app_buttons(&components)
+            .iter()
+            .filter_map(|b| b["miniAppId"].as_str().map(str::to_owned))
+            .collect();
+    let sendable = sendable_ids(deps, ctx.workspace_id, &template_ids).await;
+    let encryption = deps.variables.as_ref().map(|v| &v.encryption);
+    let mut sign = |button_id: &str, mini_app_id: &str| {
+        let claims = MiniAppResumeClaims {
+            workspace_id: ctx.workspace_id.to_string(),
+            contact_id: ctx.contact_id.to_string(),
+            mini_app_id: mini_app_id.to_owned(),
+            conversation_id: ctx.conversation_id.to_string(),
+            contact_inbox_id: ctx.contact_inbox_id.to_string(),
+            button_payload: resume_button_payload(ctx, button_id),
+        };
+        encryption?
+            .sign_mini_app_resume_token(&claims, MINI_APP_TOKEN_TTL_MS)
+            .inspect_err(
+                |err| tracing::error!(err = %err, "Unable to sign the Mini App resume token"),
+            )
+            .ok()
+    };
+    let flow_buttons = step
+        .get("buttons")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(params) = step.pointer_mut("/template/params") {
+        apply_template_resume(params, &components, &flow_buttons, &sendable, &mut sign);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_template_mini_app_button_gets_the_resume_token_of_its_paired_flow_button() {
+        let components = vec![json!({ "type": "BUTTONS", "buttons": [
+            { "type": "URL", "text": "Shop", "url": "https://shop.example.com" },
+            { "type": "URL", "text": "Form", "url": "https://app.example.com/mini-apps?id=7&token={{1}}" },
+            { "type": "URL", "text": "Other", "url": "https://app.example.com/mini-apps?id=8&token={{1}}" }
+        ] })];
+        let flow_buttons = vec![
+            json!({ "id": "b1", "buttonType": "openMiniApp", "beforeStep": { "miniAppId": "7" } }),
+            json!({ "id": "b2", "buttonType": "openMiniApp", "beforeStep": { "miniAppId": "8" } }),
+        ];
+        let mut params = json!({ "button": [
+            { "index": 0, "sub_type": "url", "text": "x" },
+            { "index": 1, "sub_type": "url", "text": "contact-token" },
+            { "index": 2, "sub_type": "url", "text": "contact-token" }
+        ] });
+        let sendable: HashSet<String> = ["7".to_owned()].into();
+        let mut sign = |button: &str, app: &str| Some(format!("{button}:{app}+/"));
+        apply_template_resume(
+            &mut params,
+            &components,
+            &flow_buttons,
+            &sendable,
+            &mut sign,
+        );
+        assert_eq!(params["button"][0]["text"], "x");
+        assert_eq!(params["button"][1]["text"], "b1%3A7%2B%2F");
+        // Mini App 8 is not sendable: the contact token stays.
+        assert_eq!(params["button"][2]["text"], "contact-token");
+    }
 
     const CTX: LinkContext<'static> = LinkContext {
         workspace_id: 1,

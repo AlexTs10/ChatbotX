@@ -12,7 +12,7 @@ P3.6-D1 (`specs/P3.6-D1.md`).
 | 3 | Public `/v1/mini-apps` (list, get, validate, create, duplicate, update, delete, bulk delete, flow-json, submissions) | `api::handlers::mini_apps` | `features/mini-apps/api/public.ts` |
 | 4 | `/rpc`: `miniAppsAPI.listMiniAppOptionsAPI`, the page queries and the builder actions | `api::rpc_procedures::mini_apps` | `features/mini-apps/api/private.ts`, `queries`, `actions/*` |
 | 5 | Public runtime: `POST /rpc/pages/miniApp`, `submitMiniAppAction`, `saveMiniAppScreenAction`, `POST /api/mini-apps/{id}/uploads`, flow resume | `server::mini_apps` | `app/mini-apps/page.tsx`, `lib/public-mini-app.ts`, `resolve-visitor-contact.ts`, `resolve-contact-variables.ts`, `resume-flow.ts`, `app/api/mini-apps/[id]/uploads/route.ts` |
-| 6 | Flow step: Open Mini App buttons become signed `/mini-apps?id&token&resume` links | `worker::mini_app_buttons`, `worker::send_flow_step` | `apps/worker/src/lib/mini-app-buttons.ts` |
+| 6 | Flow step: Open Mini App buttons become signed `/mini-apps?id&token&resume` links; a Messenger template's Mini App URL suffix becomes the resume token | `worker::mini_app_buttons`, `worker::send_flow_step` | `apps/worker/src/lib/mini-app-buttons.ts`, `chat/utils/messenger-template-mini-app.ts` |
 | 6b | WhatsApp Flows: publish, draft, preview, draft delete (`/v1` + builder actions), Flow removal on delete | `business::mini_app_whatsapp`, `api::handlers::mini_apps`, `rpc_procedures::mini_apps` | `lib/whatsapp-publication.ts`, `lib/delete-mini-apps.ts`, `integrations/whatsapp/src/api/flow.ts` (write calls) |
 | 7 | Web SPA: list, editor, submissions and the public runner page | `apps/web/src/routes/mini-apps.tsx`, `features/mini-apps/*` (copied from the builder), `queries/index.ts` | `app/space/[workspaceId]/mini-apps/*`, `app/mini-apps/page.tsx` |
 
@@ -49,7 +49,7 @@ See `conversion/DECISIONS.md` (2026-11-17 "Q.D1m" lines).
 - `crates/business/tests/mini_app_definition.rs`, `mini_app_service.rs`, `mini_app_upload_service.rs`.
 - `crates/api/tests/mini_apps_public_api.rs`, `mini_apps_whatsapp_public_api.rs` (local Graph server).
 - Unit tests: `server::mini_apps` (cross-site check), `worker::mini_app_buttons`
-  (links, dropped buttons), `rpc_procedures::mini_apps` (number label).
+  (links, dropped buttons, template resume suffix), `rpc_procedures::mini_apps` (number label).
 - The submit and upload route tests are covered by parity `50-mini-apps`.
 
 ## Parity
@@ -59,6 +59,5 @@ Not run in this unit. Suites: `p1-12-miniapps-orders-payments/50-mini-apps`,
 
 ## Not done
 
-- The Messenger template Mini App button.
 - The `resolveContactVariables` cases of `mini-app-contact-variables.test.ts`
   (covered by parity `50-mini-apps`).

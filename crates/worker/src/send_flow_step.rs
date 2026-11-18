@@ -446,13 +446,25 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         metadata: metadata.as_ref(),
         app_url: &deps.app_url,
     };
-    crate::mini_app_buttons::resolve_mini_app_links(
-        deps,
-        &link_context,
-        &mut resolved,
-        raw_quick_replies.as_mut(),
-    )
-    .await;
+    if step_type == "sendMessengerTemplateMessage" {
+        // `processMessengerTemplate` takes the step's raw buttons: only the
+        // template's URL suffix changes (`applyMiniAppResumeToTemplateParams`).
+        crate::mini_app_buttons::resolve_template_mini_app_resume(
+            deps,
+            &link_context,
+            contact_inbox.inbox_id,
+            &mut resolved,
+        )
+        .await;
+    } else {
+        crate::mini_app_buttons::resolve_mini_app_links(
+            deps,
+            &link_context,
+            &mut resolved,
+            raw_quick_replies.as_mut(),
+        )
+        .await;
+    }
     let channel = contact_inbox.channel.clone();
     let contact_inbox_text = contact_inbox.id.to_string();
     let convert = |buttons: &[Value]| {
