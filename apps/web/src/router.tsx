@@ -106,6 +106,7 @@ const publicMiniAppRoute = createRoute({
   path: "mini-apps",
   component: lazyRouteComponent(miniApps, "PublicMiniAppPage"),
 })
+
 // `/booking/*` is public too: the signed token is the authority.
 const bookingPages = (
   [

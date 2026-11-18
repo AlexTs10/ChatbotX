@@ -180,6 +180,16 @@ mod logger_diagnostic;
 mod logger_err_serializer;
 #[path = "logger_redact.rs"]
 mod logger_redact;
+#[path = "mini_app_display_text.rs"]
+mod mini_app_display_text;
+#[path = "mini_app_runtime.rs"]
+mod mini_app_runtime;
+#[path = "mini_app_serialize.rs"]
+mod mini_app_serialize;
+#[path = "mini_app_validate.rs"]
+mod mini_app_validate;
+#[path = "mini_app_validate_issue_codes.rs"]
+mod mini_app_validate_issue_codes;
 #[path = "partials_contact_filter_reference_coverage.rs"]
 mod partials_contact_filter_reference_coverage;
 #[path = "partials_thread_control_sdk_parity.rs"]

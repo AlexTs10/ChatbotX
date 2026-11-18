@@ -124,6 +124,8 @@ mod messenger_menus_public_api;
 mod messenger_templates_public_api;
 #[path = "meta_catalog_public_api.rs"]
 mod meta_catalog_public_api;
+#[path = "mini_apps_public_api.rs"]
+mod mini_apps_public_api;
 #[path = "minigames_public_api.rs"]
 mod minigames_public_api;
 #[path = "mobile_member_scope.rs"]
