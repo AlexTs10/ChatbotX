@@ -50,6 +50,9 @@ pub(super) const ACTIONS: &[&str] = &[
     "syncWooCommerceAction",
     "disconnectWooCommerceAction",
     "startStripeConnectAction",
+    "paymentProvidersPage",
+    "connectStripeKeyAction",
+    "disconnectPaymentProviderAction",
 ];
 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
@@ -68,16 +71,23 @@ fn require_ecommerce(ctx: &Ctx<'_>) -> Result<(), OrpcError> {
     }
 }
 
-/// `startStripeConnectAction`: the Stripe Connect page for this workspace
-/// (super admins only); the callback lands back on its Stripe row.
-async fn start_stripe_connect(ctx: &Ctx<'_>) -> Result<Value, OrpcError> {
-    if ctx.permissions.get("superAdmin") != Some(&Value::Bool(true)) {
-        return Err(action_fail(BusinessError::exception(
+/// `assertWorkspaceSuperAdmin`.
+fn require_super_admin(ctx: &Ctx<'_>) -> Result<(), OrpcError> {
+    if ctx.permissions.get("superAdmin") == Some(&Value::Bool(true)) {
+        Ok(())
+    } else {
+        Err(action_fail(BusinessError::exception(
             "You need to be a workspace super admin to do this.",
             "systemError",
             400,
-        )));
+        )))
     }
+}
+
+/// `startStripeConnectAction`: the Stripe Connect page for this workspace
+/// (super admins only); the callback lands back on its Stripe row.
+async fn start_stripe_connect(ctx: &Ctx<'_>) -> Result<Value, OrpcError> {
+    require_super_admin(ctx)?;
     let encryption = ctx.api.encryption.as_deref().ok_or_else(|| {
         action_fail(BusinessError::exception(
             "ENCRYPTION_KEY is not set",
@@ -394,6 +404,43 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             .map(|code| json!({ "code": code }))
             .map_err(action_fail),
         "startStripeConnectAction" => start_stripe_connect(ctx).await,
+        // The Stripe row of `settings/integrations/stripe` (settings layout:
+        // super admins only): `getPaymentProviders`, then the same calls
+        // `paymentProviders.connectStripeKey` / `.disconnect` make.
+        "paymentProvidersPage" => {
+            require_super_admin(ctx)?;
+            public(ctx, "paymentProviders.list", &[], None, None).await
+        }
+        "connectStripeKeyAction" => {
+            require_super_admin(ctx)?;
+            let view = public(
+                ctx,
+                "paymentProviders.connectStripeKey",
+                &[],
+                None,
+                Some(arg(args, 1)),
+            )
+            .await
+            .map_err(|e| action_error(schema_errors(e)))?;
+            Ok(json!({ "chargesEnabled": view["chargesEnabled"], "livemode": view["livemode"] }))
+        }
+        "disconnectPaymentProviderAction" => {
+            require_super_admin(ctx)?;
+            let provider = match arg(args, 1)["provider"].as_str() {
+                Some(p @ ("stripe" | "paypal")) => p,
+                _ => return Err(invalid()),
+            };
+            public(
+                ctx,
+                "paymentProviders.disconnect",
+                &[],
+                Some(&format!("provider={provider}")),
+                None,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(|e| action_error(schema_errors(e)))
+        }
         // The same calls `shopify.*` / `woocommerce.*` make.
         "connectShopifyAction"
         | "syncShopifyAction"
