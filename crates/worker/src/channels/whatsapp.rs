@@ -806,6 +806,14 @@ fn interactive_reply(
 
 /// `receiveMessage`: one `whatsapp-api-js` `OnMessageArgs` payload.
 pub fn parse_incoming(payload: &Value) -> Received {
+    let info = crate::thread_control::whatsapp_receive_info(&payload["raw"]);
+    // A standby echo is a partner's outgoing message (its Send API body), never a
+    // customer message.
+    if info["delivery"] == "standby"
+        && crate::thread_control::is_standby_echo_item(&payload["message"])
+    {
+        return crate::thread_control::parse_standby_echo(&payload["message"], info);
+    }
     let message = &payload["message"];
     let mut incoming = IncomingMessage::incoming(s(message, "id"));
     // `extractWhatsappUserIdentity(raw)`: the BSUID fields of the contact.
@@ -931,10 +939,10 @@ pub fn parse_incoming(payload: &Value) -> Received {
             "videoUrl": s(r, "video_url"), "raw": r,
         }));
     }
-    // ponytail: standby echoes / thread control, commerce events and the
-    // `deriveAdSourcePlatform` field are not ported.
+    // ponytail: commerce events and the `deriveAdSourcePlatform` field are not ported.
     received.message = Some(incoming);
     received.contact = contact;
+    received.thread_control = Some(info);
     received
 }
 

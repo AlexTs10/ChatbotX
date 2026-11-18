@@ -25,7 +25,9 @@ use chatbotx_rt::EventType;
 use serde_json::{Value, json};
 
 use crate::channel::{InboundInbox, IncomingContact, IncomingMessage, Received};
+use crate::thread_control::record_inbound;
 use crate::{Deps, db_fail, fail, str_of};
+use chatbotx_business::thread_control as tc;
 
 /// `IntegrationJobAction.incomingMessage`.
 pub const INCOMING_MESSAGE: &str = "incomingMessage";
@@ -72,6 +74,8 @@ pub struct Stored {
     /// A step's Skip tap: resolved by its own `resolveStepInput` job, never
     /// routed as a typed reply.
     pub step_input_skip: bool,
+    /// `standbyCopy`: the stored standby copy (also on a retry of an unpromoted one).
+    pub standby_copy: Option<chatbotx_db::repo::models::Message>,
 }
 
 /// `IntegrationJobAction.incomingMessage`: [`receive_message`] then the
@@ -138,6 +142,17 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         &integration_type,
         skip_challenge_id.is_some(),
     );
+    // `markStandbyDelivery`: a standby copy of an inbound message carries a marker
+    // so its later owner delivery can promote it once.
+    if suppress
+        && let Some(incoming) = received
+            .message
+            .as_mut()
+            .filter(|m| m.message_type != "outgoing")
+    {
+        let attrs = incoming.content_attributes.get_or_insert_with(|| json!({}));
+        attrs[tc::DELIVERY_KEY] = json!(tc::STANDBY_DELIVERY);
+    }
     if is_third_party_echo(&received) {
         let (probe_inbox, contact) = (inbox.clone(), received.contact.clone());
         let known = deps
@@ -197,7 +212,92 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
 
     let mut message = None;
     let mut message_id = None;
+    let mut standby_copy = None;
+    let info = received.thread_control.clone();
+    let delivery = info
+        .as_ref()
+        .and_then(|t| str_of(t, "delivery"))
+        .map(str::to_owned);
+    // A routing delivery with no storable message still records its ownership
+    // observation (the guarded write is idempotent on the delivery's own time).
+    if saved.is_none()
+        && let Some(info) = &info
+    {
+        record_inbound(
+            deps,
+            &inbox,
+            &contact_inbox,
+            conversation.id,
+            info,
+            now_ms(),
+            false,
+        )
+        .await?;
+    }
     if let Some((stored, is_new)) = saved {
+        let mut owns_automation = is_new;
+        if let Some(info) = info
+            .as_ref()
+            .filter(|_| delivery.as_deref() == Some("owner"))
+        {
+            // An owner delivery unlocks the thread for our automation. It is
+            // recorded after the save (one transaction above), so a retry after a
+            // failed record sees a stored message: a record that still changes the
+            // state means the earlier attempt never got to the automation.
+            let recorded = record_inbound(
+                deps,
+                &inbox,
+                &contact_inbox,
+                conversation.id,
+                info,
+                now_ms(),
+                false,
+            )
+            .await?;
+            owns_automation |= recorded.is_some_and(|r| r.state_changed);
+            // The owner delivery of a message first stored from its standby copy:
+            // recorded at the copy's own time, then the one-shot promotion claim.
+            let attrs = stored.message.content_attributes.as_ref().map(|j| &j.0);
+            if !is_new && tc::is_unpromoted_standby_copy(attrs) {
+                record_inbound(
+                    deps,
+                    &inbox,
+                    &contact_inbox,
+                    conversation.id,
+                    info,
+                    stored.message.created_at,
+                    true,
+                )
+                .await?;
+                owns_automation |=
+                    tc::promote_standby_delivery(&deps.db, inbox.workspace_id, &stored.message)
+                        .await
+                        .map_err(|e| fail(e.message()))?;
+            }
+        }
+        // A standby copy (new, or a retry of one still unpromoted) records the
+        // standby transition; a delivery that says nothing about ownership (a
+        // partner's template echo) is stored only.
+        if let Some(info) = info.as_ref().filter(|i| {
+            delivery.as_deref() == Some(tc::STANDBY_DELIVERY)
+                && i.get("signalsOwnership") != Some(&json!(false))
+        }) && (is_new
+            || tc::is_unpromoted_standby_copy(
+                stored.message.content_attributes.as_ref().map(|j| &j.0),
+            ))
+        {
+            standby_copy = Some(stored.message.clone());
+            record_inbound(
+                deps,
+                &inbox,
+                &contact_inbox,
+                conversation.id,
+                info,
+                stored.message.created_at,
+                false,
+            )
+            .await?;
+        }
         let row = broadcast_saved(deps, &inbox, &conversation, &stored, is_new, None).await;
         // Also on a redelivery: the job is deduplicated and the challenge
         // claim settles it once.
@@ -217,7 +317,7 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
             );
             add_job(deps, QueueName::Integration, &job.name, job.data, job.opts).await?;
         }
-        if is_new {
+        if owns_automation {
             // Q.D13 hook: `awardInboundMessageLeaderboard` goes here.
             message_id = row["id"].as_str().and_then(|s| s.parse().ok());
             message = Some(row);
@@ -232,6 +332,7 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         message_id,
         received,
         is_new_contact,
+        standby_copy,
     }))
 }
 
@@ -1200,7 +1301,7 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! The API channel through the shared pipeline: contact, conversation
     //! and message rows, the redelivery dedup, the debounced keyword job and
     //! its text reply (`41-keywords-trigger` in small).
@@ -1212,7 +1313,7 @@ mod tests {
     use super::*;
 
     #[derive(Default)]
-    struct Recording(Mutex<Vec<(QueueName, String, Value, JobOptions)>>);
+    pub(crate) struct Recording(pub(crate) Mutex<Vec<(QueueName, String, Value, JobOptions)>>);
 
     impl Enqueuer for Recording {
         fn add(
@@ -1243,7 +1344,7 @@ mod tests {
         }
     }
 
-    async fn setup() -> (Deps, Arc<Recording>) {
+    pub(crate) async fn setup() -> (Deps, Arc<Recording>) {
         let dir = std::env::temp_dir().join(format!(
             "chatbotx-worker-inbound-{}-{}",
             std::process::id(),

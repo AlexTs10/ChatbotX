@@ -1578,16 +1578,23 @@ fn occurred_at(timestamp: Option<&Value>, now: i64) -> i64 {
 
 /// `receiveMessage` of one queued `{ object, entry: [{ messaging: [event] }] }`.
 pub fn parse_incoming(page_id: &str, payload: &Value, now: i64) -> ChannelResult<Received> {
-    let Some(messaging) = payload.pointer("/entry/0/messaging/0") else {
-        // ponytail: standby deliveries (`threadControlEvent` jobs) are not
-        // queued yet (thread control, Q.D12); an entry without `messaging`
-        // fails as the original's non-standby branch.
-        return Err(SendFailure::other("No messaging found"));
+    // A `threadControlEvent` standby rewrap `{entry:[{standby:[item]}]}` is a
+    // listen-only (standby) delivery of the same item shape.
+    let (messaging, standby) = match payload.pointer("/entry/0/messaging/0") {
+        Some(messaging) => (messaging, false),
+        None => match payload.pointer("/entry/0/standby/0") {
+            Some(item) => (item, true),
+            None => return Err(SendFailure::other("No messaging found")),
+        },
     };
     let message = messaging.get("message").filter(|m| m.is_object());
-    let postback = messaging.get("postback").filter(|p| p.is_object());
+    // Meta strips a standby postback's payload / title; one without a `mid`
+    // has nothing to key a message on.
+    let postback = messaging
+        .get("postback")
+        .filter(|p| p.is_object() && (!standby || p.get("mid").is_some_and(Value::is_string)));
     let referral_top = messaging.get("referral").filter(|r| r.is_object());
-    if message.is_none() && postback.is_none() && referral_top.is_none() {
+    if !standby && message.is_none() && postback.is_none() && referral_top.is_none() {
         return Err(SendFailure::other("No message found"));
     }
     let sender = messaging
@@ -1731,13 +1738,56 @@ pub fn parse_incoming(page_id: &str, payload: &Value, now: i64) -> ChannelResult
         received.referral = Some(referral);
     }
     received.echo_origin = echo_origin.map(str::to_owned);
-    if !is_echo && !from_page {
+    if standby {
+        // A standby delivery is listen-only: it never routes a flow action; its
+        // echo is the partner's own outgoing message (a third-party echo).
+        received.postback_action = None;
+        received.quick_reply_action = None;
+        let ai_generated = message.is_some_and(|m| m.get("ai_generated") == Some(&json!(true)));
+        if is_echo {
+            received.echo_origin = Some("thirdParty".into());
+            if let Some(incoming) = received.message.as_mut() {
+                let attrs = incoming.content_attributes.get_or_insert_with(|| json!({}));
+                attrs["threadControlEcho"] = json!(true);
+                if ai_generated {
+                    attrs["aiGenerated"] = json!(true);
+                }
+            }
+        }
+        let mut info =
+            json!({ "delivery": "standby", "occurredAt": chatbotx_db::repo::iso(timestamp) });
+        if let Some(owner) = standby_owner_app_id(payload, message, ai_generated) {
+            info["ownerAppId"] = json!(owner);
+            info["ownerRole"] = json!("ai_agent");
+        }
+        received.thread_control = Some(info);
+    } else if !is_echo && !from_page {
         received.thread_control = Some(json!({
             "delivery": "owner",
             "occurredAt": chatbotx_db::repo::iso(timestamp),
         }));
     }
     Ok(received)
+}
+
+/// `readStandbyOwnerAppId`: the Business-AI app id when a standby delivery shows it
+/// owns the thread (`hop_context.is_ai_thread_owner`, `ai_generated`, or the echo's
+/// `app_id`), else `None` (never guessed).
+fn standby_owner_app_id(
+    payload: &Value,
+    message: Option<&Value>,
+    ai_generated: bool,
+) -> Option<String> {
+    let ai = chatbotx_business::thread_control::channel::business_ai_app_id();
+    let hop = payload.pointer("/entry/0/hop_context/is_ai_thread_owner") == Some(&json!(true));
+    let echo_app = message
+        .and_then(|m| m.get("app_id"))
+        .is_some_and(|id| match id {
+            Value::String(s) => *s == ai,
+            Value::Number(n) => n.to_string() == ai,
+            _ => false,
+        });
+    (hop || ai_generated || echo_app).then_some(ai)
 }
 
 #[cfg(test)]
