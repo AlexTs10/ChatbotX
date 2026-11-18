@@ -201,6 +201,12 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         chatbotx_business::thread_control::RELEASE_JOB => {
             crate::thread_control::release_owned_thread(&deps, &job.data["data"]).await?
         }
+        crate::coexist_whatsapp::BUFFER_JOB => {
+            crate::coexist_whatsapp::buffer(&deps, &job.data["data"]).await?
+        }
+        crate::coexist_whatsapp::FLUSH_JOB => {
+            crate::coexist_whatsapp::flush(&deps, &job.data["data"]).await?
+        }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }

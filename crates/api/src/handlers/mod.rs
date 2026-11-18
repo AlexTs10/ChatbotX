@@ -76,6 +76,7 @@ pub mod templates;
 pub mod triggers;
 pub mod webchats;
 pub mod webhooks;
+pub mod whatsapp_coexist;
 pub mod whatsapp_flows;
 pub mod whatsapp_templates;
 pub mod working_hours;
@@ -726,6 +727,8 @@ async fn route(
         whatsapp_templates::handle(state, route_id, call).await
     } else if whatsapp_flows::ROUTES.contains(&route_id) {
         whatsapp_flows::handle(state, route_id, call).await
+    } else if whatsapp_coexist::ROUTES.contains(&route_id) {
+        whatsapp_coexist::handle(state, route_id, call).await
     } else if saved_replies::ROUTES.contains(&route_id) {
         saved_replies::handle(state, route_id, call).await
     } else if response_sla::ROUTES.contains(&route_id) {

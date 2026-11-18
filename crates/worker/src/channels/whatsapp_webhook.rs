@@ -141,6 +141,7 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             .into_iter()
             .flatten()
         {
+            jobs.extend(coexist_job(change));
             if change.get("field").and_then(Value::as_str) == Some("messaging_handovers") {
                 jobs.extend(handover_job(change.get("value"), pinned));
                 continue;
@@ -299,9 +300,40 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             }
         }
     }
-    // ponytail: coexist history, automatic events, calls, identity changes and
-    // account updates are not ported yet.
+    // ponytail: automatic events, calls, identity changes and account
+    // updates are not ported yet.
     jobs
+}
+
+/// `extractCoexistPayloads` + `enqueueCoexistPayloads`: a history,
+/// state-sync or echo slice goes whole to `coexistWhatsappBuffer` (not
+/// pinned: the buffer checks the integration).
+///
+/// ponytail: the hash is of serde_json's key order, as in [`handover_job`].
+fn coexist_job(change: &Value) -> Option<WebhookJob> {
+    let value = change.get("value").filter(|v| v.is_object())?;
+    let field_key = match change.get("field").and_then(Value::as_str) {
+        Some("history") => Some("history"),
+        Some("smb_app_state_sync") => Some("state_sync"),
+        Some("smb_message_echoes") => Some("message_echoes"),
+        _ => None,
+    };
+    let is_array = |key: &str| value.get(key).is_some_and(Value::is_array);
+    if !(field_key.is_some_and(is_array) || is_array("history") || is_array("smb_app_state_sync")) {
+        return None;
+    }
+    let phone = value
+        .pointer("/metadata/phone_number_id")
+        .and_then(Value::as_str)?;
+    Some(WebhookJob {
+        name: crate::coexist_whatsapp::BUFFER_JOB,
+        data: json!({ "type": crate::coexist_whatsapp::BUFFER_JOB, "data": { "phoneNumberId": phone, "payload": value } }),
+        job_id: format!(
+            "wa-coexist-{}-{}",
+            safe_id_segment(phone),
+            chatbotx_core::utils::crypto::sha256_hex(&value.to_string())
+        ),
+    })
 }
 
 /// `splitHandoverChange` + `enqueueConversationRoutingPayloads`: one

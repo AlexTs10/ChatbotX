@@ -19,6 +19,7 @@ pub mod bot_field;
 pub mod broadcast;
 pub mod capabilities;
 pub mod channel_integration;
+pub mod coexist;
 pub mod comment_automation;
 pub mod comment_automation_crud;
 pub mod comment_automation_posts;

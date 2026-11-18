@@ -1,7 +1,8 @@
 //! The WhatsApp templates and Flows screens (Q.D12):
 //! `whatsappMessageTemplateAPIs` / `whatsappFlowAPIs`
 //! (`features/integration-whatsapp/{message-templates,flows}/api/private.ts`) and
-//! `syncMessageTemplateAction` / `syncWhatsappFlowsAction`.
+//! `syncMessageTemplateAction` / `syncWhatsappFlowsAction`; the coexist
+//! switch `integrationWhatsappAPIs.setCoexistWhatsappAPI`.
 
 use chatbotx_business::tx;
 use serde_json::{Value, json};
@@ -66,6 +67,25 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
                 .map_err(fail),
             Err(error) => Err(error),
         },
+        "integrationWhatsappAPIs.setCoexistWhatsappAPI" => {
+            let run = async {
+                let integration_id = inp.id("integrationId")?;
+                let enabled = inp.opt_bool("enabled")?.ok_or_else(invalid)?;
+                let ai_reads = inp.opt_bool("aiReadsSyncedHistory")?.unwrap_or(false);
+                let result = chatbotx_business::coexist::set_whatsapp_coexist(
+                    db,
+                    &ctx.api.graph_url,
+                    ws,
+                    integration_id,
+                    enabled,
+                    ai_reads,
+                )
+                .await
+                .map_err(fail)?;
+                Ok(crate::handlers::whatsapp_coexist::rpc_output(&result))
+            };
+            run.await
+        }
         _ => return None,
     })
 }
