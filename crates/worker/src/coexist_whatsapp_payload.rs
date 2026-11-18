@@ -241,7 +241,7 @@ fn to_ms(timestamp: Option<&Value>) -> Option<i64> {
             .or_else(|| text.trim().is_empty().then_some(0.0))?,
         _ => return None,
     };
-    seconds.is_finite().then(|| (seconds * 1000.0) as i64)
+    seconds.is_finite().then_some((seconds * 1000.0) as i64)
 }
 
 /// `extractMedia` + `buildWaIncomingAttachment`: a `wa-media:{id}` stub, or
