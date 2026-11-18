@@ -101,7 +101,7 @@ pub async fn list_topics(
         let mut where_sql = Sql::raw(r#"WHERE t."workspaceId" = "#);
         where_sql.push_bind(workspace_id);
         where_sql.push(r#" AND t."deletedAt" IS NULL AND t."status" = "#);
-        where_sql.push_bind(if archived { "archived" } else { "active" });
+        where_sql.push_bind(if archived { "archived" } else { "active" }.to_string());
         if let Some(search) = search.filter(|s| !s.is_empty()) {
             where_sql.push(r#" AND ilike(t."name", "#);
             where_sql.push_bind(like_contains(&search));
@@ -383,13 +383,21 @@ fn coupon_where(workspace_id: i64, filter: &CouponFilter) -> Sql {
         sql.push(")");
     }
     match filter.issue_status.as_deref() {
-        Some("published") => sql.push(r#" AND c."issuedContactId" IS NOT NULL"#),
-        Some("unpublished") => sql.push(r#" AND c."issuedContactId" IS NULL"#),
+        Some("published") => {
+            sql.push(r#" AND c."issuedContactId" IS NOT NULL"#);
+        }
+        Some("unpublished") => {
+            sql.push(r#" AND c."issuedContactId" IS NULL"#);
+        }
         _ => {}
     }
     match filter.usage_status.as_deref() {
-        Some("used") => sql.push(r#" AND c."usedAt" IS NOT NULL"#),
-        Some("notUsed") => sql.push(r#" AND c."usedAt" IS NULL"#),
+        Some("used") => {
+            sql.push(r#" AND c."usedAt" IS NOT NULL"#);
+        }
+        Some("notUsed") => {
+            sql.push(r#" AND c."usedAt" IS NULL"#);
+        }
         _ => {}
     }
     sql
