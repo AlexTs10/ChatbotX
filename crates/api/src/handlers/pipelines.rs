@@ -25,9 +25,11 @@ use serde_json::{Value, json};
 mod content;
 mod query;
 mod stats;
+pub(crate) use content::COMMENT;
 pub use content::activity_groups_query;
 pub use query::{item_filter_query, item_list_query};
-pub use stats::stats_query;
+pub(crate) use query::{parse_field_operator, parse_value_operator, sort_key};
+pub use stats::{stats_json, stats_query};
 
 use super::custom_fields::CUSTOM_FIELD_TYPES;
 use super::input::{Input, Num, Seg, Str, child, key};
@@ -270,7 +272,7 @@ fn nullish_at(input: &mut Input, name: &str, spec: Str) -> Option<Option<String>
 }
 
 /// `stageValues` (every key optional).
-fn stage_values(input: &mut Input) -> StageValues {
+pub(crate) fn stage_values(input: &mut Input) -> StageValues {
     StageValues {
         name: input.opt_string("name", NAME),
         description: nullish_at(input, "description", STAGE_DESCRIPTION),
@@ -741,7 +743,7 @@ const ITEM_DESCRIPTION: Str = Str {
     pattern: Some(no_nul),
     ..Str::max(5000)
 };
-const IDEMPOTENCY_KEY: Str = Str {
+pub(crate) const IDEMPOTENCY_KEY: Str = Str {
     trim: false,
     min: Some(1),
     max: Some(128),
@@ -754,18 +756,18 @@ const FIELD_VALUE: Str = Str {
 /// `MAX_FIELD_VALUES` / `MAX_FIELD_VALUE_LENGTH`.
 const MAX_FIELD_VALUES: usize = 100;
 const MAX_FIELD_VALUE_LENGTH: usize = 2000;
-const PRIORITIES: &[&str] = &["low", "medium", "high"];
-const STATUSES: &[&str] = &["open", "won", "lost"];
+pub(crate) const PRIORITIES: &[&str] = &["low", "medium", "high"];
+pub(crate) const STATUSES: &[&str] = &["open", "won", "lost"];
 /// `boundedDate`: 1900-01-01 .. 2200-01-01.
-const DATE_MIN: i64 = -2_208_988_800_000;
-const DATE_MAX: i64 = 7_258_118_400_000;
+pub(crate) const DATE_MIN: i64 = -2_208_988_800_000;
+pub(crate) const DATE_MAX: i64 = 7_258_118_400_000;
 
 /// Major units -> the stored x 10,000 integer (`storedValue`).
-fn stored_value(value: f64) -> i64 {
+pub(crate) fn stored_value(value: f64) -> i64 {
     (value * 10_000.0).round() as i64
 }
 
-fn bounded_date_at(input: &mut Input, name: &str) -> Option<Option<i64>> {
+pub(crate) fn bounded_date_at(input: &mut Input, name: &str) -> Option<Option<i64>> {
     let path = key(name);
     match input.get(name).cloned() {
         None => None,
@@ -787,7 +789,7 @@ fn bounded_date_at(input: &mut Input, name: &str) -> Option<Option<i64>> {
     }
 }
 
-fn opt_id_list(input: &mut Input, name: &str, max: usize) -> Option<Vec<i64>> {
+pub(crate) fn opt_id_list(input: &mut Input, name: &str, max: usize) -> Option<Vec<i64>> {
     if !input.has(name) {
         return None;
     }
@@ -849,7 +851,7 @@ fn field_values_at(input: &mut Input) -> Option<BTreeMap<String, Option<String>>
 }
 
 /// `itemWriteFields` (+ `title`).
-fn item_fields(input: &mut Input, title_required: bool) -> ItemFields {
+pub(crate) fn item_fields(input: &mut Input, title_required: bool) -> ItemFields {
     let title = if title_required {
         input.string("title", TITLE)
     } else {
@@ -909,7 +911,7 @@ fn item_fields(input: &mut Input, title_required: bool) -> ItemFields {
 }
 
 /// Publishes a write's realtime events and sends its flow-trigger events.
-async fn publish<T>(state: &ApiState, mutation: &ItemMutation<T>) {
+pub(crate) async fn publish<T>(state: &ApiState, mutation: &ItemMutation<T>) {
     state.publish_pipeline_changes(&mutation.events).await;
     state.emit_triggers(mutation.triggers.clone()).await;
 }
@@ -923,7 +925,7 @@ fn token_actor(call: &Call<'_>) -> PipelineActor {
     }
 }
 
-fn money(value: Option<i64>) -> Value {
+pub(crate) fn money(value: Option<i64>) -> Value {
     value.map_or(Value::Null, |v| number(major_units(v)))
 }
 

@@ -1,0 +1,361 @@
+//! Broadcasts: `features/broadcasts/api/private.ts` and
+//! `features/broadcasts/actions/*` (Q.D5). The batch stats and contacts reads
+//! need the delivery analytics (Q.D11); the contacts list is ported (Q.W2).
+
+use chatbotx_business::BusinessError;
+use chatbotx_business::broadcast::{self as service, history, recurrence, write};
+use chatbotx_db::repo::now_ms;
+use serde_json::{Value, json};
+
+use super::{Ctx, In, Outcome, action_fail, arg, fail, invalid};
+use crate::handlers::broadcasts::{
+    coerce_date, parse_action_payload, recurrence_rule, resolve_schedule_time, run_date,
+    schedule_request, send_rate, submitted_rate,
+};
+use crate::orpc::OrpcError;
+use chatbotx_core::flow_config::z;
+
+/// The ported actions.
+pub const ACTIONS: &[&str] = &[
+    "cloneBroadcastAction",
+    "createBroadcastAction",
+    "deleteBroadcastAction",
+    "deleteBroadcastsAction",
+    "moveBroadcastToDraftAction",
+    "resendBroadcastAction",
+    "resumeBroadcastAction",
+    "scheduleBroadcastAction",
+    "setBroadcastRunSkippedAction",
+    "stopBroadcastAction",
+    "updateBroadcastAction",
+    "updateDraftBroadcastAction",
+];
+
+const CHANNELS: &[&str] = &[
+    "omnichannel",
+    "webchat",
+    "messenger",
+    "whatsapp",
+    "zalo",
+    "smtp",
+    "telegram",
+    "instagram",
+    "threads",
+    "tiktok",
+    "api",
+];
+
+/// A `zodBigintAsString` bind arg.
+fn bound_id(value: &Value) -> Result<i64, OrpcError> {
+    match value {
+        Value::String(text) if !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) => {
+            Ok(text.parse::<i64>().unwrap_or(-1))
+        }
+        _ => Err(invalid()),
+    }
+}
+
+/// `withBroadcastPlanLimitOutcome`: a plan limit is `{ outcome: "planLimit", limit }`.
+fn plan_limit_outcome(result: Result<Value, BusinessError>) -> Result<Value, OrpcError> {
+    match result {
+        Err(BusinessError::Exception {
+            code,
+            data: Some(data),
+            ..
+        }) if code == "broadcastPlanLimit" => Ok(json!({ "outcome": "planLimit", "limit": data })),
+        other => other.map_err(action_fail),
+    }
+}
+
+fn parsed(schema: z::Schema, value: &Value) -> Result<Value, OrpcError> {
+    let parsed = schema.safe_parse(value);
+    parsed.data.filter(|_| parsed.success).ok_or_else(invalid)
+}
+
+/// `previewRecurrencePublicRequest` (`count` defaults to 3).
+fn preview(input: &Value) -> Result<Value, OrpcError> {
+    let data = parsed(
+        z::object(vec![
+            ("recurrence", recurrence_rule()),
+            ("count", z::number().int().gte(1.0).lte(10.0).optional()),
+        ]),
+        input,
+    )?;
+    let count = data["count"].as_u64().map_or(3, |c| c as usize);
+    recurrence::preview_upcoming(&data["recurrence"], count, now_ms()).map_err(fail)
+}
+
+fn opt_str(data: &Value, key: &str) -> Option<String> {
+    data[key].as_str().map(str::to_owned)
+}
+
+/// `listBroadcastRunGroupsPublicRequest`.
+async fn run_groups(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let data = parsed(
+        z::object(vec![
+            ("idOrName", z::string()),
+            ("groupBy", z::enum_(&["day", "week", "month"]).optional()),
+            ("timezone", z::string().optional()),
+            (
+                "limit",
+                z::number().coerce().int().gte(1.0).lte(31.0).optional(),
+            ),
+            ("cursor", z::string().optional()),
+        ]),
+        input,
+    )?;
+    let granularity =
+        history::granularity_of(data["groupBy"].as_str().unwrap_or("day")).ok_or_else(invalid)?;
+    history::list_run_groups(
+        &ctx.api.db,
+        ctx.workspace_id,
+        opt_str(&data, "idOrName").unwrap_or_default(),
+        granularity,
+        opt_str(&data, "timezone"),
+        data["limit"].as_i64().unwrap_or(31),
+        opt_str(&data, "cursor"),
+    )
+    .await
+    .map_err(fail)
+}
+
+/// `listBroadcastOccurrencesPublicRequest`.
+async fn occurrences(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let data = parsed(
+        z::object(vec![
+            ("idOrName", z::string()),
+            (
+                "limit",
+                z::number().coerce().int().gte(1.0).lte(100.0).optional(),
+            ),
+            ("cursor", z::string().optional()),
+        ]),
+        input,
+    )?;
+    let date = |key: &str| match input.get(key) {
+        None => Ok(None),
+        Some(value) => coerce_date(value).map(Some).ok_or_else(invalid),
+    };
+    history::list_occurrences(
+        &ctx.api.db,
+        ctx.workspace_id,
+        opt_str(&data, "idOrName").unwrap_or_default(),
+        date("from")?,
+        date("to")?,
+        opt_str(&data, "cursor"),
+        data["limit"].as_i64().unwrap_or(50),
+    )
+    .await
+    .map_err(fail)
+}
+
+/// `privateListBroadcastContactsAPI` (`listBroadcastContactsRequest`): no
+/// `eventType` is an empty page of a live broadcast.
+async fn contacts(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let data = parsed(
+        z::object(vec![
+            ("broadcastId", z::string()),
+            (
+                "eventType",
+                z::enum_(crate::handlers::broadcasts::BROADCAST_EVENT_TYPES).optional(),
+            ),
+            ("page", z::number().optional()),
+            ("perPage", z::number().optional()),
+        ]),
+        input,
+    )?;
+    let id = bound_id(&data["broadcastId"])
+        .map_err(|_| fail(BusinessError::not_found("Broadcast not found")))?;
+    let page = data["page"].as_f64().unwrap_or(1.0) as i64;
+    let per_page = data["perPage"].as_f64().unwrap_or(20.0) as i64;
+    let Some(event_type) = opt_str(&data, "eventType") else {
+        let ws = ctx.workspace_id;
+        let live = chatbotx_business::tx::read(&ctx.api.db, move |conn| {
+            service::list_existing_ids(conn, ws, &[id])
+        })
+        .await
+        .map_err(fail)?;
+        if live.is_empty() {
+            return Err(fail(BusinessError::not_found("Broadcast not found")));
+        }
+        return Ok(json!({ "data": [], "total": 0, "page": page, "pageCount": 0 }));
+    };
+    let mut out = service::list_contacts_page(
+        &ctx.api.db,
+        ctx.workspace_id,
+        id,
+        event_type,
+        page,
+        per_page.max(1),
+    )
+    .await
+    .map_err(fail)?;
+    out["page"] = json!(page);
+    Ok(out)
+}
+
+pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
+    let db = &ctx.api.db;
+    let ws = ctx.workspace_id;
+    let input_ref = In(input);
+    Some(match path {
+        "broadcastAPIs.privatePreviewBroadcastRecurrenceAPI" => preview(input),
+        "broadcastAPIs.privateListBroadcastRunGroupsAPI" => run_groups(ctx, input).await,
+        "broadcastAPIs.privateListBroadcastOccurrencesAPI" => occurrences(ctx, input).await,
+        "broadcastAPIs.privateListBroadcastContactsAPI" => contacts(ctx, input).await,
+        "broadcastAPIs.privateListBroadcastOptionsAPI" => {
+            async {
+                let channel = input_ref
+                    .get("channel")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !CHANNELS.contains(&channel) {
+                    return Err(invalid());
+                }
+                let data = service::list_options(db, ws, channel.to_owned())
+                    .await
+                    .map_err(fail)?;
+                Ok(json!({ "data": data }))
+            }
+            .await
+        }
+        "broadcastAPIs.privateListBroadcastTemplateDetailsAPI" => {
+            async {
+                let id = input_ref.id("broadcastId")?;
+                Ok(Value::Array(
+                    write::list_template_details(db, ws, id)
+                        .await
+                        .map_err(fail)?,
+                ))
+            }
+            .await
+        }
+        _ => return None,
+    })
+}
+
+pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
+    if !ACTIONS.contains(&name) {
+        return None;
+    }
+    let api = ctx.api;
+    let (db, audit, jobs) = (&api.db, &api.audit, api.jobs.as_ref());
+    let ws = ctx.workspace_id;
+    let can_view = ctx.has("emailAndPhone");
+    Some(
+        async {
+            match name {
+                // [workspaceId], input
+                "createBroadcastAction" => {
+                    let data = parse_action_payload(arg(args, 1)).ok_or_else(invalid)?;
+                    plan_limit_outcome(
+                        write::create(db, audit, ws, data, can_view)
+                            .await
+                            .map(|b| b.to_json()),
+                    )
+                }
+                // [workspaceId], { ids }
+                "deleteBroadcastsAction" => {
+                    let ids = In(arg(args, 1)).ids("ids")?;
+                    let (deleted, requested) = service::soft_delete_broadcasts(db, audit, ws, ids)
+                        .await
+                        .map_err(action_fail)?;
+                    Ok(json!({ "deletedCount": deleted, "requestedCount": requested }))
+                }
+                // [workspaceId, id], input?
+                _ => {
+                    let id = bound_id(arg(args, 1))?;
+                    let input = arg(args, 2);
+                    match name {
+                        "cloneBroadcastAction" => {
+                            write::clone_broadcast(db, audit, ws, id, can_view)
+                                .await
+                                .map(|b| b.to_json())
+                                .map_err(action_fail)
+                        }
+                        "deleteBroadcastAction" => {
+                            let (deleted, requested) =
+                                service::soft_delete_broadcasts(db, audit, ws, vec![id])
+                                    .await
+                                    .map_err(action_fail)?;
+                            Ok(json!({ "deletedCount": deleted, "requestedCount": requested }))
+                        }
+                        "moveBroadcastToDraftAction" => service::move_to_draft(db, audit, ws, id)
+                            .await
+                            .map_err(action_fail),
+                        "resendBroadcastAction" => plan_limit_outcome(
+                            write::resend_with_pruning(db, audit, ws, id, can_view)
+                                .await
+                                .map(|b| b.to_json()),
+                        ),
+                        "resumeBroadcastAction" => {
+                            let data =
+                                parsed(z::object(vec![("sendRatePerMinute", send_rate())]), input)?;
+                            plan_limit_outcome(
+                                service::resume_sending(db, audit, ws, id, submitted_rate(&data))
+                                    .await,
+                            )
+                        }
+                        "scheduleBroadcastAction" => {
+                            let data = parsed(schedule_request(), input)?;
+                            let recurrence =
+                                data.get("recurrence").filter(|r| !r.is_null()).cloned();
+                            plan_limit_outcome(
+                                write::schedule_draft(
+                                    db,
+                                    audit,
+                                    jobs,
+                                    ws,
+                                    id,
+                                    data["schedulesType"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .to_owned(),
+                                    resolve_schedule_time(&data),
+                                    submitted_rate(&data),
+                                    recurrence,
+                                )
+                                .await,
+                            )
+                        }
+                        "setBroadcastRunSkippedAction" => {
+                            let data = parsed(
+                                z::object(vec![("date", run_date()), ("skipped", z::boolean())]),
+                                input,
+                            )?;
+                            history::set_occurrence_excluded(
+                                db,
+                                audit,
+                                ws,
+                                id.to_string(),
+                                vec![data["date"].as_str().unwrap_or_default().to_owned()],
+                                Vec::new(),
+                                data["skipped"].as_bool().unwrap_or_default(),
+                            )
+                            .await
+                            .map_err(action_fail)
+                        }
+                        "stopBroadcastAction" => service::stop_sending(db, audit, ws, id)
+                            .await
+                            .map_err(action_fail),
+                        "updateBroadcastAction" => {
+                            let name = In(input).str("name", true, 1, 255)?;
+                            service::update(db, audit, ws, id, name)
+                                .await
+                                .map_err(action_fail)?;
+                            Ok(Value::Null)
+                        }
+                        // updateDraftBroadcastAction
+                        _ => {
+                            let data = parse_action_payload(input).ok_or_else(invalid)?;
+                            plan_limit_outcome(
+                                write::update_draft(db, audit, jobs, ws, id, data, can_view).await,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .await,
+    )
+}

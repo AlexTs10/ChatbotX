@@ -8,19 +8,33 @@
 //! returns the same JSON as a ported public `/v1` route, the handler runs that
 //! route ([`public`]) after the member checks, so both stay one code path.
 
+mod admin;
 mod analytics;
+mod appointments;
+mod automated_responses;
+mod broadcasts;
+mod comments;
 mod contacts;
 mod conversations;
+mod email_marketing;
+mod email_topics;
 mod flows;
 mod inboxes;
 pub(crate) mod integrations;
 mod lists;
 mod media_library;
+mod pipeline_board;
 mod pipelines;
 mod products;
+mod rest;
+mod sequences;
+mod settings;
 mod templates;
 mod tools;
+mod triggers;
+mod user_persistent_menus;
 mod whatsapp;
+mod working_hours;
 mod workspaces;
 
 use axum::body::to_bytes;
@@ -107,6 +121,9 @@ pub async fn procedure(
     context.workspace.as_ref()?;
     let ctx = ctx(api, context);
     let ctx = &ctx;
+    if let Some(outcome) = broadcasts::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = contacts::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -117,6 +134,12 @@ pub async fn procedure(
         return Some(outcome);
     }
     if let Some(outcome) = flows::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_topics::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = sequences::procedure(ctx, path, input).await {
         return Some(outcome);
     }
     if let Some(outcome) = whatsapp::procedure(ctx, path, input).await {
@@ -143,7 +166,25 @@ pub async fn procedure(
     if let Some(outcome) = tools::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = comments::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_marketing::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = appointments::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = working_hours::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = templates::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = rest::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = user_persistent_menus::procedure(ctx, path).await {
         return Some(outcome);
     }
     lists::procedure(ctx, path, input).await
@@ -169,13 +210,17 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = workspaces::action(ctx, name, &args).await {
         return Some(outcome);
     }
+    if let Some(outcome) = admin::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = integrations::auth_action(ctx, name, &args).await {
         return Some(outcome);
     }
     // Every other action is a `workspaceActionClient` one.
     if context.workspace.is_none() {
         return match name {
-            n if contacts::ACTIONS.contains(&n)
+            n if broadcasts::ACTIONS.contains(&n)
+                || contacts::ACTIONS.contains(&n)
                 || flows::ACTIONS.contains(&n)
                 || crate::rpc_ai::PORTED.contains(&format!("actions.{n}").as_str())
                 || conversations::ACTIONS.contains(&n)
@@ -183,14 +228,29 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || media_library::ACTIONS.contains(&n)
                 || products::ACTIONS.contains(&n)
                 || pipelines::ACTIONS.contains(&n)
+                || pipeline_board::ACTIONS.contains(&n)
                 || tools::ACTIONS.contains(&n)
+                || comments::is_action(n)
+                || rest::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n)
+                || email_topics::ACTIONS.contains(&n)
+                || sequences::ACTIONS.contains(&n)
+                || triggers::ACTIONS.contains(&n)
+                || automated_responses::ACTIONS.contains(&n)
+                || settings::ACTIONS.contains(&n)
+                || user_persistent_menus::ACTIONS.contains(&n)
+                || email_marketing::ACTIONS.contains(&n)
+                || appointments::ACTIONS.contains(&n)
+                || working_hours::ACTIONS.contains(&n)
                 || whatsapp::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
             _ => None,
         };
+    }
+    if let Some(outcome) = broadcasts::action(ctx, name, &args).await {
+        return Some(outcome);
     }
     if let Some(outcome) = contacts::action(ctx, name, &args).await {
         return Some(outcome);
@@ -210,6 +270,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = integrations::action(ctx, name, &args).await {
         return Some(outcome);
     }
+    if let Some(outcome) = email_marketing::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = products::action(ctx, name, &args).await {
         return Some(outcome);
     }
@@ -217,6 +280,36 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = tools::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = comments::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = email_topics::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = sequences::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = triggers::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = automated_responses::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = settings::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = user_persistent_menus::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = rest::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = appointments::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = working_hours::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = whatsapp::action(ctx, name, &args).await {
@@ -407,6 +500,28 @@ pub(crate) fn arg(args: &[Value], index: usize) -> &Value {
 /// `{ data, pageCount }` of a paged list.
 pub(crate) fn page(data: impl IntoIterator<Item = Value>, page_count: i64) -> Value {
     json!({ "data": data.into_iter().collect::<Vec<_>>(), "pageCount": page_count })
+}
+
+/// `conversationService.findDMByContact`: the contact's conversation
+/// without a source (not a comment thread), oldest first.
+pub(crate) async fn dm_conversation_id(
+    ctx: &Ctx<'_>,
+    contact_id: i64,
+) -> Result<Option<i64>, OrpcError> {
+    use chatbotx_db::rusqlite::OptionalExtension;
+    let ws = ctx.workspace_id;
+    chatbotx_business::tx::read(&ctx.api.db, move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT "id" FROM "Conversation" WHERE "workspaceId" = ?1 AND "contactId" = ?2 AND "sourceId" IS NULL ORDER BY "id" LIMIT 1"#,
+                [ws, contact_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(chatbotx_db::repo::Error::from)?)
+    })
+    .await
+    .map_err(fail)
 }
 
 // ---- public route bridge --------------------------------------------------

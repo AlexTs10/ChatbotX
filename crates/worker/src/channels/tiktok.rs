@@ -629,6 +629,118 @@ async fn send_parts(
     Ok(result)
 }
 
+/// A `PAYLOAD_INVALID` channel error.
+fn payload_invalid(message: &str) -> SendFailure {
+    SendFailure::Channel(ChannelError::new(message, Category::PayloadInvalid))
+}
+
+/// `requirePostId`.
+fn require_post_id(post_id: Option<&str>, action: &str) -> ChannelResult<String> {
+    post_id.filter(|id| !id.is_empty()).map(str::to_owned).ok_or_else(|| {
+        SendFailure::Channel(
+            ChannelError::new(
+                format!("Cannot {action} a TikTok comment without the video id. The comment conversation must be anchored to the post it belongs to."),
+                Category::PayloadInvalid,
+            )
+            .with_code("tiktok_missing_video_id"),
+        )
+    })
+}
+
+/// The `replyToCommentId` of a comment reply (`what` names the send).
+fn reply_to(message: &Value, what: &str) -> ChannelResult<String> {
+    message
+        .pointer("/contentAttributes/replyToCommentId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| payload_invalid(&format!("Cannot send TikTok {what}: replyToCommentId is missing. The outgoing message must be linked to a parent comment.")))
+}
+
+/// `resolveTiktokCommenterIdentity`: the comment's author from
+/// `business/comment/list/` (the webhook carries only `unique_identifier`).
+/// `{ displayName, username, avatarUrl, isOwner, imageUrl }`; `None` =
+/// authorship unknown (lookup failed or comment not returned), never an error.
+pub async fn commenter_identity(
+    base: &str,
+    auth: &Value,
+    comment_id: &str,
+    video_id: &str,
+) -> Option<Value> {
+    let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
+    let business_id = auth["metadata"]["openId"].as_str().unwrap_or_default();
+    let ids = json!([comment_id]).to_string();
+    let query = [
+        ("business_id", business_id),
+        ("video_id", video_id),
+        ("comment_ids", ids.as_str()),
+        ("status", "ALL"),
+        ("max_count", "1"),
+    ];
+    let data = match business_call(
+        &http_client(),
+        base,
+        token,
+        "business/comment/list/",
+        &query,
+        &Body::None,
+    )
+    .await
+    {
+        Ok(data) => data,
+        Err(e) => {
+            tracing::warn!(error = %e.message, comment_id, video_id, "resolveTiktokCommenterIdentity: lookup failed, falling back to webhook data");
+            return None;
+        }
+    };
+    let Some(comment) = data["comments"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["comment_id"] == comment_id)
+    else {
+        tracing::warn!(
+            comment_id,
+            video_id,
+            "resolveTiktokCommenterIdentity: comment not returned by TikTok"
+        );
+        return None;
+    };
+    let text = |key: &str| comment[key].as_str().filter(|s| !s.is_empty());
+    Some(json!({
+        "displayName": text("display_name").or(text("username")),
+        "username": text("username"),
+        "avatarUrl": text("profile_image"),
+        "isOwner": comment["owner"] == true,
+        "imageUrl": text("image_url"),
+    }))
+}
+
+/// One comment Business API POST (`business/comment/<endpoint>/`).
+async fn comment_call(
+    client: reqwest::Client,
+    base: String,
+    auth: ChannelResult<Auth>,
+    endpoint: &'static str,
+    body: impl FnOnce(&str) -> Value,
+) -> ChannelResult<Value> {
+    let auth = auth?;
+    let body = body(&auth.business_id);
+    business_call(
+        &client,
+        &base,
+        &auth.token,
+        endpoint,
+        &[],
+        &Body::Json(body),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e.message, "TikTok {endpoint} failed");
+        channel_failure(e)
+    })
+}
+
 impl Channel for Tiktok {
     fn receive_message(
         &self,
@@ -666,6 +778,180 @@ impl Channel for Tiktok {
                 }
             }
             send_parts(client, base, auth, conversation_id, parts).await
+        })
+    }
+
+    /// `sendComment` (`business/comment/reply/create/`).
+    fn send_comment(
+        &self,
+        ctx: &ChannelCtx,
+        data: SendMessage,
+    ) -> BoxFuture<'static, ChannelResult<SendResult>> {
+        let (client, base, auth) = (self.client.clone(), self.base_url.clone(), auth_of(ctx));
+        Box::pin(async move {
+            let message = &data.message;
+            let comment_id = reply_to(message, "comment reply")?;
+            let Some(text) = message["text"]
+                .as_str()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+            else {
+                return Err(payload_invalid(
+                    "Cannot send TikTok comment reply: text is required.",
+                ));
+            };
+            if message["attachments"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty())
+            {
+                return Err(payload_invalid(
+                    "TikTok comment replies cannot carry attachments.",
+                ));
+            }
+            let video_id = require_post_id(
+                message
+                    .pointer("/contentAttributes/postId")
+                    .and_then(Value::as_str)
+                    .filter(|p| !p.is_empty())
+                    .or(data.contact.source_conversation_id.as_deref()),
+                "reply to",
+            )?;
+            let text = text.to_owned();
+            let created = comment_call(client, base, auth, "business/comment/reply/create/", |business| {
+                json!({ "business_id": business, "video_id": video_id, "comment_id": comment_id, "text": text })
+            })
+            .await?;
+            Ok(SendResult {
+                message_ids: created["comment_id"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect(),
+                sent_count: 1,
+            })
+        })
+    }
+
+    /// `sendPrivateReply` (Comment-to-Message `direct_reply`).
+    fn send_private_reply(
+        &self,
+        ctx: &ChannelCtx,
+        data: SendMessage,
+    ) -> BoxFuture<'static, ChannelResult<SendResult>> {
+        let (client, base, auth) = (self.client.clone(), self.base_url.clone(), auth_of(ctx));
+        // `tiktokCanMessage`.
+        let can_message =
+            ctx.auth.pointer("/metadata/features/messaging") != Some(&Value::Bool(false));
+        Box::pin(async move {
+            if !can_message {
+                return Err(SendFailure::Channel(ChannelError::new(
+                    "Cannot send TikTok private reply: this connection has no messaging permission. TikTok Business Messaging is not available to accounts registered in the EEA, Switzerland or the UK.",
+                    Category::PermissionDenied,
+                )));
+            }
+            let message = &data.message;
+            let comment_id = reply_to(message, "private reply")?;
+            if message["attachments"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty())
+            {
+                return Err(payload_invalid(
+                    "TikTok private replies cannot carry attachments.",
+                ));
+            }
+            let Some(text) = message["text"]
+                .as_str()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+            else {
+                tracing::warn!(
+                    comment_id,
+                    "sendPrivateReply: message has no text — skipping API call"
+                );
+                return Ok(SendResult::default());
+            };
+            if text.chars().count() > MESSAGE_TEXT_LIMIT {
+                return Err(SendFailure::Channel(ChannelError::new(
+                    format!("TikTok private reply text exceeds {MESSAGE_TEXT_LIMIT} characters"),
+                    Category::PayloadInvalid,
+                )));
+            }
+            let auth = auth?;
+            let payload = json!({
+                "business_id": auth.business_id,
+                "direct_reply": { "reply_type": "COMMENT_REPLY", "comment_reply": { "comment_id": comment_id } },
+                "message_type": "TEXT",
+                "text": { "body": text },
+            });
+            let id = send_message_api(&client, &base, &auth.token, &payload)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e.message, comment_id, "Failed to send TikTok private reply");
+                    channel_failure(e)
+                })?;
+            Ok(SendResult {
+                message_ids: id.into_iter().collect(),
+                sent_count: 1,
+            })
+        })
+    }
+
+    /// `deleteComment` (`business/comment/delete/`).
+    fn delete_comment(
+        &self,
+        ctx: &ChannelCtx,
+        comment_id: String,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let (client, base, auth) = (self.client.clone(), self.base_url.clone(), auth_of(ctx));
+        Box::pin(async move {
+            comment_call(
+                client,
+                base,
+                auth,
+                "business/comment/delete/",
+                |business| json!({ "business_id": business, "comment_id": comment_id }),
+            )
+            .await
+            .map(drop)
+        })
+    }
+
+    /// `likeComment` (`business/comment/like/`).
+    fn like_comment(
+        &self,
+        ctx: &ChannelCtx,
+        comment_id: String,
+        liked: bool,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let (client, base, auth) = (self.client.clone(), self.base_url.clone(), auth_of(ctx));
+        Box::pin(async move {
+            let action = if liked { "LIKE" } else { "UNLIKE" };
+            comment_call(client, base, auth, "business/comment/like/", |business| {
+                json!({ "business_id": business, "comment_id": comment_id, "action": action })
+            })
+            .await
+            .map(drop)
+        })
+    }
+
+    /// `hideComment` (`business/comment/hide/`, needs the video id).
+    fn hide_comment(
+        &self,
+        ctx: &ChannelCtx,
+        comment_id: String,
+        hidden: bool,
+        post_id: Option<String>,
+    ) -> BoxFuture<'static, ChannelResult<()>> {
+        let (client, base, auth) = (self.client.clone(), self.base_url.clone(), auth_of(ctx));
+        Box::pin(async move {
+            let video_id =
+                require_post_id(post_id.as_deref(), if hidden { "hide" } else { "unhide" })?;
+            let action = if hidden { "HIDE" } else { "UNHIDE" };
+            comment_call(client, base, auth, "business/comment/hide/", |business| {
+                json!({ "business_id": business, "video_id": video_id, "comment_id": comment_id, "action": action })
+            })
+            .await
+            .map(drop)
         })
     }
 

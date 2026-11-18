@@ -227,7 +227,7 @@ fn flow_with_versions_json(flow: &FlowWithVersions) -> Map<String, Value> {
 }
 
 /// A query `z.boolean()` (`"true"` / `"false"`).
-fn query_bool(input: &mut Input, name: &str) -> Option<bool> {
+pub(crate) fn query_bool(input: &mut Input, name: &str) -> Option<bool> {
     match input.get(name).cloned() {
         None => None,
         Some(Value::String(text)) if text == "true" => Some(true),
@@ -256,7 +256,13 @@ async fn list(state: &ApiState, call: Call<'_>) -> Reply {
     let mut input = Input::from_query(call.params, call.query);
     let (page, per_page) = public_paging(&mut input);
     let active = query_bool(&mut input, "active").unwrap_or(true);
-    let enable_in_inbox = query_bool(&mut input, "enableInInbox");
+    let mut enable_in_inbox = query_bool(&mut input, "enableInInbox");
+    // A mobile member without `flows` only sees the flows meant for the inbox.
+    if super::mobile_member().is_some_and(|m| {
+        !chatbotx_business::workspace_member::has_permission(&m.permissions, "flows")
+    }) {
+        enable_in_inbox = Some(true);
+    }
     let name = input
         .get("name")
         .cloned()

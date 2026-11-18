@@ -77,9 +77,16 @@ async fn conversation(
     id: Option<i64>,
     errors: ErrorMap,
 ) -> Result<Conversation, crate::orpc::OrpcError> {
-    list::find_or_fail(&state.db, call.workspace_id, id.unwrap_or(-1))
+    let found = list::find_or_fail(&state.db, call.workspace_id, id.unwrap_or(-1))
         .await
-        .map_err(|e| business_error(e, errors))
+        .map_err(|e| business_error(e, errors))?;
+    // `assertConversationAccessForCaller` (mobile members).
+    super::member_scope::assert_conversation_allowed(
+        found.assigned_user_id,
+        found.assigned_inbox_team_id,
+        errors,
+    )?;
+    Ok(found)
 }
 
 /// The `conversationId` / `messageId` / `createdAt` of a message route.
@@ -158,7 +165,16 @@ async fn create(state: &ApiState, call: Call<'_>) -> Reply {
         actions::resolve_contact_inbox_for_conversation(&state.db, &found, outgoing.inbox_id)
             .await
             .map_err(|e| business_error(e, CREATING))?;
-    let sent = message::create_outgoing(&state.db, &found, &contact_inbox, outgoing, None)
+    super::member_scope::assert_member_may_start_flow(
+        &state.db,
+        call.workspace_id,
+        outgoing.flow_id,
+        CREATING,
+    )
+    .await?;
+    // `resolveSenderForCaller`: a member's message is attributed to them.
+    let sender = super::member_scope::sender_for_caller();
+    let sent = message::create_outgoing(&state.db, &found, &contact_inbox, outgoing, sender)
         .await
         .map_err(|e| business_error(e, CREATING))?;
     let body = sent.message.as_ref().map_or(Value::Null, message_json);

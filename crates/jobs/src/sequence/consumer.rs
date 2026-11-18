@@ -62,13 +62,19 @@ pub struct DispatchRow {
     pub sequence_id: String,
     pub step_id: String,
     pub workspace_id: String,
+    /// `runAtMs`.
+    pub run_at_ms: i64,
 }
 
-/// A sequence step as the consumer reads it.
+/// A sequence step as the consumer reads it (`findStepWithFlow`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepRow {
     pub id: String,
     pub sequence_id: String,
+    pub order: i64,
+    pub is_active: bool,
+    /// The step's flow, if it still exists.
+    pub flow_id: Option<i64>,
 }
 
 /// `validateStep` result.
@@ -142,6 +148,16 @@ pub trait SequenceConsumerServices: Send + Sync {
         dispatch_id: &'a str,
         workspace_id: &'a str,
     ) -> BoxFuture<'a, Result<(), BoxError>>;
+    /// `advanceEnrollment` past a step that exists but failed validation,
+    /// so the enrollment does not stop on a dead step.
+    fn advance_past_step<'a>(
+        &'a self,
+        dispatch: &'a DispatchRow,
+        step: &'a StepRow,
+    ) -> BoxFuture<'a, Result<(), BoxError>> {
+        let _ = (dispatch, step);
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// `sequenceConnections.useExisting()` + `SchedulerClient`.
@@ -366,7 +382,7 @@ impl SequenceConsumer {
             Some(step) => services.validate_step(step).await?,
             None => StepValidation {
                 valid: false,
-                reason: Some("Step not found".to_owned()),
+                reason: Some("step_not_found".to_owned()),
             },
         };
         if !validation.valid {
@@ -374,8 +390,9 @@ impl SequenceConsumer {
             services
                 .mark_dispatch_canceled(&dispatch.id, &dispatch.workspace_id, &reason)
                 .await?;
-            // The enrollment advance past an invalid step belongs to the
-            // business services (Phase 3 `advanceEnrollment` caller).
+            if let Some(step) = &step {
+                services.advance_past_step(dispatch, step).await?;
+            }
             self.schedule
                 .remove_from_schedule(dispatch.bucket, &dispatch.id)
                 .await?;

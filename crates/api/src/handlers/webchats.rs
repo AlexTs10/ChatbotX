@@ -78,7 +78,12 @@ fn domains(input: &mut Input, value: &Value) -> Option<Vec<String>> {
 }
 
 /// `webchatConversationStarter` / `webchatPersistentMenu` arrays.
-fn items(input: &mut Input, name: &str, value: &Value, types: &[&str]) -> Option<Vec<Value>> {
+pub(crate) fn items(
+    input: &mut Input,
+    name: &str,
+    value: &Value,
+    types: &[&str],
+) -> Option<Vec<Value>> {
     let path = key(name);
     let Value::Array(items) = value else {
         input.issue(&path, "invalid_type", "Invalid input: expected array");
@@ -140,7 +145,7 @@ fn items(input: &mut Input, name: &str, value: &Value, types: &[&str]) -> Option
 }
 
 const STARTER_TYPES: &[&str] = &["flow", "message", "url"];
-const MENU_TYPES: &[&str] = &["flow", "url"];
+pub(crate) const MENU_TYPES: &[&str] = &["flow", "url"];
 
 /// `webchatConnectConfigSchema` (`public` = `createWebchatPublicRequest`:
 /// `brandColor`, `conversationStarters`, `persistentMenus` required).

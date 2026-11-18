@@ -285,6 +285,16 @@ async fn contact_call(
     public(ctx, route_id, &params, None, body).await
 }
 
+/// `requireContactAccessForMember`: 404 "Contact not found" without
+/// contacts access or outside the member's assigned contacts.
+pub(super) async fn require_contact_access(
+    ctx: &Ctx<'_>,
+    contact_id: i64,
+) -> Result<(), OrpcError> {
+    let scope = ctx.require_contact_scope()?;
+    accessible(ctx, scope, contact_id).await
+}
+
 /// 404 "Contact not found" when the member may not touch the contact.
 async fn accessible(ctx: &Ctx<'_>, scope: Member, contact_id: i64) -> Result<(), OrpcError> {
     if scoped_ids(ctx, scope, vec![contact_id]).await?.is_empty() {

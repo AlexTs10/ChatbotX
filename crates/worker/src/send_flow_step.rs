@@ -642,8 +642,33 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
     {
         tracing::error!(err = %err, workspace_id = conversation.workspace_id, "Failed to publish guest realtime event for flow step");
     }
+    let ctx = crate::events::MessageContext::of(&conversation, &contact_inbox);
+    let step_ids: Map<String, Value> = [("stepId", "id"), ("nodeId", "nodeId")]
+        .into_iter()
+        .filter_map(|(key, field)| Some((key.to_owned(), json!(text_field(&step, field)?))))
+        .collect();
+    let step_ids = Value::Object(step_ids);
     match send {
         Ok(result) => {
+            let mut action = json!({
+                "flowId": flow_id,
+                "messageId": message.message.id.to_string(),
+            });
+            if let Some(version) = &flow_version_id {
+                action["flowVersionId"] = json!(version);
+            }
+            if let Some(source) = result.message_ids.first() {
+                action["sourceId"] = json!(source);
+            }
+            crate::events::emit_message_event(
+                deps.events.as_ref(),
+                "message:sent",
+                &ctx,
+                action,
+                metadata.as_ref(),
+                step_ids,
+            )
+            .await;
             if !is_public_reply && result.sent_count > 0 {
                 mark_read_after_delivery(
                     deps,
@@ -658,6 +683,19 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         Err(error) => {
             tracing::error!(err = %error, "sendFlowStep error for conversationId: {conversation_id}");
             if !is_public_reply {
+                // The public path's `sendMessageToChannel` emitted it already.
+                let mut extra = step_ids;
+                extra["errorData"] = crate::events::parsed_error(&error);
+                extra["willRetry"] = json!(false);
+                crate::events::emit_message_event(
+                    deps.events.as_ref(),
+                    "message:failed",
+                    &ctx,
+                    json!({ "messageId": message.message.id.to_string(), "flowId": flow_id }),
+                    metadata.as_ref(),
+                    extra,
+                )
+                .await;
                 persist_send_error(
                     deps,
                     &conversation,

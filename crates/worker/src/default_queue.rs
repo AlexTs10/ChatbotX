@@ -28,6 +28,12 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "importMetaCatalogProducts" => meta_catalog::import::handle(&deps, data).await?,
         "submitMetaCatalogSync" => meta_catalog::sync::submit(&deps, data).await?,
         "checkMetaCatalogSync" => meta_catalog::sync::check(&deps, data).await?,
+        "sendAppointmentReminder" => {
+            return crate::appointment::send_reminder(&deps, data).await;
+        }
+        "syncExternalCalendarEvent" => {
+            return crate::appointment::sync_external(&deps, &job, data).await;
+        }
         REVOKE_RETRY_JOB_NAME => retry_realtime_member_revoke(&deps, &job, data).await?,
         // ponytail: the other default jobs are later units. An unported
         // action fails (kept for a retry) instead of the original's

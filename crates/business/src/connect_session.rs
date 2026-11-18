@@ -650,6 +650,19 @@ pub fn complete_reconnect(
     connection_id: i64,
     now: i64,
 ) -> Result<SessionRow> {
+    complete_authorized(conn, row, result, Some(connection_id), now)
+}
+
+/// The integration-connection branch (Google Calendar / Sheets): an
+/// `authorized` session has no candidate step; it records its one result
+/// (and the `Connection` row, when the integration has one) and completes.
+pub fn complete_authorized(
+    conn: &Connection,
+    row: &SessionRow,
+    result: Value,
+    connection_id: Option<i64>,
+    now: i64,
+) -> Result<SessionRow> {
     let current = load(conn, row.id)?.ok_or_else(not_found)?;
     if current.status != "authorized" || current.expires_at <= now {
         return Err(no_longer_active());
@@ -664,7 +677,7 @@ pub fn complete_reconnect(
     let mut merged: Vec<Value> = serde_json::from_str(&old_results).unwrap_or_default();
     merged.push(result);
     let mut ids: Vec<Value> = serde_json::from_str(&old_ids).unwrap_or_default();
-    ids.push(json!(connection_id.to_string()));
+    ids.extend(connection_id.map(|id| json!(id.to_string())));
     conn.execute(
         r#"UPDATE "ConnectSession" SET "results" = ?2, "resultConnectionIds" = ?3,
                "status" = 'completed', "step" = 'done', "consumedAt" = ?4, "encryptedAuth" = NULL,

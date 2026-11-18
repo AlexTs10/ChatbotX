@@ -1,0 +1,439 @@
+"use client"
+
+import {
+  canProcessMissedComments,
+  folderTypes,
+} from "@chatbotx.io/database/partials"
+import { DataTable } from "@chatbotx.io/ui/components/data-table/data-table"
+import { DataTableColumnHeader } from "@chatbotx.io/ui/components/data-table/data-table-column-header"
+import { DataTableToolbar } from "@chatbotx.io/ui/components/data-table/data-table-toolbar"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import { Checkbox } from "@chatbotx.io/ui/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@chatbotx.io/ui/components/ui/dropdown-menu"
+import { Switch } from "@chatbotx.io/ui/components/ui/switch"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@chatbotx.io/ui/components/ui/tooltip"
+import { useDataTable } from "@chatbotx.io/ui/hooks/use-data-table"
+import type { DataTableRowAction } from "@chatbotx.io/ui/types/data-table"
+import type { ColumnDef } from "@tanstack/react-table"
+import {
+  ChartColumnIcon,
+  FolderUpIcon,
+  HistoryIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  TextIcon,
+  Trash2Icon,
+} from "lucide-react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
+import React, { use, useCallback, useMemo } from "react"
+import { toast } from "sonner"
+import { LockBadge } from "@/features/templates/components/lock-badge"
+import {
+  LockedGuard,
+  TemplateLockedList,
+  UndeletableGuard,
+} from "@/features/templates/components/lock-context"
+import { ChangeFolderDialog } from "../folders/change-folder"
+import { buildAutomationAccountColumn } from "../shared/comment-automation/automation-account-column"
+import { BulkDeleteCommentAutomationsDialog } from "../shared/comment-automation/bulk-delete-comment-automations-dialog"
+import { BulkMoveCommentAutomationFolderDialog } from "../shared/comment-automation/bulk-move-comment-automation-folder-dialog"
+import { CommentAutomationScheduleDialog } from "../shared/comment-automation/comment-automation-schedule-dialog"
+import { buildCommentAutomationStatColumns } from "../shared/comment-automation/comment-automation-stat-columns"
+import { DeleteCommentAutomationDialog } from "../shared/comment-automation/delete-comment-automation-dialog"
+import { LiveAutomationBadge } from "../shared/comment-automation/live-automation-badge"
+import { MissedCommentsProcessingLabel } from "../shared/comment-automation/missed-comments-processing-label"
+import { ProcessMissedCommentsDialog } from "../shared/comment-automation/process-missed-comments-dialog"
+import { RenameCommentAutomationDialog } from "../shared/comment-automation/rename-comment-automation-dialog"
+import { useMissedCommentsInProgress } from "../shared/comment-automation/use-missed-comments-in-progress"
+import { deleteFbCommentAction } from "./actions/delete-fb-comment.action"
+import { updateFbCommentAction } from "./actions/update-fb-comment.action"
+import { SelectFacebookPostTypeDialog } from "./components/select-facebook-post-type-dialog"
+import type { listFbComments } from "./queries"
+import type { ListFbCommentsResponse } from "./schema/action"
+
+type FbCommentsTableProps = {
+  workspaceId: string
+  promises: Promise<[Awaited<ReturnType<typeof listFbComments>>]>
+}
+
+export function FbCommentsTable({
+  workspaceId,
+  promises,
+}: FbCommentsTableProps) {
+  const t = useTranslations()
+  const router = useRouter()
+
+  const [{ data, pageCount }] = use(promises)
+
+  const [rowAction, setRowAction] = React.useState<DataTableRowAction<
+    ListFbCommentsResponse["data"][number]
+  > | null>(null)
+
+  const [missedCommentsItem, setMissedCommentsItem] = React.useState<
+    ListFbCommentsResponse["data"][number] | null
+  >(null)
+
+  const {
+    inProgress: missedCommentsInProgress,
+    refresh: refreshMissedCommentsInProgress,
+  } = useMissedCommentsInProgress(
+    workspaceId,
+    data.map((automation) => automation.id),
+  )
+
+  const [scheduleDialogItem, setScheduleDialogItem] = React.useState<
+    ListFbCommentsResponse["data"][number] | null
+  >(null)
+
+  const [postTypeOpen, setPostTypeOpen] = React.useState(false)
+
+  const handleToggleStatus = useCallback(
+    async (item: ListFbCommentsResponse["data"][number]) => {
+      if (!item.isActive) {
+        setScheduleDialogItem(item)
+        return
+      }
+
+      try {
+        await updateFbCommentAction(workspaceId, item.id, {
+          isActive: false,
+        })
+        toast.success(t("facebookCommentAutomation.deactivated"))
+        router.refresh()
+      } catch {
+        toast.error(t("messages.unknownError"))
+      }
+    },
+    [workspaceId, t, router],
+  )
+
+  const columns = useMemo<ColumnDef<ListFbCommentsResponse["data"][number]>[]>(
+    () => [
+      {
+        id: "select",
+        header: ({ table: dataTable }) => (
+          <Checkbox
+            aria-label={t("actions.selectAll")}
+            checked={dataTable.getIsAllPageRowsSelected()}
+            className="translate-y-0.5 cursor-pointer"
+            indeterminate={dataTable.getIsSomePageRowsSelected()}
+            onCheckedChange={(value) =>
+              dataTable.toggleAllPageRowsSelected(Boolean(value))
+            }
+          />
+        ),
+        cell: ({ row }) => (
+          <Checkbox
+            aria-label={t("actions.selectRow")}
+            checked={row.getIsSelected()}
+            className="translate-y-0.5 cursor-pointer"
+            onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+          />
+        ),
+        size: 50,
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        id: "name",
+        accessorKey: "name",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.name.label")}
+          />
+        ),
+        cell: ({ row }) => (
+          <div className="flex max-w-75 items-center">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Link
+                    className="truncate"
+                    href={`/space/${workspaceId}/fb-comments/${row.original.id}`}
+                  >
+                    {row.original.name ?? ""}
+                  </Link>
+                }
+              />
+              <TooltipContent>
+                <p>{row.original.name}</p>
+              </TooltipContent>
+            </Tooltip>
+            <LockBadge resourceId={row.original.id} />
+            <LiveAutomationBadge post={row.original.post} />
+            {missedCommentsInProgress.has(row.original.id) ? (
+              <MissedCommentsProcessingLabel />
+            ) : null}
+          </div>
+        ),
+        meta: {
+          label: t("fields.name.label"),
+          placeholder: t("fields.name.placeholder"),
+          variant: "text",
+        },
+        size: 300,
+        enableSorting: true,
+        enableColumnFilter: true,
+      },
+      buildAutomationAccountColumn<ListFbCommentsResponse["data"][number]>({
+        title: t("commentAutomation.account.column"),
+      }),
+      {
+        accessorKey: "isActive",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            className="w-full justify-center"
+            column={column}
+            title={t("fields.status.label")}
+          />
+        ),
+        cell: ({ row }) => (
+          <div className="flex justify-center">
+            <Switch
+              checked={row.original.isActive}
+              onCheckedChange={() => handleToggleStatus(row.original)}
+            />
+          </div>
+        ),
+        size: 100,
+      },
+      {
+        accessorKey: "repliesCount",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            className="w-full justify-center"
+            column={column}
+            title={t("facebookCommentAutomation.replies")}
+          />
+        ),
+        cell: ({ row }) => (
+          <div className="text-center">{row.original.repliesCount}</div>
+        ),
+        size: 100,
+      },
+      // `repliesCount` above counts comments answered; these count reply
+      // attempts and their outcomes. One comment answered both publicly and
+      // privately is 1 reply but 2 attempts, so the two never have to agree.
+      ...buildCommentAutomationStatColumns<
+        ListFbCommentsResponse["data"][number]
+      >({ workspaceId, t }),
+      {
+        id: "actions",
+        header: () => (
+          <div className="w-full text-center">{t("actions.actions")}</div>
+        ),
+        cell: ({ row }) => (
+          <div className="flex justify-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button size="icon" variant="ghost">
+                    <MoreHorizontalIcon className="h-4 w-4" />
+                    <span className="sr-only">Open menu</span>
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end" className="w-auto">
+                <DropdownMenuItem
+                  onClick={() =>
+                    router.push(
+                      `/space/${workspaceId}/fb-comments/${row.original.id}`,
+                    )
+                  }
+                >
+                  <PencilIcon className="me-2" />
+                  {t("actions.edit")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    router.push(
+                      `/space/${workspaceId}/fb-comments/${row.original.id}/analytics`,
+                    )
+                  }
+                >
+                  <ChartColumnIcon className="me-2" />
+                  {t("actions.viewAnalytics")}
+                </DropdownMenuItem>
+                <LockedGuard resourceId={row.original.id}>
+                  {(locked) => (
+                    <DropdownMenuItem
+                      disabled={locked}
+                      onClick={() => setRowAction({ row, variant: "update" })}
+                    >
+                      <TextIcon className="me-2" />
+                      {t("actions.rename")}
+                    </DropdownMenuItem>
+                  )}
+                </LockedGuard>
+                {canProcessMissedComments(row.original.post) ? (
+                  <DropdownMenuItem
+                    disabled={missedCommentsInProgress.has(row.original.id)}
+                    onClick={() => setMissedCommentsItem(row.original)}
+                  >
+                    <HistoryIcon className="me-2" />
+                    {t("commentAutomationMissedComments.action")}
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem
+                  onClick={() => setRowAction({ row, variant: "move" })}
+                >
+                  <FolderUpIcon className="me-2" />
+                  {t("actions.move")}
+                </DropdownMenuItem>
+                <UndeletableGuard resourceId={row.original.id}>
+                  {(disabled) => (
+                    <DropdownMenuItem
+                      className="hover:bg-muted hover:text-destructive"
+                      disabled={disabled}
+                      onClick={() => setRowAction({ row, variant: "delete" })}
+                    >
+                      <Trash2Icon className="me-2" />
+                      {t("actions.delete")}
+                    </DropdownMenuItem>
+                  )}
+                </UndeletableGuard>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ),
+        size: 50,
+        enableSorting: false,
+        enableHiding: false,
+      },
+    ],
+    [t, workspaceId, handleToggleStatus, router, missedCommentsInProgress],
+  )
+
+  const { table } = useDataTable({
+    data,
+    columns,
+    pageCount,
+    initialState: {
+      sorting: [{ id: "createdAt", desc: true }],
+      columnPinning: { right: ["actions"] },
+    },
+    getRowId: (originalRow) => originalRow.id,
+    clearOnDefault: true,
+    shallow: false,
+  })
+
+  const selectedRows = table.getFilteredSelectedRowModel().rows
+
+  return (
+    <TemplateLockedList
+      resourceKind="fbCommentAutomation"
+      rows={data}
+      workspaceId={workspaceId}
+    >
+      <DataTable table={table}>
+        <DataTableToolbar table={table}>
+          <div className="flex items-center gap-2">
+            {selectedRows.length > 0 ? (
+              <>
+                <BulkDeleteCommentAutomationsDialog
+                  deleteAction={deleteFbCommentAction}
+                  items={selectedRows.map((row) => row.original)}
+                  onOpenChange={() => setRowAction(null)}
+                  onSuccess={() => {
+                    table.toggleAllRowsSelected(false)
+                    router.refresh()
+                  }}
+                  translationNamespace="facebookCommentAutomation"
+                />
+                <BulkMoveCommentAutomationFolderDialog
+                  folderType={folderTypes.enum.fbComment}
+                  items={selectedRows.map((row) => row.original)}
+                  onOpenChange={() => setRowAction(null)}
+                  onSuccess={() => {
+                    table.toggleAllRowsSelected(false)
+                    router.refresh()
+                  }}
+                  translationNamespace="facebookCommentAutomation"
+                  workspaceId={workspaceId}
+                />
+              </>
+            ) : null}
+            <Button onClick={() => setPostTypeOpen(true)} size="sm">
+              {t("facebookCommentAutomation.create")}
+            </Button>
+          </div>
+        </DataTableToolbar>
+      </DataTable>
+
+      <SelectFacebookPostTypeDialog
+        onOpenChange={setPostTypeOpen}
+        open={postTypeOpen}
+        workspaceId={workspaceId}
+      />
+
+      <RenameCommentAutomationDialog
+        action={updateFbCommentAction.bind(
+          null,
+          rowAction?.row.original?.workspaceId ?? "",
+          rowAction?.row.original?.id ?? "",
+        )}
+        onOpenChange={() => setRowAction(null)}
+        onSuccess={() => router.refresh()}
+        open={rowAction?.variant === "update"}
+        resource={rowAction?.row.original || null}
+        translationNamespace="facebookCommentAutomation"
+      />
+
+      <ChangeFolderDialog
+        currentFolderId={rowAction?.row.original?.folderId || null}
+        folderType={folderTypes.enum.fbComment}
+        modelIds={rowAction?.row.original ? [rowAction.row.original.id] : []}
+        onOpenChange={() => setRowAction(null)}
+        open={rowAction?.variant === "move"}
+        workspaceId={workspaceId}
+      />
+
+      <DeleteCommentAutomationDialog
+        action={deleteFbCommentAction.bind(
+          null,
+          rowAction?.row.original?.workspaceId ?? "",
+          rowAction?.row.original?.id ?? "",
+        )}
+        onOpenChange={() => setRowAction(null)}
+        onSuccess={() => router.refresh()}
+        open={rowAction?.variant === "delete"}
+        resource={rowAction?.row.original || null}
+        translationNamespace="facebookCommentAutomation"
+      />
+
+      <CommentAutomationScheduleDialog
+        action={updateFbCommentAction.bind(
+          null,
+          scheduleDialogItem?.workspaceId ?? "",
+          scheduleDialogItem?.id ?? "",
+        )}
+        onOpenChange={() => setScheduleDialogItem(null)}
+        onSuccess={() => router.refresh()}
+        open={!!scheduleDialogItem}
+        resource={scheduleDialogItem}
+        translationNamespace="facebookCommentAutomation"
+      />
+
+      <ProcessMissedCommentsDialog
+        onOpenChange={() => setMissedCommentsItem(null)}
+        onSuccess={() => {
+          refreshMissedCommentsInProgress()
+          router.refresh()
+        }}
+        resource={missedCommentsItem}
+      />
+    </TemplateLockedList>
+  )
+}

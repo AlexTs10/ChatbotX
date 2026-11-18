@@ -146,6 +146,7 @@ async fn sets_the_dispatch_workspace_audit_context_before_enqueuing() {
         sequence_id: "sequence-1".into(),
         step_id: "step-1".into(),
         workspace_id: "workspace-1".into(),
+        run_at_ms: 0,
     }));
     let consumer = start(&h).await;
 

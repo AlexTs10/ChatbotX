@@ -34,6 +34,8 @@ pub const PORTED: &[&str] = &[
 pub type RpcOut = (Value, Vec<Value>);
 
 /// `errors.superAdminRequired` (en).
+/// `SUPPORT_ACCESS_WINDOW_DAYS` (7 days).
+const SUPPORT_ACCESS_WINDOW_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 const SUPER_ADMIN_REQUIRED: &str = "You need to be a workspace super admin to do this.";
 /// `workspace.deletion.alreadyStarted` (en).
 const DELETION_ALREADY_STARTED: &str = "Workspace deletion has already started.";
@@ -183,13 +185,18 @@ pub async fn call(
 /// The actions of the `workspaceActions` key and their clients.
 pub fn action_gate(name: &str) -> Option<Gate> {
     Some(match name {
-        "updateWorkspaceBasic" | "updateWorkspaceAdvanced" => Gate::AllowScheduledDeletion,
+        "updateWorkspaceBasic" | "updateWorkspaceAdvanced" | "toggleSupportAccess" => {
+            Gate::AllowScheduledDeletion
+        }
         "updateSmartResponseDelay"
         | "updateWorkspaceStatus"
         | "createWorkspaceToken"
         | "deleteWorkspaceToken"
         | "deleteErrorLog" => Gate::Workspace,
-        "scheduleWorkspaceDeletion" | "cancelWorkspaceDeletion" => Gate::AllowExpired,
+        "scheduleWorkspaceDeletion"
+        | "cancelWorkspaceDeletion"
+        | "revokeMcpOAuthGrant"
+        | "listMcpOAuthGrants" => Gate::AllowExpired,
         _ => return None,
     })
 }
@@ -493,6 +500,65 @@ pub async fn run_action(
                 .await;
             Ok(None)
         }
+        // `toggleSupportAccessAction` + `workspaceSupportAccessService.enable /
+        // disable`: a real super admin member only; one audit row each.
+        "toggleSupportAccess" => {
+            let mut input = input_of(raw);
+            let enabled = input.bool("enabled");
+            input.finish()?;
+            if !context.has_permission("superAdmin") {
+                return Err(exception(
+                    "You need to be a super admin to change platform support access",
+                ));
+            }
+            if context.is_support_session {
+                return Err(exception(
+                    "Platform support access cannot be changed from within a support session",
+                ));
+            }
+            let until = enabled
+                .unwrap_or(false)
+                .then(|| chatbotx_db::repo::now_ms() + SUPPORT_ACCESS_WINDOW_MS);
+            let updated = chatbotx_business::tx::write(db, move |conn| {
+                Ok(conn
+                    .execute(
+                        r#"UPDATE "Workspace" SET "supportAccessUntil" = ?1 WHERE "id" = ?2"#,
+                        chatbotx_db::rusqlite::params![until, ws],
+                    )
+                    .map_err(chatbotx_db::repo::Error::from)?)
+            })
+            .await?;
+            if updated == 0 {
+                return Err(BusinessError::not_found("Workspace not found").into());
+            }
+            let (action, detail) = match until {
+                Some(until) => (
+                    "support_access_enabled",
+                    format!(
+                        "enabled platform support access for workspace {ws} until {}",
+                        chatbotx_db::repo::iso(until)
+                    ),
+                ),
+                None => (
+                    "support_access_disabled",
+                    format!("disabled platform support access for workspace {ws}"),
+                ),
+            };
+            tracing::info!(
+                action,
+                user_id = context.user_id,
+                workspace_id = ws,
+                "{detail}"
+            );
+            api.audit
+                .record(chatbotx_business::audit::AuditRecordInput {
+                    user_id: Some(context.user_id.to_string()),
+                    workspace_id: Some(ws.to_string()),
+                    ..chatbotx_business::audit::AuditRecordInput::new(action, detail)
+                })
+                .await;
+            Ok(None)
+        }
         "cancelWorkspaceDeletion" => {
             if !context.has_permission("superAdmin") {
                 return Err(exception(SUPER_ADMIN_REQUIRED));
@@ -595,6 +661,50 @@ pub async fn run_action(
             input.finish()?;
             chatbotx_business::error_log::delete(db, ws, ids.unwrap_or_default()).await?;
             Ok(None)
+        }
+        // `revokeMcpOAuthGrantAction` (Q.A1): the current user's grant only.
+        "revokeMcpOAuthGrant" => {
+            let mut input = input_of(raw);
+            let client_id = input.string(
+                "clientId",
+                Str {
+                    min: Some(1),
+                    ..Str::default()
+                },
+            );
+            input.finish()?;
+            let client_id = client_id.unwrap_or_default();
+            if !chatbotx_business::mcp_oauth::revoke_grant(db, context.user_id, &client_id).await? {
+                return Err(ActionError::ValidationErrors(
+                    json!({ "_errors": ["OAuth grant no longer exists"] }),
+                ));
+            }
+            Ok(None)
+        }
+        // The grants of the `chatbotx-mcp` settings page (`toMcpOAuthGrantDto`).
+        "listMcpOAuthGrants" => {
+            let iso = chatbotx_core::js::to_iso_string;
+            let https_icon = |icon: Option<String>| {
+                icon.filter(|i| url::Url::parse(i).is_ok_and(|u| u.scheme() == "https"))
+            };
+            let now = chatbotx_core::js::now_ms();
+            let grants =
+                chatbotx_business::mcp_oauth::list_grants_for_user(db, context.user_id, now)
+                    .await?;
+            Ok(Some(json!(
+                grants
+                    .into_iter()
+                    .map(|g| json!({
+                        "activeUntil": g.active_until.and_then(iso),
+                        "clientIcon": https_icon(g.client_icon),
+                        "clientId": g.client_id,
+                        "clientName": g.client_name,
+                        "firstAuthorizedAt": iso(g.first_authorized_at),
+                        "lastRefreshedAt": g.last_refreshed_at.and_then(iso),
+                        "scopes": g.scopes,
+                    }))
+                    .collect::<Vec<_>>()
+            )))
         }
         _ => Err(ActionError::Internal(format!(
             "unknown workspace action {name}"

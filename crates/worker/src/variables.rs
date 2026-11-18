@@ -1,7 +1,7 @@
 //! [`VariableSources`] on the database: the `{{variable}}` data of the
 //! flow step sends (`resolveContactVariablesDeep`).
 //!
-//! ponytail: sources of unported domains (calls, appointments, lead ads,
+//! ponytail: sources of unported domains (calls, lead ads,
 //! questionnaires, leaderboards, coupons, pipelines, channel profile and post
 //! lookups, attachments, the default API token) answer "nothing" (`None`,
 //! empty, `""`), so their variables resolve empty instead of failing the send.
@@ -119,6 +119,41 @@ pub(crate) fn conversation_model(row: &Conversation) -> ConversationModel {
 }
 
 impl DbSources {
+    /// An appointment row with its calendar name (`include: { calendar }`).
+    async fn appointment(
+        &self,
+        workspace_id: i64,
+        find: impl FnOnce(
+            &Connection,
+        )
+            -> chatbotx_db::repo::Result<Option<chatbotx_db::repo::models::Appointment>>
+        + Send
+        + 'static,
+    ) -> SourceResult<Option<Appointment>> {
+        chatbotx_business::tx::read(&self.db, move |conn| {
+            let Some(row) = find(conn)? else {
+                return Ok(None);
+            };
+            let calendar = chatbotx_db::repo::appointment_calendar::find_by(
+                conn,
+                workspace_id,
+                row.calendar_id,
+                true,
+            )?;
+            Ok(Some(Appointment {
+                id: row.id.to_string(),
+                workspace_id: row.workspace_id.to_string(),
+                contact_id: row.contact_id.to_string(),
+                conversation_id: row.conversation_id.map(|id| id.to_string()),
+                start_at: Some(row.start_at),
+                invitee_timezone: Some(row.invitee_timezone),
+                calendar_name: calendar.map(|c| c.name),
+            }))
+        })
+        .await
+        .map_err(|e| SourceError::new(e.to_string()))
+    }
+
     async fn read<T: Send + 'static>(
         &self,
         f: impl FnOnce(&Connection) -> chatbotx_db::rusqlite::Result<T> + Send + 'static,
@@ -627,18 +662,30 @@ impl VariableSources for DbSources {
 
     async fn find_appointment(
         &self,
-        _workspace_id: &str,
-        _appointment_id: &str,
+        workspace_id: &str,
+        appointment_id: &str,
     ) -> SourceResult<Option<Appointment>> {
-        Ok(None)
+        let (Ok(ws), Ok(id)) = (workspace_id.parse::<i64>(), appointment_id.parse::<i64>()) else {
+            return Ok(None);
+        };
+        self.appointment(ws, move |conn| {
+            chatbotx_db::repo::appointment::find_by(conn, ws, id, false)
+        })
+        .await
     }
 
     async fn find_latest_appointment_for_contact(
         &self,
-        _workspace_id: &str,
-        _contact_id: &str,
+        workspace_id: &str,
+        contact_id: &str,
     ) -> SourceResult<Option<Appointment>> {
-        Ok(None)
+        let (Ok(ws), Ok(contact)) = (workspace_id.parse::<i64>(), contact_id.parse::<i64>()) else {
+            return Ok(None);
+        };
+        self.appointment(ws, move |conn| {
+            chatbotx_db::repo::appointment::find_latest_for_contact(conn, ws, contact)
+        })
+        .await
     }
 
     async fn latest_questionnaire_points(

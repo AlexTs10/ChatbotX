@@ -10,6 +10,7 @@ pub mod ai;
 pub mod ai_agent;
 pub mod ai_file;
 pub mod ai_handover;
+pub mod appointment;
 pub mod channel;
 pub mod channels;
 pub mod chat;
@@ -19,6 +20,7 @@ pub mod datetime_sweep;
 pub mod default_queue;
 pub mod events;
 pub mod flow;
+pub mod heavy;
 pub mod inbound;
 pub mod inbound_events;
 pub mod inbox_labels;
@@ -29,7 +31,10 @@ pub mod notification;
 pub mod purge;
 pub mod schedule;
 pub mod send_flow_step;
+pub mod sequence;
+pub mod smart_delay;
 pub mod steps;
+pub mod story_automation;
 pub mod thread_control;
 pub mod trigger;
 pub mod variables;
@@ -198,7 +203,7 @@ fn handler(deps: &Deps, run: QueueHandler) -> Handler {
     Arc::new(move |job| run(deps.clone(), job))
 }
 
-/// Starts the `chat`, `integration`, `ai-agent` and `default` workers (`runWorker` +
+/// Starts the `chat`, `integration`, `ai-agent`, `default` and `schedule` workers (`runWorker` +
 /// `createQueueWorker`) with the original concurrency envs.
 pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     let specs = chatbotx_jobs::runtime::worker_specs();
@@ -234,7 +239,10 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
         handler(deps, |deps, job| Box::pin(default_queue::handle(deps, job))),
     )?;
     runtime.spawn_worker(
-        spec_of(QueueName::Heavy),
+        spec_of(QueueName::Heavy)
+            .concurrency(concurrency_env("HEAVY_WORKER_CONCURRENCY", 1, 3))
+            .lease_ms(heavy::worker_lease_ms())
+            .stalled_interval_ms(60_000),
         handler(deps, |deps, job| Box::pin(ai_file::handle_heavy(deps, job))),
     )?;
     runtime.spawn_worker(

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+autotests = false
 
 [dependencies]
 # Image bytes shared without copies (an unchanged image is the same buffer).
@@ -44,3 +45,7 @@ tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "all"
+path = "tests/all.rs"

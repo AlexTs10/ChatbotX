@@ -146,10 +146,23 @@ async fn send(
         resolve_contact_inbox_for_send(&state.db, call.workspace_id, contact_id, inbox_id)
             .await
             .map_err(|e| business_error(e, errors))?;
-    let outgoing =
-        message::create_outgoing(&state.db, &found.conversation, &contact_inbox, input, None)
-            .await
-            .map_err(|e| business_error(e, errors))?;
+    super::member_scope::assert_member_may_start_flow(
+        &state.db,
+        call.workspace_id,
+        input.flow_id,
+        errors,
+    )
+    .await?;
+    let sender = super::member_scope::sender_for_caller();
+    let outgoing = message::create_outgoing(
+        &state.db,
+        &found.conversation,
+        &contact_inbox,
+        input,
+        sender,
+    )
+    .await
+    .map_err(|e| business_error(e, errors))?;
     deliver(state, &found.conversation, outgoing).await;
     Ok(no_content())
 }

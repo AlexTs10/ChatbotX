@@ -2,9 +2,8 @@
 //! (`scheduleSmartDelayResume`, `buildSendFlowResumeJob`) and
 //! `wait-resume.ts`, on the `ContactOnSmartDelay` table.
 //!
-//! ponytail: the `scanSmartDelay` schedule job (rows due later than
-//! `ENQUEUE_DELAY_MS`, stuck-row recovery) is the schedule worker (Q.W2);
-//! until then only near deadlines are enqueued.
+//! The `scanSmartDelay` schedule job (rows due later than `ENQUEUE_DELAY_MS`,
+//! stuck-row recovery) is `crate::smart_delay` (Q.D5).
 
 use chatbotx_core::flow_config::compute_follow_up_trigger_at;
 use chatbotx_core::flow_config::metadata_schema;
