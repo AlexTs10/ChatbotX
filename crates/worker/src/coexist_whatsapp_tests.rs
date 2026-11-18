@@ -229,3 +229,35 @@ fn history_echo_and_state_sync_changes_go_to_the_buffer() {
     );
     assert_eq!(jobs[0].data["data"]["payload"]["history"], json!([]));
 }
+
+#[tokio::test]
+async fn a_synced_media_message_queues_one_attachment_download() {
+    let (deps, jobs) = setup().await;
+    whatsapp(&deps, true).await;
+    open_run(&deps).await;
+    let mut payload = history(100);
+    payload["history"][0]["threads"][0]["messages"] = json!([
+        { "id": "m3", "from": "849", "timestamp": "1755700000", "type": "image", "image": { "id": "media-1", "mime_type": "image/jpeg" } },
+    ]);
+    payload["messages"] = json!([]);
+    buffer(
+        &deps,
+        &json!({ "phoneNumberId": PHONE, "payload": payload }),
+    )
+    .await
+    .unwrap();
+    flush(&deps, &json!({ "phoneNumberId": PHONE }))
+        .await
+        .unwrap();
+    let downloads: Vec<_> = jobs
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|j| j.1 == crate::coexist_attachment::JOB)
+        .map(|j| (j.0, j.3.job_id.clone()))
+        .collect();
+    assert_eq!(downloads.len(), 1);
+    assert_eq!(downloads[0].0, QueueName::Low);
+    assert!(downloads[0].1.as_deref().unwrap().starts_with("att-"));
+}

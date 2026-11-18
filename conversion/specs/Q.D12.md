@@ -58,9 +58,16 @@ the conversations thread-control cases. Not run in this unit.
 
 ## Left
 
-- WhatsApp calls (`whatsappCalls.*`, `whatsappCalling.*`, the VoIP actions,
-  `whatsappCallEvent` worker) and the coexist routes + history-sync worker:
-  not started (size; next slice of this unit).
+- WhatsApp calls: the call-event worker, native recording / transcript
+  fetch, `whatsappCallRecordingReady`, `transcribeCall` and
+  `whatsappCalls.generateSummary` are ported (follow-up 2). Left: the
+  `whatsappCalling.*` routes, the VoIP actions and signalling (WebRTC SDP,
+  `whatsappVoipSignaling` queue, Redis control record, agent realtime hints)
+  and the inbox summary server action in `apps/web`.
+- Coexist: `coexistAttachmentDownload` (WhatsApp media only) and
+  `coexistMessengerSync` are ported. Left: `coexistInstagramSync` (the
+  scheduler queues it; the job fails as an undefined action) and the
+  Messenger BUC throttle / parallel threads.
 - Thread control: standby messages / echoes, Messenger requests and app roles,
   the hand-back response (`startHandoverResponse` resume flow, AI settings),
   AI take-back, the `isOwnRetry` check, and the inbound-pipeline hooks

@@ -11,7 +11,7 @@
 //! reply, live-comment pacing, the leaderboard award, post
 //! tracking, commenter avatars, comment attachments and user-tag tracking.
 //! The other low actions (`contactMarkAsRead`, `messageStatus`, echoes,
-//! avatars, coexist downloads) fail unrecoverable until their channels exist.
+//! avatars) fail unrecoverable until their channels exist.
 
 use std::sync::{Arc, LazyLock};
 
@@ -46,6 +46,19 @@ const TIKTOK_HIGH_INTENT: &str = "tiktokHighIntent";
 pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     let kind = str_of(&job.data, "type").unwrap_or("").to_owned();
     let data = &job.data["data"];
+    if kind == crate::coexist_attachment::JOB {
+        return match crate::is_blocked_workspace(
+            &deps.db,
+            str_of(data, "workspaceId").unwrap_or(""),
+        )
+        .await?
+        {
+            true => Ok(Value::Null),
+            false => crate::coexist_attachment::handle(&deps, &job)
+                .await
+                .map(|()| Value::Null),
+        };
+    }
     if kind != "replayMissedComment" {
         return Err(JobError::unrecoverable(format!(
             "Unhandled low job type: {kind}"

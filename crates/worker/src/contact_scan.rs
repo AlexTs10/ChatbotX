@@ -26,7 +26,7 @@ const MAX_PAGES: i64 = 5000;
 /// `CHUNK_BUDGET_MS`.
 const CHUNK_BUDGET_MS: i64 = 4 * 60 * 1000;
 const BATCH: i64 = 500;
-const GRAPH: &str = "https://graph.facebook.com";
+pub(crate) const GRAPH: &str = "https://graph.facebook.com";
 /// Messenger `listConversations` page size.
 const PAGE_LIMIT: &str = "499";
 /// `MAX_INLINE_RETRIES`.
@@ -167,11 +167,11 @@ async fn reset_for_retry(
 }
 
 /// The Messenger adapter context (`loadContext`).
-struct Context {
-    inbox: InboundInbox,
-    token: String,
-    version: String,
-    page_id: String,
+pub(crate) struct Context {
+    pub(crate) inbox: InboundInbox,
+    pub(crate) token: String,
+    pub(crate) version: String,
+    pub(crate) page_id: String,
 }
 
 async fn load_context(
@@ -223,10 +223,10 @@ async fn load_context(
 
 /// A Graph failure: the HTTP status (`None` = no answer) and the error body.
 #[derive(Debug)]
-struct GraphError {
+pub(crate) struct GraphError {
     status: Option<u16>,
     body: Value,
-    message: String,
+    pub(crate) message: String,
 }
 
 /// `classifyGraphSdkError`.
@@ -248,8 +248,12 @@ fn classify(error: &GraphError) -> &'static str {
     "unknown"
 }
 
-/// One page of the walk: (contact, updated time) entries and the next cursor.
-type Page = (Vec<(IncomingContact, Option<i64>)>, Option<String>);
+/// One page of the walk: (conversation id, participant contact, updated
+/// time) per conversation and the next cursor.
+pub(crate) type Page = (
+    Vec<(String, Option<IncomingContact>, Option<i64>)>,
+    Option<String>,
+);
 
 /// `splitName`.
 fn split_name(raw: Option<&str>) -> (Option<String>, Option<String>) {
@@ -269,7 +273,7 @@ fn split_name(raw: Option<&str>) -> (Option<String>, Option<String>) {
 }
 
 /// `listConversations` with `withInlineRetry`, mapped by `listPage`.
-async fn list_page(
+pub(crate) async fn list_page(
     upstream: &impl Upstream,
     ctx: &Context,
     cursor: Option<&str>,
@@ -290,13 +294,51 @@ async fn list_page(
     if let Some(after) = cursor {
         url.query_pairs_mut().append_pair("after", after);
     }
+    let body = graph_get(upstream, &ctx.token, url.as_str()).await?;
+    let mut entries = Vec::new();
+    for conv in body["data"].as_array().into_iter().flatten() {
+        let participant = conv["participants"]["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|p| p["id"].as_str().is_some_and(|id| id != ctx.page_id));
+        let contact = participant.and_then(|p| p["id"].as_str()).map(|source_id| {
+            let (first_name, last_name) = split_name(participant.and_then(|p| p["name"].as_str()));
+            IncomingContact {
+                source_id: source_id.to_owned(),
+                first_name,
+                last_name,
+                ..IncomingContact::default()
+            }
+        });
+        let updated = str_of(conv, "updated_time").and_then(chatbotx_core::js::parse_date);
+        let id = str_of(conv, "id").unwrap_or_default().to_owned();
+        entries.push((id, contact, updated));
+    }
+    Ok((entries, next_cursor(&body)))
+}
+
+/// `nextCursor`: the `after` cursor only while a `next` page exists.
+pub(crate) fn next_cursor(body: &Value) -> Option<String> {
+    body["paging"]["next"]
+        .as_str()
+        .and(body["paging"]["cursors"]["after"].as_str())
+        .map(str::to_owned)
+}
+
+/// A Graph GET with `withInlineRetry` (retryable errors: 1 s, 2 s, 4 s).
+pub(crate) async fn graph_get(
+    upstream: &impl Upstream,
+    token: &str,
+    url: &str,
+) -> Result<Value, GraphError> {
     let mut attempt = 0;
     let body = loop {
         let reply = upstream
             .send(UpstreamRequest {
                 method: "GET",
-                url: url.to_string(),
-                headers: vec![("Authorization".into(), format!("Bearer {}", ctx.token))],
+                url: url.to_owned(),
+                headers: vec![("Authorization".into(), format!("Bearer {token}"))],
                 body: None,
             })
             .await;
@@ -334,34 +376,7 @@ async fn list_page(
         );
         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
     };
-    let mut entries = Vec::new();
-    for conv in body["data"].as_array().into_iter().flatten() {
-        let participant = conv["participants"]["data"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|p| p["id"].as_str().is_some_and(|id| id != ctx.page_id));
-        let Some(source_id) = participant.and_then(|p| p["id"].as_str()) else {
-            continue;
-        };
-        let (first_name, last_name) = split_name(participant.and_then(|p| p["name"].as_str()));
-        let updated = str_of(conv, "updated_time").and_then(chatbotx_core::js::parse_date);
-        entries.push((
-            IncomingContact {
-                source_id: source_id.to_owned(),
-                first_name,
-                last_name,
-                ..IncomingContact::default()
-            },
-            updated,
-        ));
-    }
-    // `nextCursor`: the `after` cursor only while a `next` page exists.
-    let after = body["paging"]["next"]
-        .as_str()
-        .and(body["paging"]["cursors"]["after"].as_str())
-        .map(str::to_owned);
-    Ok((entries, after))
+    Ok(body)
 }
 
 /// The `contactScan` integration job.
@@ -573,8 +588,10 @@ pub(crate) async fn run_with(
         // `filterConversationWindow`.
         let mut stop_all = false;
         let mut items = Vec::new();
-        for (contact, updated) in entries {
-            let Some(updated) = updated else { continue };
+        for (_, contact, updated) in entries {
+            let (Some(contact), Some(updated)) = (contact, updated) else {
+                continue;
+            };
             if ceiling.is_some_and(|c| updated <= c) {
                 stop_all = true;
                 break;

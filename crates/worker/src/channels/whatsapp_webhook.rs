@@ -300,8 +300,8 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             }
         }
     }
-    // ponytail: automatic events, calls, identity changes and account
-    // updates are not ported yet.
+    // ponytail: automatic events, identity changes and account updates are
+    // not ported yet (calls: `whatsapp_call_webhook`).
     jobs
 }
 
@@ -498,6 +498,12 @@ pub async fn enqueue_webhook_jobs(
         tracing::error!("Whatsapp webhook body is not JSON");
         return Ok(());
     };
+    // Call events first (they propagate and are jobId-deduped).
+    for job in crate::whatsapp_call_webhook::call_jobs(&parsed, pinned) {
+        jobs.add(QueueName::Integration, job.name, job.data, job.opts)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     for job in webhook_jobs(&parsed, pinned) {
         jobs.add(
             QueueName::Integration,

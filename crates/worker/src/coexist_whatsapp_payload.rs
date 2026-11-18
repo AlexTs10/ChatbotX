@@ -46,7 +46,9 @@ pub struct HistoricalMessage {
     pub text: String,
     /// Seconds-based Meta timestamp in ms; `None` = missing or not a number.
     pub created_at: Option<i64>,
-    pub attachment: Option<IncomingAttachment>,
+    pub attachments: Vec<IncomingAttachment>,
+    /// A template card (`contentAttributes`; Messenger button templates).
+    pub content_attributes: Option<Value>,
 }
 
 /// `ContactWithMessage`.
@@ -330,7 +332,8 @@ fn historical(message: &Value, message_type: &'static str) -> HistoricalMessage 
         message_type,
         text: text_of(message),
         created_at: to_ms(message.get("timestamp")),
-        attachment: media_of(message),
+        attachments: media_of(message).into_iter().collect(),
+        content_attributes: None,
     }
 }
 
@@ -693,14 +696,7 @@ mod tests {
             Some(1_755_700_000_000)
         );
         assert_eq!(
-            out.entries[1]
-                .message
-                .as_ref()
-                .unwrap()
-                .attachment
-                .as_ref()
-                .unwrap()
-                .origin_path,
+            out.entries[1].message.as_ref().unwrap().attachments[0].origin_path,
             "wa-media:media-1"
         );
         assert_eq!(

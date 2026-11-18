@@ -5,11 +5,12 @@
 
 pub mod chunk;
 pub mod extract;
-pub mod llm;
-pub mod model;
 mod office;
 pub mod text;
 pub mod toolset;
+
+/// The LLM client moved to `chatbotx-business` so the API can call it (call summaries).
+pub use chatbotx_business::ai::{llm, model};
 
 use std::sync::Arc;
 
