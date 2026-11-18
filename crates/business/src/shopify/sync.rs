@@ -459,11 +459,14 @@ pub(crate) fn save_mapped_product(
     mapped: mappers::MappedProduct,
 ) -> Result<()> {
     let category_id = match &mapped.category_name {
-        Some(name) => {
-            product_category::create_missing_by_name(conn, ws, &[name.clone()], Some(source))?
-                .first()
-                .map(|c| c.id)
-        }
+        Some(name) => product_category::create_missing_by_name(
+            conn,
+            ws,
+            std::slice::from_ref(name),
+            Some(source),
+        )?
+        .first()
+        .map(|c| c.id),
         None => None,
     };
     let vendor_id = match &mapped.vendor_name {
