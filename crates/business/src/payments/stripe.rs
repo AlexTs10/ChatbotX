@@ -807,9 +807,17 @@ mod tests {
             "enabled_events": ["a", "b"],
             "line_items": [{ "quantity": 1, "price_data": { "currency": "usd" } }],
         }));
+        // Key order follows the JSON map (sorted unless `preserve_order`).
+        let mut pairs: Vec<&str> = body.split('&').collect();
+        pairs.sort_unstable();
         assert_eq!(
-            body,
-            "enabled_events%5B0%5D=a&enabled_events%5B1%5D=b&line_items%5B0%5D%5Bquantity%5D=1&line_items%5B0%5D%5Bprice_data%5D%5Bcurrency%5D=usd"
+            pairs,
+            [
+                "enabled_events%5B0%5D=a",
+                "enabled_events%5B1%5D=b",
+                "line_items%5B0%5D%5Bprice_data%5D%5Bcurrency%5D=usd",
+                "line_items%5B0%5D%5Bquantity%5D=1",
+            ]
         );
     }
 
