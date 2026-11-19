@@ -36,6 +36,16 @@ p1-07 decisionConnections, p1-08 facebookLeadAds / ads, p1-09 googleAds,
 p1-12 paymentProviders, p1-15 smtpIntegrations, p1-16 tiktokChannels,
 p1-18 zaloChannels.
 
+## Gate (Dell)
+
+- Rust: `cargo fmt --check`, `clippy -D warnings` (business, api, worker),
+  `cargo test` business + api: all green (api 1342 + 53, business 2027 + 224).
+- Web: `pnpm --filter web build` OK; `tsc --noEmit` 45 errors (baseline 45,
+  none in the files of this unit).
+- `apps/web` now depends on `@chatbotx.io/integration-{active-campaign,sendgrid,smtp}`
+  (workspace links, as the other email-marketing integrations) for the
+  credential and SMTP provider schemas.
+
 ## Left, and why
 
 - Google Sheets and Response SLA settings: unit d13a. WhatsApp / Messenger /
