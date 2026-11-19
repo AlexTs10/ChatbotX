@@ -48,16 +48,29 @@ export function serverAction(
   name: string,
   options?: { workspace?: boolean; noInput?: true },
 ) {
-  return async (...args: any[]): Promise<SafeActionResult> => {
+  return customAction((...args) =>
+    call(name, args, options?.workspace ?? false),
+  )
+}
+
+/**
+ * An action served elsewhere than `/rpc/actions` (a public page loader, an
+ * auth action, a plain route): `run`'s value as `{ data }`, a rejection as
+ * `{ serverError }` / `{ validationErrors }`.
+ */
+export function customAction<Data = any>(
+  run: (...args: any[]) => Promise<unknown>,
+): (...args: any[]) => Promise<SafeActionResult<Data>> {
+  return async (...args: any[]): Promise<SafeActionResult<Data>> => {
     try {
-      return { data: await call(name, args, options?.workspace ?? false) }
+      return { data: (await run(...args)) as Data }
     } catch (error) {
       if (error instanceof ORPCError) {
         const validationErrors = (
           error.data as { validationErrors?: unknown } | undefined
         )?.validationErrors
         if (validationErrors) {
-          return { validationErrors } as SafeActionResult
+          return { validationErrors } as SafeActionResult<Data>
         }
         return { serverError: error.message }
       }

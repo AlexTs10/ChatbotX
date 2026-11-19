@@ -142,6 +142,29 @@ const shopPages = (
   }),
 )
 
+// The public pages of Q.F2-admin goal 3 (routes/public.tsx); the loaders
+// check their tokens and workspaces. `/oauth/consent` needs a session (the
+// loader answers 404 without one, as the builder page did).
+const publicPage = () => import("@/routes/public")
+const publicPages = (
+  [
+    ["unsubscribe", "UnsubscribePage"],
+    ["oauth/consent", "OAuthConsentPage"],
+    ["connect/$sessionId", "ConnectSessionPage"],
+    ["l/$workspaceId/$id", "LandingPage"],
+    ["l/$workspaceId/p/$id", "PollLandingPage"],
+    ["bs/$workspaceId/$webchatId", "BotSimulatorPage"],
+    ["extensions/datetime-picker", "DateTimePickerPage"],
+    ["webchat", "WebchatPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    component: lazyRouteComponent(publicPage, page),
+  }),
+)
+
 // Everything else needs a session (proxy.ts) and a current password
 // (`enforcePasswordCurrent` in every protected layout).
 const protectedRoute = createRoute({
@@ -588,20 +611,46 @@ const adminPages = (
     ["workspaces", "AdminWorkspacesPage"],
     ["admins", "AdminAdminsPage"],
     ["help-items", "AdminHelpItemsPage"],
-    ["platform-credentials", "AdminNotAvailablePage"],
-    ["workspaces/deleted", "AdminNotAvailablePage"],
-    ["platform-channels", "AdminNotAvailablePage"],
-    ["audit-logs", "AdminNotAvailablePage"],
-    ["smtp", "AdminNotAvailablePage"],
-    ["branding", "AdminNotAvailablePage"],
-    ["email-templates", "AdminNotAvailablePage"],
-    ["email-templates/$type", "AdminNotAvailablePage"],
+    ["platform-credentials", "AdminPlatformCredentialsPage"],
+    ["workspaces/deleted", "AdminDeletedWorkspacesPage"],
+    ["platform-channels", "AdminPlatformChannelsPage"],
+    ["audit-logs", "AdminAuditLogsPage"],
+    ["smtp", "AdminSmtpPage"],
+    ["branding", "AdminBrandingPage"],
+    ["email-templates", "AdminEmailTemplatesPage"],
+    ["email-templates/$type", "AdminEmailTemplatePage"],
   ] as const
 ).map(([path, page]) =>
   createRoute({
     getParentRoute: () => adminRoute,
     path,
     component: lazyRouteComponent(admin, page),
+  }),
+)
+
+// `app/manage/*`: the cloud reseller console (`routes/manage.tsx`).
+const manage = () => import("@/routes/manage")
+const manageRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "manage",
+  component: lazyRouteComponent(manage, "ManageLayoutPage"),
+})
+const managePages = (
+  [
+    ["/", "ManageIndexPage"],
+    ["platform-credentials", "ManagePlatformCredentialsPage"],
+    ["platform-channels", "ManagePlatformChannelsPage"],
+    ["help-items", "ManageHelpItemsPage"],
+    ["default-template", "ManageDefaultTemplatePage"],
+    ["branding", "ManageBrandingPage"],
+    ["email-templates", "ManageEmailTemplatesPage"],
+    ["email-templates/$type", "ManageEmailTemplatePage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => manageRoute,
+    path,
+    component: lazyRouteComponent(manage, page),
   }),
 )
 
@@ -668,11 +717,13 @@ const routeTree = rootRoute.addChildren([
   publicMiniAppRoute,
   ...bookingPages,
   ...shopPages,
+  ...publicPages,
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
     createChannelRoute,
     adminRoute.addChildren([...adminPages, adminDefaultTemplateRoute]),
+    manageRoute.addChildren(managePages),
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),

@@ -562,6 +562,90 @@ pub async fn delete_webhook(base: &str, secret_key: &str, endpoint_id: &str) -> 
 
 // ---- Stripe Connect ------------------------------------------------------------
 
+/// `readPlatformStripeAccountId`: the account a platform key belongs to.
+pub async fn read_platform_account_id(base: &str, secret_key: &str) -> PResult<String> {
+    Ok(read_key_account(base, secret_key).await?.account_id)
+}
+
+/// `ensureStripeConnectWebhook`: keeps `existing` while it points at `url`
+/// and is enabled, else creates the platform's Connect webhook (and removes
+/// the endpoint it replaces). Returns `(endpointId, secret)`.
+pub async fn ensure_connect_webhook(
+    base: &str,
+    secret_key: &str,
+    url: &str,
+    existing: Option<(String, String)>,
+) -> PResult<(String, String)> {
+    let mut replaced = None;
+    if let Some((endpoint_id, secret)) = existing {
+        let path = format!("/v1/webhook_endpoints/{}", encode(&endpoint_id));
+        match call(
+            base,
+            secret_key,
+            None,
+            reqwest::Method::GET,
+            &path,
+            None,
+            None,
+        )
+        .await
+        {
+            Ok(endpoint) => {
+                if endpoint["url"].as_str() == Some(url)
+                    && endpoint["status"].as_str() == Some("enabled")
+                {
+                    return Ok((endpoint_id, secret));
+                }
+                replaced = endpoint["id"].as_str().map(str::to_string);
+            }
+            Err(Failure::Api(error)) if error.is_invalid_request() && error.status == 404 => {}
+            Err(other) => return Err(other.into_provider()),
+        }
+    }
+    let params = json!({
+        "url": url,
+        "connect": true,
+        "enabled_events": CONNECT_WEBHOOK_EVENTS,
+        // Shown in a reseller's own Stripe dashboard: no platform name.
+        "description": "Web shop payments",
+    });
+    let endpoint = call(
+        base,
+        secret_key,
+        None,
+        reqwest::Method::POST,
+        "/v1/webhook_endpoints",
+        Some(&params),
+        None,
+    )
+    .await
+    .map_err(Failure::into_provider)?;
+    let Some(secret) = endpoint["secret"].as_str().filter(|s| !s.is_empty()) else {
+        return Err(ProviderError::new(
+            ErrorKind::InvalidRequest,
+            "Stripe created the webhook without a signing secret.",
+        ));
+    };
+    if let Some(replaced) = replaced {
+        let path = format!("/v1/webhook_endpoints/{}", encode(&replaced));
+        call(
+            base,
+            secret_key,
+            None,
+            reqwest::Method::DELETE,
+            &path,
+            None,
+            None,
+        )
+        .await
+        .map_err(Failure::into_provider)?;
+    }
+    Ok((
+        endpoint["id"].as_str().unwrap_or_default().to_string(),
+        secret.to_string(),
+    ))
+}
+
 /// `buildStripeAuthorizeUrl` (`oauth.authorizeUrl`).
 pub fn authorize_url(
     client_id: &str,

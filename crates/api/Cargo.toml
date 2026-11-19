@@ -10,6 +10,8 @@ autotests = false
 axum.workspace = true
 # Unverified JWT `aud` peek of a mobile access token (base64url segments); same version as crates/rt.
 base64 = "0.22"
+# Q.F2-admin `compileEmailPreview` (the `mjml` package): an MJML engine in Rust.
+mrml = { version = "5", default-features = false, features = ["parse", "render"] }
 # Multipart AI file uploads (`InputFile.bytes`, Q.D6).
 bytes.workspace = true
 # Business services behind the public handlers (P3.6+).

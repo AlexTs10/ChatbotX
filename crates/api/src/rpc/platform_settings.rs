@@ -8,6 +8,8 @@
 //!   `enterprise/features/platform-email-templates`;
 //! - `updatePlatformSmtp` / `deletePlatformSmtp` of
 //!   `enterprise/features/platform-smtp`;
+//! - `updatePlatformChannels` (own tenant) / `updateRootPlatformChannels`
+//!   (root tenant) of `features/platform-channels`;
 //! - `updateDefaultTemplate` / `clearDefaultTemplate` (own tenant) and
 //!   `updateRootDefaultTemplate` / `clearRootDefaultTemplate` (root tenant)
 //!   of `features/platform-default-template` (Q.D4 slice 6);
@@ -15,8 +17,9 @@
 //! and under the key `billingActions`: `reconcileTenantEntitlement`
 //! (`enterprise/features/billing`).
 //!
-//! ponytail: no `previewEmailTemplate` (MJML compile) and no SMTP
-//! `verifySmtpTransport` (no TLS SMTP client): both come with the mail port.
+//! `updatePlatformSmtp` checks the server first (`verifySmtpTransport`).
+//! `previewEmailTemplate` (Q.F2-admin) renders `compileEmailPreview` of
+//! `@chatbotx.io/mail/preview`: MJML through `mrml`, plain HTML wrapped.
 
 use chatbotx_business::template::tenant_default as default_template;
 use chatbotx_business::tenant::{self, ROOT_TENANT_ID};
@@ -27,7 +30,7 @@ use super::actions::{ActionContext, ActionError, ActionResult, Gate};
 use super::platform_credentials::{is_super_admin, save, stored, unauthorized};
 use crate::handlers::ApiState;
 use crate::handlers::contacts::is_email;
-use crate::handlers::input::{Input, Num, Str, child, key};
+use crate::handlers::input::{Input, Num, Seg, Str, child, key};
 
 /// The actions of the `platformSettingsActions` key.
 pub fn action_gate(name: &str) -> Option<Gate> {
@@ -43,6 +46,9 @@ pub fn action_gate(name: &str) -> Option<Gate> {
             | "clearDefaultTemplate"
             | "updateRootDefaultTemplate"
             | "clearRootDefaultTemplate"
+            | "updatePlatformChannels"
+            | "updateRootPlatformChannels"
+            | "previewEmailTemplate"
     )
     .then_some(Gate::Auth)
 }
@@ -238,6 +244,9 @@ pub async fn run_action(
         }
         return Ok(None);
     }
+    if name == "previewEmailTemplate" {
+        return preview_email_template(api, user, raw).await;
+    }
     // The client middleware runs before the input schema.
     let own_tenant = matches!(
         name,
@@ -245,6 +254,7 @@ pub async fn run_action(
             | "updateEmailTemplate"
             | "updateDefaultTemplate"
             | "clearDefaultTemplate"
+            | "updatePlatformChannels"
     );
     let allowed = if own_tenant {
         is_platform_admin(api, user).await?
@@ -290,6 +300,28 @@ pub async fn run_action(
                     "password": { "_errors": ["Enter the SMTP password."] }
                 })));
             };
+            // `verifySmtpTransport`: connect, (TLS,) authenticate, quit.
+            let auth = chatbotx_business::email_marketing::smtp::SmtpAuth {
+                host: config["host"].as_str().unwrap_or_default().to_string(),
+                port: config["port"]
+                    .as_f64()
+                    .and_then(|p| u16::try_from(p as i64).ok())
+                    .unwrap_or_default(),
+                username: config["username"].as_str().unwrap_or_default().to_string(),
+                password: password.clone(),
+            };
+            if chatbotx_business::email_marketing::smtp::verify(&auth)
+                .await
+                .is_err()
+            {
+                return Err(ActionError::Exception(
+                    chatbotx_business::BusinessError::exception(
+                        "Cannot connect to SMTP server. Please check your credentials and try again.",
+                        "systemError",
+                        400,
+                    ),
+                ));
+            }
             config.insert("password".into(), json!(password));
             save(api, None, "smtp", config).await?;
             Ok(None)
@@ -340,6 +372,20 @@ pub async fn run_action(
                 None => Err(saved.unwrap_err().into()),
             }
         }
+        "updatePlatformChannels" | "updateRootPlatformChannels" => {
+            let hidden = hidden_channels(&mut input);
+            input.finish()?;
+            let data = vec![(
+                "hiddenChannels",
+                SqlValue::Text(Value::from(hidden).to_string()),
+            )];
+            if own_tenant {
+                tenant::upsert_by_owner(&api.db, user, data).await?;
+            } else {
+                tenant::upsert_by_id(&api.db, ROOT_TENANT_ID, data).await?;
+            }
+            Ok(None)
+        }
         "clearDefaultTemplate" | "clearRootDefaultTemplate" => {
             default_template::clear(&api.db, default_template_scope(own_tenant, user), user)
                 .await?;
@@ -347,6 +393,133 @@ pub async fn run_action(
         }
         _ => Err(ActionError::Internal(format!("unknown action {name}"))),
     }
+}
+
+/// `updatePlatformChannelsSchema`: `channelTypes` items, every one of them
+/// creatable (`CREATABLE_CHANNELS`).
+fn hidden_channels(input: &mut Input) -> Vec<String> {
+    use chatbotx_core::utils::channel::{ChannelType, creatable_channels};
+    let path = key("hiddenChannels");
+    let Some(Value::Array(items)) = input.get("hiddenChannels").cloned() else {
+        input.issue(&path, "invalid_type", "Invalid input: expected array");
+        return Vec::new();
+    };
+    let all: Vec<&str> = ChannelType::ALL.iter().map(|c| c.as_str()).collect();
+    let mut out = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let mut at = path.clone();
+        at.push(Seg::Index(index));
+        if let Some(channel) = input.enum_at(&at, Some(item), &all, true) {
+            out.push(channel);
+        }
+    }
+    let creatable = creatable_channels();
+    if !out
+        .iter()
+        .all(|c| creatable.iter().any(|k| k.as_str() == *c))
+    {
+        input.issue(&path, "custom", "Only creatable channels can be hidden");
+    }
+    out
+}
+
+/// `previewEmailTemplateAction`: the input schema, the enterprise features,
+/// then a super admin or a platform admin.
+async fn preview_email_template(api: &ApiState, user: i64, raw: &Value) -> ActionResult {
+    let mut input = Input::from_object(raw.as_object().cloned().unwrap_or_default());
+    let body = input.string("body", Str::max(100_000));
+    input.finish()?;
+    assert_enterprise_features(api).await?;
+    if !(is_super_admin(api, user).await? || is_platform_admin(api, user).await?) {
+        return Err(unauthorized());
+    }
+    Ok(Some(Value::String(compile_email_preview(
+        &body.unwrap_or_default(),
+    ))))
+}
+
+/// `SAMPLE_VARS` of `compileEmailPreview`.
+const SAMPLE_VARS: &[(&str, &str)] = &[
+    ("userName", "John Doe"),
+    (
+        "verificationUrl",
+        "https://example.com/verify/sample-token-abc123",
+    ),
+    (
+        "resetPasswordUrl",
+        "https://example.com/reset/sample-token-abc123",
+    ),
+    ("magicUrl", "https://example.com/magic/sample-token-abc123"),
+    ("brandName", "ChatbotX"),
+    (
+        "brandLogoUrl",
+        "https://placehold.co/150x90/f3f4f6/374151?text=Logo",
+    ),
+    ("brandUrl", "https://example.com"),
+];
+
+/// `body.replace(/\{\{(\w+)\}\}/g, …)`: a known `{{name}}` becomes its
+/// sample value; anything else stays as written.
+fn substitute_sample_vars(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let name_len = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(after.len());
+        let name = &after[..name_len];
+        if name_len > 0 && after[name_len..].starts_with("}}") {
+            match SAMPLE_VARS.iter().find(|(k, _)| *k == name) {
+                Some((_, value)) => out.push_str(value),
+                None => {
+                    out.push_str("{{");
+                    out.push_str(name);
+                    out.push_str("}}");
+                }
+            }
+            rest = &after[name_len + 2..];
+        } else {
+            out.push_str("{{");
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// `compileEmailPreview`: an MJML body (the original starts with `<mjml`)
+/// renders to HTML, an error to a red `<pre>`; plain HTML gets a wrapper.
+pub fn compile_email_preview(body: &str) -> String {
+    let substituted = substitute_sample_vars(body);
+    if body.trim_start().starts_with("<mjml") {
+        let rendered = mrml::parse(&substituted)
+            .map_err(|e| e.to_string())
+            .and_then(|parsed| {
+                parsed
+                    .element
+                    .render(&mrml::prelude::render::RenderOptions::default())
+                    .map_err(|e| e.to_string())
+            });
+        return match rendered {
+            Ok(html) => html,
+            // ponytail: mrml's message, not mjml's `formattedMessage` text.
+            Err(message) => format!(
+                "<html><body><pre style=\"color:red;padding:16px;font-size:13px\">{}</pre></body></html>",
+                escape_html(&message)
+            ),
+        };
+    }
+    format!(
+        "<!DOCTYPE html><html><body style=\"font-family:sans-serif;padding:16px\">{substituted}</body></html>"
+    )
 }
 
 /// The reseller's own tenant, or the root tenant (`DefaultTemplateScope`).

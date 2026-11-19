@@ -322,6 +322,42 @@ pub fn unsubscribe_url(app_url: &str, contact_id: i64, workspace_id: i64) -> cra
     Ok(format!("{app_url}/unsubscribe?token={token}"))
 }
 
+/// `verifyUnsubscribeToken`: base64url JSON of the sealed `{ cid, wid, exp }`;
+/// `(contactId, workspaceId)` while it has not expired.
+pub fn verify_unsubscribe_token(token: &str) -> crate::Result<(i64, i64)> {
+    let invalid =
+        || crate::BusinessError::exception("Invalid unsubscribe token", "badRequest", 400);
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(token.trim_end_matches('='))
+        .map_err(|_| invalid())?;
+    let sealed: chatbotx_core::encryption::EncryptedData =
+        serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    let payload: serde_json::Value = crate::meta_catalog::process_encryption()
+        .decrypt_object(&sealed, None)
+        .map_err(|_| invalid())?;
+    let field = |key: &str| {
+        payload
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .and_then(|v| v.parse::<i64>().ok())
+    };
+    let exp = payload
+        .get("exp")
+        .and_then(serde_json::Value::as_f64)
+        .ok_or_else(invalid)?;
+    if exp < chrono::Utc::now().timestamp_millis() as f64 {
+        return Err(crate::BusinessError::exception(
+            "Unsubscribe token has expired",
+            "badRequest",
+            400,
+        ));
+    }
+    Ok((
+        field("cid").ok_or_else(invalid)?,
+        field("wid").ok_or_else(invalid)?,
+    ))
+}
+
 /// `esc` of the MJML template.
 fn esc(value: &str) -> String {
     value

@@ -12,7 +12,7 @@ use chatbotx_business::keys::Edition;
 use chatbotx_business::license::LICENSE_ISSUER;
 use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
-use rpc_common::{AGENT, AGENT_TOKEN, OWNER, OWNER_TOKEN, action, fixture_as, scalar};
+use rpc_common::{AGENT, AGENT_TOKEN, OWNER, OWNER_TOKEN, WS, action, call, fixture_as, scalar};
 use serde_json::{Value, json};
 
 const KID: &str = "test-license-key";
@@ -180,11 +180,47 @@ async fn root_email_template_is_stored_on_the_root_tenant() {
 
 const SMTP_ROWS: &str = r#"SELECT COUNT(*) FROM "PlatformCredential" WHERE "type" = 'smtp' AND "userId" IS NULL AND ?1 = 1"#;
 
+/// A local SMTP server that accepts any `AUTH` (`verifySmtpTransport` is
+/// mocked in the original test); the port of a closed one refuses.
+async fn fake_smtp() -> u16 {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let (read, mut write) = socket.into_split();
+                let mut lines = BufReader::new(read).lines();
+                let _ = write.write_all(b"220 fake ESMTP\r\n").await;
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let verb = line
+                        .split(' ')
+                        .next()
+                        .unwrap_or_default()
+                        .to_ascii_uppercase();
+                    let reply: &[u8] = match verb.as_str() {
+                        "EHLO" | "HELO" => b"250-fake\r\n250 AUTH PLAIN LOGIN\r\n",
+                        "AUTH" => b"235 ok\r\n",
+                        "QUIT" => b"221 bye\r\n",
+                        _ => b"250 ok\r\n",
+                    };
+                    let _ = write.write_all(reply).await;
+                    if verb == "QUIT" {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    port
+}
+
 #[tokio::test]
 async fn smtp_needs_a_password_once_then_keeps_the_stored_one() {
     let fx = fixture(Edition::Enterprise, true).await;
+    let port = fake_smtp().await;
     let smtp = |password: Option<&str>| {
-        let mut v = json!({ "host": " smtp.test ", "port": "587", "username": "mailer", "fromEmail": "noreply@acme.test" });
+        let mut v = json!({ "host": " 127.0.0.1 ", "port": port.to_string(), "username": "mailer", "fromEmail": "noreply@acme.test" });
         if let Some(p) = password {
             v["password"] = json!(p);
         }
@@ -215,6 +251,110 @@ async fn smtp_needs_a_password_once_then_keeps_the_stored_one() {
     let (status, out) = action(&fx, KEY, "deletePlatformSmtp", OWNER_TOKEN, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(scalar(&fx, SMTP_ROWS, 1).await, json!(0));
+}
+
+#[tokio::test]
+async fn smtp_that_cannot_connect_is_not_saved() {
+    let fx = fixture(Edition::Enterprise, true).await;
+    // A port with nothing listening on it.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = closed.local_addr().unwrap().port();
+    drop(closed);
+    let input = json!({ "host": "127.0.0.1", "port": port, "username": "mailer", "password": "secret", "fromEmail": "noreply@acme.test" });
+    let (status, out) = action(&fx, KEY, "updatePlatformSmtp", OWNER_TOKEN, input).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    assert_eq!(
+        out["json"]["message"],
+        json!("Cannot connect to SMTP server. Please check your credentials and try again."),
+        "{out}"
+    );
+    assert_eq!(scalar(&fx, SMTP_ROWS, 1).await, json!(0));
+}
+
+#[tokio::test]
+async fn hidden_platform_channels_must_be_creatable() {
+    let fx = fixture(Edition::Enterprise, true).await;
+    let (status, out) = action(
+        &fx,
+        KEY,
+        "updateRootPlatformChannels",
+        OWNER_TOKEN,
+        json!({ "hiddenChannels": ["whatsapp", "telegram"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        root_column(&fx, "hiddenChannels").await,
+        json!(r#"["whatsapp","telegram"]"#)
+    );
+
+    let (status, out) = action(
+        &fx,
+        KEY,
+        "updateRootPlatformChannels",
+        OWNER_TOKEN,
+        json!({ "hiddenChannels": ["smtp"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+
+    // Not a super admin.
+    let (status, out) = action(
+        &fx,
+        KEY,
+        "updateRootPlatformChannels",
+        AGENT_TOKEN,
+        json!({ "hiddenChannels": [] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
+}
+
+#[tokio::test]
+async fn email_preview_renders_mjml_and_wraps_html() {
+    let fx = fixture(Edition::Enterprise, true).await;
+    let (status, out) = action(
+        &fx,
+        KEY,
+        "previewEmailTemplate",
+        OWNER_TOKEN,
+        json!({ "body": "<p>Hi {{userName}} {{other}}</p>" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        out["json"],
+        json!(
+            "<!DOCTYPE html><html><body style=\"font-family:sans-serif;padding:16px\"><p>Hi John Doe {{other}}</p></body></html>"
+        )
+    );
+
+    let mjml = "<mjml><mj-body><mj-section><mj-column><mj-text>Hello {{brandName}}</mj-text></mj-column></mj-section></mj-body></mjml>";
+    let (status, out) = action(
+        &fx,
+        KEY,
+        "previewEmailTemplate",
+        OWNER_TOKEN,
+        json!({ "body": mjml }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let html = out["json"].as_str().unwrap_or_default();
+    assert!(
+        html.contains("Hello ChatbotX") && !html.contains("<mj-"),
+        "{html}"
+    );
+
+    // Not a super admin nor a platform admin (no own active tenant off cloud).
+    let (status, out) = action(
+        &fx,
+        KEY,
+        "previewEmailTemplate",
+        AGENT_TOKEN,
+        json!({ "body": "x" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
 }
 
 #[tokio::test]
@@ -295,4 +435,177 @@ async fn reconcile_tenant_entitlement_provisions_on_cloud_only() {
             "{edition:?}"
         );
     }
+}
+
+/// A console read (`POST /rpc/actions/<name>` with the SPA's `{ args }`).
+async fn read(
+    fx: &rpc_common::Fixture,
+    name: &str,
+    token: &str,
+    args: Value,
+) -> (StatusCode, Value) {
+    call(
+        fx,
+        "POST",
+        &format!("/rpc/actions/{name}"),
+        Some(token),
+        json!({ "args": args }),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn platform_audit_logs_list_every_workspace_with_its_name() {
+    let fx = fixture(Edition::Enterprise, true).await;
+    fx.db()
+        .write(|tx| {
+            tx.execute(
+                r#"INSERT INTO "Workspace" ("id", "name", "ownerId") VALUES (202, 'Beta', ?1)"#,
+                [OWNER],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "AuditLog" ("id", "action", "detail", "workspaceId", "userId") VALUES (1, 'flow.created', 'A', ?1, ?2), (2, 'flow.deleted', 'B', 202, NULL)"#,
+                [WS, OWNER],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let (status, out) = read(&fx, "listPlatformAuditLogs", OWNER_TOKEN, json!([{}])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let rows = out["json"]["data"].as_array().cloned().unwrap_or_default();
+    assert_eq!(rows.len(), 2, "{out}");
+    let beta = rows.iter().find(|r| r["action"] == "flow.deleted").unwrap();
+    assert_eq!(beta["workspace"], json!({ "id": "202", "name": "Beta" }));
+
+    let (status, out) = read(
+        &fx,
+        "listPlatformAuditLogs",
+        OWNER_TOKEN,
+        json!([{ "workspaceId": WS.to_string() }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        out["json"]["data"].as_array().map(Vec::len),
+        Some(1),
+        "{out}"
+    );
+
+    // The workspace filter options: the selected one is listed.
+    let (status, out) = read(
+        &fx,
+        "listPlatformAuditWorkspaces",
+        OWNER_TOKEN,
+        json!(["202"]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert!(
+        out["json"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o == &json!({ "id": "202", "label": "Beta" })),
+        "{out}"
+    );
+
+    // Not a super admin: `notFound()`.
+    let (status, _) = read(&fx, "listPlatformAuditLogs", AGENT_TOKEN, json!([{}])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn enterprise_console_reads_need_the_license_and_a_super_admin() {
+    let fx = fixture(Edition::Enterprise, false).await;
+    for name in [
+        "getPlatformSmtpSettings",
+        "listPlatformAuditLogs",
+        "listRootHelpItems",
+    ] {
+        let (status, out) = read(&fx, name, OWNER_TOKEN, json!([{}])).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{name}: {out}");
+    }
+    // Outside the `(enterprise)` group: the root tenant and the deletion records.
+    let (status, out) = read(&fx, "getRootTenant", OWNER_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, out) = read(&fx, "listDeletedWorkspaces", OWNER_TOKEN, json!([{}])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["json"], json!({ "data": [], "pageCount": 0 }));
+    let (status, _) = read(&fx, "listDeletedWorkspaces", AGENT_TOKEN, json!([{}])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn platform_smtp_settings_are_not_served_on_cloud() {
+    let fx = fixture(Edition::Cloud, true).await;
+    let (status, out) = read(&fx, "getPlatformSmtpSettings", OWNER_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{out}");
+    let fx = fixture(Edition::Enterprise, true).await;
+    let (status, out) = read(&fx, "getPlatformSmtpSettings", OWNER_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["json"], Value::Null);
+}
+
+#[tokio::test]
+async fn credential_cards_of_the_platform_need_a_super_admin() {
+    let fx = fixture(Edition::Enterprise, true).await;
+    let (status, out) = read(
+        &fx,
+        "getPlatformCredentialCards",
+        OWNER_TOKEN,
+        json!(["platform"]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let cards = &out["json"];
+    assert_eq!(cards["hasStripeWebhook"], json!(false), "{out}");
+    assert_eq!(cards["whatsapp"]["publicConfig"], Value::Null);
+    assert_eq!(cards["whatsapp"]["isInherited"], json!(false));
+    assert!(
+        cards["messenger"]["webhookUrl"]
+            .as_str()
+            .is_some_and(|u| u.ends_with("/integrations/messenger/webhook")),
+        "{out}"
+    );
+    // Self-hosted "user" scope is the global credentials too: a super admin.
+    let (status, _) = read(
+        &fx,
+        "getPlatformCredentialCards",
+        AGENT_TOKEN,
+        json!(["user"]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn manage_console_is_cloud_only_and_for_active_resellers() {
+    // Off cloud: the manage layout is a 404.
+    let fx = fixture(Edition::Enterprise, true).await;
+    let (status, _) = read(&fx, "getManageAccess", AGENT_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let fx = fixture(Edition::Cloud, true).await;
+    // `AGENT` owns the active tenant 7.
+    let (status, out) = read(&fx, "getManageAccess", AGENT_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["json"]["canManageReseller"], json!(true), "{out}");
+    assert_eq!(out["json"]["canManageCredentials"], json!(true), "{out}");
+    let (status, out) = read(&fx, "getOwnTenant", AGENT_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["json"]["id"], json!("7"), "{out}");
+    let (status, out) = read(&fx, "getOwnPlatformChannels", AGENT_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        out["json"],
+        json!({ "hiddenChannels": [], "platformHiddenChannels": [] })
+    );
+
+    // No tenant and no custom-app entitlement: no manage access.
+    let (status, _) = read(&fx, "getManageAccess", OWNER_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = read(&fx, "getOwnTenant", OWNER_TOKEN, json!([])).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

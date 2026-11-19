@@ -519,7 +519,13 @@ async fn handle(
     if let Some(export) = rest.trim_end_matches('/').strip_prefix("actions/")
         && let Some((key, name)) = actions::spa_target(export)
     {
-        let input = actions::spa_input(&rpc_input(&method, &uri, &body));
+        let mut input = actions::spa_input(&rpc_input(&method, &uri, &body));
+        // The credential actions bind their `scope` ("user" / "platform").
+        if key == "platformCredentialActions"
+            && let Some(scope) = input.as_object_mut().and_then(|o| o.remove("workspaceId"))
+        {
+            input["scope"] = scope;
+        }
         let body = Bytes::from(json!({ "json": input }).to_string());
         let rest = format!("{key}/{name}");
         if let Some(response) =

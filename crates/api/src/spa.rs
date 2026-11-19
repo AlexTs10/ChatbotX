@@ -25,6 +25,8 @@ use crate::rpc::{RpcSession, find_rpc_session};
 use crate::session::AuthState;
 
 /// The router of `/rpc/pages/*`.
+pub mod public_pages;
+
 pub fn spa_router(state: Arc<AuthState>) -> Router {
     spa_router_with(state, None)
 }
@@ -41,6 +43,10 @@ pub fn spa_router_with(
     api: Option<Arc<crate::handlers::ApiState>>,
 ) -> Router {
     Router::new()
+        .route(
+            "/go/{workspace_id}",
+            axum::routing::get(public_pages::open_link).with_state(api.clone()),
+        )
         .route("/rpc/pages/{name}", post(page))
         .layer(Extension(SpaApi(api)))
         .with_state(state)
@@ -250,6 +256,11 @@ async fn page(
         .ok()
         .and_then(|payload| payload.get("json").cloned())
         .unwrap_or(Value::Null);
+    if let Some(response) =
+        public_pages::page(&state, api.as_deref(), &name, &headers, &input).await
+    {
+        return response;
+    }
     match name.as_str() {
         "session" => session_page(&state, &headers).await,
         // ponytail: no OAuth providers in the Rust auth yet; add them with the providers.
