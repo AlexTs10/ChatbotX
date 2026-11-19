@@ -91,19 +91,33 @@ integration queues.
   ported to `parity/stacks/rust/ext/p1-09.ts`). p1-16 `threadsComments` has
   no parity tests on any branch.
 
+## Done 2026-11-19 (Q.A1 + rest run)
+
+- `countsTowardStats` (`comment_ai::counts_toward_stats`): a private reply
+  always counts; a public reply counts only where the channel has no DM
+  (Threads). The event row is written either way; `record_event`,
+  `settle_event`, `discard_event` and `mark_delivered` follow the rule.
+- A public reply anchored by `contentAttributes.commentAutomation` is
+  settled by the send path: `chat::send_message_to_channel` (terminal error
+  = `failed` with the error detail, success = delivered) and `sendFlowStep`.
+- `withReplayPriority` (task-local `REPLAY`, priority 10) on every job a
+  missed-comment replay enqueues (moderation, public reply, AI reply,
+  resume, chat, sendFlow, deferred private reply).
+- `runWithOrphanedIntegrationCleanup` (`low::complete_orphaned`): a job that
+  fails with `Integration not found: ` completes; Messenger / Instagram
+  unsubscribe the page app once an hour (`DELETE /{id}/subscribed_apps`,
+  platform app token; skipped for a Messenger page an Instagram account
+  still uses).
+- `deferredCommentPrivateReply` (TikTok without the high-intent flag): a
+  `processCommentAutomation` job with `deferred { attempt, delay }`, delays
+  45 s / 3 min / 10 min, job id `comment-private-<aid>-<cid>-<attempt>`.
+- Live-comment pacing (`reserveLiveCommentDelay`, durable kv time window:
+  Messenger 5 / s, Instagram 20 / s) and the 24 h retention of
+  `processCommentAutomation` jobs.
+
 ## Left
 
-- The AI-reply analytics keep the Rust counter rule of `record_event`
-  (every channel counts its public replies; the original counts public
-  replies only where the channel has no DM, `countsTowardStats`). The public
-  AI reply is not settled by the chat worker on a terminal send failure
-  (`settleCommentAutomationFailure`), as the other public replies.
-- No replay priority (`withReplayPriority`) and no orphaned-integration
-  cleanup (`runWithOrphanedIntegrationCleanup`) on the AI jobs.
-- The deferred TikTok private reply (`deferredCommentPrivateReply`): a
-  TikTok private reply is sent only when the high-intent flag is already on
-  the comment; else it is logged and not sent.
-- Live-comment pacing (`reserveLiveCommentDelay`), Messenger Live detection
+- Messenger Live detection
   (the attachment lookup), the leaderboard award, post tracking
   (`channelPostService`), commenter avatars, comment attachments on the
   stored row, user-tag tracking (`trackUserTags`), the Graph fallback for a

@@ -55,7 +55,8 @@ export function PublishWhatsappDialog({
     {
       onSuccess: ({ data, input }) => {
         const savedDraft =
-          input.publish === false && data?.validationErrors.length === 0
+          (input as { publish?: boolean }).publish === false &&
+          data?.validationErrors.length === 0
         if (savedDraft) {
           toast.success(t("draftSaved"))
           setMetaErrors([])

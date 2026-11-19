@@ -862,6 +862,9 @@ importers:
       '@chatbotx.io/imports':
         specifier: workspace:*
         version: link:../../packages/imports
+      '@chatbotx.io/integration-active-campaign':
+        specifier: workspace:*
+        version: link:../../integrations/active-campaign
       '@chatbotx.io/integration-facebook-ads':
         specifier: workspace:*
         version: link:../../integrations/facebook-ads
@@ -880,6 +883,12 @@ importers:
       '@chatbotx.io/integration-moosend':
         specifier: workspace:*
         version: link:../../integrations/moosend
+      '@chatbotx.io/integration-sendgrid':
+        specifier: workspace:*
+        version: link:../../integrations/sendgrid
+      '@chatbotx.io/integration-smtp':
+        specifier: workspace:*
+        version: link:../../integrations/smtp
       '@chatbotx.io/mini-app':
         specifier: workspace:*
         version: link:../../packages/mini-app

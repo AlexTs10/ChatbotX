@@ -2,6 +2,7 @@
 // The server code runs in the Rust server: POST /rpc/actions/<name>.
 import { serverAction } from "@/lib/server-action"
 
-export const getWebshopLinksAction = serverAction("getWebshopLinksAction", {
-  workspace: true,
-})
+export const getWebshopLinksAction = serverAction<{
+  previewUrl: string
+  buttonUrl: string
+}>("getWebshopLinksAction", { workspace: true })

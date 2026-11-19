@@ -416,3 +416,74 @@ async fn credential_owner_for_workspace() {
     let missing = tenant::resolve_credential_owner_id_for_workspace(&db, 999, None).await;
     assert!(missing.is_err());
 }
+
+/// Port of: packages/auth/__tests__/tenant-scoping.test.ts:109 "resolveTenantOwnerId" (all three cases)
+#[tokio::test]
+async fn resolve_tenant_owner_id_is_none_for_the_root_and_unknown_tenants() {
+    let db = fresh_db().await;
+    setup(&db, |tx| {
+        user(tx, OWNER)?;
+        tenant_row(tx, 40, OWNER, "active", "[]")
+    })
+    .await;
+    assert_eq!(
+        tenant::resolve_tenant_owner_id(&db, ROOT_TENANT_ID)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        tenant::resolve_tenant_owner_id(&db, 40).await.unwrap(),
+        Some(OWNER)
+    );
+    assert_eq!(
+        tenant::resolve_tenant_owner_id(&db, 999).await.unwrap(),
+        None
+    );
+}
+
+/// Port of: packages/auth/__tests__/tenant-scoping.test.ts:167 "resolveTenantByDomain" (all four cases)
+#[tokio::test]
+async fn resolve_tenant_by_domain_needs_an_active_domain_on_an_active_tenant() {
+    let db = fresh_db().await;
+    setup(&db, |tx| {
+        user(tx, OWNER)?;
+        tenant_row(tx, 42, OWNER, "active", "[]")?;
+        tx.execute(
+            r#"INSERT INTO "CustomDomain" ("id", "tenantId", "domain", "status") VALUES (1, 42, 'reseller.test', 'active')"#,
+            [],
+        )?;
+        Ok(())
+    })
+    .await;
+    assert_eq!(
+        tenant::resolve_tenant_by_domain(&db, "").await.unwrap(),
+        ROOT_TENANT_ID
+    );
+    assert_eq!(
+        tenant::resolve_tenant_by_domain(&db, "unknown.test")
+            .await
+            .unwrap(),
+        ROOT_TENANT_ID
+    );
+    assert_eq!(
+        tenant::resolve_tenant_by_domain(&db, "reseller.test")
+            .await
+            .unwrap(),
+        42
+    );
+    setup(&db, |tx| {
+        tx.execute(
+            r#"UPDATE "Tenant" SET "status" = 'suspended' WHERE "id" = 42"#,
+            [],
+        )?;
+        Ok(())
+    })
+    .await;
+    assert_eq!(
+        tenant::resolve_tenant_by_domain(&db, "reseller.test")
+            .await
+            .unwrap(),
+        ROOT_TENANT_ID
+    );
+}

@@ -8,10 +8,11 @@ use std::sync::Mutex;
 
 use chatbotx_business::connection::credentials::{Upstream, UpstreamReply, UpstreamRequest};
 use chatbotx_business::email_marketing::seal_auth;
+use chatbotx_business::google_ads::{settings_page, update_consent};
 use chatbotx_business::google_ads_api::{ADS_SCOPE, DATA_MANAGER_SCOPE};
 use chatbotx_business::google_ads_conversion::{
     DeliverDeps, DeliverInput, MatchingResolver, MatchingValues, RecordInput, Recorded, deliver,
-    record,
+    record, retry, validate_ingest,
 };
 use chatbotx_db::repo::{iso, now_ms};
 use chatbotx_db::rusqlite::params;
@@ -687,4 +688,161 @@ async fn sweep_releases_a_blocked_workspaces_sending_row_on_the_same_generation(
     let (status, attempt, ..) = row(&db, id).await;
     assert_eq!((status.as_str(), attempt), ("pending", 0));
     assert_eq!(queue.added.lock().expect("lock").len(), jobs_before);
+}
+
+/// Own (`retryGoogleAdsEventAction` / `googleAdsConversionService.retry`):
+/// only a `failed` event of this workspace is redriven and queued again.
+#[tokio::test]
+async fn retry_redrives_only_a_failed_event_of_the_workspace() {
+    let db = two_workspaces().await;
+    seed(&db).await;
+    let queue = Queue::default();
+    let Recorded::Queued(event) = record(&db, &queue, input("55")).await.expect("record") else {
+        panic!("not queued");
+    };
+    assert!(!retry(&db, &queue, WS, event.id).await.expect("pending"));
+    let id = event.id;
+    db.write(move |conn| {
+        conn.execute(
+            r#"UPDATE "GoogleAdsConversionEvent" SET "status" = 'failed', "error" = 'boom', "failureStage" = 'delivery' WHERE "id" = ?1"#,
+            params![id],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("fail it");
+    assert!(
+        !retry(&db, &queue, common::OTHER_WS, event.id)
+            .await
+            .expect("other workspace")
+    );
+    let before = queue.added.lock().expect("lock").len();
+    assert!(retry(&db, &queue, WS, event.id).await.expect("failed"));
+    assert_eq!(queue.added.lock().expect("lock").len(), before + 1);
+    let status: String = db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                r#"SELECT "status" FROM "GoogleAdsConversionEvent" WHERE "id" = ?1"#,
+                params![id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .expect("status");
+    assert_eq!(status, "pending");
+}
+
+/// Own (`validateGoogleAdsRequestAction` / `validateIngest`): a
+/// `validateOnly` Data Manager call; a Google refusal never echoes the click id.
+#[tokio::test]
+async fn validate_ingest_sends_validate_only_and_redacts_the_click_id() {
+    let db = two_workspaces().await;
+    seed(&db).await;
+    let click = "gclid-validate-123456";
+    let script = Script::default();
+    script.replies.lock().expect("lock").extend([
+        Ok((
+            400,
+            json!({ "error": { "code": 400, "status": "INVALID_ARGUMENT",
+                "message": format!("bad click {click}") } })
+            .to_string(),
+        )),
+        Ok((200, json!({ "requestId": "req-v" }).to_string())),
+    ]);
+    let ok = validate_ingest(&db, &script, "https://app.test", WS, "55", "gclid", click)
+        .await
+        .expect("validate");
+    assert_eq!(ok["ok"], json!(true), "{ok}");
+    assert_eq!(ok["consentSummary"]["adPersonalization"], json!("omitted"));
+    let body: Value = serde_json::from_str(
+        script.seen.lock().expect("lock")[0]
+            .body
+            .as_deref()
+            .expect("body"),
+    )
+    .expect("json");
+    assert_eq!(body["validateOnly"], json!(true));
+    let refused = validate_ingest(&db, &script, "https://app.test", WS, "55", "gclid", click)
+        .await
+        .expect("validate");
+    assert_eq!(refused["ok"], json!(false), "{refused}");
+    assert_eq!(refused["code"], json!("rejected"));
+    assert!(!refused.to_string().contains(click), "{refused}");
+    // Nothing is recorded.
+    let count: i64 = db
+        .read(|conn| {
+            Ok(conn.query_row(
+                r#"SELECT COUNT(*) FROM "GoogleAdsConversionEvent""#,
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .expect("count");
+    assert_eq!(count, 0);
+    let none = validate_ingest(
+        &db,
+        &script,
+        "https://app.test",
+        common::OTHER_WS,
+        "55",
+        "gclid",
+        click,
+    )
+    .await
+    .expect("other");
+    assert_eq!(none, json!({ "ok": false, "code": "accountNotReady" }));
+}
+
+/// Port of: apps/builder/__tests__/google-ads-load-settings-page.test.ts:41 "passes the consent through when nothing is connected"
+#[tokio::test]
+async fn load_settings_page_passes_the_consent_through_when_nothing_is_connected() {
+    let db = two_workspaces().await;
+    let page = settings_page(&db, WS).await.expect("page");
+    assert_eq!(page["setup"], Value::Null);
+    assert_eq!(page["consent"]["status"], json!("absent"));
+    let consent = json!({
+        "adUserData": { "type": "granted" },
+        "adPersonalization": { "type": "variable", "template": "{{contact.consent}}" },
+    });
+    update_consent(&db, WS, &consent).await.expect("save");
+    let page = settings_page(&db, WS).await.expect("page");
+    assert_eq!(page["consent"]["status"], json!("ok"));
+    assert_eq!(
+        page["consent"]["adUserData"],
+        json!({ "type": "granted", "template": null })
+    );
+    assert_eq!(
+        page["consent"]["adPersonalization"]["template"],
+        json!("{{contact.consent}}")
+    );
+    assert!(
+        update_consent(&db, WS, &json!({ "adUserData": { "type": "nope" } }))
+            .await
+            .is_err()
+    );
+}
+
+/// Port of: apps/builder/__tests__/google-ads-load-settings-page.test.ts:56 "reports an unreadable stored consent as invalid"
+#[tokio::test]
+async fn load_settings_page_reports_an_unreadable_stored_consent_as_invalid() {
+    let db = two_workspaces().await;
+    seed(&db).await;
+    db.write(|conn| {
+        conn.execute(
+            r#"INSERT INTO "GoogleAdsSettings" ("workspaceId", "settings") VALUES (?1, '{"version":9}')"#,
+            params![WS],
+        )?;
+        Ok(())
+    })
+    .await
+    .expect("bad doc");
+    let page = settings_page(&db, WS).await.expect("page");
+    assert_eq!(
+        page["consent"],
+        json!({ "status": "invalid", "adUserData": null, "adPersonalization": null })
+    );
+    // The setup view carries no `auth` / tokens.
+    assert_eq!(page["setup"]["customerId"], json!(CUSTOMER));
+    assert!(!page.to_string().contains("at-1"));
 }

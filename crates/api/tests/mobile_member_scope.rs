@@ -635,3 +635,82 @@ mod e2e {
         assert_eq!(status, 401);
     }
 }
+
+// ---------------------------------------------------------------------------
+// realtime.getConnectToken (port of parity p1-14 `60-realtime`, handler level)
+// ---------------------------------------------------------------------------
+
+const RT_SECRET: &str = "qa1-test-secret-qa1-test-secret-qa1-test";
+
+fn with_realtime(mut fx: Fixture) -> Fixture {
+    use chatbotx_rt::{NoPresence, NoRevokeRetry, Realtime, RealtimeDeps, RtConfig, SystemClock};
+    let clock: Arc<dyn chatbotx_rt::Clock> = Arc::new(SystemClock);
+    let realtime = Realtime::with_deps(
+        RtConfig::new(RT_SECRET),
+        RealtimeDeps {
+            clock: Arc::clone(&clock),
+            revoke_store: Arc::new(chatbotx_kv::DurableKv::new(Arc::clone(&fx.state.db), clock)),
+            presence: Arc::new(NoPresence),
+            revoke_retry: Arc::new(NoRevokeRetry),
+        },
+    );
+    fx.state = fx.state.clone().with_realtime(realtime);
+    fx
+}
+
+#[tokio::test]
+async fn realtime_connect_token_needs_a_member() {
+    let fx = with_realtime(seeded().await);
+    let (status, body) = call(&fx, "realtime.getConnectToken", WS, &[], None, None).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(body["code"], "FORBIDDEN");
+    assert_eq!(body["message"], "A signed-in member session is required");
+}
+
+#[tokio::test]
+async fn realtime_connect_token_signs_the_member_scope_and_returns_the_socket_url() {
+    let fx = with_realtime(seeded().await);
+    let agent = member(&fx, AGENT, assigned_only()).await;
+    let (status, body) = call_mobile(&fx, &agent, "realtime.getConnectToken", &[], None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["url"], "http://app/ws/");
+    assert_eq!(body["socketUrl"], format!("ws://app/ws/rt/workspaces/{WS}"));
+    let claims = chatbotx_rt::token::verify_member_connect_token(
+        body["token"].as_str().unwrap(),
+        &WS.to_string(),
+        RT_SECRET,
+        &chatbotx_rt::SystemClock,
+    )
+    .expect("valid token");
+    assert_eq!(claims.user_id, AGENT.to_string());
+    assert_eq!(claims.chat_scope, chatbotx_rt::token::ChatScope::Assigned);
+    assert_eq!(claims.team_ids, vec!["50".to_string()]);
+}
+
+/// The input is validated before the scope check (oRPC `.input()` runs
+/// before the handler): a bad body on an out-of-scope conversation is the
+/// 422 `invalidRequestData`, a good one the 404 a missing conversation gets.
+#[tokio::test]
+async fn the_body_is_validated_before_the_scope_check() {
+    let fx = seeded().await;
+    let agent = member(&fx, AGENT, assigned_only()).await;
+    let (status, body) = call_mobile(
+        &fx,
+        &agent,
+        "conversations.assign",
+        &[("id", "403")],
+        Some(json!({ "assignedId": "nobody" })),
+    )
+    .await;
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(body["code"], "invalidRequestData", "{body}");
+    let (status, _) = call_mobile(
+        &fx,
+        &agent,
+        "conversations.assign",
+        &[("id", "403")],
+        Some(json!({ "assignedId": "u_1010" })),
+    )
+    .await;
+    assert_eq!(status, 404);
+}

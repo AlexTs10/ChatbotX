@@ -116,6 +116,8 @@ mod jobs_admin_page;
 mod keywords_public_api;
 #[path = "magic_link_redirect.rs"]
 mod magic_link_redirect;
+#[path = "magic_links_public_api.rs"]
+mod magic_links_public_api;
 #[path = "media_library_public_api.rs"]
 mod media_library_public_api;
 #[path = "messages_public_api.rs"]
@@ -176,6 +178,14 @@ mod reflink_chat_widget;
 mod routes_channel_and_mobile_auth;
 #[path = "routes_public_scope.rs"]
 mod routes_public_scope;
+#[path = "rpc_automation_pages.rs"]
+mod rpc_automation_pages;
+#[path = "rpc_channel_connect.rs"]
+mod rpc_channel_connect;
+#[path = "rpc_channels.rs"]
+mod rpc_channels;
+#[path = "rpc_google_ads_settings.rs"]
+mod rpc_google_ads_settings;
 #[path = "rpc_help_items.rs"]
 mod rpc_help_items;
 #[path = "rpc_inbox_teams.rs"]
@@ -184,8 +194,12 @@ mod rpc_inbox_teams;
 mod rpc_platform_credentials;
 #[path = "rpc_procedures.rs"]
 mod rpc_procedures;
+#[path = "rpc_screen_actions.rs"]
+mod rpc_screen_actions;
 #[path = "rpc_session_auth.rs"]
 mod rpc_session_auth;
+#[path = "rpc_settings_integrations.rs"]
+mod rpc_settings_integrations;
 #[path = "rpc_spa_procedures.rs"]
 mod rpc_spa_procedures;
 #[path = "rpc_template_actions.rs"]
@@ -256,6 +270,8 @@ mod templates_save_api;
 mod triggers_public_api;
 #[path = "webchats_public_api.rs"]
 mod webchats_public_api;
+#[path = "webhooks_public_api.rs"]
+mod webhooks_public_api;
 #[path = "whatsapp_flows_public_api.rs"]
 mod whatsapp_flows_public_api;
 #[path = "whatsapp_templates_public_api.rs"]

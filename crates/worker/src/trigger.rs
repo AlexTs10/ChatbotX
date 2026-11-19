@@ -2,8 +2,8 @@
 //! `trigger-executor`, `action-executor`, `actions/*`) and the bookkeeping
 //! of `triggerService` (run limiter, contact history, daily stats).
 //!
-//! ponytail: `sendMetaCapiEvent` and `runGoogleSheet` wait for their
-//! integrations, and the tag-sync / ads
+//! ponytail: `sendMetaCapiEvent` waits for its integration, and the
+//! tag-sync / ads
 //! conversion fan-out of `addTag` waits for those units; they are skipped
 //! with a log line. Actions run in order; triggers run one after another
 //! (the original runs them with `Promise.allSettled`).
@@ -387,6 +387,36 @@ pub(crate) async fn run_datetime_actions(
     }
 }
 
+/// One inbound-webhook action (`ActionExecutor.execute`, source
+/// `inboundWebhook`): the request's contact inbox is the threaded one and
+/// `occurrence_key` keeps a re-run from sending a flow twice.
+pub(crate) async fn run_inbound_webhook_action(
+    deps: &Deps,
+    webhook_id: i64,
+    workspace_id: i64,
+    contact_id: i64,
+    contact_inbox_id: i64,
+    action: &Value,
+    occurrence_key: String,
+) -> Result<Outcome, JobError> {
+    let input = RunInput {
+        contact_inbox_id: Some(contact_inbox_id),
+        decision_flow_id: None,
+        occurrence: None,
+        channel_originated: false,
+    };
+    let ctx = ActionCtx {
+        deps,
+        action,
+        trigger_id: webhook_id,
+        workspace_id,
+        contact_id,
+        input: &input,
+        occurrence_key: Some(occurrence_key),
+    };
+    execute_action(&ctx, &mut Scope::default()).await
+}
+
 /// `incrementStats` for the day (local midnight; the worker runs in UTC).
 fn increment_stats(
     tx: &chatbotx_db::rusqlite::Connection,
@@ -612,7 +642,38 @@ async fn execute_action(ctx: &ActionCtx<'_>, scope: &mut Scope) -> Result<Outcom
         }
         "pipeline" => return pipeline(ctx, scope, &conversation).await,
         "sendGoogleAdsConversion" => return google_ads_conversion(ctx, scope, &conversation).await,
-        "sendMetaCapiEvent" | "runGoogleSheet" => {
+        "runGoogleSheet" => {
+            // A trigger-only action (`source.kind !== "trigger"`).
+            if ctx
+                .occurrence_key
+                .as_deref()
+                .is_some_and(|k| k.starts_with("inboundWebhook:"))
+            {
+                return skipped("unsupportedSource");
+            }
+            let Some(contact_inbox) = scope.contact_inbox(ctx).await? else {
+                tracing::warn!(
+                    "No contact inbox found for contact {}, skipping runGoogleSheet action",
+                    ctx.contact_id
+                );
+                return skipped("noContactInbox");
+            };
+            if let Some((step_type, step)) = crate::spreadsheet::step_of_action(ctx.action) {
+                let run = crate::spreadsheet::SheetRun {
+                    deps: ctx.deps,
+                    http: chatbotx_business::email_marketing::safe_http(),
+                    conversation: &conversation,
+                    contact_inbox: &contact_inbox,
+                    sent_by_user_id: None,
+                };
+                // The step's own error is its result; the action still succeeds.
+                if let Err(failure) = crate::spreadsheet::execute(&run, &step_type, &step).await {
+                    crate::spreadsheet::report(&run, &step_type, &failure).await;
+                }
+            }
+            Outcome::Succeeded
+        }
+        "sendMetaCapiEvent" => {
             tracing::warn!(
                 action_type,
                 trigger_id = ctx.trigger_id,
@@ -940,7 +1001,15 @@ async fn start_flow(
             QueueName::Integration,
             "sendFlow",
             json!({ "type": "sendFlow", "data": data }),
-            JobOptions::default(),
+            JobOptions {
+                // `enqueueSendFlow`: a deterministic id for inbound webhooks.
+                job_id: ctx
+                    .occurrence_key
+                    .as_deref()
+                    .filter(|k| k.starts_with("inboundWebhook:"))
+                    .map(|k| format!("send-flow-{}", k.replace(':', "-"))),
+                ..JobOptions::default()
+            },
         )
         .await
         .map_err(db_fail)?;

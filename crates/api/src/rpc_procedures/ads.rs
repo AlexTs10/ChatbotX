@@ -143,19 +143,7 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
             }
             Err(error) => Err(fail(error)),
         },
-        "integrationFacebookAdsAPI.listAdAccounts" => graph::cached_ad_accounts(db, ws)
-            .await
-            .map(|data| json!({ "data": data }))
-            .map_err(fail),
-        "integrationFacebookAdsAPI.listCustomAudiences" => {
-            match In(input).str("adAccountId", true, 1, usize::MAX) {
-                Ok(account) => graph::cached_custom_audiences(db, ws, account)
-                    .await
-                    .map(|data| json!({ "data": data }))
-                    .map_err(fail),
-                Err(error) => Err(error),
-            }
-        }
+        // `integrationFacebookAdsAPI.*`: `facebook_ads.rs` (Q.F2-settings).
         "adsCampaignAPI.createMessagingAd" => admin_route("ads.createCampaign").await,
         "adsCampaignAPI.retryMessagingAd" => operation("ads.retryCampaign").await,
         "adsCampaignAPI.publishMessagingAd" => operation("ads.publishCampaign").await,

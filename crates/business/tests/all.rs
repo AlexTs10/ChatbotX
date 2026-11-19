@@ -50,14 +50,20 @@ mod broadcast_materialize;
 mod broadcast_service;
 #[path = "capabilities_service.rs"]
 mod capabilities_service;
+#[path = "channel_integration_settings.rs"]
+mod channel_integration_settings;
 #[path = "comment_automation_post_lists.rs"]
 mod comment_automation_post_lists;
 #[path = "connection_credentials.rs"]
 mod connection_credentials;
 #[path = "connection_oauth_channels.rs"]
 mod connection_oauth_channels;
+#[path = "connection_oauth_facebook_ads.rs"]
+mod connection_oauth_facebook_ads;
 #[path = "connection_oauth_google_ads.rs"]
 mod connection_oauth_google_ads;
+#[path = "connection_oauth_instagram.rs"]
+mod connection_oauth_instagram;
 #[path = "contact_bulk_tag_stats.rs"]
 mod contact_bulk_tag_stats;
 #[path = "contact_create_with_inbox.rs"]
@@ -126,6 +132,8 @@ mod count_mode;
 mod coupon_template_guards;
 #[path = "custom_field_service_update.rs"]
 mod custom_field_service_update;
+#[path = "decision_connection.rs"]
+mod decision_connection;
 #[path = "ecommerce_open_hours_is_open.rs"]
 mod ecommerce_open_hours_is_open;
 #[path = "ecommerce_open_hours_service.rs"]
@@ -190,6 +198,8 @@ mod import_create_upload;
 mod import_peek_headers;
 #[path = "import_product_column_map.rs"]
 mod import_product_column_map;
+#[path = "inbound_webhook_apply_payload.rs"]
+mod inbound_webhook_apply_payload;
 #[path = "integration_ai_provider_verify.rs"]
 mod integration_ai_provider_verify;
 #[path = "integration_openai_compatible.rs"]
@@ -280,6 +290,8 @@ mod questionnaire_service;
 mod quota_enforcement_service;
 #[path = "reflink_service.rs"]
 mod reflink_service;
+#[path = "response_sla_window.rs"]
+mod response_sla_window;
 #[path = "sequence_service.rs"]
 mod sequence_service;
 #[path = "smart_delay_service.rs"]

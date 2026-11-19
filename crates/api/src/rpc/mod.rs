@@ -11,6 +11,7 @@
 
 pub mod actions;
 pub mod admin_workspaces;
+pub mod channel_connect;
 pub mod help_items;
 pub mod inbox_teams;
 pub mod platform_admins;
@@ -611,7 +612,10 @@ async fn handle(
                 Some(outcome) => Some(outcome),
                 None => match platform_credentials::call(api, &path, &context).await {
                     Some(outcome) => Some(outcome),
-                    None => inbox_teams::call(api, &path, &context).await,
+                    None => match inbox_teams::call(api, &path, &context).await {
+                        Some(outcome) => Some(outcome),
+                        None => channel_connect::call(api, &path, &context, &input).await,
+                    },
                 },
             },
         };

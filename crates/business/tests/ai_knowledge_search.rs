@@ -174,13 +174,6 @@ fn column(result: &Value, name: &str) -> Vec<Value> {
         .collect()
 }
 
-/// [`RecordingLog::install`] after a global no-op subscriber: a log site
-/// first hit on a thread without a subscriber would otherwise stay disabled.
-fn recording_log() -> RecordingLog {
-    let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
-    RecordingLog::install()
-}
-
 fn file_tool() -> Value {
     json!([format!("file:{FILE}")])
 }
@@ -625,7 +618,7 @@ async fn search_ai_files_expected_text_searches_at_least_the_agents_top_five_so_
 #[tokio::test]
 async fn search_ai_files_expected_text_never_logs_the_expected_text_or_the_query() {
     let db = ready(json!([])).await;
-    let log = recording_log();
+    let log = RecordingLog::install();
     run(
         &db,
         &FakeEmbedder::default(),
@@ -737,7 +730,7 @@ async fn search_knowledge_chunks_drops_non_numeric_file_ids_before_querying() {
 /// Port of: packages/ai/__tests__/knowledge-base-search.test.ts:97 "searchKnowledgeChunks > returns no matches and warns when rows are malformed"
 #[tokio::test]
 async fn search_knowledge_chunks_returns_no_matches_and_warns_when_rows_are_malformed() {
-    let log = recording_log();
+    let log = RecordingLog::install();
     let ranked = rank_matches(WS, vec![row(1, Some(0.9)), row(2, Some(f64::NAN))], 0.7);
 
     assert!(ranked.is_empty());

@@ -1,0 +1,105 @@
+"use client"
+
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@chatbotx.io/ui/components/ui/table"
+import { useTranslations } from "next-intl"
+import { use } from "react"
+import { TokenRefreshErrorIcon } from "@/components/token-refresh-error-icon"
+import { AddChannelButton } from "@/features/inboxes/components/add-channel-button"
+import { InboxMarkReadOnOutboundSwitch } from "@/features/inboxes/components/inbox-mark-read-on-outbound-switch"
+import { useChannelConnectError } from "@/hooks/use-channel-connect-error"
+import { useChannelReconnectResult } from "@/hooks/use-channel-reconnect-result"
+import { ZaloDisconnect } from "./components/zalo-disconnect"
+import { ZaloReconnect } from "./components/zalo-reconnect"
+import type { listIntegrationZalo } from "./queries"
+
+type ZaloManageProps = {
+  canCreate?: boolean
+  isEnabled: boolean
+  workspaceId: string
+  promises: Promise<[Awaited<ReturnType<typeof listIntegrationZalo>>]>
+}
+
+export function ZaloManage({
+  canCreate = true,
+  isEnabled,
+  workspaceId,
+  promises,
+}: ZaloManageProps) {
+  const [{ data: integrationZalos }] = use(promises)
+  const t = useTranslations()
+
+  useChannelConnectError("zalo")
+  useChannelReconnectResult()
+
+  if (!isEnabled) {
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-muted-foreground text-sm">
+          {t("messages.needToAddSettings")}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-end gap-2">
+        <AddChannelButton
+          canCreate={canCreate}
+          href={`/channels/create?channel=zalo&workspaceId=${workspaceId}`}
+          label={t("fields.zalo.label")}
+        />
+      </div>
+
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("fields.name.label")}</TableHead>
+              <TableHead>{t("inboxes.markReadOnOutbound.label")}</TableHead>
+              <TableHead className="w-[200px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {integrationZalos.map((integrationZalo) => (
+              <TableRow key={integrationZalo.id}>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    {integrationZalo.tokenRefreshError && (
+                      <TokenRefreshErrorIcon
+                        message={integrationZalo.tokenRefreshError}
+                      />
+                    )}
+                    {integrationZalo.name}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <InboxMarkReadOnOutboundSwitch
+                    inboxId={integrationZalo.inboxId}
+                    workspaceId={workspaceId}
+                  />
+                </TableCell>
+                <TableCell className="flex w-50 justify-end gap-2">
+                  <ZaloReconnect integrationZalo={integrationZalo} />
+                  <ZaloDisconnect integrationZalo={integrationZalo} />
+                </TableCell>
+              </TableRow>
+            ))}
+            {integrationZalos.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={3}>{t("messages.noData")}</TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  )
+}

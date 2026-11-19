@@ -8,11 +8,17 @@ import type { ZodType } from "zod"
 import { client } from "./orpc/orpc"
 
 // The input schema lives on the server: a zod type whose input is `any`.
-type SafeActionResult = NextSafeActionResult<
+// `Data` is the action's result. next-safe-action 8.7 drops the success
+// branch of a `void` result (`NormalizeActionResult`, `HookSuccessResult`:
+// `[Data] extends [void]`), and `any` extends `void`: with `Data = any`,
+// `executeAsync()` / `result` read `data` as `undefined` and a narrowed
+// `result.data` is `never`. An action whose result the SPA reads there names
+// its result type (as the builder's inferred one): `serverAction<T>(...)`.
+type SafeActionResult<Data = any> = NextSafeActionResult<
   string,
   ZodType<any, any>,
   any,
-  any
+  Data
 >
 
 const DEFAULT_SERVER_ERROR_MESSAGE =
@@ -28,16 +34,16 @@ function call(name: string, args: unknown[], workspace: boolean) {
  * `{ validationErrors }`. `noInput` (no `.inputSchema`) lets `execute()` go
  * without an argument, as the builder's types did.
  */
-export function serverAction(
+export function serverAction<Data = any>(
   name: string,
   options: { workspace?: boolean; noInput: true },
 ): (
   ...args: any[]
-) => Promise<NextSafeActionResult<string, undefined, any, any>>
-export function serverAction(
+) => Promise<NextSafeActionResult<string, undefined, any, Data>>
+export function serverAction<Data = any>(
   name: string,
   options?: { workspace?: boolean },
-): (...args: any[]) => Promise<SafeActionResult>
+): (...args: any[]) => Promise<SafeActionResult<Data>>
 export function serverAction(
   name: string,
   options?: { workspace?: boolean; noInput?: true },

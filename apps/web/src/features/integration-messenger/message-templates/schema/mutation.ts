@@ -1,0 +1,313 @@
+import {
+  findMessengerTokenVariable,
+  normalizeMessengerTokenUrl,
+} from "@chatbotx.io/flow-config"
+import { zodBigintAsString } from "@chatbotx.io/utils"
+import { z } from "zod"
+
+const NUMERIC_PLACEHOLDER_PATTERN = /{{\d+}}/g
+const ANY_PLACEHOLDER_PATTERN = /{{[^{}]*}}/g
+const NUMERIC_PLACEHOLDER = /^{{\d+}}$/
+// A Mini App or Minigame link ends in its token variable, which Meta does not
+// accept; it is saved with the positional `{{1}}` suffix and this example.
+export const TOKEN_URL_SUFFIX_EXAMPLE = "example-token"
+const SUPPORTED_PLACEHOLDER_PATTERN = /^{{([1-9]|1[0-5])}}$/
+
+const templateVariableSchema = z.object({
+  key: z
+    .string()
+    .regex(SUPPORTED_PLACEHOLDER_PATTERN)
+    .describe("Placeholder as written in the text, e.g. `{{1}}` (1 to 15)."),
+  example: z
+    .string()
+    .min(1)
+    .describe("Sample value Meta reviews for this placeholder."),
+})
+
+const BUTTON_TITLE = z
+  .string()
+  .min(1)
+  .max(20)
+  .describe("Button label, up to 20 characters.")
+
+const templateButtonSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z
+      .literal("POSTBACK")
+      .describe("Button that sends a postback to the bot."),
+    title: BUTTON_TITLE,
+  }),
+  z.object({
+    type: z.literal("PHONE_NUMBER").describe("Button that dials a number."),
+    title: BUTTON_TITLE,
+    phoneNumber: z
+      .string()
+      .min(1)
+      .describe("Number to dial in international format, e.g. `+84901234567`."),
+  }),
+  z.object({
+    type: z.literal("URL").describe("Button that opens a link."),
+    title: BUTTON_TITLE,
+    url: z
+      .string()
+      .trim()
+      .min(1)
+      .describe(
+        "Link to open; end it with `{{1}}` to append a variable. A Mini App (`/mini-apps?...&token={{mini_app_token}}`) or Minigame (`/minigames?...&token={{minigame_play_token}}`) public URL can be pasted as is, with the token variable last and no other variable: it is saved with a `{{1}}` suffix that each recipient's token fills at send time.",
+      ),
+    variables: z
+      .array(z.string().min(1))
+      .max(1)
+      .default([])
+      .describe("Example value for the URL's `{{1}}`, if it has one."),
+  }),
+  z.object({
+    type: z
+      .literal("MINI_APP")
+      .describe(
+        "Button that opens a Mini App for the recipient. Saved on Meta as a URL button to the Mini App's public link, whose `{{1}}` suffix is filled with the recipient's token at send time. Sent from a flow step, submitting the Mini App continues the flow along the button's edge.",
+      ),
+    title: BUTTON_TITLE,
+    miniAppId: zodBigintAsString().describe(
+      "Mini App the button opens. Get Mini App ids from `miniApps.list`.",
+    ),
+  }),
+])
+
+function extractPlaceholders(text: string): string[] {
+  return [...new Set(text.match(NUMERIC_PLACEHOLDER_PATTERN) ?? [])].sort(
+    (a, b) => Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")),
+  )
+}
+
+/** Swaps a Mini App / Minigame token suffix for `{{1}}` with a sample value. */
+function normalizeTokenUrlButton(
+  button: z.infer<typeof templateButtonSchema>,
+): z.infer<typeof templateButtonSchema> {
+  const tokenUrl =
+    button.type === "URL" ? normalizeMessengerTokenUrl(button.url) : null
+  if (button.type !== "URL" || !tokenUrl) {
+    return button
+  }
+  return {
+    ...button,
+    url: tokenUrl.url,
+    variables:
+      button.variables.length > 0
+        ? button.variables
+        : [TOKEN_URL_SUFFIX_EXAMPLE],
+  }
+}
+
+function addPlaceholderIssues({
+  ctx,
+  path,
+  text,
+  maxVariables,
+  variables,
+}: {
+  ctx: z.RefinementCtx
+  path: (string | number)[]
+  text: string
+  maxVariables: number
+  variables: { key: string; example: string }[]
+}) {
+  const placeholders = extractPlaceholders(text)
+  const unsupportedPlaceholder = placeholders.find(
+    (placeholder) => !SUPPORTED_PLACEHOLDER_PATTERN.test(placeholder),
+  )
+
+  if (unsupportedPlaceholder) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Only variables from {{1}} to {{15}} are supported",
+      path,
+    })
+    return
+  }
+
+  if (placeholders.length > maxVariables) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Maximum ${maxVariables} variable(s) are supported`,
+      path,
+    })
+    return
+  }
+
+  const variableKeys = variables.map((variable) => variable.key)
+  const missingExample = placeholders.find((key) => !variableKeys.includes(key))
+  const staleExample = variableKeys.find((key) => !placeholders.includes(key))
+
+  if (
+    missingExample ||
+    staleExample ||
+    variableKeys.length !== placeholders.length
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Variable examples must match the template text",
+      path,
+    })
+  }
+}
+
+export const createMessengerMessageTemplateRequest = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(512)
+      .regex(/^[a-z0-9_]+$/)
+      .describe("Template name: lowercase letters, digits and underscores."),
+    language: z
+      .string()
+      .min(1)
+      .describe("Meta language code of the template, e.g. `en_US`, `vi`."),
+    headerType: z
+      .enum(["none", "text", "text_and_image"])
+      .describe(
+        "`none`, a `text` header, or `text_and_image` (needs `headerImageUrl`).",
+      ),
+    headerText: z
+      .string()
+      .default("")
+      .describe("Header text; required unless `headerType` is `none`."),
+    headerVariables: z
+      .array(templateVariableSchema)
+      .max(1)
+      .default([])
+      .describe("Example for the header's `{{1}}` variable, if it has one."),
+    headerImageUrl: z
+      .string()
+      .url()
+      .optional()
+      .describe(
+        "Public https URL of the header image for `text_and_image`. It must resolve to a public address; redirects are not followed.",
+      ),
+    body: z
+      .string()
+      .min(1)
+      .describe("Body text; variables are `{{1}}` to `{{15}}`."),
+    bodyVariables: z
+      .array(templateVariableSchema)
+      .max(15)
+      .default([])
+      .describe("One example per body variable, matching the body text."),
+    buttons: z
+      .array(templateButtonSchema)
+      .max(3)
+      .default([])
+      .describe("Up to 3 POSTBACK, PHONE_NUMBER, URL or MINI_APP buttons."),
+  })
+  .superRefine((value, ctx) => {
+    if (value.headerType !== "none" && value.headerText.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Header text is required",
+        path: ["headerText"],
+      })
+    }
+
+    if (value.headerType === "text_and_image" && !value.headerImageUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Header image is required",
+        path: ["headerImageUrl"],
+      })
+    }
+
+    if (value.headerType !== "none") {
+      addPlaceholderIssues({
+        ctx,
+        path: ["headerVariables"],
+        text: value.headerText,
+        maxVariables: 1,
+        variables: value.headerVariables,
+      })
+    }
+
+    addPlaceholderIssues({
+      ctx,
+      path: ["bodyVariables"],
+      text: value.body,
+      maxVariables: 15,
+      variables: value.bodyVariables,
+    })
+
+    value.buttons.forEach((button, index) => {
+      if (button.type !== "URL") {
+        return
+      }
+
+      const urlPath = ["buttons", index, "url"]
+      const allPlaceholders = button.url.match(ANY_PLACEHOLDER_PATTERN) ?? []
+      const tokenUrl = normalizeMessengerTokenUrl(button.url)
+
+      if (tokenUrl) {
+        // Meta allows one suffix variable, so the token must be the only one.
+        if (allPlaceholders.length > 1) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              "A Mini App or Minigame link cannot have other variables besides its token",
+            path: urlPath,
+          })
+        }
+        return
+      }
+
+      if (findMessengerTokenVariable(button.url)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "The token variable must be the last part of a Mini App or Minigame link",
+          path: urlPath,
+        })
+        return
+      }
+
+      const placeholders = extractPlaceholders(button.url)
+      const hasNonNumericPlaceholder = allPlaceholders.some(
+        (placeholder) => !NUMERIC_PLACEHOLDER.test(placeholder),
+      )
+      const unsupportedPlaceholder = placeholders.find(
+        (placeholder) => !SUPPORTED_PLACEHOLDER_PATTERN.test(placeholder),
+      )
+
+      if (unsupportedPlaceholder || hasNonNumericPlaceholder) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Only variables from {{1}} to {{15}} are supported",
+          path: urlPath,
+        })
+        return
+      }
+
+      if (placeholders.length > 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "URL buttons support only one variable",
+          path: urlPath,
+        })
+        return
+      }
+
+      if (button.variables.length !== placeholders.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "URL examples must match URL variables",
+          path: ["buttons", index, "variables"],
+        })
+      }
+    })
+  })
+  .transform((value) => ({
+    ...value,
+    buttons: value.buttons.map(normalizeTokenUrlButton),
+  }))
+
+export type CreateMessengerMessageTemplateRequest = z.infer<
+  typeof createMessengerMessageTemplateRequest
+>

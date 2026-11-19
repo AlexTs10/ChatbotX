@@ -643,6 +643,8 @@ struct Conversion<'a> {
     customer_properties: Option<Value>,
     /// `{ emailAddress?, phoneNumber? }` SHA-256 hex digests.
     identifiers: Option<Value>,
+    /// `validateOnly`: Google checks the request and records nothing.
+    validate_only: bool,
 }
 
 fn invalid_id(label: &str) -> Failure {
@@ -745,6 +747,9 @@ async fn ingest_data_manager(
     // Required by Google whenever userData is sent; the digests are hex.
     if user_data {
         body["encoding"] = json!("HEX");
+    }
+    if c.validate_only {
+        body["validateOnly"] = json!(true);
     }
     let reply = up
         .send(crate::connection::credentials::UpstreamRequest {
@@ -936,7 +941,10 @@ async fn upload_legacy(
                 developer_token,
                 login_customer_id: (login != operating).then_some(login),
             }),
-            body: Some(json!({ "conversions": [conversion], "partialFailure": true }).to_string()),
+            body: Some(
+                json!({ "conversions": [conversion], "partialFailure": true, "validateOnly": c.validate_only })
+                    .to_string(),
+            ),
         })
         .await;
     // `topLevelFailure`: a non-2xx (not 401) whose `error` lists upload errors.
@@ -952,6 +960,9 @@ async fn upload_legacy(
     let answer = api::rescue(reply)?;
     if !answer["partialFailureError"].is_null() {
         return from_upload_failure(&answer["partialFailureError"], 400);
+    }
+    if c.validate_only {
+        return Ok(Ingest::Accepted(None));
     }
     let job_id = api::id_text(&answer["jobId"]).filter(|id| {
         id == "0"
@@ -1389,6 +1400,7 @@ async fn send<U: Upstream>(
         consent,
         customer_properties,
         identifiers,
+        validate_only: false,
     };
     // `buildActionContext` + one forced refresh after a 401.
     let mut outcome = Err(Failure::Auth);
@@ -1603,6 +1615,206 @@ async fn run_claimed<U: Upstream>(
         return Ok(Ok(()));
     };
     send(deps, event, lease, &setup).await
+}
+
+/// `googleAdsConversionService.retry` (`redriveAndEnqueue`): only a `failed`
+/// event of the workspace goes back to `pending` (next attempt) and is
+/// enqueued again. `false` = `notRetryable`.
+pub async fn retry(db: &Db, jobs: &dyn Enqueuer, workspace_id: i64, id: i64) -> Result<bool> {
+    let redriven = tx::write(db, move |conn| {
+        let Some(event) = events::find_workspace_event(conn, EventRef { id, workspace_id })? else {
+            return Ok(None);
+        };
+        if event.status != "failed" {
+            return Ok(None);
+        }
+        Ok(events::redrive(
+            conn,
+            &events::RedriveInput {
+                id,
+                workspace_id,
+                from_statuses: vec!["failed".into()],
+                expected_attempt: event.attempt,
+                ..events::RedriveInput::default()
+            },
+        )?)
+    })
+    .await?;
+    let Some(event) = redriven else {
+        return Ok(false);
+    };
+    enqueue_send(
+        jobs,
+        &event,
+        send_delay_ms(event.google_click_received_at, now_ms()),
+    )
+    .await?;
+    Ok(true)
+}
+
+/// `integrationGoogleAdsService.validateIngest` (`validateGoogleAdsRequestAction`):
+/// a `validateOnly` upload of one click with the fixed consent sources (a
+/// variable source resolves to "omitted"). Records nothing. The click id
+/// never comes back: a failure detail has it redacted.
+pub async fn validate_ingest<U: Upstream>(
+    db: &Db,
+    up: &U,
+    app_url: &str,
+    workspace_id: i64,
+    conversion_action_id: &str,
+    click_id_type: &str,
+    click_id: &str,
+) -> Result<Value> {
+    let fail = |code: &str| Ok(json!({ "ok": false, "code": code }));
+    let Some(found) = setup::get_setup(db, workspace_id).await? else {
+        return fail("accountNotReady");
+    };
+    let Some(conversion_customer_id) = found.integration.conversion_customer_id.clone() else {
+        return fail("accountNotReady");
+    };
+    if found.readiness != "ready" {
+        return fail("accountNotReady");
+    }
+    let stored_auth = setup::auth_of(&found.integration);
+    if !api::has_required_scopes(&stored_auth) {
+        return fail("needsReauth");
+    }
+    let stored = crate::google_ads::settings_page_consent(db, workspace_id).await?;
+    let Some(consent_setting) = stored else {
+        return fail("consentInvalid");
+    };
+    let method = api::upload_method_of(&stored_auth);
+    let Ok(resolved) = to_consent_input(&consent_setting, &serde_json::Map::new()) else {
+        return fail("consentInvalid");
+    };
+    let sent = consent_sent(&resolved, method);
+    let withheld_personalization =
+        method != "dataManager" && resolved["adPersonalization"]["status"].is_string();
+    let variable_skipped = ["adUserData", "adPersonalization"]
+        .iter()
+        .any(|k| consent_setting[*k]["type"] == "variable");
+    let now = now_ms();
+    let event = Event {
+        id: 0,
+        created_at: now,
+        updated_at: now,
+        workspace_id,
+        integration_google_ads_id: None,
+        contact_inbox_id: None,
+        referral_event_id: None,
+        customer_id: found.integration.customer_id.clone(),
+        login_customer_id: found.integration.login_customer_id.clone(),
+        conversion_customer_id: conversion_customer_id.clone(),
+        conversion_action_id: conversion_action_id.to_string(),
+        conversion_action_name: None,
+        conversion_action_category: String::new(),
+        lookback_window_days: None,
+        channel: String::new(),
+        source: String::new(),
+        scope_id: String::new(),
+        click_id_type: click_id_type.to_string(),
+        click_id: click_id.to_string(),
+        google_click_received_at: now,
+        occurred_at: now,
+        value: None,
+        currency: None,
+        transaction_id: format!("validate-{now}"),
+        options: None,
+        upload_method: method.to_string(),
+        status: "pending".into(),
+        attempt: 0,
+        claim_token: None,
+        claimed_at: None,
+        request_id: None,
+        sent_at: None,
+        error: None,
+        failure_stage: None,
+        processing_status: None,
+        processing_checked_at: None,
+        processing_attempts: 0,
+        next_processing_check_at: None,
+        processing_detail: None,
+    };
+    let conversion = Conversion {
+        event: &event,
+        method,
+        login_account: login_account_id(
+            &found.integration.customer_id,
+            found.integration.login_customer_id.as_deref(),
+            &conversion_customer_id,
+        ),
+        consent: sent.clone(),
+        customer_properties: None,
+        identifiers: None,
+        validate_only: true,
+    };
+    let developer_token = if method == "legacy" {
+        setup::credential(
+            db,
+            crate::meta_catalog::process_encryption(),
+            app_url,
+            workspace_id,
+        )
+        .await
+        .ok()
+        .flatten()
+        .and_then(|c| setup::developer_token(Some(&c)).flatten())
+    } else {
+        None
+    };
+    let mut outcome = Err(Failure::Auth);
+    for force in [false, true] {
+        let auth = match setup::fresh_auth(db, up, &found.integration, force).await {
+            Ok(auth) => auth,
+            Err(_) => return fail("needsReauth"),
+        };
+        let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
+        outcome = if method == "legacy" {
+            upload_legacy(up, token, developer_token.as_deref(), &conversion).await
+        } else {
+            ingest_data_manager(up, token, &conversion).await
+        };
+        if outcome != Err(Failure::Auth) {
+            break;
+        }
+    }
+    let redact = |text: String| text.replace(click_id, "[redacted]");
+    match outcome {
+        Ok(Ingest::Retry(_)) => Ok(json!({
+            "ok": false,
+            "code": "rejected",
+            "detail": "Google is temporarily unavailable, try again later",
+        })),
+        Ok(_) => Ok(json!({
+            "ok": true,
+            "consentSummary": {
+                "adUserData": sent.0.as_deref().unwrap_or("omitted"),
+                "adPersonalization": sent.1.as_deref().unwrap_or(
+                    if withheld_personalization { "notSentLegacy" } else { "omitted" }
+                ),
+            },
+            "variableSkipped": variable_skipped,
+            "withheldAdPersonalization": if withheld_personalization {
+                resolved["adPersonalization"]["status"].clone()
+            } else {
+                Value::Null
+            },
+        })),
+        Err(Failure::Auth) => fail("needsReauth"),
+        Err(Failure::Google(e)) if e.reason.as_deref() == Some(api::NOT_ALLOWLISTED) => {
+            fail("legacyUploadNotAllowed")
+        }
+        Err(Failure::Google(e)) => Ok(json!({
+            "ok": false,
+            "code": "rejected",
+            "detail": redact(api::sanitize(&e.message, &[click_id])),
+        })),
+        Err(Failure::Network(message)) => Ok(json!({
+            "ok": false,
+            "code": "rejected",
+            "detail": redact(api::sanitize(&message, &[click_id])),
+        })),
+    }
 }
 
 #[cfg(test)]

@@ -160,7 +160,7 @@ export function ItemSheet({
   const contactsHref = `/space/${workspaceId}/contacts`
   // Every member is listed (unnamed ones as the shared "--" label), so an
   // active member is never read as a former one.
-  const memberNames = new Map(
+  const memberNames = new Map<string, string>(
     (members.data ?? []).flatMap((member) =>
       member.user?.id
         ? [[member.user.id, workspaceMemberLabel(member)] as const]

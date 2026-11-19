@@ -7,7 +7,7 @@
 use chatbotx_business::BusinessError;
 use chatbotx_business::connect_session::SessionRow;
 use chatbotx_business::connection::api_key;
-use chatbotx_business::connection::credentials::{self, HttpUpstream};
+use chatbotx_business::connection::credentials::{self, HttpUpstream, SafeUpstream};
 use chatbotx_business::connection::oauth::{self, Actor, StartSession};
 use chatbotx_business::connection::providers::{
     self, CHANNEL_TYPES, CONNECTION_KINDS, CONNECTION_STATUSES, INTEGRATION_TYPES,
@@ -351,7 +351,7 @@ pub async fn handle(
                         .await
                     }
                     (_, _, Some(provider)) if active => {
-                        api_key::verify(&state.db, &HttpUpstream, provider, row).await
+                        api_key::verify(&state.db, &SafeUpstream, provider, row).await
                     }
                     _ if row.provider == "telegram" && active => {
                         credentials::verify_telegram(&state.db, &HttpUpstream, row).await
@@ -585,11 +585,12 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
                 return Some(
                     api_key::connect(
                         &state.db,
-                        &HttpUpstream,
+                        &SafeUpstream,
                         call.workspace_id,
                         provider,
                         &config,
                         None,
+                        false,
                     )
                     .await
                     .map(|row| {

@@ -371,15 +371,26 @@ export const externalStoreRepository = {
         : [],
     ])
     return {
-      byProduct: new Map(
-        products.map((product) => [product.id, product.externalVariantId]),
+      byProduct: new Map<string, string | null>(
+        products.map(
+          (product): [string, string | null] => [
+            product.id,
+            product.externalVariantId,
+          ],
+        ),
       ),
-      byVariant: new Map(
-        variants.map((variant) => [variant.id, variant.externalId]),
+      byVariant: new Map<string, string | null>(
+        variants.map((variant): [string, string | null] => [
+          variant.id,
+          variant.externalId,
+        ]),
       ),
       /** The store's own product id, for a store that orders by product. */
-      productExternalIds: new Map(
-        products.map((product) => [product.id, product.externalId]),
+      productExternalIds: new Map<string, string | null>(
+        products.map((product): [string, string | null] => [
+          product.id,
+          product.externalId,
+        ]),
       ),
     }
   },

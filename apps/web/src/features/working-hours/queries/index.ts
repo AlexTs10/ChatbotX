@@ -2,6 +2,7 @@
 // `workingHoursEditorPage` in the Rust server (`workingHours.get` + the
 // workspace timezone; 404 when the schedule is not in the workspace).
 import { serverQuery } from "@/lib/server-action"
+import type { ResponseSlaResource } from "@/features/response-sla/schema/resource"
 import type {
   WorkingHoursHolidayResource,
   WorkingHoursResource,
@@ -23,4 +24,5 @@ export const getWorkingHoursListPage = (input: { workspaceId: string }) =>
     workingHours: WorkingHoursResource[]
     members: { value: string; label: string }[]
     holidays: WorkingHoursHolidayResource[]
+    responseSla: ResponseSlaResource | null
   }>("workingHoursListPage", input.workspaceId, [])
