@@ -490,20 +490,6 @@ async fn play_action(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ids_are_digit_strings_up_to_19_chars() {
-        assert_eq!(id_of(Some("123")), Some(123));
-        assert_eq!(id_of(Some("")), None);
-        assert_eq!(id_of(Some("12a")), None);
-        assert_eq!(id_of(Some("12345678901234567890")), None);
-        assert_eq!(id_of(None), None);
-    }
-}
-
 /// The `/bs` preview: an http(s) website, a servable workspace, an enabled
 /// webchat and the website on its allowed domains; else not found (null).
 async fn bot_simulator_page(State(state): State<Arc<ApiState>>, body: Bytes) -> Response {
@@ -537,4 +523,18 @@ async fn bot_simulator_page(State(state): State<Arc<ApiState>>, body: Bytes) -> 
         "brandColor": webchat.brand_color,
         "websiteUrl": website.as_str(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_are_digit_strings_up_to_19_chars() {
+        assert_eq!(id_of(Some("123")), Some(123));
+        assert_eq!(id_of(Some("")), None);
+        assert_eq!(id_of(Some("12a")), None);
+        assert_eq!(id_of(Some("12345678901234567890")), None);
+        assert_eq!(id_of(None), None);
+    }
 }

@@ -328,7 +328,10 @@ pub fn comment_automation_clicked(conn: &Connection, payloads: &[Value]) -> Resu
 }
 
 /// The `flow:clicked` listeners, by name (`flowListeners`).
-pub const FLOW_CLICKED_LISTENERS: &[(&str, fn(&Connection, &[Value]) -> Result<(), DbError>)] = &[
+/// A click writer: one transaction over the batch's payloads.
+pub type ClickWriter = fn(&Connection, &[Value]) -> Result<(), DbError>;
+
+pub const FLOW_CLICKED_LISTENERS: &[(&str, ClickWriter)] = &[
     ("broadcast-ops", broadcast_clicked),
     ("sequence-ops", sequence_clicked),
     ("flow-ops", flow_clicked),
@@ -707,7 +710,7 @@ pub async fn record_dashboard(db: &Db, payloads: Vec<Value>) -> Vec<String> {
 pub async fn record_clicks(
     db: &Db,
     name: &'static str,
-    write: fn(&Connection, &[Value]) -> Result<(), DbError>,
+    write: ClickWriter,
     payloads: Vec<Value>,
 ) -> Vec<String> {
     let ids = entry_ids(&payloads);
@@ -723,7 +726,7 @@ pub async fn record_clicks(
 fn click_listener(
     db: &Arc<Db>,
     name: &'static str,
-    write: fn(&Connection, &[Value]) -> Result<(), DbError>,
+    write: ClickWriter,
 ) -> EventListener {
     let db = Arc::clone(db);
     EventListener {
