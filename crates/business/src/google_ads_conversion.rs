@@ -993,8 +993,12 @@ pub struct DeliverDeps<'a, U: Upstream> {
     pub matching: Option<&'a dyn MatchingResolver>,
 }
 
+/// The resolved `(email, phone)`; `Ok(None)` = the inbox is gone. An `Err`
+/// fails the delivery for a retry (the original's resolver throws).
+pub type MatchingValues = std::result::Result<Option<(Option<String>, Option<String>)>, String>;
+
 /// `MatchingTemplateResolver`: the step's e-mail / phone `{{variable}}`s for
-/// the event's contact inbox. `None` = the inbox is gone.
+/// the event's contact inbox.
 pub trait MatchingResolver: Send + Sync {
     fn resolve<'a>(
         &'a self,
@@ -1002,9 +1006,7 @@ pub trait MatchingResolver: Send + Sync {
         contact_inbox_id: i64,
         email: Option<String>,
         phone: Option<String>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Option<(Option<String>, Option<String>)>> + Send + 'a>,
-    >;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = MatchingValues> + Send + 'a>>;
 }
 
 /// `normalizeEmail`: lower-case, no whitespace; Gmail local parts lose dots
@@ -1088,13 +1090,15 @@ async fn load_matching_identifiers<U: Upstream>(
     deps: &DeliverDeps<'_, U>,
     event: &Event,
     matching: &Value,
-) -> Option<Value> {
+) -> std::result::Result<Option<Value>, String> {
+    let (Some(resolver), Some(inbox)) = (deps.matching, event.contact_inbox_id) else {
+        return Ok(None);
+    };
     if matching["status"] != "enabled" {
-        return None;
+        return Ok(None);
     }
-    let (resolver, inbox) = (deps.matching?, event.contact_inbox_id?);
     let template = |key: &str| matching[key].as_str().map(str::to_string);
-    let (email, phone) = resolver
+    let values = resolver
         .resolve(
             event.workspace_id,
             inbox,
@@ -1102,7 +1106,8 @@ async fn load_matching_identifiers<U: Upstream>(
             template("phone"),
         )
         .await?;
-    hash_matching_identifiers(email.as_deref(), phone.as_deref())
+    Ok(values
+        .and_then(|(email, phone)| hash_matching_identifiers(email.as_deref(), phone.as_deref())))
 }
 
 pub(crate) struct Lease {
@@ -1295,10 +1300,39 @@ async fn send<U: Upstream>(
             return Ok(fail(deps, event, lease, &failure, false).await);
         }
     };
-    let identifiers = match options.as_ref().map(|o| &o["matching"]) {
-        Some(matching) => load_matching_identifiers(deps, event, matching).await,
-        None => None,
+    // Only a confirmed `true` sends user data: Google fails an event with user
+    // data when the account has not signed the customer-data terms.
+    let terms_accepted = setup.integration.accepted_customer_data_terms == Some(true);
+    let matching = options.as_ref().map(|o| &o["matching"]);
+    let matching_enabled = matching.is_some_and(|m| m["status"] == "enabled");
+    let identifiers = match matching {
+        Some(matching) if terms_accepted => {
+            match load_matching_identifiers(deps, event, matching).await {
+                Ok(identifiers) => identifiers,
+                Err(error) => {
+                    return Ok(Err(BusinessError::exception(
+                        error,
+                        "internalServerError",
+                        500,
+                    )));
+                }
+            }
+        }
+        _ => None,
     };
+    if matching_enabled && !terms_accepted {
+        tracing::info!(
+            event_id = event.id,
+            workspace_id = event.workspace_id,
+            "google ads: customer data terms not accepted, customer matching withheld, sent by click only"
+        );
+    } else if matching_enabled && identifiers.is_none() {
+        tracing::info!(
+            event_id = event.id,
+            workspace_id = event.workspace_id,
+            "google ads: customer matching had no usable identifier, sent by click only"
+        );
+    }
     let stamped = event
         .processing_detail
         .as_ref()

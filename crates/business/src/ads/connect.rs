@@ -475,7 +475,8 @@ async fn store(
             let (channel, integration_id) = (channel.clone(), *integration_id);
             let channel_for_tx = channel.clone();
             tx::write(db, move |conn| {
-                let reference = connections::integration_ref(ws, &channel_for_tx, integration_id);
+                let reference =
+                    crate::ads::graph::integration_ref(ws, &channel_for_tx, integration_id);
                 let auth = Json(sealed);
                 match connections::find_for_integration(conn, reference)? {
                     Some(existing) => {

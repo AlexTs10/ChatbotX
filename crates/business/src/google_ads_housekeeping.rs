@@ -397,14 +397,14 @@ async fn poll_one<U: Upstream>(
         );
         return Ok(());
     }
-    if !cache.contains_key(&event.workspace_id) {
+    if let std::collections::hash_map::Entry::Vacant(slot) = cache.entry(event.workspace_id) {
         // Cached either way (as the original caches the rejected promise).
         let loaded = poll_context(deps, event.workspace_id).await;
         let failed = loaded
             .as_ref()
             .err()
             .map(crate::errors::BusinessError::message);
-        cache.insert(event.workspace_id, loaded.ok().flatten());
+        slot.insert(loaded.ok().flatten());
         if let Some(reason) = failed {
             return Err(reason);
         }

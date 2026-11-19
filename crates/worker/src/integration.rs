@@ -295,6 +295,65 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     Ok(Value::Null)
 }
 
+/// `resolveMatchingTemplates`: the customer-matching `{{variable}}`s against
+/// the current contact. A value that is blank or still holds `{{` is no value.
+/// Nothing here logs the values.
+struct MatchingTemplates<'a>(&'a Deps);
+
+impl chatbotx_business::google_ads_conversion::MatchingResolver for MatchingTemplates<'_> {
+    fn resolve<'a>(
+        &'a self,
+        workspace_id: i64,
+        contact_inbox_id: i64,
+        email: Option<String>,
+        phone: Option<String>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = chatbotx_business::google_ads_conversion::MatchingValues,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            use chatbotx_db::repo::Model as _;
+            use chatbotx_db::repo::models::ContactInbox;
+            use chatbotx_db::rusqlite::OptionalExtension as _;
+            let inbox = self
+                .0
+                .db
+                .read(move |c| {
+                    Ok(c.query_row(
+                        &format!(
+                            r#"{} WHERE "id" = ?1 AND "inboxId" IN (SELECT "id" FROM "Inbox" WHERE "workspaceId" = ?2)"#,
+                            ContactInbox::select_sql()
+                        ),
+                        [contact_inbox_id, workspace_id],
+                        ContactInbox::from_row,
+                    )
+                    .optional()?)
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            let Some(inbox) = inbox else {
+                return Ok(None);
+            };
+            let templates = serde_json::json!({ "email": email, "phone": phone });
+            let resolved = match &self.0.variables {
+                Some(variables) => variables.resolve_contact(&inbox, &templates).await?,
+                None => templates,
+            };
+            let usable = |key: &str| {
+                resolved[key]
+                    .as_str()
+                    .filter(|v| !v.contains("{{") && !v.trim().is_empty())
+                    .map(str::to_owned)
+            };
+            Ok(Some((usable("email"), usable("phone"))))
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! `flow-execution-key.test.ts`, `integration-channel-origin.test.ts`
@@ -450,64 +509,5 @@ mod tests {
         );
         assert!(!called.get());
         assert!(!should_run_story_mention_automation(&json!({}), async || false).await);
-    }
-}
-
-/// `resolveMatchingTemplates`: the customer-matching `{{variable}}`s against
-/// the current contact. A value that is blank or still holds `{{` is no value.
-/// Nothing here logs the values.
-struct MatchingTemplates<'a>(&'a Deps);
-
-impl chatbotx_business::google_ads_conversion::MatchingResolver for MatchingTemplates<'_> {
-    fn resolve<'a>(
-        &'a self,
-        workspace_id: i64,
-        contact_inbox_id: i64,
-        email: Option<String>,
-        phone: Option<String>,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = chatbotx_business::google_ads_conversion::MatchingValues,
-                > + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async move {
-            use chatbotx_db::repo::Model as _;
-            use chatbotx_db::repo::models::ContactInbox;
-            use chatbotx_db::rusqlite::OptionalExtension as _;
-            let inbox = self
-                .0
-                .db
-                .read(move |c| {
-                    Ok(c.query_row(
-                        &format!(
-                            r#"{} WHERE "id" = ?1 AND "inboxId" IN (SELECT "id" FROM "Inbox" WHERE "workspaceId" = ?2)"#,
-                            ContactInbox::select_sql()
-                        ),
-                        [contact_inbox_id, workspace_id],
-                        ContactInbox::from_row,
-                    )
-                    .optional()?)
-                })
-                .await
-                .map_err(|e| e.to_string())?;
-            let Some(inbox) = inbox else {
-                return Ok(None);
-            };
-            let templates = serde_json::json!({ "email": email, "phone": phone });
-            let resolved = match &self.0.variables {
-                Some(variables) => variables.resolve_contact(&inbox, &templates).await?,
-                None => templates,
-            };
-            let usable = |key: &str| {
-                resolved[key]
-                    .as_str()
-                    .filter(|v| !v.contains("{{") && !v.trim().is_empty())
-                    .map(str::to_owned)
-            };
-            Ok(Some((usable("email"), usable("phone"))))
-        })
     }
 }

@@ -10,7 +10,8 @@ use chatbotx_business::connection::credentials::{Upstream, UpstreamReply, Upstre
 use chatbotx_business::email_marketing::seal_auth;
 use chatbotx_business::google_ads_api::{ADS_SCOPE, DATA_MANAGER_SCOPE};
 use chatbotx_business::google_ads_conversion::{
-    DeliverDeps, DeliverInput, MatchingResolver, RecordInput, Recorded, deliver, record,
+    DeliverDeps, DeliverInput, MatchingResolver, MatchingValues, RecordInput, Recorded, deliver,
+    record,
 };
 use chatbotx_db::repo::{iso, now_ms};
 use chatbotx_db::rusqlite::params;
@@ -231,25 +232,32 @@ impl MatchingResolver for Contact {
         contact_inbox_id: i64,
         email: Option<String>,
         phone: Option<String>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Option<(Option<String>, Option<String>)>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = MatchingValues> + Send + 'a>> {
         assert_eq!(contact_inbox_id, 5001);
         assert_eq!(email.as_deref(), Some("{{contact.email}}"));
         assert_eq!(phone.as_deref(), Some("{{contact.phone}}"));
         Box::pin(async {
-            Some((
+            Ok(Some((
                 Some(" John.Doe+ads@GMail.com ".to_string()),
                 Some("14155552671".to_string()),
-            ))
+            )))
         })
     }
 }
 
-#[tokio::test]
-async fn customer_matching_sends_hashed_identifiers_when_consent_is_granted() {
+/// Delivers a matching-enabled conversion; `terms` = the account's
+/// `acceptedCustomerDataTerms`. Returns the Data Manager request body.
+async fn matched_body(terms: Option<bool>) -> Value {
     let db = two_workspaces().await;
     seed(&db).await;
+    setup(&db, move |tx| {
+        tx.execute(
+            r#"UPDATE "IntegrationGoogleAds" SET "acceptedCustomerDataTerms" = ?1"#,
+            params![terms],
+        )?;
+        Ok(())
+    })
+    .await;
     let queue = Queue::default();
     let mut with_matching = input("55");
     with_matching.match_email = Some("{{contact.email}}".into());
@@ -283,7 +291,12 @@ async fn customer_matching_sends_hashed_identifiers_when_consent_is_granted() {
     };
     deliver(&deps, run).await.expect("deliver");
     let seen = script.seen.lock().expect("lock").clone();
-    let body: Value = serde_json::from_str(seen[0].body.as_deref().expect("body")).expect("json");
+    serde_json::from_str(seen[0].body.as_deref().expect("body")).expect("json")
+}
+
+#[tokio::test]
+async fn customer_matching_sends_hashed_identifiers_when_consent_is_granted() {
+    let body = matched_body(Some(true)).await;
     let sha = chatbotx_core::utils::crypto::sha256_hex;
     assert_eq!(
         body["events"][0]["userData"]["userIdentifiers"],
@@ -293,6 +306,18 @@ async fn customer_matching_sends_hashed_identifiers_when_consent_is_granted() {
         ])
     );
     assert_eq!(body["encoding"], "HEX");
+}
+
+#[tokio::test]
+async fn customer_matching_is_withheld_until_the_terms_are_accepted() {
+    for terms in [None, Some(false)] {
+        let body = matched_body(terms).await;
+        assert!(body["events"][0]["userData"].is_null(), "{terms:?}: {body}");
+        assert_eq!(
+            body["events"][0]["adIdentifiers"]["gclid"],
+            "gclid-abc-1234567890"
+        );
+    }
 }
 
 // ---- housekeeping (port of a subset of `google-ads-housekeeping.test.ts`) -----
