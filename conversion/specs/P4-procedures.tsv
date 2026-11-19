@@ -166,8 +166,8 @@ sequencesAPI.listSequencesWorkspaceAuthAPI	2	web	rust
 sequencesAPI.privateGetSequenceStepStatsAPI	1		missing
 sequencesAPI.privateListSequenceStepContactsAPI	1		missing
 spreadsheetsAPI.listSpreadsheetsAuthenticatedAPI	1	web	rust
-spreadsheetsAPI.listWorksheetHeadersAuthenticatedAPI	1	web	missing
-spreadsheetsAPI.listWorksheetsAuthenticatedAPI	1	web	missing
+spreadsheetsAPI.listWorksheetHeadersAuthenticatedAPI	1	web	rust
+spreadsheetsAPI.listWorksheetsAuthenticatedAPI	1	web	rust
 tagsAPI.key	1	web	missing
 tagsAPI.privateListWorkspaceTagsAPI	1	web	rust
 templatesAPI.key	1	web	missing

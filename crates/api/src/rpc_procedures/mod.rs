@@ -30,6 +30,7 @@ mod pipeline_board;
 mod pipelines;
 mod products;
 mod rest;
+mod screens;
 mod sequences;
 mod settings;
 mod templates;
@@ -246,6 +247,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || mini_apps::ACTIONS.contains(&n)
                 || comments::is_action(n)
                 || rest::ACTIONS.contains(&n)
+                || screens::ACTIONS.contains(&n)
                 || integrations::ACTIONS.contains(&n)
                 || email_topics::ACTIONS.contains(&n)
                 || sequences::ACTIONS.contains(&n)
@@ -325,6 +327,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = rest::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = screens::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = appointments::action(ctx, name, &args).await {

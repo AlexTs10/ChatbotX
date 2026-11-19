@@ -26,6 +26,7 @@ const dashboard = () => import("@/routes/dashboard")
 const ecommerce = () => import("@/routes/ecommerce")
 const tools = () => import("@/routes/tools")
 const toolEditors = () => import("@/routes/tool-editors")
+const webhookTools = () => import("@/routes/webhook-tools")
 const comments = () => import("@/routes/comments")
 const appointments = () => import("@/routes/appointments")
 const booking = () => import("@/routes/booking")
@@ -403,6 +404,38 @@ const toolEditorPages = (
     component: lazyRouteComponent(toolEditors, page),
   }),
 )
+// The super-admin tool screens (Q.D13a).
+const webhookToolPages = (
+  [
+    ["inbound-webhooks", "InboundWebhooksPage"],
+    ["inbound-webhooks/$id", "InboundWebhookEditorPage"],
+    ["inbound-webhooks/$id/analytics", "InboundWebhookAnalyticsPage"],
+    ["webhooks/$id/edit", "EditWebhookPage"],
+    ["magic-links", "MagicLinksPage"],
+    ["magic-links/$magicLinkId/analytics", "MagicLinkAnalyticsPage"],
+    ["google-sheets", "GoogleSheetsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(webhookTools, page),
+  }),
+)
+// `(has-folder)/webhooks/layout.tsx`: the folder store around the list (the
+// edit page sits outside it).
+const webhooksFolderRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "webhooks-folder",
+  component: lazyRouteComponent(webhookTools, "WebhooksLayout"),
+})
+const webhooksListRoute = webhooksFolderRoute.addChildren([
+  createRoute({
+    getParentRoute: () => webhooksFolderRoute,
+    path: "webhooks",
+    component: lazyRouteComponent(webhookTools, "WebhooksPage"),
+  }),
+])
 const miniAppPages = (
   [
     ["mini-apps", "MiniAppsPage"],
@@ -685,6 +718,8 @@ const routeTree = rootRoute.addChildren([
       templateInstallsRoutes,
       ...logPages,
       ...toolEditorPages,
+      ...webhookToolPages,
+      webhooksListRoute,
       ...miniAppPages,
       ...commentListRoutes,
       ...commentPages,

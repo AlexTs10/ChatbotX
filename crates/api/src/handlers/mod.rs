@@ -154,6 +154,9 @@ pub struct ApiState {
     pub graph_url: String,
     /// The auth state (`POST /v1/me/password`); `None` = off (tests).
     pub sessions: Option<Arc<crate::session::AuthState>>,
+    /// The provider transport of the Google Sheets reads (SSRF-safe
+    /// `SafeHttp`; tests give a fake).
+    pub provider_http: Arc<dyn chatbotx_business::email_marketing::Http>,
 }
 
 impl ApiState {
@@ -177,6 +180,7 @@ impl ApiState {
             embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
             graph_url: chatbotx_business::whatsapp::GRAPH_API_URL.to_owned(),
             sessions: None,
+            provider_http: Arc::new(chatbotx_business::email_marketing::SafeHttp::default()),
         }
     }
 
@@ -259,6 +263,15 @@ impl ApiState {
     /// Uses `kv`.
     pub fn with_kv(mut self, kv: Arc<Kv>) -> ApiState {
         self.kv = Some(kv);
+        self
+    }
+
+    /// Uses `http` for the Google Sheets reads.
+    pub fn with_provider_http(
+        mut self,
+        http: Arc<dyn chatbotx_business::email_marketing::Http>,
+    ) -> ApiState {
+        self.provider_http = http;
         self
     }
 

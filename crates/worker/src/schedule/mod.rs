@@ -25,6 +25,7 @@ pub const PORTED: &[&str] = &[
     "cleanupWebhookExecutions",
     "purgeErrorLogs",
     "purgeInboundWebhookRequests",
+    "redispatchInboundWebhookRequests",
     "purgeCommentAutomationEvents",
     "purgeExpiredConnectSessions",
     "purgeWhatsappSignupSessions",
@@ -100,6 +101,10 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         "purgeErrorLogs" => {
             purge::purge_error_logs(&deps.db).await?;
+            Value::Null
+        }
+        "redispatchInboundWebhookRequests" => {
+            crate::inbound_webhook::redispatch(&deps).await?;
             Value::Null
         }
         "purgeInboundWebhookRequests" => {
