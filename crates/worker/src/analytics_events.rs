@@ -723,11 +723,7 @@ pub async fn record_clicks(
     }
 }
 
-fn click_listener(
-    db: &Arc<Db>,
-    name: &'static str,
-    write: ClickWriter,
-) -> EventListener {
+fn click_listener(db: &Arc<Db>, name: &'static str, write: ClickWriter) -> EventListener {
     let db = Arc::clone(db);
     EventListener {
         name: name.to_owned(),
