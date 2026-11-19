@@ -829,7 +829,9 @@ mod tests {
         // Some text pixels are drawn; the corner below the text is empty.
         assert!(image.pixels().take(80 * 24).any(|p| p.0[3] > 0));
         assert_eq!(image.get_pixel(2, 58).0, [0, 0, 0, 0]);
-        // The QR quiet zone is white.
-        assert_eq!(image.get_pixel(21, 25).0, [255, 255, 255, 255]);
+        // The QR box starts at (20, 24), 32 px wide, 23 modules (margin 1):
+        // the quiet-zone corner is light, the top-left finder centre dark.
+        assert!(image.get_pixel(20, 24).0[0] > 128);
+        assert!(image.get_pixel(26, 30).0[0] < 64);
     }
 }

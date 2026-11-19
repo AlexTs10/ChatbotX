@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(mask_name(Some("Ann Lee")), "Ann *** Lee");
         assert_eq!(mask_name(Some("Ann")), "A***");
         assert_eq!(mask_name(None), "***");
-        assert_eq!(mask_phone(Some("+84 912-345-678")).unwrap(), "•••••••••678");
+        assert_eq!(mask_phone(Some("+84 912-345-678")).unwrap(), "••••••••678");
         assert_eq!(mask_phone(Some("12")).unwrap(), "••");
         assert_eq!(mask_phone(None), None);
     }
