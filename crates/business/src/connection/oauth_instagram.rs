@@ -114,7 +114,10 @@ pub async fn exchange_code(
     code: &str,
 ) -> std::result::Result<Value, ProviderFailure> {
     if provider == "instagramFacebook" {
-        let endpoint = format!("{FACEBOOK_GRAPH}/{}/oauth/access_token", facebook_version(config));
+        let endpoint = format!(
+            "{FACEBOOK_GRAPH}/{}/oauth/access_token",
+            facebook_version(config)
+        );
         let short = call(
             upstream,
             get(query_url(
@@ -188,7 +191,10 @@ pub async fn exchange_code(
         get(query_url(
             &format!("{INSTAGRAM_GRAPH}/me"),
             &[
-                ("fields", "id,user_id,username,name,profile_picture_url,account_type"),
+                (
+                    "fields",
+                    "id,user_id,username,name,profile_picture_url,account_type",
+                ),
                 ("access_token", &token),
             ],
         )),
@@ -313,8 +319,7 @@ pub fn persist(
     now: i64,
 ) -> Result<ConnectionRow> {
     let (ig_id, name) = describe(auth)?;
-    let (existing, inbox_id) =
-        new_channel_inbox(conn, workspace_id, provider, &ig_id, &name, now)?;
+    let (existing, inbox_id) = new_channel_inbox(conn, workspace_id, provider, &ig_id, &name, now)?;
     let meta = &auth["metadata"];
     let kind = if provider == "instagram" {
         "instagram"
@@ -362,7 +367,11 @@ pub async fn subscribe_webhook(
 ) -> std::result::Result<(), ProviderFailure> {
     let meta = &auth["metadata"];
     let (base, default, fields) = if provider == "instagram" {
-        (INSTAGRAM_GRAPH, INSTAGRAM_VERSION, INSTAGRAM_SUBSCRIBE_FIELDS)
+        (
+            INSTAGRAM_GRAPH,
+            INSTAGRAM_VERSION,
+            INSTAGRAM_SUBSCRIBE_FIELDS,
+        )
     } else {
         (FACEBOOK_GRAPH, FACEBOOK_VERSION, FACEBOOK_SUBSCRIBE_FIELDS)
     };

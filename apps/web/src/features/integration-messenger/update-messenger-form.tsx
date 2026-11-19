@@ -53,7 +53,10 @@ import { useInvalidateInboxes } from "@/features/inboxes/provider/inbox-hook"
 import PersistentMenuField from "../integration-webchat/components/persistent-menu-field"
 import { updateMessengerAction } from "./actions/update-messenger-action"
 import { TagSyncCard } from "./components/tag-sync-card"
-import { updateMessengerRequest } from "./schema/action"
+import {
+  type UpdateMessengerRequest,
+  updateMessengerRequest,
+} from "./schema/action"
 
 type UpdateMessengerFormProps = {
   workspaceId: string
@@ -114,12 +117,13 @@ export function UpdateMessengerForm({
     name: "conversationStarters",
   })
 
+  // The form type is not inferred here in apps/web; name it.
   const {
     fields: personas,
     append: appendPersona,
     remove: removePersona,
     update: updatePersona,
-  } = useFieldArray({
+  } = useFieldArray<UpdateMessengerRequest, "personas">({
     control: form.control,
     name: "personas",
   })

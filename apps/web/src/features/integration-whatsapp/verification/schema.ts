@@ -1,4 +1,4 @@
-import { WHATSAPP_VERIFICATION_CODE_METHODS } from "@chatbotx.io/integration-whatsapp/constants"
+import { WHATSAPP_VERIFICATION_CODE_METHODS } from "@/features/integration-whatsapp/lib/graph-types"
 import { zodBigintAsString } from "@chatbotx.io/utils"
 import { z } from "zod"
 

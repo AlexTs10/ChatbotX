@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Query, State};
+use axum::extract::{RawQuery, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -38,27 +38,21 @@ pub fn router(state: ConnectStartState) -> Router {
     Router::new()
         .route(
             "/channels/create/messenger",
-            get(
-                |s: State<ConnectStartState>, h: HeaderMap, q: Query<HashMap<String, String>>| {
-                    start(s, h, q, "messenger")
-                },
-            ),
+            get(|s: State<ConnectStartState>, h: HeaderMap, q: RawQuery| {
+                start(s, h, q, "messenger")
+            }),
         )
         .route(
             "/channels/instagram",
-            get(
-                |s: State<ConnectStartState>, h: HeaderMap, q: Query<HashMap<String, String>>| {
-                    start(s, h, q, "instagram")
-                },
-            ),
+            get(|s: State<ConnectStartState>, h: HeaderMap, q: RawQuery| {
+                start(s, h, q, "instagram")
+            }),
         )
         .route(
             "/channels/instagram-facebook",
-            get(
-                |s: State<ConnectStartState>, h: HeaderMap, q: Query<HashMap<String, String>>| {
-                    start(s, h, q, "instagramFacebook")
-                },
-            ),
+            get(|s: State<ConnectStartState>, h: HeaderMap, q: RawQuery| {
+                start(s, h, q, "instagramFacebook")
+            }),
         )
         .with_state(state)
 }
@@ -178,9 +172,13 @@ async fn is_super_admin(api: &ApiState, workspace_id: i64, user_id: i64) -> bool
 async fn start(
     State(state): State<ConnectStartState>,
     headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
+    RawQuery(raw): RawQuery,
     provider: &'static str,
 ) -> Response {
+    let query: HashMap<String, String> =
+        url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes())
+            .into_owned()
+            .collect();
     let api = &state.api;
     let Ok(Some(session)) = find_rpc_session(&state.auth, &headers).await else {
         return not_found();

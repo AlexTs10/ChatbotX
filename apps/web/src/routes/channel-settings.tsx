@@ -26,8 +26,8 @@ import type {
   IntegrationMessengerModel,
   IntegrationWebchatModel,
 } from "@chatbotx.io/database/types"
-import type { WhatsappPhoneNumberDetail } from "@chatbotx.io/integration-whatsapp/api/phone-number"
-import type { WhatsappWabaMMLite } from "@chatbotx.io/integration-whatsapp/api/waba"
+import type { WhatsappPhoneNumberDetail } from "@/features/integration-whatsapp/lib/graph-types"
+import type { WhatsappWabaMMLite } from "@/features/integration-whatsapp/lib/graph-types"
 import {
   Card,
   CardContent,

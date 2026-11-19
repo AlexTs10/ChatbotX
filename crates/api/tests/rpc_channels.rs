@@ -48,7 +48,7 @@ async fn seed(fx: &Fixture) {
                 r#"INSERT INTO "IntegrationMessenger" ("id", "auth", "pageId", "name", "conversationStarters", "persistentMenus", "personas", "workspaceId", "inboxId")
                    VALUES (102, '{"tokens":{"accessToken":"fb-secret"}}', 'page-1', 'Main', '[]', '[]', '[]', ?1, 7),
                           (103, '{}', 'page-2', 'Other page', '[]', '[]', '[]', ?2, 8),
-                          (104, '{}', 'page-1', 'Same page', '[]', '[]', '[]', ?1, 9)"#,
+                          (104, '{}', 'page-3', 'Third page', '[]', '[]', '[]', ?1, 9)"#,
                 params![WS, OTHER_WS],
             )?;
             tx.execute(
@@ -260,10 +260,10 @@ async fn messenger_templates_page_filters_pages_and_lists_clone_targets() {
         .collect();
     assert_eq!(ids, [&json!("13")]);
     assert_eq!(page["templates"]["pageCount"], 2);
-    // Every admin workspace's page but the same Facebook page, by name.
+    // Every admin workspace's page but the source page, by name.
     assert_eq!(
         page["channels"],
-        json!([{ "id": "103", "name": "Other page" }])
+        json!([{ "id": "103", "name": "Other page" }, { "id": "104", "name": "Third page" }])
     );
 }
 
@@ -297,12 +297,13 @@ async fn messenger_template_actions_check_the_page_and_clone_targets() {
         json!(0)
     );
 
-    // 104 shares the source's Facebook page: not a target.
+    // The source page itself is not a target (`pageId` is unique, so a
+    // second row of the same page cannot exist).
     let (status, body) = act(
         &fx,
         OWNER_TOKEN,
         "cloneMessengerMessageTemplateAction",
-        json!([ws(), "102", "12", { "targetIntegrationMessengerIds": ["104"] }]),
+        json!([ws(), "102", "12", { "targetIntegrationMessengerIds": ["102"] }]),
     )
     .await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");

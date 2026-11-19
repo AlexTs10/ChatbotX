@@ -13,11 +13,9 @@ import { useTranslations } from "next-intl"
 import { use, useEffect } from "react"
 import { toast } from "sonner"
 import type { IntegrationWhatsappLinkable } from "@/features/integration-whatsapp/queries"
-import type { findWhatsappAutomation } from "./queries"
+import type { ConversationalAutomation } from "@/features/integration-whatsapp/lib/graph-types"
 
-type WhatsappAutomationResponse = Awaited<
-  ReturnType<typeof findWhatsappAutomation>
-> & { error?: string }
+type WhatsappAutomationResponse = ConversationalAutomation & { error?: string }
 
 type WhatsappAutomationManageProps = {
   integrationWhatsapp: IntegrationWhatsappLinkable

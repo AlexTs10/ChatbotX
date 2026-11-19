@@ -10,6 +10,9 @@
 //!
 //! ponytail: no `assertReferencable` template locks (P3.6-D1 rule).
 
+// ponytail: `GraphError` keeps every Meta field for the error mapping; box it if it grows.
+#![allow(clippy::result_large_err)]
+
 use chatbotx_business::{BusinessError, tx};
 use chatbotx_db::repo::models::IntegrationWhatsapp;
 use chatbotx_db::repo::{Json, find_one, integration_whatsapp, now_ms};

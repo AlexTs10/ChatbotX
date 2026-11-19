@@ -821,7 +821,11 @@ pub async fn facebook_sso_token(
     .filter(|t| !t.is_empty());
     let token = token?;
     let config = &credential.config;
-    let app_token = format!("{}|{}", text(config, "clientId"), text(config, "clientSecret"));
+    let app_token = format!(
+        "{}|{}",
+        text(config, "clientId"),
+        text(config, "clientSecret")
+    );
     let debug = call(
         upstream,
         get(query_url(

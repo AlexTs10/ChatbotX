@@ -337,18 +337,8 @@ pub(crate) fn next_cursor(body: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// A Graph GET with `withInlineRetry` (retryable errors: 1 s, 2 s, 4 s).
-pub(crate) async fn graph_get(
-    upstream: &impl Upstream,
-    token: &str,
-    url: &str,
-) -> Result<Value, GraphError> {
-    graph_get_with_headers(upstream, token, url)
-        .await
-        .map(|(body, _)| body)
-}
-
-/// `graph_get` with the response headers of the answer.
+/// A Graph GET with `withInlineRetry` (retryable errors: 1 s, 2 s, 4 s) and
+/// the response headers of the answer.
 pub(crate) async fn graph_get_with_headers(
     upstream: &impl Upstream,
     token: &str,

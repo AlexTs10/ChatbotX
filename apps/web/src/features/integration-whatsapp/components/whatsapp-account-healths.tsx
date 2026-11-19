@@ -4,8 +4,8 @@ import type {
   WhatsappEntityCanSendMessage,
   WhatsappHealthEntity,
   WhatsappPhoneNumberDetail,
-} from "@chatbotx.io/integration-whatsapp/api/phone-number"
-import type { WhatsappWabaMMLite } from "@chatbotx.io/integration-whatsapp/api/waba"
+} from "@/features/integration-whatsapp/lib/graph-types"
+import type { WhatsappWabaMMLite } from "@/features/integration-whatsapp/lib/graph-types"
 import { Badge } from "@chatbotx.io/ui/components/ui/badge"
 import { buttonVariants } from "@chatbotx.io/ui/components/ui/button"
 import { Card, CardContent } from "@chatbotx.io/ui/components/ui/card"

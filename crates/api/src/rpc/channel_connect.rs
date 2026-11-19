@@ -47,7 +47,12 @@ pub async fn call(
     input: &Value,
 ) -> Option<Result<RpcOut, OrpcError>> {
     let (_, provider, key, table) = PROCEDURES.iter().find(|p| p.0 == path)?;
-    let text = |k: &str| input[k].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
+    let text = |k: &str| {
+        input[k]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
     let (Some(session_id), Some(target)) = (text("sessionId"), text(key)) else {
         let mut error = OrpcError::new("BAD_REQUEST", Some(400), Some("Input validation failed"));
         error.defined = false;
@@ -188,14 +193,26 @@ async fn connect(
         .as_array()
         .and_then(|t| t.iter().find(|t| t["id"] == target_id))
     else {
-        return outcome(target_id, target_id, json!({ "status": "failed", "reason": "notSelectable" }));
+        return outcome(
+            target_id,
+            target_id,
+            json!({ "status": "failed", "reason": "notSelectable" }),
+        );
     };
     let name = target["name"].as_str().unwrap_or(target_id).to_string();
     if target["selectable"] != true {
         return if target["alreadyConnected"].is_string() {
-            outcome(target_id, &name, json!({ "status": "duplicated", "reason": "alreadyConnected" }))
+            outcome(
+                target_id,
+                &name,
+                json!({ "status": "duplicated", "reason": "alreadyConnected" }),
+            )
         } else {
-            outcome(target_id, &name, json!({ "status": "failed", "reason": "notSelectable" }))
+            outcome(
+                target_id,
+                &name,
+                json!({ "status": "failed", "reason": "notSelectable" }),
+            )
         };
     }
     let Some(encryption) = api.encryption.as_deref() else {
@@ -292,9 +309,7 @@ pub async fn select_page(api: &ApiState, user_id: i64, input: &Value) -> Value {
         "messenger" => "noPages",
         _ => "noInstagramAccounts",
     };
-    let picker = |error: &str, ws: Option<i64>| {
-        json!({ "redirect": crate::channel_connect::create_channel_path(Some(error), ws) })
-    };
+    let picker = |error: &str, ws: Option<i64>| json!({ "redirect": crate::channel_connect::create_channel_path(Some(error), ws) });
     let Some(id) = text("session").and_then(|s| s.parse::<i64>().ok()) else {
         return json!({ "redirect": "/channels/create" });
     };

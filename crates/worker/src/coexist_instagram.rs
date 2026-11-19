@@ -11,9 +11,10 @@
 //! lowers that or pauses the calls. A chunk yields after 4 minutes.
 //!
 //! ponytail: the profile snapshot capture (`enqueueProfileSnapshotJobs`) is
-//! not queued — no Rust worker consumes that queue yet. Graph GETs have no
-//! inline retry (`withInlineRetry`): a failed conversation read counts as
-//! failed, a failed page read fails the run.
+//! not queued — no Rust worker consumes that queue yet. Graph GETs use the
+//! shared `withInlineRetry` (`contact_scan::graph_get_with_headers`); after
+//! it, a failed conversation read counts as failed, a failed page read fails
+//! the run.
 
 use std::time::Duration;
 
