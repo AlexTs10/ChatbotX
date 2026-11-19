@@ -102,6 +102,8 @@ to the fixed Graph URL; the app secret is read with `chatbotx_core::encryption`.
 Tests: `crates/business/tests/whatsapp_{call_ring_targets,voip_sdp,call_announcement_options,meta_call_permission,call_voip_call_service,voip_turn_credentials,call_hours}.rs`,
 `crates/api/tests/whatsapp_calling_{actions,public_api}.rs` (TEST_MAP rows set to `ported`).
 
+Gate (Dell, 2026-11-19): fmt + clippy `-D warnings` clean; business 2048, api 1343, worker 600, server 135 and rt tests pass, 0 failed; web build OK, tsc 45 errors (45 before).
+
 Parity suites to run (not run here): p1-10 (`10-inboxes`, `30-integrations`)
 and p1-11 (`42-messages-whatsapp`); no parity suite drives calls yet.
 
