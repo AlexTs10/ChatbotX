@@ -24,6 +24,8 @@ use crate::order::{self, Actor, ContactRef, Deps, PlaceInput, PlaceItem, Quote};
 use crate::store_source::{is_external_store_source, resolve_store_source};
 use crate::{cart, ecommerce_settings, order_payment, tx};
 
+mod external_checkout;
+
 /// Most distinct lines (product and variant pairs) one cart may hold.
 pub const MAX_CART_LINES: usize = 100;
 /// A preview cart is a cookie: kept well under the browser's 4 KB limit.
@@ -283,11 +285,12 @@ struct WorkspaceRow {
     language: String,
     timezone: String,
     scheduled_deletion_at: Option<i64>,
+    owner_id: Option<i64>,
 }
 
 fn workspace_row(conn: &Connection, workspace_id: i64) -> Result<Option<WorkspaceRow>> {
     conn.query_row(
-        r#"SELECT "name", "brandColor", "language", "timezone", "scheduledDeletionAt" FROM "Workspace" WHERE "id" = ?1"#,
+        r#"SELECT "name", "brandColor", "language", "timezone", "scheduledDeletionAt", "ownerId" FROM "Workspace" WHERE "id" = ?1"#,
         [workspace_id],
         |r| {
             Ok(WorkspaceRow {
@@ -296,11 +299,25 @@ fn workspace_row(conn: &Connection, workspace_id: i64) -> Result<Option<Workspac
                 language: r.get(2)?,
                 timezone: r.get(3)?,
                 scheduled_deletion_at: r.get(4)?,
+                owner_id: r.get(5)?,
             })
         },
     )
     .optional()
     .map_err(repo_err)
+}
+
+/// The `ownerBlocked` part of `resolveWorkspaceFreezeReasonById` (cloud
+/// only): the owner's plan has lapsed or hit its contact limit.
+// ponytail: a plan-less owner counts as on the tenant's default plan
+// (active); that plan's own contact limit lives in KV and is not read here.
+fn owner_blocked(conn: &Connection, owner_id: Option<i64>, now_ms: i64) -> Result<bool> {
+    let Some(owner_id) = owner_id.filter(|_| crate::keys::Edition::from_env().is_cloud()) else {
+        return Ok(false);
+    };
+    let quota =
+        crate::user_quota::get_for_user(conn, owner_id)?.filter(|q| q.plan_status.is_some());
+    Ok(crate::user_quota::access_state_from_quota(quota.as_ref(), now_ms).blocked)
 }
 
 /// `orderingState`: ordering on, the workspace not frozen, and inside the
@@ -322,7 +339,9 @@ pub fn ordering_state(
     let Some(workspace) = workspace_row(conn, workspace_id)? else {
         return Ok(unavailable);
     };
-    if workspace.scheduled_deletion_at.is_some() {
+    // A frozen workspace (owner blocked, deletion pending) takes no orders.
+    if workspace.scheduled_deletion_at.is_some() || owner_blocked(conn, workspace.owner_id, now_ms)?
+    {
         return Ok(unavailable);
     }
     let store_hours = settings["general"]["openHoursId"]
@@ -998,16 +1017,27 @@ pub async fn checkout(deps: Deps<'_>, shopper: Shopper, form: CheckoutForm) -> R
             ));
         }
         assert_checkout_form(&settings, &form)?;
-        if external {
-            // ponytail: `checkoutOnExternalStore` (Shopify / WooCommerce
-            // checkout) is not ported yet.
-            return Err(closed("orderingUnavailable", None));
-        }
-        Ok((settings, lines, (cart.and_then(|c| c.discount_code), form)))
+        let source = external.then_some(source);
+        Ok((
+            settings,
+            lines,
+            (cart.and_then(|c| c.discount_code), form, source),
+        ))
     })
     .await?;
-    let _ = settings;
-    let (discount_code, form) = code;
+    let (discount_code, form, source) = code;
+    if let Some(source) = source {
+        return external_checkout::checkout(
+            deps,
+            shopper,
+            &source,
+            &settings,
+            &lines,
+            discount_code,
+            form,
+        )
+        .await;
+    }
     let ordered = lines.clone();
     let placed = order::place(
         deps,

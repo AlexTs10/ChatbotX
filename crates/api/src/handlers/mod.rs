@@ -77,6 +77,7 @@ pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
 pub mod questionnaires;
+pub mod realtime;
 pub mod reflinks;
 pub mod response_sla;
 pub mod saved_replies;
@@ -421,6 +422,8 @@ pub struct Principal {
     pub read_only: bool,
     /// `context.member` of a mobile principal (Q.A1 §3); `None` for a token.
     pub mobile: Option<Arc<crate::auth::MobileMember>>,
+    /// `context.requestIssuedAtMs` (set for a mobile access token).
+    pub issued_at_ms: Option<i64>,
 }
 
 /// A handler outcome.
@@ -741,6 +744,8 @@ async fn route(
         minigames::handle(state, route_id, call).await
     } else if questionnaires::ROUTES.contains(&route_id) {
         questionnaires::handle(state, route_id, call).await
+    } else if realtime::ROUTES.contains(&route_id) {
+        realtime::handle(state, route_id, call, principal).await
     } else if reflinks::ROUTES.contains(&route_id) {
         reflinks::handle(state, route_id, call).await
     } else if workspace_members::ROUTES.contains(&route_id) {

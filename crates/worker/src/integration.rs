@@ -179,7 +179,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         "tiktokHighIntentComment" => {
             crate::low::tiktok_high_intent_comment(&deps, &job.data["data"]).await?
         }
-        crate::low::PROCESS_COMMENT_AUTOMATION => {
+        crate::low::PROCESS_COMMENT_AUTOMATION | crate::low::DEFERRED_COMMENT_PRIVATE_REPLY => {
             crate::low::process_comment_automation_job(&deps, &job.data["data"]).await?
         }
         crate::inbound_events::UPDATE_INCOMING_COMMENT => {

@@ -90,11 +90,18 @@ and sub-resource), `contacts::public_contact_json` (masking),
 `flows.list` (`enableInInbox` without `flows`). `workspaceMembers.list`,
 `inboxTeams.list`, `sequences.list`, `tags.list`, `customFields.list`,
 `savedReplies.list`, `mediaLibrary.*`: workspace-level in the original too.
-`realtime.getConnectToken` is not ported (501 for every caller).
+`realtime.getConnectToken` (`handlers::realtime`): a member session only
+(403 otherwise); signs the member's user id, chat scope and teams with the
+realtime secret (`mint_member_connect_token`, shared with the `/rpc` route)
+and answers `{ token, socketUrl, url }`.
 
-Not ported (ponytail, attribution only, no data exposure): the `userId` /
-`assignedBy` actor of the archive / follow / read / bot / assign actions.
-Order: a member's out-of-scope conversation is 404 before body validation.
+Actor: a member who assigns a conversation to themself queues no
+`notifyConversationAssigned` (the original's `assignedUserId !== assignedBy`).
+The `userId` of the archive / follow / read / bot actions only feeds the
+conversation trigger events, which have no Rust producer yet.
+Order: the body is validated before the scope check (oRPC runs `.input()`
+before the handler), as in the original: a bad body on an out-of-scope
+conversation is 422 (`invalidRequestData`), a good one 404.
 
 Mobile tokens are on: `crates/server` sets `LiveAuthDeps.mobile_audience`
 (`<builder origin>/api`). Tests: `crates/api/tests/mobile_member_scope.rs`
@@ -132,3 +139,4 @@ Test: `crates/api/tests/session_invitation_start.rs`. The public
 
 - 2026-11-17: §1 done (8f1c7fdae); §2 and §4 done; §3 open (mobile tokens stay off).
 - 2026-11-17: §3 done (member filters, `/v1/me*`, mobile tokens on); §5 done.
+- 2026-11-19: `realtime.getConnectToken`, the self-assign actor rule and the order test done. Multi-tenant auth tests: `resolveTenantOwnerId` / `resolveTenantByDomain` ported (`crates/business/tests/tenant_service.rs`); the tenant-scoped better-auth adapter, `withTenant`, OAuth-state tenant, reseller provisioning and the tenant credential lookup are n-a (the Rust auth runs one tenant, P3.5 §10).
