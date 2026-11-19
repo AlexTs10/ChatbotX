@@ -176,6 +176,10 @@ mod reflink_chat_widget;
 mod routes_channel_and_mobile_auth;
 #[path = "routes_public_scope.rs"]
 mod routes_public_scope;
+#[path = "rpc_channel_connect.rs"]
+mod rpc_channel_connect;
+#[path = "rpc_channels.rs"]
+mod rpc_channels;
 #[path = "rpc_help_items.rs"]
 mod rpc_help_items;
 #[path = "rpc_inbox_teams.rs"]

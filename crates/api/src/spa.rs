@@ -273,6 +273,13 @@ async fn page(
             }
             Err(response) => *response,
         },
+        "channelConnectSelect" => match (require_session(&state, &headers).await, api.as_deref()) {
+            (Ok(session), Some(api)) => {
+                ok(crate::rpc::channel_connect::select_page(api, session.user_id, &input).await)
+            }
+            (Err(response), _) => *response,
+            (Ok(_), None) => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
+        },
         "invitation" => invitation_page(&state, &headers, &input).await,
         "templateShare" => template_share_page(&state, &headers, &input).await,
         "templateInstall" => match require_session(&state, &headers).await {

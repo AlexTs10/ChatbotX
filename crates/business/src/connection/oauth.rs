@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use super::credentials::{Upstream, UpstreamRequest};
 use super::{COLUMNS, ConnectionRow, find_or_fail, providers, repo_err, row};
-use super::{oauth_channels, oauth_google_ads};
+use super::{oauth_channels, oauth_google_ads, oauth_instagram};
 use crate::connect_session::{self, NewSession, SessionRow};
 use crate::{BusinessError, Result, tx};
 
@@ -112,6 +112,18 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
             },
             multi_account: false,
         }),
+        "instagram" => Some(Adapter {
+            provider: "instagram",
+            credential_type: "instagram",
+            slug: "instagram",
+            multi_account: false,
+        }),
+        "instagramFacebook" => Some(Adapter {
+            provider: "instagramFacebook",
+            credential_type: "instagramFacebook",
+            slug: "instagram-facebook",
+            multi_account: true,
+        }),
         "googleAds" => Some(Adapter {
             provider: "googleAds",
             credential_type: "googleAds",
@@ -127,6 +139,7 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
 pub fn provider_for_slug(slug: &str) -> &str {
     match slug {
         "google-ads" => "googleAds",
+        "instagram-facebook" => "instagramFacebook",
         other => other,
     }
 }
@@ -281,6 +294,9 @@ fn authorize_url(provider: &str, credential: &OAuthCredential, state: &str) -> S
     if provider == oauth_google_ads::PROVIDER {
         return oauth_google_ads::authorize_url(config, &credential.callback_url, state);
     }
+    if oauth_instagram::handles(provider) {
+        return oauth_instagram::authorize_url(provider, config, &credential.callback_url, state);
+    }
     query_url(
         &format!("{FACEBOOK}/{}/dialog/oauth", version(config)),
         &[
@@ -341,6 +357,16 @@ async fn exchange_code(
         return oauth_google_ads::exchange_code(upstream, config, &credential.callback_url, code)
             .await;
     }
+    if oauth_instagram::handles(provider) {
+        return oauth_instagram::exchange_code(
+            upstream,
+            provider,
+            config,
+            &credential.callback_url,
+            code,
+        )
+        .await;
+    }
     let endpoint = format!("{GRAPH}/{}/oauth/access_token", version(config));
     let short = call(
         upstream,
@@ -397,6 +423,19 @@ async fn list_candidates(
     }
     if provider == oauth_google_ads::PROVIDER {
         return oauth_google_ads::list_candidates(upstream, auth).await;
+    }
+    // Instagram login: the grant is its one account.
+    if provider == "instagram" {
+        return Ok(oauth_instagram::describe(auth)
+            .map(|(id, name)| vec![candidate(&id, &name, auth.clone())])
+            .unwrap_or_default());
+    }
+    if provider == "instagramFacebook" {
+        return Ok(oauth_instagram::list_facebook_candidates(upstream, auth)
+            .await?
+            .into_iter()
+            .map(|(id, name, auth)| candidate(&id, &name, auth))
+            .collect());
     }
     if auth["authType"] != "oauth2" {
         return Ok(Vec::new());
@@ -682,12 +721,20 @@ pub async fn complete_authorization(
 
 /// The workspace (if any) where `(provider, sourceId)` has an active
 /// connection (`findByProviderAndSourceIdsAnyWorkspace`, first row).
+/// `instagram` and `instagramFacebook` share the `igId` identity: an
+/// account connected under the sibling provider is not selectable either
+/// (`findActiveWorkspacesByIgIds`).
 fn active_workspace_of(conn: &Connection, provider: &str, source_id: &str) -> Result<Option<i64>> {
+    let sibling = match provider {
+        "instagram" => "instagramFacebook",
+        "instagramFacebook" => "instagram",
+        other => other,
+    };
     conn.query_row(
-        r#"SELECT "workspaceId" FROM "Connection" WHERE "provider" = ?1 AND "sourceId" = ?2
+        r#"SELECT "workspaceId" FROM "Connection" WHERE "provider" IN (?1, ?3) AND "sourceId" = ?2
                AND "status" IN ('connected', 'degraded')
            ORDER BY "id" LIMIT 1"#,
-        params![provider, source_id],
+        params![provider, source_id, sibling],
         |r| r.get(0),
     )
     .optional()
@@ -697,7 +744,7 @@ fn active_workspace_of(conn: &Connection, provider: &str, source_id: &str) -> Re
 /// `listAndAttachCandidates`: the candidate list (encrypted, bound to the
 /// session) and the public targets (an account connected anywhere is not
 /// selectable).
-async fn list_and_attach(
+pub async fn list_and_attach(
     db: &Db,
     encryption: &Encryption,
     upstream: &impl Upstream,
@@ -745,6 +792,114 @@ async fn list_and_attach(
     )?;
     connect_session::attach_authorization(db, session.id, session.workspace_id, encrypted, targets)
         .await
+}
+
+/// `tryReuseFacebookSsoToken`: the user's Facebook sign-in token when
+/// Meta's `/debug_token` (app token `clientId|clientSecret`) says it is
+/// valid and carries every Messenger scope but `email` / `public_profile`.
+/// Any failure is `None` (the normal OAuth dialog runs).
+pub async fn facebook_sso_token(
+    db: &Db,
+    upstream: &impl Upstream,
+    user_id: i64,
+    credential: &OAuthCredential,
+) -> Option<String> {
+    let token: Option<String> = tx::read(db, move |conn| {
+        conn.query_row(
+            r#"SELECT "accessToken" FROM "Account" WHERE "userId" = ?1 AND "providerId" = 'facebook'
+               ORDER BY "id" LIMIT 1"#,
+            params![user_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
+        .map_err(repo_err)
+    })
+    .await
+    .ok()
+    .flatten()
+    .filter(|t| !t.is_empty());
+    let token = token?;
+    let config = &credential.config;
+    let app_token = format!(
+        "{}|{}",
+        text(config, "clientId"),
+        text(config, "clientSecret")
+    );
+    let debug = call(
+        upstream,
+        get(query_url(
+            &format!("{GRAPH}/{}/debug_token", version(config)),
+            &[("input_token", &token), ("access_token", &app_token)],
+        )),
+    )
+    .await
+    .ok()?;
+    let data = &debug["data"];
+    let scopes: Vec<&str> = data["scopes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let reusable = data["is_valid"] == true
+        && MESSENGER_SCOPES
+            .iter()
+            .filter(|s| !matches!(**s, "email" | "public_profile"))
+            .all(|s| scopes.contains(s));
+    reusable.then_some(token)
+}
+
+/// `tryMessengerSsoReuse`: with a reusable Facebook sign-in token, a
+/// `connect` session goes straight to the page list (no OAuth dialog).
+/// `None` = the dialog runs (a failed attempt fails its session).
+pub async fn start_messenger_with_sso(
+    db: &Db,
+    encryption: &Encryption,
+    upstream: &impl Upstream,
+    credential: &OAuthCredential,
+    workspace_id: i64,
+    user_id: i64,
+    platform_owner_id: i64,
+) -> Option<SessionRow> {
+    let token = facebook_sso_token(db, upstream, user_id, credential).await?;
+    let session = match connect_session::create(
+        db,
+        NewSession {
+            workspace_id,
+            provider: "messenger".into(),
+            purpose: "connect".into(),
+            target_connection_id: None,
+            actor_user_id: Some(user_id),
+            actor_token_id: None,
+            platform_owner_id: Some(platform_owner_id.to_string()),
+            origin_host: None,
+            return_url: None,
+        },
+        |_, _| Value::Null,
+    )
+    .await
+    {
+        Ok(session) => session,
+        Err(error) => {
+            tracing::error!(error = %error, workspace_id, "Facebook SSO reuse failed for messenger connect; falling back to OAuth");
+            return None;
+        }
+    };
+    let auth = oauth2_auth(
+        &credential.config,
+        &credential.callback_url,
+        json!({ "accessToken": token }),
+        None,
+    );
+    match list_and_attach(db, encryption, upstream, &session, &auth).await {
+        Ok(session) => Some(session),
+        Err(error) => {
+            tracing::error!(error = %error, session_id = session.id, "Facebook SSO reuse failed for messenger connect; falling back to OAuth");
+            connect_session::fail(db, &session, "internal_error", None).await;
+            None
+        }
+    }
 }
 
 /// The `Connection` of `(workspace, provider, sourceId)`.
@@ -905,7 +1060,16 @@ async fn subscribe_best_effort(
     connection: ConnectionRow,
 ) -> Result<ConnectionRow> {
     // TikTok / Zalo webhooks are set in the developer portal (no `webhook`).
-    if connection.provider != "messenger" || subscribe_webhook(upstream, auth).await.is_ok() {
+    let subscribed = match connection.provider.as_str() {
+        "messenger" => subscribe_webhook(upstream, auth).await.is_ok(),
+        provider if oauth_instagram::handles(provider) => {
+            oauth_instagram::subscribe_webhook(upstream, provider, auth)
+                .await
+                .is_ok()
+        }
+        _ => true,
+    };
+    if subscribed {
         return Ok(connection);
     }
     tracing::warn!(
@@ -1110,6 +1274,8 @@ pub async fn connect_targets(
                 oauth_channels::persist(conn, &provider, workspace_id, &saved, actor_user_id, now)
             } else if provider == oauth_google_ads::PROVIDER {
                 oauth_google_ads::persist(conn, workspace_id, &saved, actor_user_id, now)
+            } else if oauth_instagram::handles(&provider) {
+                oauth_instagram::persist(conn, &provider, workspace_id, &saved, actor_user_id, now)
             } else {
                 persist_messenger(conn, workspace_id, &saved, actor_user_id, now)
             }

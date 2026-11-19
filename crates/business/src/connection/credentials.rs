@@ -208,9 +208,25 @@ pub struct UpstreamRequest {
 /// The status and body of an answer; `Err` = no answer (network, timeout).
 pub type UpstreamReply = std::result::Result<(u16, String), String>;
 
+/// An answer with its response headers (lower-case names).
+pub type UpstreamHeadersReply = std::result::Result<(u16, String, Vec<(String, String)>), String>;
+
 /// The provider HTTP client (injected; `HttpUpstream` in production).
 pub trait Upstream: Send + Sync {
     fn send(&self, request: UpstreamRequest) -> impl Future<Output = UpstreamReply> + Send;
+
+    /// `send` that also returns the response headers (the Graph usage
+    /// headers); a client without them answers no headers.
+    fn send_with_headers(
+        &self,
+        request: UpstreamRequest,
+    ) -> impl Future<Output = UpstreamHeadersReply> + Send {
+        async move {
+            self.send(request)
+                .await
+                .map(|(status, body)| (status, body, Vec::new()))
+        }
+    }
 }
 
 /// reqwest, 10 s timeout, no retries (`ky` with `retry: 0`).
@@ -232,6 +248,12 @@ fn http_client() -> std::result::Result<&'static reqwest::Client, String> {
 
 impl Upstream for HttpUpstream {
     async fn send(&self, request: UpstreamRequest) -> UpstreamReply {
+        self.send_with_headers(request)
+            .await
+            .map(|(status, body, _)| (status, body))
+    }
+
+    async fn send_with_headers(&self, request: UpstreamRequest) -> UpstreamHeadersReply {
         let client = http_client()?;
         let method =
             reqwest::Method::from_bytes(request.method.as_bytes()).map_err(|e| e.to_string())?;
@@ -251,8 +273,15 @@ impl Upstream for HttpUpstream {
         }
         let response = builder.send().await.map_err(|e| e.to_string())?;
         let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
+            })
+            .collect();
         let body = response.text().await.unwrap_or_default();
-        Ok((status, body))
+        Ok((status, body, headers))
     }
 }
 

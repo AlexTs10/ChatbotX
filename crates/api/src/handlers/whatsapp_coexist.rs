@@ -1,5 +1,5 @@
-//! `createCoexistRoute("whatsapp")` of `features/channel-integrations/api/public.ts`
-//! (scope `channels`): `GET` / `PUT /v1/whatsapp-channels/{id}/coexist`.
+//! `createCoexistRoute(channel)` of `features/channel-integrations/api/public.ts`
+//! (scope `channels`): `GET` / `PUT /v1/{whatsapp,messenger,instagram}-channels/{id}/coexist`.
 use chatbotx_business::BusinessError;
 use chatbotx_business::coexist::{self, SetCoexist};
 use serde_json::{Value, json};
@@ -12,6 +12,10 @@ use super::{ApiState, Call, ErrorMap, FINDING, MUTATING, Reply, business_error, 
 pub const ROUTES: &[&str] = &[
     "whatsappChannels.getCoexistStatus",
     "whatsappChannels.setCoexist",
+    "messengerChannels.getCoexistStatus",
+    "messengerChannels.setCoexist",
+    "instagramChannels.getCoexistStatus",
+    "instagramChannels.setCoexist",
 ];
 
 /// `possibleErrorsOnSettingCoexist`.
@@ -31,12 +35,17 @@ fn not_found() -> BusinessError {
 
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     let ws = call.workspace_id;
-    if route_id == "whatsappChannels.getCoexistStatus" {
+    let channel = match route_id.split_once("Channels.") {
+        Some(("messenger", _)) => "messenger",
+        Some(("instagram", _)) => "instagram",
+        _ => "whatsapp",
+    };
+    if route_id.ends_with(".getCoexistStatus") {
         let mut input = Input::from_query(call.params, call.query);
         let value = input.get("id").cloned();
         let id = digits_at(&mut input, &key("id"), value.as_ref(), true).unwrap_or_default();
         input.finish()?;
-        return coexist::whatsapp_coexist_status(&state.db, ws, id)
+        return coexist::coexist_status(&state.db, channel, ws, id)
             .await
             .and_then(|status| status.ok_or_else(not_found))
             .map(|status| json(200, status))
@@ -48,6 +57,22 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     let enabled = input.bool("enabled");
     let ai_reads = input.opt_bool("aiReadsSyncedHistory");
     input.finish()?;
+    if channel != "whatsapp" {
+        return match coexist::set_pull_coexist(
+            &state.db,
+            channel,
+            ws,
+            id,
+            enabled.unwrap_or_default(),
+            ai_reads.unwrap_or(false),
+        )
+        .await
+        {
+            Ok(Some(run)) => Ok(json(200, pull_output(run))),
+            Ok(None) => Err(business_error(not_found(), SETTING)),
+            Err(error) => Err(business_error(error, MUTATING)),
+        };
+    }
     let result = coexist::set_whatsapp_coexist(
         &state.db,
         &state.graph_url,
@@ -79,6 +104,15 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         SetCoexist::TriggerThrew(_) => sync_not_started("trigger_failed"),
     };
     Err(business_error(error, SETTING))
+}
+
+/// The `setCoexist` / `setCoexist{Messenger,Instagram}API` success of a pull
+/// channel (`runId` only when enabling).
+pub fn pull_output(run: Option<i64>) -> Value {
+    match run {
+        Some(id) => json!({ "success": true, "runId": id.to_string() }),
+        None => json!({ "success": true }),
+    }
 }
 
 /// `integrationWhatsappAPIs.setCoexistWhatsappAPI` output
