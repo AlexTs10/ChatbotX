@@ -8,7 +8,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chatbotx_db::Db;
-use chatbotx_db::rusqlite::params;
 use chatbotx_jobs::events::event_bus_message_id_key;
 use chatbotx_worker::analytics_events::{
     magic_link_clicked, record_clicks, record_dashboard, ref_link_opened,
