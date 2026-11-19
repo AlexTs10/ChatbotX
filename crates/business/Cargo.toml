@@ -22,6 +22,12 @@ chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
 # Concurrent error-log emits (`Promise.allSettled`, Q.D11).
 futures = { workspace = true }
+# Q.D13b dynamic images (`@napi-rs/canvas` + `qrcode` in the original): 2D raster,
+# glyph outlines of the vendored fonts, QR encoding, image decode / PNG encode.
+image = { workspace = true }
+qrcodegen = "1.8"
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 # Q.I3 Mailchimp subscriber hash (`md5(email.toLowerCase())`).
 md-5 = { version = "0.11", default-features = false }
 # Q.D1i product imports: XLSX (a ZIP of XML parts) read / template write; same versions as the lockfile.

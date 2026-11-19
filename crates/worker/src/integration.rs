@@ -176,6 +176,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::inbound_events::delete_incoming(&deps, &job.data["data"], "commentId").await?
         }
         "incomingComment" => crate::low::incoming_comment(&deps, &job.data["data"]).await?,
+        crate::leaderboard::CHANNEL_AUDIENCE_EVENT => {
+            crate::leaderboard::channel_audience_event(&deps, &job.data["data"]).await?
+        }
         "tiktokHighIntentComment" => {
             crate::low::tiktok_high_intent_comment(&deps, &job.data["data"]).await?
         }

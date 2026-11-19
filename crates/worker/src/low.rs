@@ -454,7 +454,7 @@ async fn receive_comment(
     if is_live {
         attributes["isLiveComment"] = json!(true);
     }
-    let (_, _, is_new) = store_message(
+    let (stored_row, _, is_new) = store_message(
         deps,
         &contact_inbox,
         &conversation,
@@ -484,6 +484,24 @@ async fn receive_comment(
             integration_type,
             "receiveComment: comment already stored, re-checking automation enqueue"
         );
+    }
+    // Leaderboard comments/live comments, only for a newly stored top-level comment.
+    if is_new && !is_comment_reply(str_of(c, "parentId"), post_id, comment_id) {
+        let at = str_of(&stored_row, "createdAt")
+            .and_then(chatbotx_db::repo::parse_iso)
+            .unwrap_or_else(now_ms);
+        crate::leaderboard::award_comment(
+            deps,
+            &inbox,
+            contact_inbox.contact_id,
+            comment_id,
+            post_id,
+            normalize_post_id(post_id),
+            str_of(c, "message"),
+            is_live,
+            at,
+        )
+        .await;
     }
     if authorship_unknown {
         tracing::warn!(

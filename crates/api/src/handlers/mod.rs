@@ -38,7 +38,9 @@ pub mod contacts_bulk;
 pub mod conversations;
 pub mod coupons;
 pub mod custom_fields;
+pub mod decisions;
 pub mod discount_codes;
+pub mod dynamic_images;
 pub mod ecommerce_analytics;
 pub mod ecommerce_settings;
 pub mod email_topics;
@@ -54,6 +56,7 @@ pub mod inboxes;
 pub mod input;
 pub mod integrations_ai;
 pub mod keywords;
+pub mod leaderboards;
 pub mod magic_links;
 pub mod marketing_messages;
 pub mod me;
@@ -632,6 +635,12 @@ async fn route(
         working_hours::handle(state, route_id, call).await
     } else if appointments::ROUTES.contains(&route_id) {
         appointments::handle(state, route_id, call, principal).await
+    } else if dynamic_images::ROUTES.contains(&route_id) {
+        dynamic_images::handle(state, route_id, call).await
+    } else if decisions::ROUTES.contains(&route_id) {
+        decisions::handle(state, route_id, call).await
+    } else if leaderboards::ROUTES.contains(&route_id) {
+        leaderboards::handle(state, route_id, call, principal).await
     } else if contact_scans::ROUTES.contains(&route_id) {
         contact_scans::handle(state, route_id, call).await
     } else if comment_automations::ROUTES.contains(&route_id) {

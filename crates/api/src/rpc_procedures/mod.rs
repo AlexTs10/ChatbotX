@@ -21,6 +21,8 @@ mod contacts;
 mod conversations;
 mod coupons;
 mod decision_connections;
+mod decisions;
+mod dynamic_images;
 mod ecommerce;
 mod email_marketing;
 mod email_topics;
@@ -29,11 +31,13 @@ mod flows;
 mod google_ads;
 mod inboxes;
 pub(crate) mod integrations;
+mod leaderboards;
 mod lists;
 mod media_library;
 mod mini_apps;
 mod pipeline_board;
 mod pipelines;
+mod places;
 mod products;
 mod rest;
 mod screens;
@@ -206,6 +210,9 @@ pub async fn procedure(
     if let Some(outcome) = Box::pin(templates::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
+    if let Some(outcome) = Box::pin(decisions::procedure(ctx, path, input)).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = Box::pin(rest::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
@@ -356,6 +363,18 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = Box::pin(automated_responses::action(ctx, name, &args)).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = Box::pin(decisions::action(ctx, name, &args)).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = Box::pin(dynamic_images::action(ctx, name, &args)).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = Box::pin(leaderboards::action(ctx, name, &args)).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = Box::pin(places::action(ctx, name, &args)).await {
         return Some(outcome);
     }
     if let Some(outcome) = Box::pin(settings::action(ctx, name, &args)).await {

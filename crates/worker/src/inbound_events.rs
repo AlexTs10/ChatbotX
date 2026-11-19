@@ -242,6 +242,7 @@ pub async fn message_reaction(deps: &Deps, data: &Value) -> Result<(), JobError>
         return Ok(());
     };
     if created.is_new {
+        let created_at = created.message.created_at;
         let row = message_json(&MessageWithAttachments {
             message: created.message,
             attachment_count: None,
@@ -255,7 +256,15 @@ pub async fn message_reaction(deps: &Deps, data: &Value) -> Result<(), JobError>
             row,
         )
         .await;
-        // ponytail: `awardReactionLeaderboard` (leaderboard points) is not ported.
+        crate::leaderboard::award_reaction(
+            deps,
+            &inbox,
+            conversation.contact_id,
+            &reaction_source_id,
+            &action,
+            created_at,
+        )
+        .await;
         return Ok(());
     }
     if let Some(id) = changed {

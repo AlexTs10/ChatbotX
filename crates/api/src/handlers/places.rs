@@ -34,13 +34,13 @@ const MUTATING_PLACE_CATEGORY: ErrorMap = &[
 
 /// `MAX_RANK`.
 const MAX_RANK: f64 = 2_147_483_647.0;
-const NAME: Str = Str::trimmed(1, 255);
-const RANK: Num = Num::int(1.0, MAX_RANK);
-const LATITUDE: Num = Num::range(-90.0, 90.0);
-const LONGITUDE: Num = Num::range(-180.0, 180.0);
+pub(crate) const NAME: Str = Str::trimmed(1, 255);
+pub(crate) const RANK: Num = Num::int(1.0, MAX_RANK);
+pub(crate) const LATITUDE: Num = Num::range(-90.0, 90.0);
+pub(crate) const LONGITUDE: Num = Num::range(-180.0, 180.0);
 
 /// `placeCategoryWriteResource`.
-fn category_json(row: &PlaceCategory) -> Value {
+pub(crate) fn category_json(row: &PlaceCategory) -> Value {
     json!({
         "id": id(row.id),
         "name": row.name,
@@ -51,7 +51,7 @@ fn category_json(row: &PlaceCategory) -> Value {
 }
 
 /// `placeCategoryResource`.
-fn category_list_json(row: &PlaceCategoryListItem) -> Value {
+pub(crate) fn category_list_json(row: &PlaceCategoryListItem) -> Value {
     json!({
         "id": id(row.id),
         "name": row.name,
@@ -63,7 +63,7 @@ fn category_list_json(row: &PlaceCategoryListItem) -> Value {
 }
 
 /// `placeLocationResource`.
-fn location_json(item: &PlaceLocationItem) -> Value {
+pub(crate) fn location_json(item: &PlaceLocationItem) -> Value {
     json!({
         "id": id(item.id),
         "name": item.name,

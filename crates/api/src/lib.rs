@@ -6,6 +6,7 @@ pub mod channel_connect;
 pub mod connect_callback;
 pub mod errors;
 pub mod files;
+pub mod game_public;
 pub mod handlers;
 pub mod idempotency;
 pub mod inbound_webhook_intake;

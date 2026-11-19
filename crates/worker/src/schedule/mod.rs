@@ -43,6 +43,7 @@ pub const PORTED: &[&str] = &[
     "googleAdsSyncSetups",
     "sweepStaleWhatsappCalls",
     "purgeExpiredCallRecordings",
+    "finishOverdueLeaderboards",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -186,6 +187,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::google_ads_housekeeping::sync_setups(&deps).await?;
             Value::Null
         }
+        other if crate::leaderboard::run_schedule(&deps, other).await => Value::Null,
         other => {
             tracing::warn!(job_type = other, "Unknown schedule job type");
             Value::Null

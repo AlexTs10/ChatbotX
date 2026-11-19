@@ -1,6 +1,7 @@
 //! `chatbotx-server`: the single ChatbotX binary.
 
 mod config;
+mod dynamic_images;
 mod meta_webhook;
 mod mini_apps;
 mod web;
@@ -341,6 +342,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         ))
         .merge(chatbotx_api::payment_webhooks::router(Arc::clone(&api)))
         .merge(chatbotx_api::booking_public::router(Arc::clone(&api)))
+        .merge(chatbotx_api::game_public::router(Arc::clone(&api)))
         .merge(chatbotx_api::shop_public::router(Arc::clone(&api)))
         .merge(chatbotx_api::inbound_webhook_intake::router(Arc::clone(
             &api,
@@ -356,6 +358,10 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
     }
     app = app.merge(chatbotx_api::files::router(Arc::clone(&shared.files)));
     app = app.merge(mini_apps::router(Arc::clone(&api), worker_deps.clone()));
+    app = app.merge(dynamic_images::router(
+        Arc::clone(&api),
+        worker_deps.clone(),
+    ));
     app = app.merge(webchat::router(
         Arc::clone(&api),
         worker_deps,

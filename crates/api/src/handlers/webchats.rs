@@ -15,6 +15,7 @@ pub const ROUTES: &[&str] = &[
     "webchats.create",
     "webchats.update",
     "webchats.delete",
+    "botSimulator.getLink",
 ];
 
 /// `webchatPublicResource` (no `workspaceId`, no `auth`).
@@ -322,6 +323,29 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 )
                 .await;
             Ok(no_content())
+        }
+        // `features/bot-simulator/api/public.ts` (the `channels` scope).
+        "botSimulator.getLink" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let webchat_id = input.id("webchatId");
+            let website_url = input.string(
+                "websiteUrl",
+                Str {
+                    trim: true,
+                    ..Str::max(2000)
+                },
+            );
+            input.finish()?;
+            integration_webchat::create_bot_simulator_link(
+                db,
+                &state.app_url,
+                ws,
+                webchat_id.unwrap_or_default(),
+                &website_url.unwrap_or_default(),
+            )
+            .await
+            .map(|url| json(200, json!({ "url": url })))
+            .map_err(|e| business_error(e, super::FINDING))
         }
         _ => Err(crate::routes::not_ported_error()),
     }

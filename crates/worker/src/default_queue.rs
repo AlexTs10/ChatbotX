@@ -28,6 +28,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         return Ok(Value::Null);
     }
     match kind {
+        crate::leaderboard::EXPORT_PARTICIPANTS => {
+            crate::leaderboard::export_participants(&deps, data).await?
+        }
         "importMetaCatalogProducts" => meta_catalog::import::handle(&deps, data).await?,
         "submitMetaCatalogSync" => meta_catalog::sync::submit(&deps, data).await?,
         "checkMetaCatalogSync" => meta_catalog::sync::check(&deps, data).await?,

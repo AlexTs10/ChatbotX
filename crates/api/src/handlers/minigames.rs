@@ -60,7 +60,7 @@ fn play_url(state: &ApiState, minigame_id: i64) -> String {
 }
 
 /// `minigamePublicResource`.
-fn minigame_json(state: &ApiState, row: &Minigame) -> Value {
+pub(crate) fn minigame_json(state: &ApiState, row: &Minigame) -> Value {
     json!({
         "id": id(row.id),
         "createdAt": date(row.created_at),

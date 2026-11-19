@@ -2,6 +2,8 @@
 // Each test file keeps its own copy of its helper modules, as before.
 #![allow(clippy::duplicate_mod)]
 
+#[path = "analytics_events.rs"]
+mod analytics_events;
 #[path = "inbound_webhook_worker.rs"]
 mod inbound_webhook_worker;
 #[path = "schedule_broadcast.rs"]

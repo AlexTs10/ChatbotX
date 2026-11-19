@@ -204,6 +204,8 @@ mod inbound_webhook_apply_payload;
 mod integration_ai_provider_verify;
 #[path = "integration_openai_compatible.rs"]
 mod integration_openai_compatible;
+#[path = "leaderboard_service.rs"]
+mod leaderboard_service;
 #[path = "license_refresh.rs"]
 mod license_refresh;
 #[path = "license_service.rs"]
