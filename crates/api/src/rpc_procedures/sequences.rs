@@ -18,7 +18,84 @@ pub const ACTIONS: &[&str] = &[
     "deleteSequenceAction",
     "upsertSequenceStepAction",
     "deleteSequenceStepAction",
+    // The detail page query (`features/sequences/queries`).
+    "getSequence",
 ];
+
+/// `sequenceStepEventTypes` (message + flow event types).
+const STEP_EVENT_TYPES: &[&str] = &[
+    "message:sent",
+    "message:delivered",
+    "message:seen",
+    "message:failed",
+    "message:received",
+    "flow:clicked",
+    "flow:ref",
+];
+
+/// `getSequence` → `findWithSteps`: the sequence, its steps by `order` with
+/// their flow (`steps` and `sequenceSteps`); `null` = not found.
+async fn get_sequence(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcError> {
+    let Ok(id) = bound_id(arg(args, 1)) else {
+        return Ok(Value::Null);
+    };
+    match sequence::find_with_steps(&ctx.api.db, ctx.workspace_id, id).await {
+        Ok(found) => {
+            let mut out = found.sequence.to_json();
+            let steps: Vec<Value> = found
+                .steps
+                .iter()
+                .map(|s| {
+                    let mut step = s.step.to_json();
+                    step["flow"] = s.flow.as_ref().map_or(Value::Null, |f| f.to_json());
+                    step
+                })
+                .collect();
+            out["steps"] = json!(steps);
+            out["sequenceSteps"] = json!(steps);
+            Ok(out)
+        }
+        Err(error) if error.code() == Some("notFound") => Ok(Value::Null),
+        Err(error) => Err(fail(error)),
+    }
+}
+
+/// `privateGetSequenceStepStatsAPI` / `privateListSequenceStepContactsAPI`.
+async fn step_procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Result<Value, OrpcError> {
+    let input = In(input);
+    let sequence_id = input.id("sequenceId")?;
+    let step_id = input.id("stepId")?;
+    if path == "sequencesAPI.privateGetSequenceStepStatsAPI" {
+        return sequence::step_stats(&ctx.api.db, ctx.workspace_id, sequence_id, step_id)
+            .await
+            .map_err(fail);
+    }
+    let event_type = input
+        .get("eventType")
+        .and_then(Value::as_str)
+        .filter(|t| STEP_EVENT_TYPES.contains(t))
+        .ok_or_else(invalid)?
+        .to_owned();
+    let number = |key: &str, default: f64| match input.get(key) {
+        None => Ok(default),
+        Some(value) => value.as_f64().ok_or_else(invalid),
+    };
+    let page = number("page", 1.0)? as i64;
+    let per_page = (number("perPage", 20.0)? as i64).max(1);
+    let mut out = sequence::list_step_contacts_page(
+        &ctx.api.db,
+        ctx.workspace_id,
+        sequence_id,
+        step_id,
+        event_type,
+        page,
+        per_page,
+    )
+    .await
+    .map_err(fail)?;
+    out["page"] = json!(page);
+    Ok(out)
+}
 
 /// A `zodBigintAsString` bind arg.
 fn bound_id(value: &Value) -> Result<i64, OrpcError> {
@@ -69,6 +146,13 @@ fn update_data(input: &In<'_>) -> Result<UpdateSequence, OrpcError> {
 }
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
+    if matches!(
+        path,
+        "sequencesAPI.privateGetSequenceStepStatsAPI"
+            | "sequencesAPI.privateListSequenceStepContactsAPI"
+    ) {
+        return Some(step_procedure(ctx, path, input).await);
+    }
     if path != "sequencesAPI.listSequencesWorkspaceAuthAPI" {
         return None;
     }
@@ -106,6 +190,9 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
     if !ACTIONS.contains(&name) {
         return None;
+    }
+    if name == "getSequence" {
+        return Some(get_sequence(ctx, args).await);
     }
     let db = &ctx.api.db;
     let ws = ctx.workspace_id;

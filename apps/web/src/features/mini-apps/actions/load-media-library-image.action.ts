@@ -2,4 +2,7 @@
 // The server code runs in the Rust server: POST /rpc/actions/<name>.
 import { serverAction } from "@/lib/server-action"
 
-export const loadMediaLibraryImageAction = serverAction("loadMediaLibraryImageAction", { workspace: true })
+export const loadMediaLibraryImageAction = serverAction<{
+  base64: string
+  mimeType: string
+}>("loadMediaLibraryImageAction", { workspace: true })

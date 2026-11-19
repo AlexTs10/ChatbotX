@@ -188,7 +188,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/client-imports-no-backend-packages.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/client-imports-no-queries.test.ts` | B | - | todo | Builder app shell and shared components; builder node-env, client logic |
 | `apps/builder/__tests__/coexist-client.test.ts` | B | - | todo | Coexist (existing-app history sync); builder jsdom |
-| `apps/builder/__tests__/coexist-messenger-api.test.ts` | C | tbd | todo | Coexist (existing-app history sync); builder server code |
+| `apps/builder/__tests__/coexist-messenger-api.test.ts` | C | `crates/api/tests/rpc_channels.rs` | ported | Coexist (existing-app history sync); builder server code |
 | `apps/builder/__tests__/coexist-row-trailing.test.tsx` | B | - | todo | Coexist (existing-app history sync); builder jsdom |
 | `apps/builder/__tests__/coexist-run.test.ts` | B | - | todo | Coexist (existing-app history sync); builder node-env, client logic |
 | `apps/builder/__tests__/coexist-step.test.tsx` | B | - | todo | Coexist (existing-app history sync); builder jsdom |
@@ -237,10 +237,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/contact-inbox-panel.test.tsx` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/contact-inbox-resource.test.ts` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/contact-scan-form.test.tsx` | B | - | todo | Contact scan; builder jsdom |
-| `apps/builder/__tests__/contact-scan-histories-page.test.tsx` | C | tbd | todo | Contact scan; builder server code |
+| `apps/builder/__tests__/contact-scan-histories-page.test.tsx` | C | `crates/api/tests/rpc_automation_pages.rs` | ported | Contact scan; builder server code; Q.F2-automation: contact_scan_refuses_an_assigned_only_member, contact_scan_schedules_once_and_lists_the_run |
 | `apps/builder/__tests__/contact-scan-history-table.test.tsx` | B | - | todo | Contact scan; builder jsdom |
 | `apps/builder/__tests__/contact-scan-public-api.test.ts` | C | tbd | todo | Contact scan; builder server code |
-| `apps/builder/__tests__/contact-scan-status-api.test.ts` | C | tbd | todo | Contact scan; builder server code |
+| `apps/builder/__tests__/contact-scan-status-api.test.ts` | C | `crates/api/tests/rpc_automation_pages.rs` | ported | Contact scan; builder server code; Q.F2-automation: the same two tests (gate before the status read) |
 | `apps/builder/__tests__/contact-search-combobox.test.tsx` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/contact-subresource-authz.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/contact-thread-control-section.test.tsx` | B | - | todo | Thread control (handover protocol); builder jsdom |
@@ -277,7 +277,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/conversations-authenticated-api-block-gate.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
 | `apps/builder/__tests__/conversations-public-api.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
 | `apps/builder/__tests__/conversations-public-scope.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
-| `apps/builder/__tests__/conversations-thread-control-public-api.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
+| `apps/builder/__tests__/conversations-thread-control-public-api.test.ts` | C | `crates/api/tests/conversations_thread_control_public_api.rs` | ported | Thread control (handover protocol); builder server code |
 | `apps/builder/__tests__/conversion-events-account-reset.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
 | `apps/builder/__tests__/conversion-events-rule-types.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
 | `apps/builder/__tests__/count-contact-inboxes.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
@@ -397,8 +397,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/google-ads-dashboard-entry.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
 | `apps/builder/__tests__/google-ads-enum-labels.test.ts` | B | - | todo | Google Ads integration; builder jsdom |
 | `apps/builder/__tests__/google-ads-events-history.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
-| `apps/builder/__tests__/google-ads-load-settings-page.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
-| `apps/builder/__tests__/google-ads-load-settings-session.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
+| `apps/builder/__tests__/google-ads-load-settings-page.test.ts` | C | `crates/business/tests/google_ads_conversion.rs`, `crates/api/tests/rpc_google_ads_settings.rs` | ported | Google Ads integration; builder server code; Q.F2-settings |
+| `apps/builder/__tests__/google-ads-load-settings-session.test.ts` | C | `crates/api/tests/rpc_google_ads_settings.rs` | ported | Google Ads integration; builder server code; Q.F2-settings; the `parseConnectErrorParam` cases test client code kept as is in `apps/web` (no web test runner) |
 | `apps/builder/__tests__/google-ads-notice-alert.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
 | `apps/builder/__tests__/google-ads-public-api.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
 | `apps/builder/__tests__/google-ads-select-field.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
@@ -430,16 +430,16 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/ig-stories-public-api.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/import-contacts-action.test.ts` | B | - | todo | Imports and exports (contacts, products, flows); builder node-env, client logic |
 | `apps/builder/__tests__/import-upload-url-public-api.test.ts` | C | `crates/api/tests/import_upload_url_public_api.rs`, `crates/api/tests/product_imports_public_api.rs` | passing | Imports and exports (contacts, products, flows); builder server code |
-| `apps/builder/__tests__/inbound-webhook-actions.test.ts` | C | tbd | todo | Inbound webhooks; builder server code |
-| `apps/builder/__tests__/inbound-webhook-analytics-page.test.tsx` | C | tbd | todo | Inbound webhooks; builder server code |
+| `apps/builder/__tests__/inbound-webhook-actions.test.ts` | C | `crates/api/tests/rpc_screen_actions.rs` | ported | Inbound webhooks; builder server code; Q.D13a |
+| `apps/builder/__tests__/inbound-webhook-analytics-page.test.tsx` | C | `crates/api/tests/rpc_screen_actions.rs` | ported | Inbound webhooks; builder server code; Q.D13a: SPA route `routes/webhook-tools.tsx`; its reads are the tested queries |
 | `apps/builder/__tests__/inbound-webhook-contact-lookup-section.test.tsx` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/inbound-webhook-endpoint-url.test.ts` | B | - | todo | Inbound webhooks; builder jsdom |
 | `apps/builder/__tests__/inbound-webhook-form.test.ts` | B | - | todo | Inbound webhooks; builder jsdom |
 | `apps/builder/__tests__/inbound-webhook-json-picker.test.ts` | B | - | todo | Inbound webhooks; builder jsdom |
-| `apps/builder/__tests__/inbound-webhook-route.test.ts` | C | tbd | todo | Inbound webhooks; builder server code |
+| `apps/builder/__tests__/inbound-webhook-route.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; builder server code; Q.D13 (intake) |
 | `apps/builder/__tests__/inbound-webhook-schema.test.ts` | B | - | todo | Inbound webhooks; builder jsdom |
 | `apps/builder/__tests__/inbound-webhook-secret-url-input.test.tsx` | B | - | todo | Inbound webhooks; builder jsdom |
-| `apps/builder/__tests__/inbound-webhooks-public-api.test.ts` | C | tbd | todo | Inbound webhooks; builder server code |
+| `apps/builder/__tests__/inbound-webhooks-public-api.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; builder server code; Q.D13 + Q.D13a previewMapping |
 | `apps/builder/__tests__/inbox-card-list-linkless-channels.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/inbox-mark-read-on-outbound-switch.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/inbox-route-guards.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
@@ -454,7 +454,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/instagram-select-page.test.tsx` | C | tbd | todo | Instagram channel; builder server code |
 | `apps/builder/__tests__/instagram-settings-actions.test.ts` | C | tbd | todo | Instagram channel; builder server code |
 | `apps/builder/__tests__/install-source-badge.test.tsx` | B | - | todo | Ads analytics and CTWA tracking; builder jsdom |
-| `apps/builder/__tests__/integration-actions-create-disconnect.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
+| `apps/builder/__tests__/integration-actions-create-disconnect.test.ts` | C | `crates/api/tests/rpc_settings_integrations.rs` | ported | Channel connection and OAuth connect flow; builder server code; Q.F2-settings; :82-:131 test the TS factory hooks (`afterDisconnect`, `log`), which Rust does not have |
 | `apps/builder/__tests__/integration-api-token-hash.test.ts` | B | - | todo | API channel integration (custom channels); builder jsdom |
 | `apps/builder/__tests__/integration-credential-connect-actions.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/integration-klaviyo-api.test.ts` | B | - | todo | Klaviyo integration; builder jsdom |
@@ -463,7 +463,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/integration-moosend-api.test.ts` | B | - | todo | Moosend integration; builder jsdom |
 | `apps/builder/__tests__/integration-sendgrid-api.test.ts` | C | tbd | todo | SendGrid integration; builder server code |
 | `apps/builder/__tests__/integration-tiktok-connect.action.test.ts` | C | tbd | todo | TikTok channel; builder server code |
-| `apps/builder/__tests__/integration-tiktok-queries.test.ts` | C | tbd | todo | TikTok channel; builder server code |
+| `apps/builder/__tests__/integration-tiktok-queries.test.ts` | C | `crates/business/tests/channel_integration_settings.rs` | ported | TikTok channel; builder server code; Q.F2-settings |
 | `apps/builder/__tests__/integration-webhook-real-dispatch.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/integration-webhook-routing.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/integration-webhook-threads.test.ts` | C | tbd | todo | Threads channel; builder server code |
@@ -490,7 +490,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/list-whatsapp-calls-query.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/load-servable-workspace.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/magic-link-route.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
-| `apps/builder/__tests__/magic-links-public-api.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
+| `apps/builder/__tests__/magic-links-public-api.test.ts` | C | `crates/api/tests/magic_links_public_api.rs` | ported | Authentication (sign-in, social, mobile, magic links); builder server code; Q.D13a |
 | `apps/builder/__tests__/main-page-default-workspace.test.tsx` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/mark-read-on-outbound-field.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/marketing-messages-api.test.ts` | B | - | todo | Facebook Marketing Messages; builder jsdom |
@@ -618,7 +618,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/orpc-handlers.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/orpc-unbatched-paths.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/outbound-call-mode-query-keys.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
-| `apps/builder/__tests__/page-automated-responses-route-guards.test.ts` | C | tbd | todo | Automated responses and keywords; builder server code |
+| `apps/builder/__tests__/page-automated-responses-route-guards.test.ts` | C | `crates/api/tests/rpc_automation_pages.rs` | ported | Automated responses and keywords; builder server code; Q.F2-automation: outbound_keywords_need_super_admin_not_full_permissions |
 | `apps/builder/__tests__/payment-request-param-field.test.tsx` | B | - | todo | WhatsApp message templates; builder jsdom |
 | `apps/builder/__tests__/payment-settings-card.test.tsx` | B | - | todo | Ecommerce: orders and payment providers; builder jsdom |
 | `apps/builder/__tests__/pending-reads.test.ts` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
@@ -702,7 +702,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/quick-replies-popover.test.tsx` | B | - | todo | Flow steps: messages and buttons; builder jsdom |
 | `apps/builder/__tests__/quota-metrics-trial.test.ts` | C | tbd | todo | Licensing, billing and quotas; builder server code |
 | `apps/builder/__tests__/read-conversation.action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
-| `apps/builder/__tests__/realtime-connect-token-api.test.ts` | C | tbd | todo | Realtime (WebSocket gateway); builder server code |
+| `apps/builder/__tests__/realtime-connect-token-api.test.ts` | C | `crates/api/tests/rpc_procedures.rs`, `crates/api/tests/mobile_member_scope.rs` | ported | Realtime (WebSocket gateway); builder server code; Q.A1 (`/rpc` mint + public `realtime.getConnectToken`) |
 | `apps/builder/__tests__/realtime-warn-limiter.test.ts` | B | - | todo | Realtime (WebSocket gateway); builder jsdom |
 | `apps/builder/__tests__/recurrence-defaults.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/recurrence-rule-fields.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
@@ -728,7 +728,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/resolve-last-message-preview.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
 | `apps/builder/__tests__/resolve-provider.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/resolve-workspace-realtime-gates.test.ts` | B | - | todo | Realtime (WebSocket gateway); builder jsdom |
-| `apps/builder/__tests__/response-sla-public-api.test.ts` | C | tbd | todo | Response SLA; builder server code |
+| `apps/builder/__tests__/response-sla-public-api.test.ts` | C | `crates/api/tests/saved_replies_sla_public_api.rs` | ported | Response SLA; builder server code; Q.D13 (stale row) |
 | `apps/builder/__tests__/resume-broadcast-dialog.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/routing-roles-section.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/row-status.test.ts` | B | - | todo | Builder app shell and shared components; builder node-env, client logic |
@@ -765,7 +765,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/smtp-integrations-public-api.test.ts` | C | tbd | todo | SMTP email integration; builder server code |
 | `apps/builder/__tests__/social-auth-instances.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
 | `apps/builder/__tests__/social-login-community.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
-| `apps/builder/__tests__/spreadsheets-public-api.test.ts` | C | tbd | todo | Google Sheets integration; builder server code |
+| `apps/builder/__tests__/spreadsheets-public-api.test.ts` | C | `crates/api/tests/spreadsheets_public_api.rs` | ported | Google Sheets integration; builder server code; Q.D13 + Q.D13a (stale row) |
 | `apps/builder/__tests__/spreadsheets-url-validation.test.ts` | B | - | todo | Google Sheets integration; builder jsdom |
 | `apps/builder/__tests__/start-meta-capi-oauth.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
 | `apps/builder/__tests__/start-product-import.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
@@ -851,7 +851,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/update-conversation-assignee.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/update-handover-resume-flow-action.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
 | `apps/builder/__tests__/update-instagram-action.test.ts` | C | tbd | todo | Instagram channel; builder server code |
-| `apps/builder/__tests__/update-mark-read-on-outbound.action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
+| `apps/builder/__tests__/update-mark-read-on-outbound.action.test.ts` | C | `crates/api/tests/rpc_settings_integrations.rs` | ported | Inbox and live chat (conversations, messages); builder server code; Q.F2-settings |
 | `apps/builder/__tests__/update-messenger-action.test.ts` | C | tbd | todo | Messenger channel; builder server code |
 | `apps/builder/__tests__/update-messenger-handover-resume-flow-action.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
 | `apps/builder/__tests__/update-pix-redirect-action.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
@@ -894,7 +894,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/use-whatsapp-call-starter.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/use-whatsapp-voip-call.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/use-workspace-option-sources.test.tsx` | B | - | todo | Workspaces; builder jsdom |
-| `apps/builder/__tests__/user-persistent-menus-public-api.test.ts` | C | tbd | todo | Messenger channel; builder server code |
+| `apps/builder/__tests__/user-persistent-menus-public-api.test.ts` | C | `crates/api/tests/messenger_menus_public_api.rs` | ported | Messenger channel; builder server code |
 | `apps/builder/__tests__/user-timezone.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/v1-etag-interceptor.test.ts` | C | tbd | todo | Tags and labels; builder server code |
 | `apps/builder/__tests__/validate-ai-mcp-server.action.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions); builder server code |
@@ -913,7 +913,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/webchats-create-visibility-guard.test.ts` | C | tbd | todo | Webchat channel; builder server code |
 | `apps/builder/__tests__/webchats-public-api.test.ts` | C | tbd | todo | Webchat channel; builder server code |
 | `apps/builder/__tests__/webhook-log.test.ts` | B | - | todo | Outbound webhooks; builder node-env, client logic |
-| `apps/builder/__tests__/webhooks-public-api.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
+| `apps/builder/__tests__/webhooks-public-api.test.ts` | C | `crates/api/tests/webhooks_public_api.rs` | ported | Outbound webhooks; builder server code; Q.D13a |
 | `apps/builder/__tests__/webshop-public-api.test.ts` | C | tbd | todo | Ecommerce: webshop storefront; builder server code |
 | `apps/builder/__tests__/webshop-shop-locale.test.ts` | C | tbd | todo | Ecommerce: webshop storefront; builder server code |
 | `apps/builder/__tests__/webshop-shop-session.test.ts` | C | tbd | todo | Ecommerce: webshop storefront; builder server code |
@@ -1124,7 +1124,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/src/features/inboxes/provider/__tests__/inbox-hook.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/src/features/integration-facebook-ads/lib/__tests__/needs-reconnect.test.ts` | B | - | todo | Facebook Ads integration; builder jsdom |
 | `apps/builder/src/features/integration-instagram/actions/__tests__/reconnect-callback.test.ts` | C | tbd | todo | Instagram channel; builder server code |
-| `apps/builder/src/features/integration-klaviyo/actions/__tests__/connect.action.test.ts` | C | tbd | todo | Klaviyo integration; builder server code |
+| `apps/builder/src/features/integration-klaviyo/actions/__tests__/connect.action.test.ts` | C | `crates/business/tests/connection_credentials.rs` | ported | Klaviyo integration; builder server code; Q.F2-settings |
 | `apps/builder/src/features/integration-messenger/actions/__tests__/disconnect-messenger.test.ts` | C | tbd | todo | Messenger channel; builder server code |
 | `apps/builder/src/features/integration-messenger/actions/__tests__/reconnect-callback.test.ts` | C | tbd | todo | Messenger channel; builder server code |
 | `apps/builder/src/features/integration-messenger/actions/__tests__/toggle-tag-sync.test.ts` | C | tbd | todo | Messenger channel; builder server code |
@@ -1133,7 +1133,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/src/features/integration-whatsapp/flows/lib/__tests__/build-flow-field-mappings.test.ts` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/src/features/integration-whatsapp/message-templates/components/__tests__/meta-catalog-product-select.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/src/features/integration-zalo/actions/__tests__/reconnect-callback.test.ts` | C | tbd | todo | Zalo channel; builder server code |
-| `apps/builder/src/features/integration-zalo/actions/__tests__/toggle-tag-sync.test.ts` | C | tbd | todo | Zalo channel; builder server code |
+| `apps/builder/src/features/integration-zalo/actions/__tests__/toggle-tag-sync.test.ts` | C | `crates/api/tests/rpc_settings_integrations.rs` | ported | Zalo channel; builder server code; Q.F2-settings |
 | `apps/builder/src/features/messages/components/__tests__/create-appointment-trigger.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/src/features/messages/components/__tests__/inbound-commerce-bubbles.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/src/features/messages/components/__tests__/input-menu.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
@@ -1246,19 +1246,19 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/chunkers.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/clear-custom-field-step.test.ts` | C | tbd | todo | Custom fields |
 | `apps/worker/__tests__/clear-expired-support-access.test.ts` | C | tbd | todo | Workspace support access |
-| `apps/worker/__tests__/coexist-attachment-download.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `apps/worker/__tests__/coexist-attachment-download.test.ts` | C | `crates/worker/src/coexist_attachment.rs` | ported | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-historical-id.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-instagram-adapter.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-instagram-facebook-adapter.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `apps/worker/__tests__/coexist-instagram-sync.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `apps/worker/__tests__/coexist-instagram-sync.test.ts` | C | `crates/worker/src/coexist_instagram_tests.rs` | ported | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-messenger-sync.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-messenger-template.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-usage-throttle.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `apps/worker/__tests__/coexist-whatsapp-buffer.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `apps/worker/__tests__/coexist-whatsapp-buffer.test.ts` | C | `crates/worker/src/coexist_whatsapp_tests.rs` | ported | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-flush-bsuid.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-flush-lifecycle.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-flush.payloads.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `apps/worker/__tests__/coexist-whatsapp-flush.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `apps/worker/__tests__/coexist-whatsapp-flush.test.ts` | C | `crates/worker/src/coexist_whatsapp_tests.rs` | ported | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-history-photo-intent.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-pending-patches.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/comment-automation-attachment.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
@@ -1346,7 +1346,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/import-contacts-extractor.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/import-contacts-handler.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/import-coupons-handler.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
-| `apps/worker/__tests__/inbound-webhook-request-crons.test.ts` | C | tbd | todo | Inbound webhooks |
+| `apps/worker/__tests__/inbound-webhook-request-crons.test.ts` | C | `crates/worker/tests/inbound_webhook_worker.rs` | ported | Inbound webhooks; Q.D13a |
 | `apps/worker/__tests__/inbox-labels.test.ts` | C | tbd | todo | Tags and labels |
 | `apps/worker/__tests__/install-template-handler.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/integration-channel-origin.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
@@ -1403,7 +1403,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/notification/notify-new-order.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `apps/worker/__tests__/notification/push-notification-content.test.ts` | C | tbd | todo | Mobile API and push notifications |
 | `apps/worker/__tests__/notification/send-push-expo.test.ts` | C | tbd | todo | Mobile API and push notifications |
-| `apps/worker/__tests__/operator-handler.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
+| `apps/worker/__tests__/operator-handler.test.ts` | C | `crates/worker/src/spreadsheet.rs` (unit tests) | ported | Inbox and live chat (conversations, messages); Q.D13a |
 | `apps/worker/__tests__/orphaned-integration-cleanup.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/pipeline-matchers.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `apps/worker/__tests__/pipeline-stage-bulk-handler.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
@@ -1415,7 +1415,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/process-ai-file.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/process-broadcast-contacts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/process-conversation-source-ensure-stored.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
-| `apps/worker/__tests__/process-inbound-webhook-request.test.ts` | C | tbd | todo | Inbound webhooks |
+| `apps/worker/__tests__/process-inbound-webhook-request.test.ts` | C | `crates/worker/tests/inbound_webhook_worker.rs` | ported | Inbound webhooks; Q.D13a; log-redaction and injected-failure cases not applicable |
 | `apps/worker/__tests__/process-pending-embeddings.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/product-import-extractor.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/product-import-handler.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -1513,10 +1513,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/settle-and-log.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/smart-delay-resume-job.test.ts` | C | `crates/worker/tests/smart_delay.rs` | ported | Smart delay |
 | `apps/worker/__tests__/speech-to-text-handler.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
-| `apps/worker/__tests__/spreadsheet-handler-bot-fields.test.ts` | C | tbd | todo | Google Sheets integration |
-| `apps/worker/__tests__/spreadsheet-handler-temporal.test.ts` | C | tbd | todo | Google Sheets integration |
-| `apps/worker/__tests__/spreadsheet-lookup-values.test.ts` | C | tbd | todo | Google Sheets integration |
-| `apps/worker/__tests__/spreadsheet-write-values.test.ts` | C | tbd | todo | Google Sheets integration |
+| `apps/worker/__tests__/spreadsheet-handler-bot-fields.test.ts` | C | `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
+| `apps/worker/__tests__/spreadsheet-handler-temporal.test.ts` | C | `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
+| `apps/worker/__tests__/spreadsheet-lookup-values.test.ts` | C | `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
+| `apps/worker/__tests__/spreadsheet-write-values.test.ts` | C | `crates/worker/src/spreadsheet.rs` (unit tests), `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
 | `apps/worker/__tests__/start-external-step-handlers.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/step-buttons.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/step-input-resolution.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
@@ -1542,7 +1542,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/thread-control-handler.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `apps/worker/__tests__/thread-control-queue-types.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `apps/worker/__tests__/thread-control-send-gate.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `apps/worker/__tests__/thread-control-step.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `apps/worker/__tests__/thread-control-step.test.ts` | C | `crates/worker/src/steps/tests.rs` | ported | Thread control (handover protocol) |
 | `apps/worker/__tests__/tiktok-comment-identity.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `apps/worker/__tests__/tiktok-high-intent-comment.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `apps/worker/__tests__/trigger-action-executor-add-tag.test.ts` | C | tbd | todo | Triggers |
@@ -1722,7 +1722,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/messenger/__tests__/comment-video.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/connection-oauth.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/conversation-routing-handlers.test.ts` | C | tbd | todo | Messenger channel |
-| `integrations/messenger/__tests__/conversation-routing-parsers.test.ts` | C | tbd | todo | Messenger channel |
+| `integrations/messenger/__tests__/conversation-routing-parsers.test.ts` | C | `crates/worker/src/thread_control.rs` | ported | Messenger channel |
 | `integrations/messenger/__tests__/disconnect.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/eager-media-compression.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/error-mapper.test.ts` | C | tbd | todo | Messenger channel |
@@ -1790,7 +1790,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/sendgrid/__tests__/client.test.ts` | C | tbd | todo | SendGrid integration |
 | `integrations/sendgrid/__tests__/connection.test.ts` | C | tbd | todo | SendGrid integration |
 | `integrations/sendgrid/__tests__/integration.test.ts` | C | tbd | todo | SendGrid integration |
-| `integrations/shopify/__tests__/lib.test.ts` | C | tbd | todo | Shopify integration |
+| `integrations/shopify/__tests__/lib.test.ts` | C | `crates/business/src/webshop/external_checkout.rs` (unit) | ported | Shopify integration; Q.D8: `buildShopifyCartPermalink` ported; webhook signature + gid cases stay with the Shopify receiver unit |
 | `integrations/smtp/__tests__/smoke.test.ts` | C | tbd | todo | SMTP email integration |
 | `integrations/telegram/__tests__/call-phone-number-button.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
 | `integrations/telegram/__tests__/connection.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
@@ -1848,9 +1848,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/whatsapp/__tests__/contact-without-profile-webhook.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversation-handlers.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversation-routing-api.test.ts` | C | tbd | todo | WhatsApp channel |
-| `integrations/whatsapp/__tests__/conversation-routing-extractor.test.ts` | C | tbd | todo | WhatsApp channel |
+| `integrations/whatsapp/__tests__/conversation-routing-extractor.test.ts` | C | `crates/worker/src/thread_control.rs` | ported | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversation-routing-handlers.test.ts` | C | tbd | todo | WhatsApp channel |
-| `integrations/whatsapp/__tests__/conversation-routing-parsers.test.ts` | C | tbd | todo | WhatsApp channel |
+| `integrations/whatsapp/__tests__/conversation-routing-parsers.test.ts` | C | `crates/worker/src/thread_control.rs` | ported | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversions.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/delete-flow.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/delivery-receipts.test.ts` | C | tbd | todo | WhatsApp channel |
@@ -1982,13 +1982,13 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/auth/__tests__/mcp-resource.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/mobile-auth.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/mobile-resource.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/auth/__tests__/provisioning.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
+| `packages/auth/__tests__/provisioning.test.ts` | C | - | not-applicable | Authentication (sign-in, social, mobile, magic links); Q.A1: reseller account provisioning, the Rust auth runs one tenant (P3.5 §10) |
 | `packages/auth/__tests__/schema-parity.test.ts` | C | `crates/db/tests/schema_parity.rs` | passing | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/send-magic-link.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/signup-gate.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/social-redirect-origin.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/auth/__tests__/tenant-credential-lookup.integration.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/auth/__tests__/tenant-scoping.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
+| `packages/auth/__tests__/tenant-credential-lookup.integration.test.ts` | C | - | not-applicable | Authentication (sign-in, social, mobile, magic links); Q.A1: tenant-scoped better-auth adapter, the Rust auth runs one tenant (P3.5 §10) |
+| `packages/auth/__tests__/tenant-scoping.test.ts` | C | `crates/business/tests/tenant_service.rs` | ported | Authentication (sign-in, social, mobile, magic links); Q.A1: `resolveTenantOwnerId` / `resolveTenantByDomain` ported; `withTenant`, OAuth-state tenant and the tenant-scoped adapter n-a (one tenant) |
 | `packages/auth/__tests__/trusted-origins-build-phase.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/automated-response/__tests__/dispatch-reply-ads-conversion.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/automated-response/__tests__/dispatch-reply-contact-activity.test.ts` | C | tbd | todo | Automated responses and keywords |
@@ -2208,15 +2208,15 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/import-start-contact-import.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/business/__tests__/import-start-product-statuses.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/business/__tests__/import.service.test.ts` | C | tbd | todo | Business layer shared services |
-| `packages/business/__tests__/inbound-webhook-action-references-semantics.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-action-references.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-apply-mapped-fields.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-apply-payload.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-effective-channel.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-extract.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-resolve-contact.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/business/__tests__/inbound-webhook-resolve-inbox.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-service.test.ts` | C | tbd | todo | Inbound webhooks |
+| `packages/business/__tests__/inbound-webhook-action-references-semantics.test.ts` | C | `crates/business/tests/trigger_service.rs`, `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; Q.D13a: shared `find_invalid_action_references` |
+| `packages/business/__tests__/inbound-webhook-action-references.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; Q.D13a: the config save refuses unknown references |
+| `packages/business/__tests__/inbound-webhook-apply-mapped-fields.test.ts` | C | `crates/business/tests/inbound_webhook_apply_payload.rs` | ported | Inbound webhooks; Q.D13a |
+| `packages/business/__tests__/inbound-webhook-apply-payload.test.ts` | C | `crates/business/tests/inbound_webhook_apply_payload.rs` | ported | Inbound webhooks; Q.D13a |
+| `packages/business/__tests__/inbound-webhook-effective-channel.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; Q.D13a: activation checks of `updateSettings` |
+| `packages/business/__tests__/inbound-webhook-extract.test.ts` | C | `crates/business/src/inbound_webhook_apply.rs` (unit tests) | ported | Inbound webhooks; Q.D13a |
+| `packages/business/__tests__/inbound-webhook-resolve-contact.test.ts` | C | `crates/business/tests/inbound_webhook_apply_payload.rs` | ported | Contacts (profiles, notes, activity); Q.D13a: one write transaction replaces the create lock |
+| `packages/business/__tests__/inbound-webhook-resolve-inbox.test.ts` | C | `crates/business/tests/inbound_webhook_apply_payload.rs` | ported | Inbound webhooks; Q.D13a |
+| `packages/business/__tests__/inbound-webhook-service.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs`, `crates/api/tests/rpc_screen_actions.rs` | ported | Inbound webhooks; Q.D13a: through the routes and actions |
 | `packages/business/__tests__/inbox-disconnect-ai-handover.test.ts` | C | tbd | todo | AI handover (human takeover) |
 | `packages/business/__tests__/inbox-has-any-channel.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/__tests__/inbox-profile-link.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -2392,7 +2392,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/resolve-minigame-prize.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/resolve-sent-whatsapp-flow.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
 | `packages/business/__tests__/resolve-workspace-access.test.ts` | C | tbd | todo | Workspaces |
-| `packages/business/__tests__/response-sla-service.test.ts` | C | tbd | todo | Response SLA |
+| `packages/business/__tests__/response-sla-service.test.ts` | C | `crates/business/tests/response_sla_window.rs` | ported | Response SLA; Q.D13a; cache / warm-up / lock cases not applicable |
 | `packages/business/__tests__/saved-reply-service.test.ts` | C | tbd | todo | Saved replies |
 | `packages/business/__tests__/select-labels-by-ids.test.ts` | C | tbd | todo | Tags and labels |
 | `packages/business/__tests__/self-serve-config-fields.test.ts` | C | tbd | todo | Instagram channel |
@@ -2511,15 +2511,15 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/tenant-reconcile.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
 | `packages/business/__tests__/tenant-settings-domain.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/tenant-settings-entitlement.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `packages/business/__tests__/thread-control-constants.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `packages/business/__tests__/thread-control-service.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `packages/business/__tests__/thread-control-constants.test.ts` | C | `crates/business/tests/thread_control_service.rs` | ported | Thread control (handover protocol) |
+| `packages/business/__tests__/thread-control-service.test.ts` | C | `crates/business/tests/thread_control_service.rs` | ported | Thread control (handover protocol) |
 | `packages/business/__tests__/tiktok-post-details.test.ts` | C | tbd | todo | TikTok channel |
 | `packages/business/__tests__/trigger-service-executions.test.ts` | C | `crates/business/tests/trigger_executions.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger-service-update-settings.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger-service-update-with-conditions.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger.service.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/update-from-message.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/business/__tests__/user-persistent-menu-service.test.ts` | C | tbd | todo | Messenger channel |
+| `packages/business/__tests__/user-persistent-menu-service.test.ts` | C | `crates/api/tests/messenger_menus_public_api.rs` | ported | Messenger channel |
 | `packages/business/__tests__/user-quota-access-state.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/user-quota-bootstrap-plan.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/user-quota-default-plan.test.ts` | C | tbd | todo | Licensing, billing and quotas |
@@ -2582,12 +2582,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/connection/__tests__/store-bindings.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/connection/__tests__/upsert.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/conversation/__tests__/conversation.service.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/business/src/decision/adapters.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/connection-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
+| `packages/business/src/decision/adapters.test.ts` | C | `crates/business/tests/decision_connection.rs` | todo | Decision engine (routing profiles); Q.F2-settings ported :66 (response normalize); :25/:40 test `compileDecisionProfileRequest` of the decision-profile runtime, not a settings screen |
+| `packages/business/src/decision/connection-service.test.ts` | C | `crates/business/tests/decision_connection.rs` | ported | Decision engine (routing profiles); Q.F2-settings |
 | `packages/business/src/decision/contracts.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
 | `packages/business/src/decision/global-router-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
 | `packages/business/src/decision/profile-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/transport.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
+| `packages/business/src/decision/transport.test.ts` | C | `crates/business/tests/decision_connection.rs` | ported | Decision engine (routing profiles); Q.F2-settings |
 | `packages/business/src/discount-code/__tests__/discount-code-service.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; Q.D8 (mock-based service test, see DECISIONS) |
 | `packages/business/src/discount-code/__tests__/pricing.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; Q.D8 (mock-based service test, see DECISIONS) |
 | `packages/business/src/ecommerce-analytics/__tests__/ecommerce-analytics-service.test.ts` | C | parity p1-08 `03` | dropped | Ecommerce: settings, open hours, analytics; Q.D8 (mock-based service test, see DECISIONS) |
@@ -2682,9 +2682,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/channel-partial.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/client-errors.test.ts` | C | `crates/db/tests/client_errors.rs` | passing | Error logs |
 | `packages/database/__tests__/coexist-channel-enum.test.ts` | C | `crates/db/tests/coexist_channel_enum.rs` | passing | Coexist (existing-app history sync) |
-| `packages/database/__tests__/coexist-run-recovery-repository.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `packages/database/__tests__/coexist-sync-run-repository.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `packages/database/__tests__/coexist-sync-run-type-scoping.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `packages/database/__tests__/coexist-run-recovery-repository.test.ts` | C | `crates/db/tests/repo_coexist_run_recovery_repository.rs` | ported | Coexist (existing-app history sync) |
+| `packages/database/__tests__/coexist-sync-run-repository.test.ts` | C | `crates/db/tests/repo_coexist_sync_run_repository.rs` | ported | Coexist (existing-app history sync) |
+| `packages/database/__tests__/coexist-sync-run-type-scoping.test.ts` | C | `crates/db/tests/repo_coexist_sync_run_type_scoping.rs` | ported | Coexist (existing-app history sync) |
 | `packages/database/__tests__/comment-automation-event-purge.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `packages/database/__tests__/connect-session-cancel-pending.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/database/__tests__/connect-session-repository.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -2728,13 +2728,13 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/google-click-query.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/database/__tests__/google-click-referral-merge.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/database/__tests__/inbound-webhook-partial.test.ts` | C | `crates/db/tests/inbound_webhook_partial.rs` | passing | Inbound webhooks |
-| `packages/database/__tests__/inbound-webhook-repository.test.ts` | C | tbd | todo | Inbound webhooks |
+| `packages/database/__tests__/inbound-webhook-repository.test.ts` | C | `crates/db/tests/repo_inbound_webhook_repository.rs` | ported | Inbound webhooks; stale row fixed (Q.D13a) |
 | `packages/database/__tests__/inbox-repository.test.ts` | C | `crates/db/tests/inbox_repository.rs` | passing | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/inbox-team-member-repository.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/integration-google-ads-repository.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/integration-messenger-repository-personas.test.ts` | C | tbd | todo | Messenger channel |
-| `packages/database/__tests__/integration-whatsapp-mark-token-refresh-error.test.ts` | C | tbd | todo | WhatsApp channel |
-| `packages/database/__tests__/integration-whatsapp-partial.test.ts` | C | tbd | todo | WhatsApp channel |
+| `packages/database/__tests__/integration-messenger-repository-personas.test.ts` | C | `crates/db/tests/repo_integration_messenger_repository_personas.rs` | ported | Messenger channel |
+| `packages/database/__tests__/integration-whatsapp-mark-token-refresh-error.test.ts` | C | `crates/db/tests/repo_integration_whatsapp_mark_token_refresh_error.rs` | ported | WhatsApp channel |
+| `packages/database/__tests__/integration-whatsapp-partial.test.ts` | C | `crates/db/tests/partials_integration_whatsapp_partial.rs` | ported | WhatsApp channel |
 | `packages/database/__tests__/integration/ai-file-processing-run.test.ts` | C | tbd | baseline-skip | AI knowledge base (RAG, AI files); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/ai-handover-bulk-eligibility.test.ts` | C | tbd | baseline-skip | AI handover (human takeover); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/ai-handover-bulk-run-lifecycle.test.ts` | C | tbd | baseline-skip | AI handover (human takeover); P0.3: needs Postgres/Redis, not run — run in P0.7 |
@@ -2793,8 +2793,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/messaging-ad-media-partial.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/database/__tests__/messaging-ad-operation-repository.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/database/__tests__/messaging-ads-connection-repository.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
-| `packages/database/__tests__/messenger-credential-schema.test.ts` | C | tbd | todo | Messenger channel |
-| `packages/database/__tests__/messenger-welcome-message-flow-repository.test.ts` | C | tbd | todo | Messenger channel |
+| `packages/database/__tests__/messenger-credential-schema.test.ts` | C | `crates/db/tests/partials_messenger_credential_schema.rs` | ported | Messenger channel |
+| `packages/database/__tests__/messenger-welcome-message-flow-repository.test.ts` | C | `crates/db/tests/repo_messenger_welcome_message_flow_repository.rs` | ported | Messenger channel |
 | `packages/database/__tests__/meta-catalog-sendable-products-repository.test.ts` | C | tbd | todo | Meta Catalog |
 | `packages/database/__tests__/money-scale.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/database/__tests__/oauth-consent.repository.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -2813,20 +2813,20 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/tag-channel-repository.test.ts` | C | tbd | todo | Tags and labels |
 | `packages/database/__tests__/template-selectable-resource-repository.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `packages/database/__tests__/template-version-pin.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/database/__tests__/thread-control-partial.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `packages/database/__tests__/thread-control-repository.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `packages/database/__tests__/thread-control-sdk-parity.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `packages/database/__tests__/thread-control-partial.test.ts` | C | `crates/db/tests/partials_thread_control_partial.rs` | ported | Thread control (handover protocol) |
+| `packages/database/__tests__/thread-control-repository.test.ts` | C | `crates/db/tests/repo_thread_control_repository.rs` | ported | Thread control (handover protocol) |
+| `packages/database/__tests__/thread-control-sdk-parity.test.ts` | C | `crates/core/tests/partials_thread_control_sdk_parity.rs` | ported | Thread control (handover protocol) |
 | `packages/database/__tests__/timescale.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/trigger-repository.test.ts` | C | `crates/db/tests/repo_trigger_repository.rs` | ported | Triggers; P3.3 (see specs/P3.3-test-map.tsv) |
 | `packages/database/__tests__/user-repository.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
-| `packages/database/__tests__/whatsapp-business-account-repository.test.ts` | C | tbd | todo | WhatsApp channel |
+| `packages/database/__tests__/whatsapp-business-account-repository.test.ts` | C | `crates/db/tests/repo_whatsapp_business_account_repository.rs` | ported | WhatsApp channel |
 | `packages/database/__tests__/whatsapp-call-display-outcome.test.ts` | C | `crates/db/tests/partials_whatsapp_call_display_outcome.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-list-for-workspace.test.ts` | C | `crates/db/tests/repo_whatsapp_call_list_for_workspace.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-outcome.test.ts` | C | `crates/db/tests/partials_whatsapp_call_outcome.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-repository.test.ts` | C | `crates/db/tests/repo_whatsapp_call_repository.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-workspace-fk-cascade.test.ts` | C | `crates/db/tests/whatsapp_call_workspace_fk_cascade.rs` | passing | WhatsApp calling (VoIP) |
-| `packages/database/__tests__/whatsapp-credential-schema.test.ts` | C | tbd | todo | WhatsApp channel |
-| `packages/database/__tests__/whatsapp-signup-session-repository.test.ts` | C | tbd | todo | WhatsApp channel |
+| `packages/database/__tests__/whatsapp-credential-schema.test.ts` | C | `crates/db/tests/partials_whatsapp_credential_schema.rs` | ported | WhatsApp channel |
+| `packages/database/__tests__/whatsapp-signup-session-repository.test.ts` | C | `crates/db/tests/repo_whatsapp_signup_session_repository.rs` | ported | WhatsApp channel |
 | `packages/database/__tests__/with-id-tie-break.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/working-hours-repository.test.ts` | C | tbd | todo | Working hours |
 | `packages/database/__tests__/working-hours-schema.test.ts` | C | tbd | todo | Working hours |
@@ -2927,7 +2927,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/flow-config/__tests__/template-flow-node-schema.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `packages/flow-config/__tests__/template-parameter-values.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `packages/flow-config/__tests__/template-structure.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/flow-config/__tests__/thread-control-step.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `packages/flow-config/__tests__/thread-control-step.test.ts` | C | `crates/core/tests/flow_config_thread_control_step.rs` | ported | Thread control (handover protocol) |
 | `packages/flow-config/__tests__/tiktok-text-rules.test.ts` | C | tbd | todo | TikTok channel |
 | `packages/flow-config/__tests__/unresolved-references.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/flow-config/__tests__/wa-template-flow-token.test.ts` | C | tbd | todo | WhatsApp message templates |
@@ -2937,7 +2937,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/flow-config/__tests__/wa-template-quick-reply-buttons.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `packages/flow-config/__tests__/wa-template.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `packages/flow-config/__tests__/whatsapp-flow-step.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
-| `packages/flow-config/__tests__/whatsapp-location.test.ts` | C | tbd | todo | WhatsApp channel |
+| `packages/flow-config/__tests__/whatsapp-location.test.ts` | C | `crates/core/tests/flow_config_whatsapp_location.rs` | ported | WhatsApp channel |
 | `packages/imports/__tests__/cell.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/imports/__tests__/contacts-header-match.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/imports/__tests__/file-validation.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -3024,7 +3024,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/ui/src/hooks/__tests__/use-debounced-callback.test.tsx` | B | - | todo | UI component library; frontend package |
 | `packages/ui/src/lib/__tests__/format.test.ts` | B | - | todo | UI component library; frontend package |
 | `packages/utils/__tests__/call-capable-channels.test.ts` | C | `crates/core/tests/utils_call_capable_channels.rs` | ported | WhatsApp calling (VoIP) |
-| `packages/utils/__tests__/coexist-channels.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `packages/utils/__tests__/coexist-channels.test.ts` | C | `crates/core/tests/utils_coexist_channels.rs` | ported | Coexist (existing-app history sync) |
 | `packages/utils/__tests__/concurrency.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/utils/__tests__/connection.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/utils/__tests__/coordinates.test.ts` | C | tbd | todo | Utils (shared helpers) |
@@ -3046,7 +3046,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/utils/__tests__/id.test.ts` | C | tbd | todo | Utils (shared helpers) |
 | `packages/utils/__tests__/image-optimize-settings.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/utils/__tests__/image-optimize.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/utils/__tests__/inbound-webhook-channel.test.ts` | C | tbd | todo | Inbound webhooks |
+| `packages/utils/__tests__/inbound-webhook-channel.test.ts` | C | `crates/core/tests/utils_inbound_webhook_channel.rs` | ported | Inbound webhooks; stale row fixed (Q.D13a) |
 | `packages/utils/__tests__/inbox-image-support.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/utils/__tests__/json-path.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/utils/__tests__/live-media.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -3066,7 +3066,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/utils/__tests__/store-incoming-image.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/utils/__tests__/temporal-input.test.ts` | C | tbd | todo | Utils (shared helpers) |
 | `packages/utils/__tests__/temporal-storage.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/utils/__tests__/thread-control-channels.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `packages/utils/__tests__/thread-control-channels.test.ts` | C | `crates/core/tests/utils_thread_control_channels.rs` | ported | Thread control (handover protocol) |
 | `packages/utils/__tests__/web-url.test.ts` | C | tbd | todo | Utils (shared helpers) |
 | `packages/utils/__tests__/whatsapp-call-hours.test.ts` | C | `crates/core/tests/utils_whatsapp_call_hours.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/utils/__tests__/whatsapp-call.test.ts` | C | `crates/core/tests/utils_whatsapp_call.rs` | ported | WhatsApp calling (VoIP) |

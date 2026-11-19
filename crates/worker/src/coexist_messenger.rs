@@ -3,11 +3,9 @@
 //! `contacts` walks `/conversations` newest first and imports the
 //! participants; phase `messages` walks it again and imports each thread's
 //! messages (90-day store window, phone / email discovery). A chunk yields
-//! after 4 minutes and queues its continuation.
-//!
-//! ponytail: conversations run one after another and the Graph usage (BUC)
-//! throttle is left out, as in `contact_scan`; add bounded concurrency when
-//! large pages make a chunk too slow.
+//! after 4 minutes and queues its continuation. The message phase runs up to
+//! 5 conversations at once; the `X-Business-Use-Case-Usage` reading of each
+//! Graph answer lowers that (5 / 3 / 1) or pauses the calls.
 
 use std::collections::{HashMap, HashSet};
 
@@ -23,6 +21,7 @@ use chatbotx_jobs::{JobError, JobOptions, QueueName};
 use serde_json::{Value, json};
 
 use crate::channel::{InboundInbox, IncomingAttachment, IncomingContact};
+use crate::coexist_throttle::{Throttle, Usage, messenger_concurrency, parse_buc, run_limited};
 use crate::coexist_whatsapp::{Activity, apply_activity, import_messages, read, write};
 use crate::coexist_whatsapp_payload::HistoricalMessage;
 use crate::contact_scan::{self as scan, GRAPH};
@@ -36,6 +35,10 @@ const CHUNK_BUDGET_MS: i64 = 4 * 60 * 1000;
 const STORE_WINDOW_MS: i64 = 90 * 24 * 60 * 60 * 1000;
 /// `MAX_DISCOVERY_PAGES`: pages read past the window for phone / email.
 const MAX_DISCOVERY_PAGES: u32 = 10;
+/// `DEFAULT_CONCURRENCY`.
+const DEFAULT_CONCURRENCY: usize = 5;
+/// `MAX_PAUSE_SEC`: the longest in-process BUC pause.
+const MAX_PAUSE_SECS: f64 = 300.0;
 const MESSAGE_FIELDS: &str = "id,message,from,created_time,attachments{id,name,mime_type,size,image_data,video_data,file_url,generic_template}";
 
 struct Sync<'a, U> {
@@ -49,6 +52,33 @@ struct Sync<'a, U> {
     job_start: i64,
     /// `errorRef`: the last non-fatal failure (`currentError`).
     error: Option<String>,
+    throttle: Throttle,
+}
+
+impl<U> Sync<'_, U> {
+    /// `applyBucThrottle`.
+    fn apply_buc(&self, usage: Option<Usage>) {
+        let next = messenger_concurrency(usage.as_ref());
+        if next == 0 {
+            let wait = usage.map_or(60.0, |u| u.regain_secs).min(MAX_PAUSE_SECS);
+            self.throttle
+                .pause_for(std::time::Duration::from_secs_f64(wait.max(0.0)));
+            self.throttle.set_concurrency(1);
+            tracing::warn!(
+                wait,
+                run_id = self.run_id,
+                "[coexist] BUC budget exhausted — pausing Graph calls"
+            );
+            return;
+        }
+        if self.throttle.set_concurrency(next) {
+            tracing::info!(
+                next,
+                run_id = self.run_id,
+                "[coexist] BUC throttle adjusted Messenger concurrency"
+            );
+        }
+    }
 }
 
 type Fatal = String;
@@ -214,6 +244,7 @@ pub(crate) async fn run_with(
         ai_reads_synced_history: ai_reads,
         job_start,
         error: init.current_error.clone(),
+        throttle: Throttle::new(DEFAULT_CONCURRENCY),
     };
     let mut phase = init.messenger_sync_phase.clone();
     let mut last_page = 0;
@@ -360,10 +391,15 @@ async fn walk<U: Upstream>(s: &mut Sync<'_, U>, phase: &str) -> Result<(bool, i6
         if now_ms() - s.job_start >= CHUNK_BUDGET_MS {
             return Ok((false, page_number));
         }
+        s.throttle.respect_pause().await;
         page_number += 1;
-        let (convs, after) = scan::list_page(s.upstream, &s.graph, cursor.as_deref())
-            .await
-            .map_err(|e| e.message)?;
+        let ((convs, after), headers) =
+            scan::list_page_with_headers(s.upstream, &s.graph, cursor.as_deref())
+                .await
+                .map_err(|e| e.message)?;
+        s.apply_buc(parse_buc(&headers));
+        // A BUC pause holds even when this is the last page.
+        s.throttle.respect_pause().await;
         let step = format!(
             "phase={phase} page {page_number} — {} conversations",
             convs.len()
@@ -492,19 +528,30 @@ async fn messages_page<U: Upstream>(
     let (mut imported, mut skipped, mut failed) = (0, 0, 0);
     let mut page_oldest = current_oldest;
     let mut activity = Vec::new();
-    for (source_id, (conv_id, _, updated)) in &by_participant {
-        let Some(&link) = links.get(source_id) else {
-            continue; // rejected in phase 1
-        };
-        match import_conversation(s, conv_id, link, updated - STORE_WINDOW_MS).await {
+    let shared: &Sync<'_, U> = s;
+    let jobs: Vec<_> = by_participant
+        .iter()
+        .filter_map(|(source_id, (conv_id, _, updated))| {
+            // A contact rejected in phase 1 has no link.
+            let link = *links.get(source_id)?;
+            Some(async move {
+                let result =
+                    import_conversation(shared, conv_id, link, updated - STORE_WINDOW_MS).await;
+                (conv_id, *updated, result)
+            })
+        })
+        .collect();
+    let results = run_limited(jobs, shared.throttle.concurrency()).await;
+    for (conv_id, updated, result) in results {
+        match result {
             Ok(result) => {
                 imported += result.imported;
                 skipped += result.skipped;
                 if result.activity.newest.is_some() || result.activity.ai_marker.is_some() {
                     activity.push(result.activity);
                 }
-                if page_oldest.is_none_or(|o| *updated < o) {
-                    page_oldest = Some(*updated);
+                if page_oldest.is_none_or(|o| updated < o) {
+                    page_oldest = Some(updated);
                 }
             }
             Err(error) => {
@@ -578,9 +625,12 @@ async fn import_conversation<U: Upstream>(
         if let Some(after) = &cursor {
             url.query_pairs_mut().append_pair("after", after);
         }
-        let body = scan::graph_get(s.upstream, &s.graph.token, url.as_str())
-            .await
-            .map_err(|e| e.message)?;
+        s.throttle.respect_pause().await;
+        let (body, headers) =
+            scan::graph_get_with_headers(s.upstream, &s.graph.token, url.as_str())
+                .await
+                .map_err(|e| e.message)?;
+        s.apply_buc(parse_buc(&headers));
         let mut page = Vec::new();
         for m in body["data"].as_array().into_iter().flatten() {
             let text_body = m["message"].as_str().filter(|t| !t.is_empty());

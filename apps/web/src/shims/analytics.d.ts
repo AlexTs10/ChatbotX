@@ -20,4 +20,11 @@ export declare const magicLinkAnalyticsService: any
 export declare const messageAnalyticsService: any
 export declare const refLinkAnalyticsService: any
 export declare const sequenceAnalyticsService: any
+// The business services (type-checked through `@chatbotx.io/business`).
+export declare const emailTopicAnalyticsService: any
+export declare const macRepository: any
+export declare const macTrackingService: any
+export type CreateEmailRecipientInput = any
+export type EmailRecipientTransition = any
+export type EmailTopicCounterIncrement = any
 // biome-ignore-end lint/suspicious/noExplicitAny: server services, not in the SPA

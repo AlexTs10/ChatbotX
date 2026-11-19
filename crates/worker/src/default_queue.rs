@@ -22,6 +22,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             job_type = kind,
             "Skipping workspace job for frozen workspace"
         );
+        if kind == "processInboundWebhookRequest" {
+            crate::inbound_webhook::skip_blocked_request(&deps, data).await?;
+        }
         return Ok(Value::Null);
     }
     match kind {
@@ -33,6 +36,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         "syncExternalCalendarEvent" => {
             return crate::appointment::sync_external(&deps, &job, data).await;
+        }
+        "processInboundWebhookRequest" => {
+            crate::inbound_webhook::process_request(&deps, &job, data).await?;
         }
         REVOKE_RETRY_JOB_NAME => retry_realtime_member_revoke(&deps, &job, data).await?,
         // ponytail: the other default jobs are later units. An unported

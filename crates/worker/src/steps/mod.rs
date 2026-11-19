@@ -161,6 +161,24 @@ pub(crate) async fn run(
     if let Some(status) = appointment::run(&ctx, step_type).await? {
         return Ok(status);
     }
+    if crate::spreadsheet::STEP_TYPES.contains(&step_type) {
+        let sheets = crate::spreadsheet::SheetRun {
+            deps: run.deps,
+            http: chatbotx_business::email_marketing::safe_http(),
+            conversation: &run.conversation,
+            contact_inbox: &run.contact_inbox,
+            sent_by_user_id: crate::str_of(run.data, "sentByUserId").map(str::to_owned),
+        };
+        return Ok(
+            match crate::spreadsheet::execute(&sheets, step_type, step).await {
+                Ok(()) => StepStatus::Success,
+                Err(failure) => {
+                    crate::spreadsheet::report(&sheets, step_type, &failure).await;
+                    step_error(&ctx, failure.message)
+                }
+            },
+        );
+    }
     match step_type {
         "condition" => condition::handle(&ctx).await,
         "pipeline" => pipeline::handle(&ctx).await,
@@ -175,8 +193,8 @@ pub(crate) async fn run(
             Ok(StepStatus::Success)
         }
         other => {
-            // ponytail: steps of unported domains (AI, ads, email/CRM,
-            // spreadsheets, ecommerce, ...) are implicit
+            // ponytail: steps of unported domains (ads, ecommerce, ...)
+            // are implicit
             // successes until their units; see specs/Q.W3.md.
             tracing::warn!(
                 step_type = other,

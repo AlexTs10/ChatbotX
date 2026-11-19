@@ -1,6 +1,7 @@
 //! `coexistService.enable` / `disable` and `integration-whatsapp/coexist.ts`
 //! `setCoexist` with the `triggerSmbAppDataSync` provider call
-//! (`integrations/whatsapp/src/api/coexists.ts`).
+//! (`integrations/whatsapp/src/api/coexists.ts`); the pull channels
+//! (Messenger, Instagram) use `enable` / `disable` alone (Q.D12-channels).
 use std::time::Duration;
 
 use chatbotx_db::repo::coexist_sync_run::{self as runs, CoexistIntegrationRow, CreateRunInput};
@@ -193,18 +194,64 @@ pub async fn set_whatsapp_coexist(
     Ok(SetCoexist::Done)
 }
 
-/// `coexistRunResource` of `getCoexistStatus`: `None` = no such channel.
-pub async fn whatsapp_coexist_status(
+/// `coexistService.enable` / `disable` of a pull channel (`messenger`,
+/// `instagram`): `None` = no such channel, `Some(Some(runId))` = enabled
+/// (a live run is reused), `Some(None)` = disabled (live runs failed).
+pub async fn set_pull_coexist(
     db: &chatbotx_db::Db,
+    channel: &'static str,
+    workspace_id: i64,
+    integration_id: i64,
+    enabled: bool,
+    ai_reads_synced_history: bool,
+) -> Result<Option<Option<i64>>> {
+    let (ws, id) = (workspace_id, integration_id);
+    tx::write(db, move |c| {
+        if !enabled {
+            if runs::set_integration_coexist_enabled(c, channel, ws, id, false, None)?.is_none() {
+                return Ok(None);
+            }
+            runs::tear_down_active_runs_for_integration(c, channel, id, "Coexist disabled")?;
+            return Ok(Some(None));
+        }
+        if runs::find_integration_for_coexist(c, ws, id, channel)?.is_none() {
+            return Ok(None);
+        }
+        runs::set_integration_coexist_enabled(
+            c,
+            channel,
+            ws,
+            id,
+            true,
+            Some(ai_reads_synced_history),
+        )?;
+        if let Some(live) = runs::find_live_run(c, id, channel)? {
+            return Ok(Some(Some(live.id)));
+        }
+        let input = CreateRunInput {
+            workspace_id: ws,
+            integration_id: id,
+            channel,
+            trigger_source: "popup-enable",
+        };
+        Ok(Some(Some(runs::create_run(c, &input)?.id)))
+    })
+    .await
+}
+
+/// `coexistRunResource` of `getCoexistStatus`: `None` = no such channel.
+pub async fn coexist_status(
+    db: &chatbotx_db::Db,
+    channel: &'static str,
     workspace_id: i64,
     integration_id: i64,
 ) -> Result<Option<Value>> {
     let (ws, id) = (workspace_id, integration_id);
     tx::read(db, move |c| {
-        if runs::find_integration_for_coexist(c, ws, id, "whatsapp")?.is_none() {
+        if runs::find_integration_for_coexist(c, ws, id, channel)?.is_none() {
             return Ok(None);
         }
-        let run = runs::find_latest_run(c, ws, id, "whatsapp")?;
+        let run = runs::find_latest_run(c, ws, id, channel)?;
         let date = |ms: Option<i64>| {
             ms.map_or(Value::Null, |ms| Value::String(chatbotx_db::repo::iso(ms)))
         };

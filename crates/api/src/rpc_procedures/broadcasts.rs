@@ -29,7 +29,180 @@ pub const ACTIONS: &[&str] = &[
     "stopBroadcastAction",
     "updateBroadcastAction",
     "updateDraftBroadcastAction",
+    // Server-component queries of the broadcast pages (P4 spec §5.1).
+    "listBroadcasts",
+    "listBroadcastsForCalendar",
+    "findDraftBroadcast",
+    "findRecurringBroadcast",
+    "findIntegrationWhatsappInboxId",
 ];
+
+/// The page queries (no next-safe-action wrapper: a plain value or error).
+const QUERIES: &[&str] = &[
+    "listBroadcasts",
+    "listBroadcastsForCalendar",
+    "findDraftBroadcast",
+    "findRecurringBroadcast",
+    "findIntegrationWhatsappInboxId",
+];
+
+/// `TEMPLATE_BORROWED_STATUSES` of `features/broadcasts/queries`.
+const TEMPLATE_BORROWED_STATUSES: &[&str] = &["cancelled", "sent"];
+
+/// A nuqs enum param: an unknown value parses as `null`.
+fn known(input: &In<'_>, key: &str, values: &[&str]) -> Option<String> {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|v| values.contains(v))
+        .map(str::to_owned)
+}
+
+/// `listBroadcasts` (`features/broadcasts/queries/index.ts`): one-off
+/// broadcasts and repeating series, never the runs of a series.
+async fn list_page(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    use chatbotx_db::repo::partials::broadcast::BROADCAST_STATUSES;
+    let input = In(input);
+    let repeating = input.get("kind").and_then(Value::as_str) == Some("repeating");
+    let status = known(&input, "status", BROADCAST_STATUSES);
+    let exclude_templates =
+        !repeating && TEMPLATE_BORROWED_STATUSES.contains(&status.as_deref().unwrap_or(""));
+    let list = chatbotx_db::repo::broadcast::BroadcastListInput {
+        workspace_id: ctx.workspace_id,
+        name: input.opt_str("name")?.filter(|n| !n.is_empty()),
+        status,
+        page: input.opt_positive("page")?,
+        per_page: input.opt_positive("perPage")?,
+        sort: input.sort(),
+        channel: None,
+        scheduled_from: None,
+        scheduled_to: None,
+        include_runs: Some(false),
+        exclude_templates: Some(exclude_templates),
+        parent_broadcast_id: None,
+        schedules_type: repeating.then(|| "recurring".to_owned()),
+    };
+    service::list(&ctx.api.db, list).await.map_err(fail)
+}
+
+/// `listBroadcastsForCalendar`: the SPA sends the UTC window it computed
+/// with the builder's `getCalendarQueryRange` (`from` / `to` ISO strings).
+async fn calendar(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    use chatbotx_db::repo::partials::broadcast::BROADCAST_STATUSES;
+    let at = |key: &str| {
+        input
+            .get(key)
+            .filter(|v| v.is_string())
+            .and_then(coerce_date)
+            .ok_or_else(invalid)
+    };
+    let input_ref = In(input);
+    let rows = service::audience::list_for_calendar(
+        &ctx.api.db,
+        service::audience::CalendarInput {
+            workspace_id: ctx.workspace_id,
+            from: at("from")?,
+            to: at("to")?,
+            status: known(&input_ref, "status", BROADCAST_STATUSES),
+            schedules_type: (input_ref.get("kind").and_then(Value::as_str) == Some("repeating"))
+                .then(|| "recurring".to_owned()),
+            name: input_ref.opt_str("name")?,
+        },
+    )
+    .await
+    .map_err(fail)?;
+    Ok(Value::Array(rows))
+}
+
+/// `broadcastService.findDraft`: a `draft` row of the workspace with its
+/// targets, repeat rule and the page of its integration (`null` = none).
+async fn find_draft(ctx: &Ctx<'_>, id: i64) -> Result<Value, OrpcError> {
+    use chatbotx_db::repo::models::{Broadcast, BroadcastRecurrence, BroadcastTarget};
+    use chatbotx_db::repo::{Error, find_many, find_one};
+    use chatbotx_db::rusqlite::OptionalExtension;
+    let ws = ctx.workspace_id;
+    chatbotx_business::tx::read(&ctx.api.db, move |conn| {
+        let Some(row) = find_one::<Broadcast>(
+            conn,
+            r#""id" = ?1 AND "workspaceId" = ?2 AND "status" = 'draft' AND "deletedAt" IS NULL"#,
+            &[&id, &ws],
+        )?
+        else {
+            return Ok(Value::Null);
+        };
+        let targets = find_many::<BroadcastTarget>(conn, r#"WHERE "broadcastId" = ?1"#, &[&id])?;
+        let recurrence = find_one::<BroadcastRecurrence>(conn, r#""broadcastId" = ?1"#, &[&id])?;
+        let inbox_of = |table: &str, integration: Option<i64>| -> Result<Value, Error> {
+            let Some(integration) = integration else {
+                return Ok(Value::Null);
+            };
+            let inbox: Option<i64> = conn
+                .query_row(
+                    &format!(r#"SELECT "inboxId" FROM "{table}" WHERE "id" = ?1"#),
+                    [integration],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(inbox.map_or(Value::Null, |i| json!({ "inboxId": i.to_string() })))
+        };
+        let mut out = row.to_json();
+        out["targets"] = Value::Array(targets.iter().map(|t| t.to_json()).collect());
+        out["recurrence"] = recurrence.map_or(
+            Value::Null,
+            |r| json!({ "rule": r.to_json()["rule"], "occurrenceCount": r.occurrence_count }),
+        );
+        out["integrationWhatsapp"] = inbox_of("IntegrationWhatsapp", row.integration_whatsapp_id)?;
+        out["integrationMessenger"] =
+            inbox_of("IntegrationMessenger", row.integration_messenger_id)?;
+        Ok(out)
+    })
+    .await
+    .map_err(fail)
+}
+
+/// The broadcast page queries ([`QUERIES`]); `[workspaceId, input]`.
+async fn query(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcError> {
+    let input = arg(args, 1);
+    match name {
+        "listBroadcasts" => list_page(ctx, input).await,
+        "listBroadcastsForCalendar" => calendar(ctx, input).await,
+        "findDraftBroadcast" => {
+            let Ok(id) = In(input).id("broadcastId") else {
+                return Ok(Value::Null);
+            };
+            find_draft(ctx, id).await
+        }
+        // `findByIdOrName` of the runs page: only a repeating series
+        // resolves (`null` otherwise, the page's 404).
+        "findRecurringBroadcast" => {
+            let id = In(input).str("broadcastId", false, 1, usize::MAX)?;
+            match service::find_by_id_or_name(&ctx.api.db, ctx.workspace_id, id).await {
+                Ok(found) if !found["recurrence"].is_null() => Ok(found),
+                Ok(_) => Ok(Value::Null),
+                Err(BusinessError::Exception { code, .. }) if code == "notFound" => Ok(Value::Null),
+                Err(error) => Err(fail(error)),
+            }
+        }
+        // `integrationWhatsappService.findByIdForWorkspace(...).inboxId` of
+        // the create page's Ads deep link (`null` = preselect nothing).
+        _ => {
+            let Ok(id) = In(input).id("integrationWhatsappId") else {
+                return Ok(Value::Null);
+            };
+            let ws = ctx.workspace_id;
+            chatbotx_business::tx::read(&ctx.api.db, move |conn| {
+                Ok(
+                    chatbotx_db::repo::integration_whatsapp::find_by_id_for_workspace(
+                        conn, id, ws,
+                    )?
+                    .map_or(Value::Null, |i| Value::String(i.inbox_id.to_string())),
+                )
+            })
+            .await
+            .map_err(fail)
+        }
+    }
+}
 
 const CHANNELS: &[&str] = &[
     "omnichannel",
@@ -203,6 +376,20 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
         "broadcastAPIs.privateListBroadcastRunGroupsAPI" => run_groups(ctx, input).await,
         "broadcastAPIs.privateListBroadcastOccurrencesAPI" => occurrences(ctx, input).await,
         "broadcastAPIs.privateListBroadcastContactsAPI" => contacts(ctx, input).await,
+        // A soft-deleted broadcast's id is dropped (`listExistingIds`).
+        "broadcastAPIs.privateGetBatchBroadcastStatsAPI" => {
+            async {
+                let ids = input_ref.ids("broadcastIds")?;
+                let stats = chatbotx_business::tx::read(db, move |conn| {
+                    let live = service::list_existing_ids(conn, ws, &ids)?;
+                    history::batch_stats(conn, ws, &live)
+                })
+                .await
+                .map_err(fail)?;
+                Ok(Value::Object(stats))
+            }
+            .await
+        }
         "broadcastAPIs.privateListBroadcastOptionsAPI" => {
             async {
                 let channel = input_ref
@@ -242,6 +429,9 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
     let (db, audit, jobs) = (&api.db, &api.audit, api.jobs.as_ref());
     let ws = ctx.workspace_id;
     let can_view = ctx.has("emailAndPhone");
+    if QUERIES.contains(&name) {
+        return Some(query(ctx, name, args).await);
+    }
     Some(
         async {
             match name {

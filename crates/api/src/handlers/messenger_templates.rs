@@ -355,7 +355,7 @@ async fn upload_header_image(
 // --- rows -------------------------------------------------------------------------------
 
 /// `messengerMessageTemplateResource`.
-fn template_json(row: &MessengerMessageTemplate) -> Value {
+pub(crate) fn template_json(row: &MessengerMessageTemplate) -> Value {
     json!({
         "id": row.id.to_string(),
         "name": row.name,
@@ -375,7 +375,7 @@ fn template_where(alias_filter: &str) -> String {
 }
 
 /// `findByIdForWorkspace` with its page.
-async fn find_template(
+pub(crate) async fn find_template(
     db: &Db,
     workspace_id: i64,
     id: i64,
@@ -1100,7 +1100,7 @@ async fn prepare_components_for_clone(components: &Value, auth: &PageAuth) -> Re
 }
 
 /// `cloneMessengerMessageTemplate`.
-async fn clone_template(
+pub(crate) async fn clone_template(
     db: &Db,
     source: &MessengerMessageTemplate,
     targets: Vec<IntegrationMessenger>,

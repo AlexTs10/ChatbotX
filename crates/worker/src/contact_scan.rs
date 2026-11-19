@@ -278,6 +278,17 @@ pub(crate) async fn list_page(
     ctx: &Context,
     cursor: Option<&str>,
 ) -> Result<Page, GraphError> {
+    list_page_with_headers(upstream, ctx, cursor)
+        .await
+        .map(|(page, _)| page)
+}
+
+/// `list_page` with the response headers (the coexist BUC reading).
+pub(crate) async fn list_page_with_headers(
+    upstream: &impl Upstream,
+    ctx: &Context,
+    cursor: Option<&str>,
+) -> Result<(Page, Vec<(String, String)>), GraphError> {
     let mut url = url::Url::parse(&format!(
         "{GRAPH}/{}/{}/conversations",
         ctx.version, ctx.page_id
@@ -294,7 +305,7 @@ pub(crate) async fn list_page(
     if let Some(after) = cursor {
         url.query_pairs_mut().append_pair("after", after);
     }
-    let body = graph_get(upstream, &ctx.token, url.as_str()).await?;
+    let (body, headers) = graph_get_with_headers(upstream, &ctx.token, url.as_str()).await?;
     let mut entries = Vec::new();
     for conv in body["data"].as_array().into_iter().flatten() {
         let participant = conv["participants"]["data"]
@@ -315,7 +326,7 @@ pub(crate) async fn list_page(
         let id = str_of(conv, "id").unwrap_or_default().to_owned();
         entries.push((id, contact, updated));
     }
-    Ok((entries, next_cursor(&body)))
+    Ok(((entries, next_cursor(&body)), headers))
 }
 
 /// `nextCursor`: the `after` cursor only while a `next` page exists.
@@ -326,16 +337,17 @@ pub(crate) fn next_cursor(body: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// A Graph GET with `withInlineRetry` (retryable errors: 1 s, 2 s, 4 s).
-pub(crate) async fn graph_get(
+/// A Graph GET with `withInlineRetry` (retryable errors: 1 s, 2 s, 4 s) and
+/// the response headers of the answer.
+pub(crate) async fn graph_get_with_headers(
     upstream: &impl Upstream,
     token: &str,
     url: &str,
-) -> Result<Value, GraphError> {
+) -> Result<(Value, Vec<(String, String)>), GraphError> {
     let mut attempt = 0;
     let body = loop {
         let reply = upstream
-            .send(UpstreamRequest {
+            .send_with_headers(UpstreamRequest {
                 method: "GET",
                 url: url.to_owned(),
                 headers: vec![("Authorization".into(), format!("Bearer {token}"))],
@@ -343,10 +355,13 @@ pub(crate) async fn graph_get(
             })
             .await;
         let error = match reply {
-            Ok((status, text)) if (200..300).contains(&status) => {
-                break serde_json::from_str::<Value>(&text).unwrap_or(Value::Null);
+            Ok((status, text, headers)) if (200..300).contains(&status) => {
+                break (
+                    serde_json::from_str::<Value>(&text).unwrap_or(Value::Null),
+                    headers,
+                );
             }
-            Ok((status, text)) => {
+            Ok((status, text, _)) => {
                 let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
                 let message = body["error"]["message"]
                     .as_str()

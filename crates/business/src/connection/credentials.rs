@@ -208,9 +208,25 @@ pub struct UpstreamRequest {
 /// The status and body of an answer; `Err` = no answer (network, timeout).
 pub type UpstreamReply = std::result::Result<(u16, String), String>;
 
+/// An answer with its response headers (lower-case names).
+pub type UpstreamHeadersReply = std::result::Result<(u16, String, Vec<(String, String)>), String>;
+
 /// The provider HTTP client (injected; `HttpUpstream` in production).
 pub trait Upstream: Send + Sync {
     fn send(&self, request: UpstreamRequest) -> impl Future<Output = UpstreamReply> + Send;
+
+    /// `send` that also returns the response headers (the Graph usage
+    /// headers); a client without them answers no headers.
+    fn send_with_headers(
+        &self,
+        request: UpstreamRequest,
+    ) -> impl Future<Output = UpstreamHeadersReply> + Send {
+        async move {
+            self.send(request)
+                .await
+                .map(|(status, body)| (status, body, Vec::new()))
+        }
+    }
 }
 
 /// reqwest, 10 s timeout, no retries (`ky` with `retry: 0`).
@@ -232,6 +248,12 @@ fn http_client() -> std::result::Result<&'static reqwest::Client, String> {
 
 impl Upstream for HttpUpstream {
     async fn send(&self, request: UpstreamRequest) -> UpstreamReply {
+        self.send_with_headers(request)
+            .await
+            .map(|(status, body, _)| (status, body))
+    }
+
+    async fn send_with_headers(&self, request: UpstreamRequest) -> UpstreamHeadersReply {
         let client = http_client()?;
         let method =
             reqwest::Method::from_bytes(request.method.as_bytes()).map_err(|e| e.to_string())?;
@@ -251,8 +273,75 @@ impl Upstream for HttpUpstream {
         }
         let response = builder.send().await.map_err(|e| e.to_string())?;
         let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
+            })
+            .collect();
         let body = response.text().await.unwrap_or_default();
-        Ok((status, body))
+        Ok((status, body, headers))
+    }
+}
+
+/// [`HttpUpstream`] for a user-given URL (the ActiveCampaign `apiUrl`): no
+/// automatic redirects, `assertPublicUrl` before every hop (5 hops at most);
+/// the headers (credentials) go only to the first URL's origin.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SafeUpstream;
+
+impl Upstream for SafeUpstream {
+    async fn send(&self, request: UpstreamRequest) -> UpstreamReply {
+        static CLIENT: OnceLock<std::result::Result<reqwest::Client, String>> = OnceLock::new();
+        let client = CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .timeout(Duration::from_secs(10))
+                    .build()
+                    .map_err(|e| e.to_string())
+            })
+            .as_ref()
+            .map_err(Clone::clone)?;
+        let origin = |url: &str| url::Url::parse(url).ok().map(|u| u.origin());
+        let first_origin = origin(&request.url);
+        let (mut url, mut method, mut body) = (request.url.clone(), request.method, request.body);
+        for _ in 0..=5 {
+            crate::net::ssrf_guard::assert_public_url(&url, "Integration URL").await?;
+            let verb = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
+            let mut builder = client.request(verb, &url);
+            if origin(&url) == first_origin {
+                for (name, value) in &request.headers {
+                    builder = builder.header(name, value);
+                }
+            }
+            if let Some(body) = &body {
+                builder = builder
+                    .header("content-type", "application/json")
+                    .body(body.clone());
+            }
+            let response = builder.send().await.map_err(|e| e.to_string())?;
+            let status = response.status().as_u16();
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|l| l.to_str().ok())
+                .map(str::to_owned);
+            if let (true, Some(location)) = ((300..400).contains(&status), location) {
+                url = url::Url::parse(&url)
+                    .and_then(|base| base.join(&location))
+                    .map_err(|e| e.to_string())?
+                    .to_string();
+                if matches!(status, 301..=303) {
+                    method = "GET";
+                    body = None;
+                }
+                continue;
+            }
+            return Ok((status, response.text().await.unwrap_or_default()));
+        }
+        Err("Too many redirects".into())
     }
 }
 
