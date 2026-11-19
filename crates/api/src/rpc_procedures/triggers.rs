@@ -16,7 +16,54 @@ pub const ACTIONS: &[&str] = &[
     "deleteTriggersAction",
     "updateTriggerAction",
     "updateTriggerSettingsAction",
+    // The list / edit page queries (`features/triggers/queries`).
+    "getTriggers",
+    "triggerEditPage",
 ];
+
+/// The page queries: the pages are `superAdmin` only (`(has-folder)/triggers`
+/// layout, `requireWorkspacePermission` of the edit page): 404 otherwise.
+async fn query(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcError> {
+    if !ctx.has("superAdmin") {
+        return Err(fail(BusinessError::not_found("Page not found")));
+    }
+    let db = &ctx.api.db;
+    let ws = ctx.workspace_id;
+    let input = In(arg(args, 1));
+    if name == "triggerEditPage" {
+        // `findTrigger` + `ecommerceSettingsService.storeSource`; no trigger = `null`.
+        let Ok(id) = input.id("id") else {
+            return Ok(Value::Null);
+        };
+        let Some(found) = service::find(db, ws, id).await.map_err(fail)? else {
+            return Ok(Value::Null);
+        };
+        let store_source = chatbotx_business::tx::read(db, move |conn| {
+            chatbotx_business::store_source::resolve_store_source(conn, ws)
+        })
+        .await
+        .map_err(fail)?;
+        return Ok(json!({
+            "trigger": service::trigger_json(&found),
+            "storeSource": store_source,
+        }));
+    }
+    // `getTriggers`: `folderId` null = the top level (no folder).
+    let (data, page_count) = service::list(
+        db,
+        ws,
+        Some(input.opt_id("folderId")?),
+        input.opt_str("name")?.filter(|n| !n.is_empty()),
+        input.opt_positive("page")?.unwrap_or(1),
+        input.opt_positive("perPage")?.unwrap_or(10),
+    )
+    .await
+    .map_err(fail)?;
+    Ok(super::page(
+        data.iter().map(service::trigger_json),
+        page_count,
+    ))
+}
 
 /// A `zodBigintAsString` bind arg.
 fn bound_id(value: &Value) -> Result<i64, OrpcError> {
@@ -60,6 +107,9 @@ fn object(value: &Value) -> Result<Input, OrpcError> {
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
     if !ACTIONS.contains(&name) {
         return None;
+    }
+    if matches!(name, "getTriggers" | "triggerEditPage") {
+        return Some(query(ctx, name, args).await);
     }
     let db = &ctx.api.db;
     let ws = ctx.workspace_id;
