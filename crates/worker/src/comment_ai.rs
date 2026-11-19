@@ -456,7 +456,7 @@ pub(super) async fn record_and_enqueue_moderation(
     let add = |job: Value, options: JobOptions| async move {
         let name = str_of(&job, "type").unwrap_or("").to_owned();
         deps.jobs
-            .add(QueueName::Chat, &name, job, options)
+            .add(QueueName::Chat, &name, job, with_replay_priority(options))
             .await
             .map(|_| ())
             .map_err(db_fail)
@@ -612,11 +612,11 @@ impl ReplyTo<'_> {
                 "message": row,
             },
         });
-        let options = JobOptions {
+        let options = with_replay_priority(JobOptions {
             delay_ms: Some(delay),
             attempts,
             ..JobOptions::default()
-        };
+        });
         Ok(self
             .deps
             .jobs
@@ -637,6 +637,59 @@ struct EventKey {
     automation_id: i64,
     comment_id: String,
     channel: String,
+}
+
+/// `countsTowardStats`: a private reply always moves the counters; a public
+/// one only where the channel has no comment-anchored DM (Threads). The
+/// event row is written either way; a gone automation counts nothing public.
+pub(crate) fn counts_toward_stats(
+    conn: &chatbotx_db::rusqlite::Connection,
+    automation_id: i64,
+    channel: &str,
+) -> chatbotx_db::rusqlite::Result<bool> {
+    if channel == "private" {
+        return Ok(true);
+    }
+    let channel_type: Option<String> = conn
+        .query_row(
+            r#"SELECT "type" FROM "CommentAutomation" WHERE "id" = ?1"#,
+            [automation_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(channel_type.is_some_and(|t| !supports_private_reply(&t)))
+}
+
+/// `readCommentAutomationAnchor`: the event a comment-automation reply
+/// message names (`commentAutomation` + `replyToCommentId`), if any.
+fn anchor_key(attributes: Option<&Value>) -> Option<EventKey> {
+    let attributes = attributes?;
+    let anchor = attributes.get("commentAutomation")?;
+    let comment_id = attributes.get("replyToCommentId")?.as_str()?;
+    let channel = anchor.get("replyChannel")?.as_str()?;
+    if !matches!(channel, "public" | "private") {
+        return None;
+    }
+    Some(EventKey {
+        automation_id: id_of(anchor.get("automationId")?)?,
+        comment_id: comment_id.to_owned(),
+        channel: channel.to_owned(),
+    })
+}
+
+/// `settleCommentAutomationDelivered`: the channel accepted the reply.
+pub(crate) async fn settle_anchor_delivered(deps: &Deps, attributes: Option<&Value>) {
+    if let Some(key) = anchor_key(attributes) {
+        mark_delivered(deps, &key).await;
+    }
+}
+
+/// `settleCommentAutomationFailure`: a terminal send failure flips the
+/// optimistic `sent` row to `failed` (the reply text stays).
+pub(crate) async fn settle_anchor_failed(deps: &Deps, attributes: Option<&Value>, detail: &str) {
+    if let Some(key) = anchor_key(attributes) {
+        settle_event(deps, &key, "failed", None, Some(detail.to_owned())).await;
+    }
 }
 
 impl EventKey {
@@ -697,7 +750,7 @@ async fn settle_event(
                     channel
                 ],
             )?;
-            if changed > 0 && status == "failed" {
+            if changed > 0 && status == "failed" && counts_toward_stats(tx, automation_id, &channel)? {
                 tx.execute(
                     r#"UPDATE "CommentAutomation" SET "failedCount" = "failedCount" + 1 WHERE "id" = ?1"#,
                     [automation_id],
@@ -743,6 +796,9 @@ async fn discard_event(deps: &Deps, key: &EventKey) {
             let Some((status, delivered, seen, clicked, failed)) = deleted else {
                 return Ok(());
             };
+            if !counts_toward_stats(tx, automation_id, &channel)? {
+                return Ok(());
+            }
             tx.execute(
                 r#"UPDATE "CommentAutomation" SET "sentCount" = "sentCount" - 1,
                        "deliveredCount" = "deliveredCount" - ?2, "seenCount" = "seenCount" - ?3,
@@ -793,6 +849,9 @@ async fn mark_delivered(deps: &Deps, key: &EventKey) {
                        "status" = 'sent', "updatedAt" = ?2 WHERE "id" = ?1"#,
                 params![id, now],
             )?;
+            if !counts_toward_stats(tx, automation_id, &channel)? {
+                return Ok(());
+            }
             tx.execute(
                 r#"UPDATE "CommentAutomation" SET "deliveredCount" = "deliveredCount" + 1,
                        "failedCount" = "failedCount" - ?2 WHERE "id" = ?1"#,
@@ -884,10 +943,10 @@ impl<U: Upstream> Run<'_, U> {
                 QueueName::AiAgent,
                 COMMENT_MODERATION,
                 json!({ "type": COMMENT_MODERATION, "data": data }),
-                JobOptions {
+                with_replay_priority(JobOptions {
                     job_id: Some(job_id),
                     ..JobOptions::default()
-                },
+                }),
             )
             .await;
         match queued {
@@ -942,7 +1001,7 @@ impl<U: Upstream> Run<'_, U> {
                 QueueName::AiAgent,
                 COMMENT_AI_REPLY,
                 json!({ "type": COMMENT_AI_REPLY, "data": data }),
-                JobOptions {
+                with_replay_priority(JobOptions {
                     delay_ms: Some(delay),
                     job_id: Some(format!(
                         "comment-ai-reply-{}-{}-{channel}",
@@ -950,7 +1009,7 @@ impl<U: Upstream> Run<'_, U> {
                     )),
                     attempts,
                     ..JobOptions::default()
-                },
+                }),
             )
             .await;
         if let Err(err) = queued {
@@ -984,10 +1043,10 @@ async fn resume(
             QueueName::Integration,
             PROCESS_COMMENT_AUTOMATION,
             json!({ "type": PROCESS_COMMENT_AUTOMATION, "data": payload }),
-            JobOptions {
+            with_replay_priority(JobOptions {
                 job_id: Some(job_id),
                 ..JobOptions::default()
-            },
+            }),
         )
         .await
         .map(|_| ())
@@ -1202,7 +1261,8 @@ pub async fn comment_ai_reply(deps: &Deps, job: &JobCtx) -> Result<(), JobError>
     {
         settle_event(deps, &key, "failed", generated, Some(err.to_string())).await;
     }
-    result
+    // The AI queue's `runWithOrphanedIntegrationCleanup`.
+    complete_orphaned(deps, COMMENT_AI_REPLY, false, result).await
 }
 
 /// `generateAndDeliverAIReply`.
