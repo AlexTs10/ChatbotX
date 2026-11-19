@@ -243,6 +243,7 @@ async fn profiles_reject_a_model_outside_the_connection_catalog() {
 
     let mut extra = form(&conn);
     extra["unknown"] = json!(1);
+    // `.strict()`: an unknown key is the 422 `invalidRequestData` here.
     let (status, _) = call(&f, "decisionProfiles.create", WS, &[], None, Some(extra)).await;
-    assert_eq!(status, 400);
+    assert_eq!(status, 422);
 }

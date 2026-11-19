@@ -36,9 +36,17 @@ async fn link(f: &Fixture, webchat_id: &str, website: &str) -> (u16, Value) {
     call(f, "botSimulator.getLink", WS, &[], Some(&query), None).await
 }
 
-fn rejected_on(out: &(u16, Value), field: &str) {
-    assert!(out.0 >= 400, "{}", out.1);
-    assert!(out.1.to_string().contains(field), "{}", out.1);
+/// The `/v1` body has no `field`: the 422 `validation` message names it.
+fn rejected_on(out: &(u16, Value), subject: &str) {
+    assert_eq!(out.0, 422, "{}", out.1);
+    assert_eq!(out.1["code"], "validation");
+    assert!(
+        out.1["message"]
+            .as_str()
+            .is_some_and(|m| m.starts_with(subject)),
+        "{}",
+        out.1
+    );
 }
 
 #[tokio::test]
@@ -71,7 +79,7 @@ async fn rejects_a_non_http_website_before_any_lookup() {
     let f = fixture().await;
     for website in ["javascript:alert(1)", "not a url", ""] {
         // An unknown webchat id: the website check comes first.
-        rejected_on(&link(&f, "999", website).await, "websiteUrl");
+        rejected_on(&link(&f, "999", website).await, "Website");
     }
 }
 
@@ -79,14 +87,14 @@ async fn rejects_a_non_http_website_before_any_lookup() {
 async fn rejects_a_disabled_webchat() {
     let f = fixture().await;
     let id = webchat(&f, WS, &[], false).await;
-    rejected_on(&link(&f, &id, "https://example.com").await, "webchatId");
+    rejected_on(&link(&f, &id, "https://example.com").await, "Webchat");
 }
 
 #[tokio::test]
 async fn rejects_a_website_outside_the_allowed_domains() {
     let f = fixture().await;
     let id = webchat(&f, WS, &["other.test"], true).await;
-    rejected_on(&link(&f, &id, "https://example.com").await, "websiteUrl");
+    rejected_on(&link(&f, &id, "https://example.com").await, "Website");
 }
 
 #[tokio::test]
