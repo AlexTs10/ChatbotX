@@ -48,9 +48,24 @@ pub fn send_delay_ms(received_at: i64, now: i64) -> i64 {
 
 /// `isConversionExpired` (advisory; Google stays authoritative).
 pub fn is_expired(event: &Event, now: i64) -> bool {
-    let lookback = event.lookback_window_days.unwrap_or(MAX_CLICK_AGE_DAYS) * DAY_MS;
-    now - event.google_click_received_at > MAX_CLICK_AGE_DAYS * DAY_MS
-        || event.occurred_at - event.google_click_received_at > lookback
+    is_conversion_expired(
+        event.occurred_at,
+        event.google_click_received_at,
+        event.lookback_window_days,
+        now,
+    )
+}
+
+/// `isConversionExpired`: A = the click is over 90 days old at delivery;
+/// B = the conversion is later than the lookback (`None` = 90 days) after it.
+pub fn is_conversion_expired(
+    occurred_at: i64,
+    received_at: i64,
+    lookback_window_days: Option<i64>,
+    now: i64,
+) -> bool {
+    let lookback = lookback_window_days.unwrap_or(MAX_CLICK_AGE_DAYS) * DAY_MS;
+    now - received_at > MAX_CLICK_AGE_DAYS * DAY_MS || occurred_at - received_at > lookback
 }
 
 // ---- transaction-id.ts / send-queue.ts --------------------------------------------
@@ -80,7 +95,11 @@ pub fn send_job_id(event_id: i64, attempt: i64) -> String {
 }
 
 /// `enqueueSend`. `created == false` = a job with this id is still kept.
-async fn enqueue_send(jobs: &dyn Enqueuer, event: &Event, delay_ms: i64) -> Result<bool> {
+pub(crate) async fn enqueue_send(
+    jobs: &dyn Enqueuer,
+    event: &Event,
+    delay_ms: i64,
+) -> Result<bool> {
     let added = enqueue_integration_job(
         jobs,
         IntegrationJob {
@@ -622,6 +641,8 @@ struct Conversion<'a> {
     login_account: String,
     consent: (Option<String>, Option<String>),
     customer_properties: Option<Value>,
+    /// `{ emailAddress?, phoneNumber? }` SHA-256 hex digests.
+    identifiers: Option<Value>,
 }
 
 fn invalid_id(label: &str) -> Failure {
@@ -700,10 +721,20 @@ async fn ingest_data_manager(
     if !consent.is_empty() {
         event["consent"] = Value::Object(consent);
     }
+    if let Some(identifiers) = &c.identifiers {
+        let list: Vec<Value> = ["emailAddress", "phoneNumber"]
+            .iter()
+            .filter_map(|key| identifiers.get(*key).map(|v| json!({ *key: v })))
+            .collect();
+        if !list.is_empty() {
+            event["userData"] = json!({ "userIdentifiers": list });
+        }
+    }
     if let Some(properties) = &c.customer_properties {
         event["userProperties"] = properties.clone();
     }
-    let body = json!({
+    let user_data = event.get("userData").is_some();
+    let mut body = json!({
         "destinations": [{
             "loginAccount": account(&c.login_account, "login customer id")?,
             "operatingAccount": account(&e.conversion_customer_id, "operating customer id")?,
@@ -711,6 +742,10 @@ async fn ingest_data_manager(
         }],
         "events": [event],
     });
+    // Required by Google whenever userData is sent; the digests are hex.
+    if user_data {
+        body["encoding"] = json!("HEX");
+    }
     let reply = up
         .send(crate::connection::credentials::UpstreamRequest {
             method: "POST",
@@ -935,7 +970,7 @@ async fn upload_legacy(
 
 // ---- delivery.ts --------------------------------------------------------------
 
-/// `DeliverInput` (the matching resolver is not ported: see [`deliver`]).
+/// `DeliverInput`.
 #[derive(Debug, Clone, Copy)]
 pub struct DeliverInput {
     pub event_id: i64,
@@ -954,12 +989,126 @@ pub struct DeliverDeps<'a, U: Upstream> {
     pub events: Option<&'a EventBuses>,
     /// For the platform credential (the optional developer token).
     pub app_url: &'a str,
+    /// `resolveTemplates` of customer matching; `None` = click only.
+    pub matching: Option<&'a dyn MatchingResolver>,
 }
 
-struct Lease {
-    id: i64,
-    workspace_id: i64,
-    claim_token: String,
+/// `MatchingTemplateResolver`: the step's e-mail / phone `{{variable}}`s for
+/// the event's contact inbox. `None` = the inbox is gone.
+pub trait MatchingResolver: Send + Sync {
+    fn resolve<'a>(
+        &'a self,
+        workspace_id: i64,
+        contact_inbox_id: i64,
+        email: Option<String>,
+        phone: Option<String>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Option<(Option<String>, Option<String>)>> + Send + 'a>,
+    >;
+}
+
+/// `normalizeEmail`: lower-case, no whitespace; Gmail local parts lose dots
+/// and `+tags`.
+pub fn normalize_email(raw: &str) -> Option<String> {
+    let lowered: String = raw
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_lowercase();
+    let mut parts = lowered.split('@');
+    let (Some(local), Some(domain), None) = (parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    let local = if domain == "gmail.com" || domain == "googlemail.com" {
+        local
+            .replace('.', "")
+            .split('+')
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    } else {
+        local.to_string()
+    };
+    if local.is_empty() || domain.is_empty() {
+        return None;
+    }
+    // `PLAIN_ADDRESS`: `^[^\s@]+@[^\s@]+\.[^\s@]+$`.
+    let dotted = domain
+        .char_indices()
+        .any(|(i, c)| c == '.' && i > 0 && i + 1 < domain.len());
+    dotted.then(|| format!("{local}@{domain}"))
+}
+
+fn parse_e164(text: &str) -> Option<String> {
+    // `{ extract: false }`: the whole text is the number, never one found in
+    // prose. An extension (`ext.`, `x`) is refused anyway.
+    if !text
+        .chars()
+        .all(|c| c.is_ascii_digit() || c.is_whitespace() || "+()-./".contains(c))
+    {
+        return None;
+    }
+    let parsed = phonenumber::parse(None, text).ok()?;
+    (parsed.is_valid() && parsed.extension().is_none())
+        .then(|| parsed.format().mode(phonenumber::Mode::E164).to_string())
+}
+
+/// `normalizePhone`: an E.164 number, also from bare international digits.
+pub fn normalize_phone(raw: &str) -> Option<String> {
+    let text = raw.trim();
+    parse_e164(text).or_else(|| {
+        let digits = text.len() >= 8
+            && text.len() <= 15
+            && !text.starts_with('0')
+            && text.bytes().all(|b| b.is_ascii_digit());
+        digits.then(|| parse_e164(&format!("+{text}"))).flatten()
+    })
+}
+
+/// `hashMatchingIdentifiers`: `None` when nothing normalizes.
+pub fn hash_matching_identifiers(email: Option<&str>, phone: Option<&str>) -> Option<Value> {
+    let mut out = serde_json::Map::new();
+    if let Some(email) = email.and_then(normalize_email) {
+        out.insert(
+            "emailAddress".into(),
+            json!(chatbotx_core::utils::crypto::sha256_hex(&email)),
+        );
+    }
+    if let Some(phone) = phone.and_then(normalize_phone) {
+        out.insert(
+            "phoneNumber".into(),
+            json!(chatbotx_core::utils::crypto::sha256_hex(&phone)),
+        );
+    }
+    (!out.is_empty()).then_some(Value::Object(out))
+}
+
+/// `loadMatchingIdentifiers`: only an `enabled` snapshot with an inbox.
+async fn load_matching_identifiers<U: Upstream>(
+    deps: &DeliverDeps<'_, U>,
+    event: &Event,
+    matching: &Value,
+) -> Option<Value> {
+    if matching["status"] != "enabled" {
+        return None;
+    }
+    let (resolver, inbox) = (deps.matching?, event.contact_inbox_id?);
+    let template = |key: &str| matching[key].as_str().map(str::to_string);
+    let (email, phone) = resolver
+        .resolve(
+            event.workspace_id,
+            inbox,
+            template("email"),
+            template("phone"),
+        )
+        .await?;
+    hash_matching_identifiers(email.as_deref(), phone.as_deref())
+}
+
+pub(crate) struct Lease {
+    pub(crate) id: i64,
+    pub(crate) workspace_id: i64,
+    pub(crate) claim_token: String,
 }
 
 fn lost(event: &Event, action: &str) {
@@ -986,7 +1135,7 @@ async fn write_finish(db: &Db, input: FinishSendingInput) -> Result<Option<Event
 }
 
 /// `failDelivery`.
-async fn fail<U: Upstream>(
+pub(crate) async fn fail<U: Upstream>(
     deps: &DeliverDeps<'_, U>,
     event: &Event,
     lease: &Lease,
@@ -1146,18 +1295,10 @@ async fn send<U: Upstream>(
             return Ok(fail(deps, event, lease, &failure, false).await);
         }
     };
-    // ponytail: customer matching (hashed e-mail / phone from the step's
-    // `{{variable}}`s) is not sent yet: every conversion goes by click only.
-    if options
-        .as_ref()
-        .is_some_and(|o| o["matching"]["status"] == "enabled")
-    {
-        tracing::info!(
-            event_id = event.id,
-            workspace_id = event.workspace_id,
-            "google ads: customer matching is not ported, sent by click only"
-        );
-    }
+    let identifiers = match options.as_ref().map(|o| &o["matching"]) {
+        Some(matching) => load_matching_identifiers(deps, event, matching).await,
+        None => None,
+    };
     let stamped = event
         .processing_detail
         .as_ref()
@@ -1213,6 +1354,7 @@ async fn send<U: Upstream>(
         ),
         consent,
         customer_properties,
+        identifiers,
     };
     // `buildActionContext` + one forced refresh after a 401.
     let mut outcome = Err(Failure::Auth);
@@ -1528,5 +1670,38 @@ mod tests {
             Ok((Some("NEW".into()), None))
         );
         assert!(parse_customer_properties(Some("vip"), None).is_err());
+    }
+
+    /// Port of `google-ads-customer-properties.test.ts`
+    /// (`parseCustomerProperties`, `buildCustomerPropertiesSnapshot` status).
+    #[test]
+    fn customer_properties_parse_and_snapshot_status() {
+        assert_eq!(parse_customer_properties(None, None), Ok((None, None)));
+        assert_eq!(
+            parse_customer_properties(Some("  "), Some("{{contact.tier}}")),
+            Ok((None, None))
+        );
+        assert_eq!(
+            parse_customer_properties(Some(" returning "), Some("High")),
+            Ok((Some("RETURNING".into()), Some("HIGH".into())))
+        );
+        for (kind, bucket) in [
+            (Some("VIP"), None),
+            (Some("REENGAGED"), None),
+            (None, Some("GOLD")),
+            (Some("NEW"), Some("5")),
+        ] {
+            assert!(parse_customer_properties(kind, bucket).is_err());
+        }
+        assert_eq!(enrichment_status("dataManager", Some("granted")), "enabled");
+        assert_eq!(
+            enrichment_status("dataManager", Some("denied")),
+            "withheldConsent"
+        );
+        assert_eq!(enrichment_status("dataManager", None), "withheldConsent");
+        assert_eq!(
+            enrichment_status("legacy", Some("granted")),
+            "unsupportedTransport"
+        );
     }
 }

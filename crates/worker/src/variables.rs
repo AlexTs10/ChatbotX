@@ -797,6 +797,33 @@ impl VariableDeps {
         .await
     }
 
+    /// `resolveContactVariablesDeep(contactId, value, { contactInbox })`:
+    /// contact data only, no conversation (Google Ads customer matching).
+    pub async fn resolve_contact(
+        &self,
+        contact_inbox: &ContactInbox,
+        value: &Value,
+    ) -> Result<Value, String> {
+        use chatbotx_core::variables::Variables;
+        use chatbotx_core::variables::contact_variable::ContactInboxArg;
+        use chatbotx_core::variables::deep_replace::{DeepOptions, DeepSource};
+        let clock = chatbotx_kv::SystemClock;
+        Variables::new(&self.sources, &self.cache, &self.encryption, &clock)
+            .resolve_contact_variables_deep(
+                &contact_inbox.contact_id.to_string(),
+                value,
+                DeepSource {
+                    contact_inbox: ContactInboxArg::Model(contact_inbox_model(
+                        contact_inbox.clone(),
+                    )),
+                    ..DeepSource::default()
+                },
+                DeepOptions::default(),
+            )
+            .await
+            .map_err(|err| err.to_string())
+    }
+
     /// `resolveContactVariablesDeep` with the spintax option.
     pub async fn resolve(
         &self,

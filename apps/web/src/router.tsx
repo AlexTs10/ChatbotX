@@ -26,6 +26,7 @@ const dashboard = () => import("@/routes/dashboard")
 const ecommerce = () => import("@/routes/ecommerce")
 const tools = () => import("@/routes/tools")
 const toolEditors = () => import("@/routes/tool-editors")
+const ads = () => import("@/routes/ads")
 const comments = () => import("@/routes/comments")
 const appointments = () => import("@/routes/appointments")
 const booking = () => import("@/routes/booking")
@@ -240,14 +241,12 @@ const dashboardRoute = createRoute({
   path: "dashboard",
   component: lazyRouteComponent(dashboard, "DashboardLayout"),
 })
-const dashboardRoutes = dashboardRoute.addChildren(
-  (
+const dashboardRoutes = dashboardRoute.addChildren([
+  ...(
     [
       ["/", "DashboardIndexPage"],
       ["contacts", "DashboardContactsPage"],
       ["conversations", "DashboardConversationsPage"],
-      ["ads", "DashboardAdsPage"],
-      ["ads/$channel", "DashboardAdsPage"],
     ] as const
   ).map(([path, page]) =>
     createRoute({
@@ -256,6 +255,44 @@ const dashboardRoutes = dashboardRoute.addChildren(
       component: lazyRouteComponent(dashboard, page),
     }),
   ),
+  ...(
+    [
+      ["ads", "DashboardAdsRedirectPage"],
+      ["ads/google", "DashboardGoogleAdsPage"],
+      ["ads/conversion-events", "DashboardConversionEventsPage"],
+      ["ads/$channel", "DashboardAdsChannelPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => dashboardRoute,
+      path,
+      component: lazyRouteComponent(ads, page),
+    }),
+  ),
+])
+
+// The ads tools and old ads bookmarks (routes/ads.tsx).
+const adsPages = (
+  [
+    ["ads", "AdsPage"],
+    ["ads/analytics", "AdsAnalyticsRedirectPage"],
+    ["ads/connect-accounts", "AdsAnalyticsRedirectPage"],
+    ["ads/conversion-events", "AdsConversionEventsRedirectPage"],
+    ["messaging-ads", "MessagingAdsRedirectPage"],
+    ["messaging-ads/$channel", "MessagingAdsChannelPage"],
+    ["fb-lead-ads", "FbLeadAdsPage"],
+    ["fb-lead-ads/create", "CreateFbLeadAdPage"],
+    ["fb-lead-ads/$id", "EditFbLeadAdPage"],
+    ["fb-marketing-messages", "FbMarketingMessagesPage"],
+    ["fb-marketing-messages/create", "CreateFbMarketingMessagePage"],
+    ["fb-marketing-messages/$id", "EditFbMarketingMessagePage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(ads, page),
+  }),
 )
 
 // `(e-commerce)`: a pathless layout (ecommerce permission, tabs, shop link);
@@ -687,6 +724,7 @@ const routeTree = rootRoute.addChildren([
       ...toolEditorPages,
       ...miniAppPages,
       ...commentListRoutes,
+      ...adsPages,
       ...commentPages,
       pipelinesRoutes,
       appointmentCalendarsRoutes,

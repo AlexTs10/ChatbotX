@@ -2,16 +2,11 @@
 // page: app/space/[workspaceId]/dashboard/page.tsx
 // page: app/space/[workspaceId]/dashboard/contacts/page.tsx
 // page: app/space/[workspaceId]/dashboard/conversations/page.tsx
-// page: app/space/[workspaceId]/dashboard/ads/page.tsx
-// page: app/space/[workspaceId]/dashboard/ads/[channel]/page.tsx
-// page: app/space/[workspaceId]/dashboard/ads/google/page.tsx
-// page: app/space/[workspaceId]/dashboard/ads/conversion-events/page.tsx
 // The layout's `analytics` permission check (404) and its inbox cards. The
 // server data (`listInboxes`, `listAnalyticsFilterOptions`,
 // `resolveAdsDashboardChannels`) comes from the one connected-inbox list
 // (`inboxesAPI.listAllInboxesAuthenticatedAPI`), filtered as the builder
-// queries filter it. Google Ads has no Rust domain: its nav entry stays off.
-// `dashboard/ads/*` (ads domain, Q.D7) shows the not-available state.
+// queries filter it. `dashboard/ads/*` lives in routes/ads.tsx.
 import { ContactsDashboard } from "@chatbotx.io/analytics-nextjs/components/contacts-dashboard"
 import { ConversationsDashboard } from "@chatbotx.io/analytics-nextjs/components/conversations-dashboard"
 import {
@@ -27,7 +22,8 @@ import { InboxCardList } from "@/features/inboxes/components/inbox-card-list"
 import { hasWorkspacePermission } from "@/lib/auth/permission-routes"
 import { client } from "@/lib/orpc/orpc"
 import { orpc } from "@/lib/orpc/query"
-import { NotAvailablePage, NotFoundPage } from "@/routes/root"
+import { serverQuery } from "@/lib/server-action"
+import { NotFoundPage } from "@/routes/root"
 import { useWorkspacePage } from "@/routes/workspace"
 import { Redirect } from "@/shims/redirect"
 
@@ -92,12 +88,35 @@ export function DashboardIndexPage() {
   return <Redirect href={`/space/${workspaceId}/dashboard/contacts`} />
 }
 
+/** `AnalyticsNav` with `resolveAdsDashboardChannels` and
+ * `resolveGoogleAdsDashboardEntry` (both super admin only). */
+export function useAdsNav() {
+  const workspaceId = useWorkspaceId()
+  const { permissions } = useWorkspacePage()
+  const inboxes = useDashboardInboxes()
+  const isSuperAdmin = hasWorkspacePermission(permissions, "superAdmin")
+  const adsChannels = isSuperAdmin
+    ? adsEligibleChannelTypes.options.filter((channel) =>
+        inboxes.some((inbox) => inbox.channel === channel),
+      )
+    : []
+  const { data: showGoogleAds } = useSuspenseQuery({
+    queryKey: ["spa", "resolveGoogleAdsDashboardEntry", workspaceId],
+    queryFn: () =>
+      isSuperAdmin
+        ? serverQuery<boolean>("resolveGoogleAdsDashboardEntry", workspaceId, [
+            workspaceId,
+          ]).catch(() => false)
+        : false,
+  })
+  return <AnalyticsNav adsChannels={adsChannels} showGoogleAds={showGoogleAds} />
+}
+
 /** The props both dashboards share (`contacts/page.tsx`, `conversations/page.tsx`). */
 function useDashboardProps() {
   const workspaceId = useWorkspaceId()
-  const { permissions, allWorkspaces } = useWorkspacePage()
+  const { allWorkspaces } = useWorkspacePage()
   const inboxes = useDashboardInboxes()
-  const isSuperAdmin = hasWorkspacePermission(permissions, "superAdmin")
   // `listAnalyticsFilterOptions`: known channels, by name.
   const filterInboxes = inboxes
     .flatMap((inbox) => {
@@ -107,12 +126,7 @@ function useDashboardProps() {
         : []
     })
     .sort((a, b) => a.name.localeCompare(b.name))
-  // `resolveAdsDashboardChannels`: super admins, connected eligible channels.
-  const adsChannels = isSuperAdmin
-    ? adsEligibleChannelTypes.options.filter((channel) =>
-        inboxes.some((inbox) => inbox.channel === channel),
-      )
-    : []
+  const nav = useAdsNav()
   const workspace = allWorkspaces.find((item) => item.id === workspaceId) as
     | { createdAt?: string }
     | undefined
@@ -123,7 +137,7 @@ function useDashboardProps() {
       workspaceId,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     },
-    nav: <AnalyticsNav adsChannels={adsChannels} showGoogleAds={false} />,
+    nav,
     workspaceCreatedAt: workspace?.createdAt
       ? new Date(workspace.createdAt)
       : undefined,
@@ -139,15 +153,5 @@ export function DashboardConversationsPage() {
     <div className="flex flex-col gap-4">
       <ConversationsDashboard {...useDashboardProps()} />
     </div>
-  )
-}
-
-/** `dashboard/ads/*`: the ads domain is not in the Rust server yet (Q.D7). */
-export function DashboardAdsPage() {
-  return (
-    <NotAvailablePage
-      detail="Ads analytics is not available yet in this version."
-      title="Ads"
-    />
   )
 }

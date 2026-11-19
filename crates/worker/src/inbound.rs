@@ -170,9 +170,8 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         }
     }
     // ponytail: the Zalo / Telegram tap label (`resolvePostbackButtonLabel`,
-    // `resolveStepInputSkipLabel`), profile lookups, Google click and
-    // thread-control recording are not ported: they need the channel
-    // profile fetcher / ads units.
+    // `resolveStepInputSkipLabel`), profile lookups and thread-control
+    // recording are not ported: they need the channel profile fetcher.
     // A cart or product question is named before the save, so the stored
     // message already carries it.
     crate::inbound_cart::enrich(deps, &inbox, &mut received).await;
@@ -212,6 +211,17 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         })
         .await
         .map_err(db_fail)?;
+    // `lookupAndPersistGoogleClick` (gated, best effort, saved by itself).
+    // Rust reads no profile when it creates a contact, so a new contact's
+    // click is looked up here too (`persistNewContactGoogleClick`).
+    if received
+        .message
+        .as_ref()
+        .is_some_and(is_inbound_conversation_message)
+    {
+        crate::google_click_lookup::lookup_and_persist(deps, inbox.workspace_id, &contact_inbox)
+            .await;
+    }
 
     let mut message = None;
     let mut message_id = None;

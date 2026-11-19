@@ -10,7 +10,7 @@ use chatbotx_business::connection::credentials::{Upstream, UpstreamReply, Upstre
 use chatbotx_business::email_marketing::seal_auth;
 use chatbotx_business::google_ads_api::{ADS_SCOPE, DATA_MANAGER_SCOPE};
 use chatbotx_business::google_ads_conversion::{
-    DeliverDeps, DeliverInput, RecordInput, Recorded, deliver, record,
+    DeliverDeps, DeliverInput, MatchingResolver, RecordInput, Recorded, deliver, record,
 };
 use chatbotx_db::repo::{iso, now_ms};
 use chatbotx_db::rusqlite::params;
@@ -172,6 +172,7 @@ async fn records_a_conversion_once_and_delivers_it_to_data_manager() {
         jobs: &queue,
         events: None,
         app_url: "https://app.test",
+        matching: None,
     };
     let run = DeliverInput {
         event_id: event.id,
@@ -218,4 +219,447 @@ async fn records_a_conversion_once_and_delivers_it_to_data_manager() {
     assert_eq!(status, "sent");
     assert_eq!(request.as_deref(), Some("req-1"));
     assert_eq!(processing.as_deref(), Some("processing"));
+}
+
+/// The step's templates resolve to raw contact values.
+struct Contact;
+
+impl MatchingResolver for Contact {
+    fn resolve<'a>(
+        &'a self,
+        _: i64,
+        contact_inbox_id: i64,
+        email: Option<String>,
+        phone: Option<String>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Option<(Option<String>, Option<String>)>> + Send + 'a>,
+    > {
+        assert_eq!(contact_inbox_id, 5001);
+        assert_eq!(email.as_deref(), Some("{{contact.email}}"));
+        assert_eq!(phone.as_deref(), Some("{{contact.phone}}"));
+        Box::pin(async {
+            Some((
+                Some(" John.Doe+ads@GMail.com ".to_string()),
+                Some("14155552671".to_string()),
+            ))
+        })
+    }
+}
+
+#[tokio::test]
+async fn customer_matching_sends_hashed_identifiers_when_consent_is_granted() {
+    let db = two_workspaces().await;
+    seed(&db).await;
+    let queue = Queue::default();
+    let mut with_matching = input("55");
+    with_matching.match_email = Some("{{contact.email}}".into());
+    with_matching.match_phone = Some(" {{contact.phone}} ".into());
+    let Recorded::Queued(event) = record(&db, &queue, with_matching).await.expect("record") else {
+        panic!("not queued");
+    };
+    let options = &event.options.as_ref().expect("options").0;
+    assert_eq!(options["version"], 2);
+    assert_eq!(options["matching"]["status"], "enabled");
+
+    let script = Script::default();
+    script
+        .replies
+        .lock()
+        .expect("lock")
+        .push(Ok((200, json!({ "requestId": "req-2" }).to_string())));
+    let deps = DeliverDeps {
+        db: &db,
+        up: &script,
+        jobs: &queue,
+        events: None,
+        app_url: "https://app.test",
+        matching: Some(&Contact),
+    };
+    let run = DeliverInput {
+        event_id: event.id,
+        workspace_id: WS,
+        attempt: 0,
+        is_last_in_job_attempt: false,
+    };
+    deliver(&deps, run).await.expect("deliver");
+    let seen = script.seen.lock().expect("lock").clone();
+    let body: Value = serde_json::from_str(seen[0].body.as_deref().expect("body")).expect("json");
+    let sha = chatbotx_core::utils::crypto::sha256_hex;
+    assert_eq!(
+        body["events"][0]["userData"]["userIdentifiers"],
+        json!([
+            { "emailAddress": sha("johndoe@gmail.com") },
+            { "phoneNumber": sha("+14155552671") },
+        ])
+    );
+    assert_eq!(body["encoding"], "HEX");
+}
+
+// ---- housekeeping (port of a subset of `google-ads-housekeeping.test.ts`) -----
+
+const HOUR: i64 = 60 * 60 * 1000;
+
+/// A recorded conversion delivered to Data Manager (`sent`, `req-1`).
+async fn sent_event(db: &chatbotx_db::Db, queue: &Queue) -> i64 {
+    seed(db).await;
+    let Recorded::Queued(event) = record(db, queue, input("55")).await.expect("record") else {
+        panic!("not queued");
+    };
+    let script = Script::default();
+    script
+        .replies
+        .lock()
+        .expect("lock")
+        .push(Ok((200, json!({ "requestId": "req-1" }).to_string())));
+    let deps = DeliverDeps {
+        db,
+        up: &script,
+        jobs: queue,
+        events: None,
+        app_url: "https://app.test",
+        matching: None,
+    };
+    let run = DeliverInput {
+        event_id: event.id,
+        workspace_id: WS,
+        attempt: 0,
+        is_last_in_job_attempt: false,
+    };
+    deliver(&deps, run).await.expect("deliver");
+    event.id
+}
+
+type Row = (
+    String,
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+    Option<i64>,
+    Option<String>,
+);
+
+async fn row(db: &chatbotx_db::Db, id: i64) -> Row {
+    db.read(move |conn| {
+        Ok(conn.query_row(
+            r#"SELECT "status", "attempt", "processingStatus", "failureStage", "error",
+                      "processingAttempts", "nextProcessingCheckAt", "processingDetail"
+               FROM "GoogleAdsConversionEvent" WHERE "id" = ?1"#,
+            params![id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                ))
+            },
+        )?)
+    })
+    .await
+    .expect("row")
+}
+
+async fn poll_with(
+    db: &chatbotx_db::Db,
+    queue: &Queue,
+    reply: Option<Value>,
+    now: i64,
+) -> Vec<UpstreamRequest> {
+    let script = Script::default();
+    if let Some(reply) = reply {
+        script
+            .replies
+            .lock()
+            .expect("lock")
+            .push(Ok((200, reply.to_string())));
+    }
+    let deps = DeliverDeps {
+        db,
+        up: &script,
+        jobs: queue,
+        events: None,
+        app_url: "https://app.test",
+        matching: None,
+    };
+    chatbotx_business::google_ads_housekeeping::poll_processing_status(&deps, now)
+        .await
+        .expect("poll");
+    script.seen.lock().expect("lock").clone()
+}
+
+fn one_status(status: &str, reasons: &[&str]) -> Value {
+    let errors: Vec<Value> = reasons
+        .iter()
+        .map(|r| json!({ "reason": r, "recordCount": "1" }))
+        .collect();
+    json!({ "requestStatusPerDestination": [{
+        "requestStatus": status,
+        "eventsIngestionStatus": { "recordCount": "1" },
+        "errorInfo": { "errorCounts": errors },
+    }] })
+}
+
+/// Port of: "pollGoogleAdsProcessingStatus > SUCCESS marks the event processed and stops polling"
+#[tokio::test]
+async fn poll_success_marks_the_event_processed_and_stops_polling() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    let id = sent_event(&db, &queue).await;
+    let now = now_ms() + 4 * HOUR;
+    let seen = poll_with(&db, &queue, Some(one_status("SUCCESS", &[])), now).await;
+    assert_eq!(
+        seen[0].url,
+        "https://datamanager.googleapis.com/v1/requestStatus:retrieve?requestId=req-1"
+    );
+    assert_eq!(seen[0].method, "GET");
+    let (status, _, processing, _, _, attempts, next, detail) = row(&db, id).await;
+    assert_eq!(
+        (status.as_str(), processing.as_deref()),
+        ("processed", Some("success"))
+    );
+    assert_eq!((attempts, next), (1, None));
+    let detail: Value = serde_json::from_str(&detail.expect("detail")).expect("json");
+    assert_eq!(detail["recordCount"], 1);
+    // Not due any more: no second call.
+    assert!(
+        poll_with(&db, &queue, None, now + 30 * 24 * HOUR)
+            .await
+            .is_empty()
+    );
+}
+
+/// Port of: "a duplicate-only failure finishes processed with duplicateRecovery, fenced by the poll"
+#[tokio::test]
+async fn poll_duplicate_only_failure_finishes_processed_with_duplicate_recovery() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    let id = sent_event(&db, &queue).await;
+    let reply = one_status("FAILED", &["PROCESSING_ERROR_REASON_DUPLICATE_GCLID"]);
+    poll_with(&db, &queue, Some(reply), now_ms() + 4 * HOUR).await;
+    let (status, _, processing, _, _, _, _, detail) = row(&db, id).await;
+    assert_eq!(
+        (status.as_str(), processing.as_deref()),
+        ("processed", Some("success"))
+    );
+    let detail: Value = serde_json::from_str(&detail.expect("detail")).expect("json");
+    assert_eq!(detail["duplicateRecovery"], true);
+    assert_eq!(detail["errorCounts"], json!([]));
+}
+
+/// Port of: "FAILED marks the event failed(processing) and logs a provider error" (+ "open-ended Google reasons are bounded to enum shapes")
+#[tokio::test]
+async fn poll_failed_marks_the_event_failed_with_bounded_reasons() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    let id = sent_event(&db, &queue).await;
+    let reply = one_status(
+        "FAILED",
+        &["PROCESSING_ERROR_REASON_INVALID_GCLID", "gclid=abc leaked"],
+    );
+    poll_with(&db, &queue, Some(reply), now_ms() + 4 * HOUR).await;
+    let (status, _, processing, stage, error, _, next, detail) = row(&db, id).await;
+    assert_eq!(
+        (status.as_str(), processing.as_deref()),
+        ("failed", Some("failed"))
+    );
+    assert_eq!(stage.as_deref(), Some("processing"));
+    assert_eq!(
+        error.as_deref(),
+        Some("PROCESSING_ERROR_REASON_INVALID_GCLID, UNKNOWN")
+    );
+    assert_eq!(next, None);
+    assert!(!detail.expect("detail").contains("gclid=abc"));
+}
+
+/// Port of: "a transient Google failure is redriven as a new generation after 6h"
+#[tokio::test]
+async fn poll_transient_failure_is_redriven_as_a_new_generation_after_six_hours() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    let id = sent_event(&db, &queue).await;
+    let reply = one_status("FAILED", &["PROCESSING_ERROR_REASON_TOO_RECENT_CLICK"]);
+    poll_with(&db, &queue, Some(reply), now_ms() + 4 * HOUR).await;
+    let (status, attempt, ..) = row(&db, id).await;
+    assert_eq!((status.as_str(), attempt), ("pending", 1));
+    let added = queue.added.lock().expect("lock");
+    let last = added.last().expect("job");
+    assert_eq!(last.2.job_id, Some(format!("google-ads-send-{id}-a1")));
+    assert_eq!(last.2.delay_ms, Some(6 * 60 * 60 * 1000));
+}
+
+/// Port of: "PROCESSING stays sent and backs off by the poll count" (+ "an unrecognised response stays sent as unknown")
+#[tokio::test]
+async fn poll_processing_stays_sent_and_backs_off() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    let id = sent_event(&db, &queue).await;
+    let now = now_ms() + 4 * HOUR;
+    poll_with(&db, &queue, Some(one_status("PROCESSING", &[])), now).await;
+    let (status, _, processing, _, _, attempts, next, _) = row(&db, id).await;
+    assert_eq!(
+        (status.as_str(), processing.as_deref()),
+        ("sent", Some("processing"))
+    );
+    assert_eq!((attempts, next), (1, Some(now + 3 * HOUR)));
+    let later = now + 3 * HOUR;
+    poll_with(
+        &db,
+        &queue,
+        Some(json!({ "requestStatusPerDestination": [] })),
+        later,
+    )
+    .await;
+    let (status, _, processing, _, _, attempts, next, _) = row(&db, id).await;
+    assert_eq!(
+        (status.as_str(), processing.as_deref()),
+        ("sent", Some("unknown"))
+    );
+    assert_eq!((attempts, next), (2, Some(later + 6 * HOUR)));
+}
+
+/// Port of: "times out a request unresolved for more than 7 days"
+#[tokio::test]
+async fn poll_times_out_a_request_unresolved_for_more_than_seven_days() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    let id = sent_event(&db, &queue).await;
+    let seen = poll_with(&db, &queue, None, now_ms() + 8 * 24 * HOUR).await;
+    assert!(seen.is_empty());
+    let (status, _, processing, stage, ..) = row(&db, id).await;
+    assert_eq!(
+        (status.as_str(), processing.as_deref()),
+        ("failed", Some("timed_out"))
+    );
+    assert_eq!(stage.as_deref(), Some("timeout"));
+}
+
+/// Port of: "sweepStrandedGoogleAdsEvents > redrives a pending event whose job is dead, delayed by the click age" (+ "redrives a sending event with a stale claim")
+#[tokio::test]
+async fn sweep_redrives_dead_pending_and_stale_sending_events() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    seed(&db).await;
+    let Recorded::Queued(event) = record(&db, &queue, input("55")).await.expect("record") else {
+        panic!("not queued");
+    };
+    let (id, now) = (event.id, now_ms());
+    setup(&db, move |tx| {
+        tx.execute(
+            r#"UPDATE "GoogleAdsConversionEvent" SET "updatedAt" = ?2 WHERE "id" = ?1"#,
+            params![id, now - HOUR],
+        )?;
+        Ok(())
+    })
+    .await;
+    let script = Script::default();
+    let deps = DeliverDeps {
+        db: &db,
+        up: &script,
+        jobs: &queue,
+        events: None,
+        app_url: "https://app.test",
+        matching: None,
+    };
+    // The fake queue knows no job, so the generation's job is dead.
+    chatbotx_business::google_ads_housekeeping::sweep_stranded(&deps, now, 200)
+        .await
+        .expect("sweep");
+    let (status, attempt, ..) = row(&db, id).await;
+    assert_eq!((status.as_str(), attempt), ("pending", 1));
+    {
+        let added = queue.added.lock().expect("lock");
+        let last = added.last().expect("job");
+        assert_eq!(last.2.job_id, Some(format!("google-ads-send-{id}-a1")));
+        // The click is 7 h old: past the 6 h gate.
+        assert_eq!(last.2.delay_ms, Some(0));
+    }
+    // A crashed worker's lease.
+    setup(&db, move |tx| {
+        tx.execute(
+            r#"UPDATE "GoogleAdsConversionEvent" SET "status" = 'sending', "claimToken" = 'dead',
+                   "claimedAt" = ?2 WHERE "id" = ?1"#,
+            params![id, now - HOUR],
+        )?;
+        Ok(())
+    })
+    .await;
+    chatbotx_business::google_ads_housekeeping::sweep_stranded(&deps, now, 200)
+        .await
+        .expect("sweep");
+    let (status, attempt, ..) = row(&db, id).await;
+    assert_eq!((status.as_str(), attempt), ("pending", 2));
+    assert!(script.seen.lock().expect("lock").is_empty());
+}
+
+async fn block_workspace(db: &chatbotx_db::Db) {
+    setup(db, |tx| {
+        tx.execute(
+            r#"UPDATE "Workspace" SET "scheduledDeletionAt" = 1 WHERE "id" = ?1"#,
+            params![WS],
+        )?;
+        Ok(())
+    })
+    .await;
+}
+
+/// Port of: "pollGoogleAdsProcessingStatus > blocked owner reschedules as unknown without calling Google"
+#[tokio::test]
+async fn poll_blocked_owner_reschedules_as_unknown_without_calling_google() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    let id = sent_event(&db, &queue).await;
+    block_workspace(&db).await;
+    let now = now_ms() + 4 * HOUR;
+    let seen = poll_with(&db, &queue, Some(one_status("SUCCESS", &[])), now).await;
+    assert!(seen.is_empty());
+    let (status, _, processing, _, _, attempts, next, _) = row(&db, id).await;
+    assert_eq!(
+        (status.as_str(), processing.as_deref()),
+        ("sent", Some("unknown"))
+    );
+    assert_eq!((attempts, next), (1, Some(now + 3 * HOUR)));
+}
+
+/// Port of: "sweepStrandedGoogleAdsEvents > a blocked workspace's stranded sending row is released to pending on the same generation"
+#[tokio::test]
+async fn sweep_releases_a_blocked_workspaces_sending_row_on_the_same_generation() {
+    let db = two_workspaces().await;
+    let queue = Queue::default();
+    seed(&db).await;
+    let Recorded::Queued(event) = record(&db, &queue, input("55")).await.expect("record") else {
+        panic!("not queued");
+    };
+    let (id, now) = (event.id, now_ms());
+    setup(&db, move |tx| {
+        tx.execute(
+            r#"UPDATE "GoogleAdsConversionEvent" SET "status" = 'sending', "claimToken" = 'dead',
+                   "claimedAt" = ?2 WHERE "id" = ?1"#,
+            params![id, now - HOUR],
+        )?;
+        Ok(())
+    })
+    .await;
+    block_workspace(&db).await;
+    let jobs_before = queue.added.lock().expect("lock").len();
+    let script = Script::default();
+    let deps = DeliverDeps {
+        db: &db,
+        up: &script,
+        jobs: &queue,
+        events: None,
+        app_url: "https://app.test",
+        matching: None,
+    };
+    chatbotx_business::google_ads_housekeeping::sweep_stranded(&deps, now, 200)
+        .await
+        .expect("sweep");
+    let (status, attempt, ..) = row(&db, id).await;
+    assert_eq!((status.as_str(), attempt), ("pending", 0));
+    assert_eq!(queue.added.lock().expect("lock").len(), jobs_before);
 }

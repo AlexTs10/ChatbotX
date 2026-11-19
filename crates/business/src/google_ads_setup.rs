@@ -218,6 +218,79 @@ async fn sync_from_google(
     ))
 }
 
+/// `getConversionReport`: Google's own conversion counts of the synced
+/// actions for `from..=to`; `{ status: "unavailable" }` on any failure.
+pub async fn conversion_report(
+    db: &Db,
+    up: &impl Upstream,
+    credential: Option<&OAuthCredential>,
+    workspace_id: i64,
+    from: &str,
+    to: &str,
+) -> Result<Value> {
+    let unavailable = json!({ "status": "unavailable" });
+    let Some(setup) = get_setup(db, workspace_id).await? else {
+        return Ok(unavailable);
+    };
+    let integration = &setup.integration;
+    let Some(customer) = integration.conversion_customer_id.as_deref() else {
+        return Ok(unavailable);
+    };
+    if setup.readiness != "ready" {
+        return Ok(unavailable);
+    }
+    let Some(developer) = developer_token(credential) else {
+        return Ok(unavailable);
+    };
+    let Ok(auth) = fresh_auth(db, up, integration, false).await else {
+        return Ok(unavailable);
+    };
+    let creds = Creds {
+        access_token: auth["tokens"]["accessToken"].as_str().unwrap_or_default(),
+        developer_token: developer.as_deref(),
+        login_customer_id: integration.login_customer_id.as_deref(),
+    };
+    let rows = match api::conversion_report(up, creds, customer, from, to).await {
+        Ok(rows) => rows,
+        Err(failure) => {
+            tracing::warn!(workspace_id, error = %failure.public_message(&[]), "Google Ads report unavailable");
+            return Ok(unavailable);
+        }
+    };
+    let synced: Vec<String> = integration
+        .conversion_actions
+        .as_ref()
+        .and_then(|actions| actions.0.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|a| api::id_text(&a["id"]))
+        .collect();
+    let mut by_action: Vec<Value> = Vec::new();
+    for row in rows {
+        let id = row["conversionActionId"].as_str().unwrap_or_default();
+        if !synced.iter().any(|s| s == id) {
+            continue;
+        }
+        let conversions = row["conversions"].as_f64().unwrap_or(0.0);
+        match by_action.iter_mut().find(|a| a["conversionActionId"] == id) {
+            Some(entry) => {
+                let sum = entry["conversions"].as_f64().unwrap_or(0.0) + conversions;
+                entry["conversions"] = json!(sum);
+            }
+            None => by_action.push(json!({
+                "conversionActionId": id,
+                "name": row["name"],
+                "conversions": conversions,
+            })),
+        }
+    }
+    let total: f64 = by_action
+        .iter()
+        .map(|a| a["conversions"].as_f64().unwrap_or(0.0))
+        .sum();
+    Ok(json!({ "status": "ok", "total": total, "byAction": by_action }))
+}
+
 /// `refreshSetup`: re-resolves the conversion customer and re-reads its
 /// offline-import conversion actions. Every failure lands in `setupError`
 /// as a stable code; `None` = no Google Ads integration.

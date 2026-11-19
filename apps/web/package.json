@@ -23,6 +23,7 @@
     "@chatbotx.io/decision-config": "workspace:*",
     "@chatbotx.io/flow-config": "workspace:*",
     "@chatbotx.io/imports": "workspace:*",
+    "@chatbotx.io/integration-facebook-ads": "workspace:*",
     "@chatbotx.io/integration-get-response": "workspace:*",
     "@chatbotx.io/integration-klaviyo": "workspace:*",
     "@chatbotx.io/integration-mailchimp": "workspace:*",

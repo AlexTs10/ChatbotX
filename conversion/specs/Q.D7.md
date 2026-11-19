@@ -22,9 +22,20 @@ delivery. The web pages and the Google Ads producers are left (see "Not done").
 | 10 | `ads.*` campaign writes (create / list / retry / publish / pause / delete / insights, ad accounts, pages, image / video upload, video status) and `ads.startRetargetAudienceSync` + the `syncRetargetAudience` job | `business::ads::{campaigns,retarget}`, `api::handlers::ads_campaigns`, `worker::integration` | `features/ads-campaign`, `messaging-ads` |
 | 11 | Google Ads OAuth connect (adapter `googleAds`), the settings actions (start / reconnect / pick / cancel / disconnect / sync) and `googleAdsAPI.getIntegration` / `getInFlightConnectSession` | `business::{google_ads_api,google_ads_setup}`, `connection::oauth_google_ads`, `api::rpc_procedures::google_ads` | `integrations/google-ads`, `integration-google-ads/service.ts`, `features/integration-google-ads/actions` |
 | 12 | Google Ads conversion record + delivery (Data Manager `events:ingest`, legacy `uploadClickConversions`) and the `sendGoogleAdsConversion` job | `business::google_ads_conversion`, `worker::integration` | `google-ads/{record-conversion,delivery}.ts`, `apis/*` |
+| 13 | Web ads screens (round 2, branch `feat/conversion-r2-ads`): `ads/*` redirects, `dashboard/ads/{$channel,google,conversion-events}`, `messaging-ads/*`, `fb-lead-ads/*`, `fb-marketing-messages/*`; the builder procedures `adsAPI.*`, `adsCampaignAPI.*`, `integrationFacebookAdsAPI.*`, `facebookLeadAdsAPI.*`, `facebookMarketingMessagesAPI.*`; the page queries and actions of those screens; `googleAds` conversion report (Google's own numbers); the Google Ads nav entry (`resolveGoogleAdsDashboardEntry`) | `api::rpc_procedures::ads`, `apps/web/src/routes/ads.tsx` | `app/space/[workspaceId]/{ads,dashboard/ads,messaging-ads,fb-lead-ads,fb-marketing-messages}`, `features/{ads,ads-campaign,facebook-lead-ad-automation,facebook-marketing-messages}` |
+| 14 | Meta ads OAuth connects (`connectLeadAdsAction`, `connectMarketingMessagesAction`, `connectMessagingAdsAction`) and their callback flows (`facebookLeadAds` page leadgen subscription, `facebookMarketingMessages` grant, `messagingAds` connection) | `business::ads::connect`, `api::connect_callback` | `*/actions/connect*.action.ts`, `integrations/[...integration]/callback{,-stores}.ts` |
+| 15 | Google Ads producers: the `sendGoogleAdsConversion` flow step and trigger action (consent setting, `{{variable}}` fields, error branches and Error Log lines); customer matching at delivery (hashed e-mail / phone, `encoding: HEX`, only with accepted customer-data terms); the blocked-owner check of the delivery job; the Zalo Google-click lookup (`profileLookup`) | `worker::{google_ads_producer,google_click_lookup}`, `business::google_ads_conversion` | `google-ads/{resolve-conversion-inputs,google-ads-input-error,send-conversion,resolve-matching-templates}.ts`, `customer-matching.ts`, `hash-user-data.ts`, `google-click-lookup.ts`, `click-lookup.ts` |
+| 16 | Google Ads housekeeping: the processing-status poll (`requestStatus:retrieve`), the stranded / stale-claim sweep, the blocked-owner park, the daily setup sync; crons `googleAdsHousekeeping` (`*/10`) and `googleAdsSyncSetups` (03:30) | `business::google_ads_housekeeping`, `worker::google_ads_housekeeping`, `jobs::Enqueuer::job_state` | `google-ads/{housekeeping,processing-status,redrive,send-queue}.ts`, `schedule/handlers/google-ads-housekeeping.ts` |
 
 ## Security
 
+- Customer matching hashes (SHA-256 hex) the normalised e-mail / phone at
+  delivery, reads the current contact value, never logs it, and sends user
+  data only when the account accepted the customer-data terms. A resolver
+  failure retries the delivery (identifiers are not dropped).
+- The housekeeping logs only enum-shaped Google reasons (`^[A-Z0-9_]{1,80}$`,
+  else `UNKNOWN`), at most 1000 characters; a poll error is sanitised
+  without the click id.
 - Every route is a workspace-token route of scope `ads` (route table); the
   workspace id comes from the token, every query is scoped to it.
 - Lead-ads `create` subscribes the page to `leadgen` before it stores the
@@ -39,6 +50,18 @@ delivery. The web pages and the Google Ads producers are left (see "Not done").
   auth does not decrypt is marked `invalid` (reconnect needed, 409).
 - `disconnectConnection` revokes the token (`DELETE me/permissions`) best
   effort, then always deletes the row; a corrupt auth makes no Graph call.
+- The ads screens: `dashboard/ads/*` and `messaging-ads/$channel` are super
+  admin only (404 page, as `resolveGuardedWorkspaceId(..., "superAdmin")`);
+  every page query checks the role again in Rust (`systemError` 400).
+- The Meta ads connects use a signed connect session (provider `messenger`,
+  purpose = the flow, `state = {sessionId}.{nonce}`, nonce stored hashed)
+  instead of the original's unsigned base64 JSON state. The callback finishes
+  a session only for the member who started it (signed-in, still a member);
+  `messagingAds` also needs a super admin and an integration of the
+  workspace and channel (else 404, as the original). The return path is
+  fixed by the action (relative, `validate_return_url`): no open redirect.
+  Tokens are stored encrypted (`chatbotx_core::encryption`, no AAD, as the
+  original). One callback per session (`claim_authorization`).
 
 ## Decisions
 
@@ -65,14 +88,19 @@ runs parity).
 
 ## Not done
 
-- Google Ads producers: the `sendGoogleAdsConversion` flow step and trigger
-  action (template resolution, consent setting, error branches) still skip
-  as `notPorted`; `record` has no caller yet.
-- Google Ads housekeeping: the processing-status poll
-  (`requestStatus:retrieve`), the stranded / stale-claim sweeps, the daily
-  conversion-action sync, `googleAdsAPI.listEvents` (procedure) and
-  customer matching (hashed e-mail / phone at delivery).
-- Web SPA ads pages (`specs/P4-web.md` §6): `dashboard/ads/*` still shows
-  "not available yet".
+- The Meta CAPI producers (`sendMetaCapiEvent` flow step and trigger action)
+  still skip as `notPorted` (the CAPI send of the channels, Q.I1a / Q.I1b).
+- Zalo / Telegram profile reads on contact creation (`persistNewContactGoogleClick`
+  runs as the existing-contact lookup instead; see DECISIONS).
+- TEST_MAP: 154 class C rows of the six ads sections are still `todo`
+  (mostly builder procedure tests and the `integrations/facebook-ads`,
+  `integrations/google-ads` and `meta-conversions` adapter tests).
+- `reconnectWhatsappAction` / `persistReconnectAuthAndResubscribe` (the
+  WhatsApp CAPI-scope reconnect button of the ads account switcher): the
+  WhatsApp embedded-signup reconnect has no Rust port yet (WhatsApp channel
+  domain, Q.I1a); the button answers the generic action error.
+- The channel CAPI tabs `whatsapps|messengers|instagrams/$id/ads` and the
+  legacy `facebookAds` / `metaCapi` callback flows (channel pages, Q.I1a /
+  Q.I1b).
 - A `messaging_referrals` event without a message records no ad touch: the
   Rust `Received` has no provider time (`occurredAt`) to key it.

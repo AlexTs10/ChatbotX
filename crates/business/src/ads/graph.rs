@@ -504,6 +504,21 @@ pub async fn channel_ad_accounts(
     Ok(out)
 }
 
+/// `getCachedAdAccounts` (500 without a workspace connection).
+pub async fn cached_ad_accounts(db: &Db, workspace_id: i64) -> Result<Value> {
+    cached(
+        format!("fb-ads:ad-accounts:{workspace_id}"),
+        LIST_TTL,
+        || async {
+            let auth = workspace_auth(db, workspace_id)
+                .await?
+                .ok_or_else(|| internal("Facebook Ads integration not found"))?;
+            ad_accounts(&auth).await.map_err(BusinessError::from)
+        },
+    )
+    .await
+}
+
 /// `getCachedCustomAudiences` (500 without a workspace connection).
 pub async fn cached_custom_audiences(
     db: &Db,

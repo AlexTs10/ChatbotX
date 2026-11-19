@@ -453,6 +453,62 @@ async fn search_stream(
         .collect())
 }
 
+/// `getUploadClickConversionReport`: Google's per-day conversions per
+/// conversion action (by conversion date) for `from..=to` (`YYYY-MM-DD`).
+pub async fn conversion_report(
+    up: &impl Upstream,
+    creds: Creds<'_>,
+    conversion_customer_id: &str,
+    from: &str,
+    to: &str,
+) -> Result<Vec<Value>, Failure> {
+    let day = |d: &str| {
+        d.len() == 10
+            && d.bytes().enumerate().all(|(i, b)| {
+                if i == 4 || i == 7 {
+                    b == b'-'
+                } else {
+                    b.is_ascii_digit()
+                }
+            })
+    };
+    // Interpolated into GAQL, so only a plain date may pass.
+    if !(day(from) && day(to)) {
+        return Err(Failure::Google(GoogleError::terminal(
+            400,
+            "invalidRange",
+            "Report range must be YYYY-MM-DD dates",
+        )));
+    }
+    let query = format!(
+        "SELECT segments.date, segments.conversion_action, segments.conversion_action_name, metrics.conversions_by_conversion_date, metrics.conversions_value_by_conversion_date FROM customer WHERE segments.date BETWEEN '{from}' AND '{to}'"
+    );
+    let results = search_stream(up, creds, conversion_customer_id, &query).await?;
+    let number = |v: &Value| match v {
+        Value::Number(n) => n.as_f64().unwrap_or(0.0),
+        Value::String(s) => s.parse().unwrap_or(0.0),
+        _ => 0.0,
+    };
+    Ok(results
+        .iter()
+        .filter_map(|r| {
+            let segments = &r["segments"];
+            let resource = segments["conversionAction"].as_str()?;
+            let (_, action_id) = resource.rsplit_once("conversionActions/")?;
+            let date = segments["date"].as_str()?;
+            (!action_id.is_empty() && action_id.bytes().all(|b| b.is_ascii_digit())).then(|| {
+                json!({
+                    "date": date,
+                    "conversionActionId": action_id,
+                    "name": segments["conversionActionName"].as_str().unwrap_or(action_id),
+                    "conversions": number(&r["metrics"]["conversionsByConversionDate"]),
+                    "value": number(&r["metrics"]["conversionsValueByConversionDate"]),
+                })
+            })
+        })
+        .collect())
+}
+
 /// `listAccessibleCustomers`.
 pub async fn list_accessible_customers(
     up: &impl Upstream,
@@ -690,6 +746,103 @@ pub async fn collect_candidates(
         return Err(failure.clone());
     }
     Ok(accounts)
+}
+
+// ---- Data Manager request status ----------------------------------------------
+
+/// `GoogleAdsRequestStatus`: one `requestStatusPerDestination` entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestStatus {
+    pub request_status: String,
+    pub record_count: Option<i64>,
+    pub error_counts: Vec<(String, i64)>,
+    pub warning_counts: Vec<(String, i64)>,
+}
+
+/// `toCount`: a number, or a numeric string (proto3 int64).
+fn count_of(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(n) => n.as_f64().filter(|f| f.is_finite()).map(|f| f as i64),
+        Value::String(s) => s
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|f| f.is_finite())
+            .map(|f| f as i64),
+        _ => None,
+    }
+}
+
+fn reason_counts(counts: &Value) -> Option<Vec<(String, i64)>> {
+    let list = match counts {
+        Value::Null => return Some(Vec::new()),
+        Value::Array(list) => list,
+        _ => return None,
+    };
+    list.iter()
+        .map(|c| {
+            let reason = match &c["reason"] {
+                Value::Null => "PROCESSING_ERROR_REASON_UNSPECIFIED".to_owned(),
+                Value::String(r) => r.clone(),
+                _ => return None,
+            };
+            Some((reason, count_of(&c["recordCount"]).unwrap_or(0)))
+        })
+        .collect()
+}
+
+/// `retrieveRequestStatus` (`GET requestStatus:retrieve?requestId=`).
+pub async fn retrieve_request_status(
+    up: &impl Upstream,
+    access_token: &str,
+    request_id: &str,
+) -> Result<Vec<RequestStatus>, Failure> {
+    let malformed = || {
+        Failure::Google(GoogleError::terminal(
+            200,
+            "malformedResponse",
+            "Data Manager status response could not be read",
+        ))
+    };
+    let reply = up
+        .send(UpstreamRequest {
+            method: "GET",
+            url: format!(
+                "{DATA_MANAGER_API}requestStatus:retrieve?{}",
+                form(&[("requestId", request_id)])
+            ),
+            headers: vec![("authorization".into(), format!("Bearer {access_token}"))],
+            body: None,
+        })
+        .await;
+    let answer = rescue(reply)?;
+    let entries = match &answer["requestStatusPerDestination"] {
+        _ if !answer.is_object() => return Err(malformed()),
+        Value::Null => return Ok(Vec::new()),
+        Value::Array(entries) => entries,
+        _ => return Err(malformed()),
+    };
+    entries
+        .iter()
+        .map(|entry| {
+            let ingestion = if entry["eventsIngestionStatus"].is_object() {
+                &entry["eventsIngestionStatus"]
+            } else {
+                &entry["ingestEventsStatus"]
+            };
+            Some(RequestStatus {
+                request_status: match &entry["requestStatus"] {
+                    Value::Null => "REQUEST_STATUS_UNKNOWN".to_owned(),
+                    Value::String(s) => s.clone(),
+                    _ => return None,
+                },
+                record_count: count_of(&ingestion["recordCount"]),
+                error_counts: reason_counts(&entry["errorInfo"]["errorCounts"])?,
+                warning_counts: reason_counts(&entry["warningInfo"]["warningCounts"])?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(malformed)
 }
 
 // ---- OAuth tokens -------------------------------------------------------------

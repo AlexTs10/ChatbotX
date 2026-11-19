@@ -1792,6 +1792,14 @@ impl Enqueuer for JobStore {
     ) -> BoxFuture<'a, Result<bool, JobsError>> {
         JobInspector::remove(self, queue, job_id)
     }
+
+    fn job_state<'a>(
+        &'a self,
+        queue: QueueName,
+        job_id: &'a str,
+    ) -> BoxFuture<'a, Result<JobState, JobsError>> {
+        JobInspector::get_state(self, queue, job_id)
+    }
 }
 
 impl JobInspector for JobStore {

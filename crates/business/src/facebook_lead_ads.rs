@@ -438,6 +438,35 @@ pub async fn list_pages(db: &Db, workspace_id: i64) -> Result<Vec<Value>> {
     Ok(pages)
 }
 
+/// `enableLeadgenForWorkspacePages` (the `facebookLeadAds` OAuth return):
+/// every lead-eligible page subscribes to `leadgen`; a page that fails is
+/// skipped (`Promise.allSettled`).
+pub async fn enable_leadgen_for_workspace_pages(db: &Db, workspace_id: i64) -> Result<()> {
+    let rows: Vec<String> = tx::read(db, move |conn| {
+        let mut stmt = conn
+            .prepare("SELECT \"auth\" FROM \"IntegrationMessenger\" WHERE \"workspaceId\" = ?1")?;
+        Ok(stmt
+            .query_map([workspace_id], |r| r.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?)
+    })
+    .await?;
+    for raw in rows {
+        let Some(auth) = open_auth(&raw) else {
+            continue;
+        };
+        if !token_lead_eligible(&auth).await.unwrap_or(false) {
+            continue;
+        }
+        if let Err(error) =
+            crate::connection::oauth::subscribe_webhook_fields(&HttpUpstream, &auth, &["leadgen"])
+                .await
+        {
+            tracing::warn!(?error, workspace_id, "leadgen page subscription failed");
+        }
+    }
+    Ok(())
+}
+
 /// `listPageLeadForms`: `[]` for a page with no Messenger integration.
 pub async fn list_forms(db: &Db, workspace_id: i64, page_id: String) -> Result<Vec<Value>> {
     let Some(auth) = page_auth(db, workspace_id, page_id.clone()).await? else {

@@ -44,7 +44,13 @@ export function serverAction(
 ) {
   return async (...args: any[]): Promise<SafeActionResult> => {
     try {
-      return { data: await call(name, args, options?.workspace ?? false) }
+      const data = await call(name, args, options?.workspace ?? false)
+      // `redirect()` in a builder action: the Rust answer `{ redirectTo }`.
+      const redirectTo = (data as { redirectTo?: unknown } | null)?.redirectTo
+      if (typeof redirectTo === "string") {
+        window.location.assign(redirectTo)
+      }
+      return { data }
     } catch (error) {
       if (error instanceof ORPCError) {
         const validationErrors = (

@@ -703,3 +703,47 @@ async fn thread_control(state: &ApiState, call: Call<'_>) -> Reply {
         }
     }
 }
+
+#[cfg(test)]
+mod google_ads_click_tests {
+    //! Port of `packages/business/__tests__/google-ads-click-fields.test.ts`
+    //! (`resolveGoogleAdsClick`; `selectGoogleAdsBadge` runs in the web app).
+    use super::*;
+
+    /// Port of: "resolveGoogleAdsClick > returns null without a referral or click id"
+    #[test]
+    fn returns_null_without_a_referral_or_click_id() {
+        assert_eq!(google_ads_click(None), Value::Null);
+        assert_eq!(google_ads_click(Some(&json!({}))), Value::Null);
+        assert_eq!(
+            google_ads_click(Some(&json!({ "gclid": null, "gbraid": "" }))),
+            Value::Null
+        );
+    }
+
+    /// Port of: "reports the click type and capture time but never the id" (+ "reports gbraid when only gbraid is present")
+    #[test]
+    fn reports_the_click_type_and_capture_time_but_never_the_id() {
+        let result = google_ads_click(Some(&json!({
+            "gclid": "secret-gclid", "googleClickReceivedAt": "2026-10-01T00:00:00Z",
+        })));
+        assert_eq!(
+            result,
+            json!({ "clickIdType": "gclid", "receivedAt": "2026-10-01T00:00:00Z" })
+        );
+        assert!(!result.to_string().contains("secret-gclid"));
+        let result = google_ads_click(Some(&json!({ "gbraid": "secret-gbraid" })));
+        assert_eq!(
+            result,
+            json!({ "clickIdType": "gbraid", "receivedAt": null })
+        );
+        assert!(!result.to_string().contains("secret-gbraid"));
+    }
+
+    /// Port of: "prefers gclid when both are present"
+    #[test]
+    fn prefers_gclid_when_both_are_present() {
+        let result = google_ads_click(Some(&json!({ "gclid": "a", "gbraid": "b" })));
+        assert_eq!(result["clickIdType"], "gclid");
+    }
+}

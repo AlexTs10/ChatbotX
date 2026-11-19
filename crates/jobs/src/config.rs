@@ -156,6 +156,17 @@ impl Enqueuer for LazyEnqueuer {
             crate::store::JobInspector::remove(store.as_ref(), queue, job_id).await
         })
     }
+
+    fn job_state<'a>(
+        &'a self,
+        queue: QueueName,
+        job_id: &'a str,
+    ) -> BoxFuture<'a, Result<crate::store::JobState, JobsError>> {
+        Box::pin(async move {
+            let store = self.inner.started().await?;
+            crate::store::JobInspector::get_state(store.as_ref(), queue, job_id).await
+        })
+    }
 }
 
 impl Jobs {

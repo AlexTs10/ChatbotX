@@ -2053,3 +2053,88 @@ async fn saved_reply_sla_and_rest_actions_are_wired() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn ads_screens_follow_the_super_admin_guard_and_connect_rules() {
+    let (router, _db) = router().await;
+    // `resolveGoogleAdsDashboardEntry`: no setup and no conversion yet.
+    let (status, json) = act(
+        &router,
+        "admintoken",
+        "resolveGoogleAdsDashboardEntry",
+        json!([ws()]),
+    )
+    .await;
+    assert_eq!((status, json), (StatusCode::OK, json!(false)));
+    let (_, json) = act(
+        &router,
+        "assignedtoken",
+        "resolveGoogleAdsDashboardEntry",
+        json!([ws()]),
+    )
+    .await;
+    assert_eq!(json, json!(false));
+    // The dashboard pages are super admin only.
+    for name in [
+        "getConversionEventsData",
+        "getAdsAnalytics",
+        "getGoogleAdsStatsPage",
+    ] {
+        let (status, json) = act(&router, "assignedtoken", name, json!([ws(), {}])).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{name}: {json}");
+        assert_eq!(
+            json["message"],
+            "You need to be a workspace super admin to do this."
+        );
+    }
+    let (status, json) = act(
+        &router,
+        "admintoken",
+        "resolveMarketingMessagesGrant",
+        json!([ws()]),
+    )
+    .await;
+    assert_eq!(
+        (status, json),
+        (StatusCode::OK, json!({ "state": "missing" }))
+    );
+    let (_, page) = act(
+        &router,
+        "admintoken",
+        "getMarketingMessagesPage",
+        json!([ws()]),
+    )
+    .await;
+    assert_eq!(page["grantState"], "missing");
+    assert_eq!(page["rows"], json!([]));
+    let input = json!({ "workspaceId": ws(), "channel": "whatsapp" });
+    let (_, tools) = act(
+        &router,
+        "admintoken",
+        "listMessagingAdsToolIntegrations",
+        json!([input]),
+    )
+    .await;
+    assert_eq!(tools["integrations"], json!([]));
+    // The connect actions: messaging ads needs a super admin and a channel.
+    let target = json!([ws(), "77", { "channel": "whatsapp" }]);
+    let (status, json) = act(
+        &router,
+        "assignedtoken",
+        "connectMessagingAdsAction",
+        target,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
+    let bad = json!([ws(), "77", { "channel": "tiktok" }]);
+    let (status, json) = act(&router, "admintoken", "connectMessagingAdsAction", bad).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
+    assert!(
+        json["data"]["validationErrors"]["channel"].is_object(),
+        "{json}"
+    );
+    // No Facebook app settings: no session, no redirect.
+    let (status, json) = act(&router, "admintoken", "connectLeadAdsAction", json!([ws()])).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
+    assert_eq!(json["message"], "Facebook App settings are not valid");
+}

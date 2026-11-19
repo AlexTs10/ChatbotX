@@ -244,7 +244,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/contact-search-combobox.test.tsx` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/contact-subresource-authz.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/contact-thread-control-section.test.tsx` | B | - | todo | Thread control (handover protocol); builder jsdom |
-| `apps/builder/__tests__/contacts-ad-referrals-public-api.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking; builder server code |
+| `apps/builder/__tests__/contacts-ad-referrals-public-api.test.ts` | C | `crates/api/tests/contacts_ad_referrals_public_api.rs` | ported | Ads analytics and CTWA tracking; builder server code; Q.D7 r2: stale row, Rust test already existed |
 | `apps/builder/__tests__/contacts-authenticated-api-get-contact.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/contacts-avatar-resolution.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/contacts-bulk-public-api.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
@@ -1329,7 +1329,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/get-response-handler.test.ts` | C | tbd | todo | GetResponse integration |
 | `apps/worker/__tests__/get-user-data.test.ts` | C | tbd | todo | Get user data webview |
 | `apps/worker/__tests__/google-ads-housekeeping-schedule.test.ts` | C | tbd | todo | Google Ads integration |
-| `apps/worker/__tests__/google-ads-input-error.test.ts` | C | tbd | todo | Google Ads integration |
+| `apps/worker/__tests__/google-ads-input-error.test.ts` | C | `crates/worker/src/google_ads_producer.rs` (unit tests) | ported | Google Ads integration; Q.D7 r2 |
 | `apps/worker/__tests__/google-ads-send-conversion.test.ts` | C | tbd | todo | Google Ads integration |
 | `apps/worker/__tests__/google-click-lookup.test.ts` | C | tbd | todo | Google Ads integration |
 | `apps/worker/__tests__/handoff-executor.test.ts` | C | tbd | todo | AI handover (human takeover) |
@@ -1632,9 +1632,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/google-ads/__tests__/google-ads-api.test.ts` | C | tbd | todo | Google Ads integration |
 | `integrations/google-ads/__tests__/http-client-url.test.ts` | C | tbd | todo | Google Ads integration |
 | `integrations/google-ads/__tests__/http-client.test.ts` | C | tbd | todo | Google Ads integration |
-| `integrations/google-ads/__tests__/legacy-order-id.test.ts` | C | tbd | todo | Google Ads integration |
-| `integrations/google-ads/__tests__/sanitize.test.ts` | C | tbd | todo | Google Ads integration |
-| `integrations/google-ads/__tests__/scopes.test.ts` | C | tbd | todo | Google Ads integration |
+| `integrations/google-ads/__tests__/legacy-order-id.test.ts` | C | `crates/business/tests/google_ads_ids.rs` | ported | Google Ads integration; Q.D7 r2 |
+| `integrations/google-ads/__tests__/sanitize.test.ts` | C | `crates/business/tests/google_ads_sanitize.rs` | ported | Google Ads integration; Q.D7 r2: message redaction; HTTP code / reason are `GoogleError` fields |
+| `integrations/google-ads/__tests__/scopes.test.ts` | C | `crates/business/tests/google_ads_scopes.rs` | ported | Google Ads integration; Q.D7 r2 |
 | `integrations/google-ads/__tests__/wire-connect.test.ts` | C | tbd | todo | Google Ads integration |
 | `integrations/google-ads/__tests__/wire-data-manager.test.ts` | C | tbd | todo | Google Ads integration |
 | `integrations/google-ads/__tests__/wire-google-ads.test.ts` | C | tbd | todo | Google Ads integration |
@@ -2106,7 +2106,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/contact-phone.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/business/__tests__/contact-profile-refresh.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/business/__tests__/contact-referral-event-ad-touch.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking |
-| `packages/business/__tests__/contact-referral-event-history.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking |
+| `packages/business/__tests__/contact-referral-event-history.test.ts` | C | `crates/business/tests/contact_referral_event_history.rs` | ported | Ads analytics and CTWA tracking; Q.D7 r2: stale row, Rust test already existed |
 | `packages/business/__tests__/contact-referral-event-service.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking |
 | `packages/business/__tests__/contact-resolve-id-by-identifier.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/business/__tests__/contact-rich-system-fields.test.ts` | C | tbd | todo | System fields |
@@ -2176,27 +2176,27 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/flow-version.service.test.ts` | C | tbd | todo | Flow builder and execution |
 | `packages/business/__tests__/flow.service.test.ts` | C | tbd | todo | Flow builder and execution |
 | `packages/business/__tests__/folder-service-create.test.ts` | C | tbd | todo | Flow builder and execution |
-| `packages/business/__tests__/google-ads-click-fields.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-click-lookup.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-consent.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/business/__tests__/google-ads-click-fields.test.ts` | C | `crates/api/src/handlers/conversations.rs` (unit tests) | ported | Google Ads integration; Q.D7 r2: `resolveGoogleAdsClick`; `selectGoogleAdsBadge` runs in apps/web |
+| `packages/business/__tests__/google-ads-click-lookup.test.ts` | C | `crates/worker/src/google_click_lookup.rs` (unit tests) | ported | Google Ads integration; Q.D7 r2: markers in-process; the Redis-failure cases dropped (no Redis) |
+| `packages/business/__tests__/google-ads-consent.test.ts` | C | `crates/business/tests/google_ads_consent.rs` | ported | Google Ads integration; Q.D7 r2: `toConsentInput`; `consentForTransport` through the delivery tests |
 | `packages/business/__tests__/google-ads-customer-matching.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-customer-properties.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/business/__tests__/google-ads-customer-properties.test.ts` | C | `crates/business/src/google_ads_conversion.rs` (unit tests) | ported | Google Ads integration; Q.D7 r2: parse + snapshot status; `userPropertiesOf` through the delivery |
 | `packages/business/__tests__/google-ads-delivery.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-hash-user-data.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-housekeeping.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/business/__tests__/google-ads-hash-user-data.test.ts` | C | `crates/business/tests/google_ads_hash_user_data.rs` | ported | Google Ads integration; Q.D7 r2 |
+| `packages/business/__tests__/google-ads-housekeeping.test.ts` | C | `crates/business/tests/google_ads_conversion.rs` | ported | Google Ads integration; Q.D7 r2: real-DB poll / sweep cases; mock-only cases (4-at-a-time concurrency, page ceilings, time budget, memo spies) not ported |
 | `packages/business/__tests__/google-ads-legacy-delivery.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/business/__tests__/google-ads-list-events.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-login-account.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/business/__tests__/google-ads-login-account.test.ts` | C | `crates/business/tests/google_ads_ids.rs` | ported | Google Ads integration; Q.D7 r2 |
 | `packages/business/__tests__/google-ads-owner-schema-service.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-processing-status.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/business/__tests__/google-ads-processing-status.test.ts` | C | `crates/business/tests/google_ads_processing_status.rs` | ported | Google Ads integration; Q.D7 r2 |
 | `packages/business/__tests__/google-ads-public-setup.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/business/__tests__/google-ads-record-conversion.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-send-queue.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/business/__tests__/google-ads-send-queue.test.ts` | C | `crates/business/tests/google_ads_ids.rs`, `crates/business/tests/google_ads_conversion.rs` | ported | Google Ads integration; Q.D7 r2: `sendJobId`; enqueue options and job liveness through the delivery / sweep tests |
 | `packages/business/__tests__/google-ads-settings-service.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/business/__tests__/google-ads-stat-buckets.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/business/__tests__/google-ads-stats.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-timing.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/business/__tests__/google-ads-transaction-id.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/business/__tests__/google-ads-timing.test.ts` | C | `crates/business/tests/google_ads_timing.rs` | ported | Google Ads integration; Q.D7 r2 |
+| `packages/business/__tests__/google-ads-transaction-id.test.ts` | C | `crates/business/tests/google_ads_ids.rs` | ported | Google Ads integration; Q.D7 r2 |
 | `packages/business/__tests__/has-workspace-access.test.ts` | C | tbd | todo | Workspaces |
 | `packages/business/__tests__/human-reply-window-sla.test.ts` | C | tbd | todo | Working hours |
 | `packages/business/__tests__/ice-candidate-summary.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
@@ -2658,7 +2658,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/connections/__tests__/registry.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/connections/__tests__/self-serve.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/connections/__tests__/service.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/database/__tests__/ads-conversion-event-repository.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
+| `packages/database/__tests__/ads-conversion-event-repository.test.ts` | C | `crates/db/tests/repo_ads_conversion_event_repository.rs` | ported | Meta Conversions API (CAPI); Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/ai-agent-actions.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/database/__tests__/ai-conversation-embedding-repository.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `packages/database/__tests__/ai-file-chunking-config.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
@@ -2703,7 +2703,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/contact-inbox-thread-owner-app-columns.test.ts` | C | `crates/db/tests/contact_inbox_thread_owner_app_columns.rs` | passing | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-on-broadcast-index.test.ts` | C | `crates/db/tests/contact_on_broadcast_index.rs` | passing | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-partial.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/database/__tests__/contact-referral-event-repository.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking |
+| `packages/database/__tests__/contact-referral-event-repository.test.ts` | C | `crates/db/tests/repo_contact_referral_event_repository.rs` | ported | Ads analytics and CTWA tracking; Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/contact-repository-backdate-created-at.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/contact-repository-list-where.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/database/__tests__/conversation-ai-context-repository.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
@@ -2711,27 +2711,27 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/conversation-unread.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/credential-aad.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/database/__tests__/credential.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/database/__tests__/ctwa-retarget-predicate.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking |
+| `packages/database/__tests__/ctwa-retarget-predicate.test.ts` | C | `crates/db/tests/repo_ctwa_retarget_predicate.rs` | ported | Ads analytics and CTWA tracking; Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/date-bucket.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/database/__tests__/facebook-marketing-message-audience-schema.test.ts` | C | `crates/db/tests/facebook_marketing_message_audience_schema.rs` | passing | Facebook Marketing Messages |
 | `packages/database/__tests__/facebook-marketing-message-recipient-schema.test.ts` | C | `crates/db/tests/facebook_marketing_message_recipient_schema.rs` | passing | Facebook Marketing Messages |
-| `packages/database/__tests__/facebook-marketing-message-repository.test.ts` | C | tbd | todo | Facebook Marketing Messages |
+| `packages/database/__tests__/facebook-marketing-message-repository.test.ts` | C | `crates/db/tests/repo_facebook_marketing_message_repository.rs` | ported | Facebook Marketing Messages; Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/facebook-marketing-messages-schema.test.ts` | C | `crates/db/tests/facebook_marketing_messages_schema.rs` | passing | Facebook Marketing Messages |
 | `packages/database/__tests__/fb-comment-reply-texts.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `packages/database/__tests__/file-export-repository.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/database/__tests__/file-repository.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/database/__tests__/flow-repository.test.ts` | C | tbd | todo | Flow builder and execution |
 | `packages/database/__tests__/get-safe-since-time.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
-| `packages/database/__tests__/google-ads-conversion-event-repository.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/google-ads-settings-partial.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/google-ads-settings-repository.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/google-click-query.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/google-click-referral-merge.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/database/__tests__/google-ads-conversion-event-repository.test.ts` | C | `crates/db/tests/repo_google_ads_conversion_event_repository.rs` | ported | Google Ads integration; Q.D7 r2: stale row, Rust test already existed |
+| `packages/database/__tests__/google-ads-settings-partial.test.ts` | C | `crates/db/tests/partials_google_ads_settings_partial.rs` | ported | Google Ads integration; Q.D7 r2: stale row, Rust test already existed |
+| `packages/database/__tests__/google-ads-settings-repository.test.ts` | C | `crates/db/tests/repo_google_ads_settings_repository.rs` | ported | Google Ads integration; Q.D7 r2: stale row, Rust test already existed |
+| `packages/database/__tests__/google-click-query.test.ts` | C | `crates/db/tests/repo_google_click_query.rs` | ported | Google Ads integration; Q.D7 r2: stale row, Rust test already existed |
+| `packages/database/__tests__/google-click-referral-merge.test.ts` | C | `crates/db/tests/repo_google_click_referral_merge.rs` | ported | Google Ads integration; Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/inbound-webhook-partial.test.ts` | C | `crates/db/tests/inbound_webhook_partial.rs` | passing | Inbound webhooks |
 | `packages/database/__tests__/inbound-webhook-repository.test.ts` | C | tbd | todo | Inbound webhooks |
 | `packages/database/__tests__/inbox-repository.test.ts` | C | `crates/db/tests/inbox_repository.rs` | passing | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/inbox-team-member-repository.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/database/__tests__/integration-google-ads-repository.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/database/__tests__/integration-google-ads-repository.test.ts` | C | `crates/db/tests/repo_integration_google_ads_repository.rs` | ported | Google Ads integration; Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/integration-messenger-repository-personas.test.ts` | C | tbd | todo | Messenger channel |
 | `packages/database/__tests__/integration-whatsapp-mark-token-refresh-error.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/database/__tests__/integration-whatsapp-partial.test.ts` | C | tbd | todo | WhatsApp channel |
@@ -2756,9 +2756,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/integration/count-query-capped.test.ts` | C | tbd | baseline-skip | Contact filters and segments; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/flow-current-version-nodes.test.ts` | C | tbd | baseline-skip | Flow builder and execution; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/google-ads-conversion-event-fk.test.ts` | C | `crates/db/tests/integration_google_ads_conversion_event_fk.rs` | passing | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7 |
-| `packages/database/__tests__/integration/google-ads-conversion-event-stats.test.ts` | C | tbd | baseline-skip | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/google-ads-conversion-event-stats.test.ts` | C | `crates/db/tests/repo_integration_google_ads_conversion_event_stats.rs` | ported | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7; Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/integration/google-ads-conversion-event.test.ts` | C | `crates/db/tests/integration_google_ads_conversion_event.rs` | passing | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7; 2 cases adapted (P2.5 spec) |
-| `packages/database/__tests__/integration/google-click-referral-merge.test.ts` | C | tbd | baseline-skip | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/google-click-referral-merge.test.ts` | C | `crates/db/tests/repo_integration_google_click_referral_merge.rs` | ported | Google Ads integration; P0.3: needs Postgres/Redis, not run — run in P0.7; Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/integration/inbox-repository.test.ts` | C | tbd | baseline-skip | Inbox and live chat (conversations, messages); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/insert-required-columns.test.ts` | C | `crates/db/tests/insert_required_columns.rs` | passing | Database (Drizzle, schema, repositories, sharding); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/integration-whatsapp-lifecycle-targets.test.ts` | C | tbd | baseline-skip | WhatsApp channel; P0.3: needs Postgres/Redis, not run — run in P0.7 |
@@ -2790,9 +2790,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/media-library-folder-repository.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/database/__tests__/message-repository-factory-static-import.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/message-repository-factory.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/database/__tests__/messaging-ad-media-partial.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
-| `packages/database/__tests__/messaging-ad-operation-repository.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
-| `packages/database/__tests__/messaging-ads-connection-repository.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
+| `packages/database/__tests__/messaging-ad-media-partial.test.ts` | C | `crates/db/tests/partials_messaging_ad_media_partial.rs` | ported | Ads campaigns (Meta messaging ads); Q.D7 r2: stale row, Rust test already existed |
+| `packages/database/__tests__/messaging-ad-operation-repository.test.ts` | C | `crates/db/tests/repo_messaging_ad_operation_repository.rs` | ported | Ads campaigns (Meta messaging ads); Q.D7 r2: stale row, Rust test already existed |
+| `packages/database/__tests__/messaging-ads-connection-repository.test.ts` | C | `crates/db/tests/repo_messaging_ads_connection_repository.rs` | ported | Ads campaigns (Meta messaging ads); Q.D7 r2: stale row, Rust test already existed |
 | `packages/database/__tests__/messenger-credential-schema.test.ts` | C | tbd | todo | Messenger channel |
 | `packages/database/__tests__/messenger-welcome-message-flow-repository.test.ts` | C | tbd | todo | Messenger channel |
 | `packages/database/__tests__/meta-catalog-sendable-products-repository.test.ts` | C | tbd | todo | Meta Catalog |
@@ -2912,8 +2912,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/flow-config/__tests__/reference-registry-completeness.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/flow-config/__tests__/remap.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/flow-config/__tests__/routable-handle.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
-| `packages/flow-config/__tests__/send-google-ads-conversion.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/flow-config/__tests__/send-meta-capi-event.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
+| `packages/flow-config/__tests__/send-google-ads-conversion.test.ts` | C | `crates/core/tests/flow_config_send_google_ads_conversion.rs` | ported | Google Ads integration; Q.D7 r2: stale row, Rust test already existed |
+| `packages/flow-config/__tests__/send-meta-capi-event.test.ts` | C | `crates/core/tests/flow_config_send_meta_capi_event.rs` | ported | Meta Conversions API (CAPI); Q.D7 r2: stale row, Rust test already existed |
 | `packages/flow-config/__tests__/send-multiple-images.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `packages/flow-config/__tests__/send-products.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `packages/flow-config/__tests__/send-text-length-rules.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
@@ -3040,7 +3040,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/utils/__tests__/error-log.test.ts` | C | tbd | todo | Error logs |
 | `packages/utils/__tests__/field-value-calculator.test.ts` | C | tbd | todo | Custom fields |
 | `packages/utils/__tests__/form-answer-format.test.ts` | C | tbd | todo | Utils (shared helpers) |
-| `packages/utils/__tests__/google-click.test.ts` | C | tbd | todo | Google Ads integration |
+| `packages/utils/__tests__/google-click.test.ts` | C | `crates/core/tests/utils_google_click.rs` | ported | Google Ads integration; Q.D7 r2: stale row, Rust test already existed |
 | `packages/utils/__tests__/graph-error.test.ts` | C | tbd | todo | Error logs |
 | `packages/utils/__tests__/graph-pagination.test.ts` | C | tbd | todo | Utils (shared helpers) |
 | `packages/utils/__tests__/id.test.ts` | C | tbd | todo | Utils (shared helpers) |
@@ -3052,7 +3052,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/utils/__tests__/live-media.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/utils/__tests__/math-expression.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/utils/__tests__/media-download.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/utils/__tests__/meta-capi.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
+| `packages/utils/__tests__/meta-capi.test.ts` | C | `crates/core/tests/utils_meta_capi.rs` | ported | Meta Conversions API (CAPI); Q.D7 r2: stale row, Rust test already existed |
 | `packages/utils/__tests__/money.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/utils/__tests__/normalize-for-match.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/utils/__tests__/placeholder-email.test.ts` | C | tbd | todo | Utils (shared helpers) |

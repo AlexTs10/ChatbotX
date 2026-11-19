@@ -1,8 +1,9 @@
 //! `GET /integrations/{provider}/callback` for a connect session state
 //! (`handleConnectSessionCallback` / `runConnectSessionCallback` of
 //! `apps/builder/src/app/integrations/[...integration]/callback.ts`). The
-//! legacy JSON-state flows of that route are not ported: such a state
-//! answers 404. No relay to `originHost`: a session only stores the app's own
+//! legacy JSON-state flows of that route answer 404; the Meta ads flows
+//! (`facebookLeadAds`, `facebookMarketingMessages`, `messagingAds`) are
+//! connect sessions too (`ads::connect`). No relay to `originHost`: a session only stores the app's own
 //! host (`toSessionReturn`), so the relay is always a no-op here.
 
 use std::collections::HashMap;
@@ -133,6 +134,9 @@ async fn handle(
     };
     if let Some(kind) = kind {
         return google_callback(&state, kind, &session, &query, &headers).await;
+    }
+    if chatbotx_business::ads::connect::flow_of(&session).is_some() {
+        return ads_callback(&state, &session, &query, &headers).await;
     }
     if session.provider == "stripe" {
         return stripe_callback(&state, session, &query, &headers).await;
@@ -439,6 +443,81 @@ async fn stripe_refuse(
         return_to,
         &[("stripe", "error"), ("reason", &reason)],
     ))
+}
+
+/// The Meta ads flows: only the member who pressed Connect finishes the
+/// session (messaging ads: still a super admin, and the integration is the
+/// workspace's); then back to the page that started it.
+async fn ads_callback(
+    state: &ApiState,
+    session: &SessionRow,
+    query: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Response {
+    use chatbotx_business::ads::connect;
+    let return_to = return_url(session);
+    if query.contains_key("error") {
+        connect_session::fail(&state.db, session, "provider_denied", Some(PENDING)).await;
+        return redirect(&return_to);
+    }
+    let user_id = match state.sessions.as_deref() {
+        Some(auth) => crate::rpc::find_rpc_session(auth, headers)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.user_id),
+        None => None,
+    };
+    let ws = session.workspace_id;
+    let (is_member, super_admin) = match user_id {
+        Some(user) => {
+            let member = tx::read(&state.db, move |conn| {
+                Ok(conn
+                    .query_row(
+                        r#"SELECT 1 FROM "WorkspaceMember" WHERE "workspaceId" = ?1 AND "userId" = ?2"#,
+                        [ws, user],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some())
+            })
+            .await
+            .unwrap_or(false);
+            (
+                member,
+                member && is_workspace_super_admin(state, ws, user).await,
+            )
+        }
+        None => (false, false),
+    };
+    let Some(encryption) = state.encryption.as_deref() else {
+        connect_session::fail(&state.db, session, "internal_error", Some(PENDING)).await;
+        return not_found();
+    };
+    let code = query.get("code").map(String::as_str).unwrap_or_default();
+    let caller = connect::Caller {
+        user_id,
+        is_member,
+        super_admin,
+    };
+    match connect::complete(
+        &state.db,
+        encryption,
+        &state.app_url,
+        &HttpUpstream,
+        session,
+        caller,
+        code,
+    )
+    .await
+    {
+        Ok(true) => redirect(&return_to),
+        Ok(false) => not_found(),
+        Err(error) => {
+            tracing::error!(%error, session_id = session.id, "Meta ads connect callback failed");
+            redirect(&append_connect_error(&return_to, "provider_error"))
+        }
+    }
 }
 
 /// `assertWorkspaceSuperAdmin` for the signed-in member.

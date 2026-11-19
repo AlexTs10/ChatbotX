@@ -154,6 +154,19 @@ pub async fn resolve_grant(db: &Db, workspace_id: i64) -> Result<Option<Grant>> 
     }
 }
 
+/// The grant state the screens show: `missing` (never granted), `valid`
+/// or `expired` (every other outcome of [`resolve_grant`]).
+pub async fn grant_state(db: &Db, workspace_id: i64) -> Result<&'static str> {
+    if auth_row(db, workspace_id).await?.is_none() {
+        return Ok("missing");
+    }
+    Ok(if resolve_grant(db, workspace_id).await?.is_some() {
+        "valid"
+    } else {
+        "expired"
+    })
+}
+
 /// `requireValidGrant`.
 pub async fn require_grant(db: &Db, workspace_id: i64) -> Result<Grant> {
     resolve_grant(db, workspace_id)

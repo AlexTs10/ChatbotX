@@ -162,8 +162,22 @@ mod flow_version_service;
 mod flow_version_service_publish;
 #[path = "folder_service_create.rs"]
 mod folder_service_create;
+#[path = "google_ads_consent.rs"]
+mod google_ads_consent;
 #[path = "google_ads_conversion.rs"]
 mod google_ads_conversion;
+#[path = "google_ads_hash_user_data.rs"]
+mod google_ads_hash_user_data;
+#[path = "google_ads_ids.rs"]
+mod google_ads_ids;
+#[path = "google_ads_processing_status.rs"]
+mod google_ads_processing_status;
+#[path = "google_ads_sanitize.rs"]
+mod google_ads_sanitize;
+#[path = "google_ads_scopes.rs"]
+mod google_ads_scopes;
+#[path = "google_ads_timing.rs"]
+mod google_ads_timing;
 #[path = "google_oauth_connect.rs"]
 mod google_oauth_connect;
 #[path = "import_column_map_and_template.rs"]

@@ -2,8 +2,8 @@
 //! `trigger-executor`, `action-executor`, `actions/*`) and the bookkeeping
 //! of `triggerService` (run limiter, contact history, daily stats).
 //!
-//! ponytail: `sendMetaCapiEvent`, `sendGoogleAdsConversion` and
-//! `runGoogleSheet` wait for their integrations, and the tag-sync / ads
+//! ponytail: `sendMetaCapiEvent` and `runGoogleSheet` wait for their
+//! integrations, and the tag-sync / ads
 //! conversion fan-out of `addTag` waits for those units; they are skipped
 //! with a log line. Actions run in order; triggers run one after another
 //! (the original runs them with `Promise.allSettled`).
@@ -611,7 +611,8 @@ async fn execute_action(ctx: &ActionCtx<'_>, scope: &mut Scope) -> Result<Outcom
             return start_flow(ctx, scope, &conversation, action_type).await;
         }
         "pipeline" => return pipeline(ctx, scope, &conversation).await,
-        "sendMetaCapiEvent" | "sendGoogleAdsConversion" | "runGoogleSheet" => {
+        "sendGoogleAdsConversion" => return google_ads_conversion(ctx, scope, &conversation).await,
+        "sendMetaCapiEvent" | "runGoogleSheet" => {
             tracing::warn!(
                 action_type,
                 trigger_id = ctx.trigger_id,
@@ -625,6 +626,121 @@ async fn execute_action(ctx: &ActionCtx<'_>, scope: &mut Scope) -> Result<Outcom
         }
     };
     Ok(outcome)
+}
+
+/// `sendGoogleAdsConversion` (`integration-actions.ts`): the threaded inbox
+/// when it carries a Google click, else the contact's latest click inbox;
+/// the stored action is checked with the flow step's schema first.
+async fn google_ads_conversion(
+    ctx: &ActionCtx<'_>,
+    scope: &mut Scope,
+    conversation: &Conversation,
+) -> Result<Outcome, JobError> {
+    use chatbotx_core::flow_config::steps::{
+        google_ads_conversion_fields_schema, with_google_ads_conversion_refinements,
+    };
+    use chatbotx_db::repo::contact_inbox as inboxes;
+
+    use crate::google_ads_producer::{Produce, Produced, produce, report};
+    let (ws, contact) = (ctx.workspace_id, ctx.contact_id);
+    let threaded = scope.contact_inbox(ctx).await?.map(|c| c.id);
+    let click =
+        ctx.deps
+            .db
+            .read(move |c| {
+                let found = match threaded {
+                    Some(id) => inboxes::find_google_click_attribution(c, ws, id)
+                        .map_err(crate::repo_err)?,
+                    None => None,
+                };
+                let found = match found {
+                    Some(row) => Some(row),
+                    None => inboxes::find_latest_google_click_inbox_by_contact(c, ws, contact)
+                        .map_err(crate::repo_err)?,
+                };
+                let Some(row) = found else { return Ok(None) };
+                Ok(c.query_row(
+                    &format!(r#"{} WHERE "id" = ?1"#, ContactInbox::select_sql()),
+                    [row.id],
+                    ContactInbox::from_row,
+                )
+                .optional()?)
+            })
+            .await
+            .map_err(db_fail)?;
+    let Some(click) = click else {
+        tracing::warn!(
+            "No contact inbox with a Google click for contact {contact}, skipping sendGoogleAdsConversion action"
+        );
+        return skipped("noGoogleClick");
+    };
+    let trigger = ctx.trigger_id;
+    let parsed = with_google_ads_conversion_refinements(google_ads_conversion_fields_schema())
+        .safe_parse(ctx.action);
+    let Some(action) = parsed.data.clone().filter(|_| parsed.success) else {
+        let code =
+            chatbotx_core::utils::google_click::google_ads_conversion_error_code("invalidInput")
+                .unwrap_or_default();
+        let issues: Vec<String> = parsed
+            .issues()
+            .iter()
+            .map(|issue| {
+                let path: Vec<String> = issue.path.iter().map(ToString::to_string).collect();
+                if path.is_empty() {
+                    issue.message.clone()
+                } else {
+                    format!("{}: {}", path.join("."), issue.message)
+                }
+            })
+            .collect();
+        let detail = crate::google_ads_producer::describe_input_failure(
+            code,
+            &serde_json::json!({}),
+            &issues,
+        );
+        tracing::warn!("Invalid Google Ads trigger action for trigger {trigger}: {detail}");
+        report(
+            ctx.deps,
+            ws,
+            contact,
+            &click.source_id,
+            format!("{detail}\nTrigger: {trigger}"),
+        )
+        .await;
+        return skipped("invalidAction");
+    };
+    let produced = produce(Produce {
+        deps: ctx.deps,
+        conversation,
+        contact_inbox: &click,
+        source: "triggerAction",
+        scope_id: trigger.to_string(),
+        fields: &action,
+        occurrence_key: ctx
+            .occurrence_key
+            .as_ref()
+            .map(|key| format!("{key}:{contact}")),
+        sent_by_user_id: None,
+        report_suffix: format!("\nTrigger: {trigger}"),
+    })
+    .await;
+    match produced {
+        Produced::Queued => Ok(Outcome::Succeeded),
+        Produced::Refused("invalidConsentConfig" | "invalidConsentValue") => {
+            tracing::warn!("Google Ads conversion not recorded for trigger {trigger}: consent");
+            skipped("configRefused")
+        }
+        Produced::Refused(status) => {
+            tracing::warn!("Google Ads conversion not recorded for trigger {trigger}: {status}");
+            skipped(status)
+        }
+        Produced::Failed(reason) => {
+            tracing::error!(
+                "Failed to record Google Ads conversion for trigger {trigger}: {reason}"
+            );
+            skipped("recordFailed")
+        }
+    }
 }
 
 /// `addSequence` / `removeSequence` (1..=`MAX_SEQUENCES_PER_TRIGGER_ACTION`

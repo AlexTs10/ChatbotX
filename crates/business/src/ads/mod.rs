@@ -2,6 +2,7 @@
 
 pub mod analytics;
 pub mod campaigns;
+pub mod connect;
 pub mod funnel;
 pub mod graph;
 pub mod referral;

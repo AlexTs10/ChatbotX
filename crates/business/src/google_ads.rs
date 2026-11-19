@@ -293,6 +293,33 @@ fn setting_view(source: &GoogleAdsConsentSource) -> Value {
     }
 }
 
+/// `googleAdsSettingsService.getConsent` as the `to_consent_input` settings
+/// (`{ adUserData: { type, template }, adPersonalization }`): no row = both
+/// `notProvided`; `None` = a row failing the document schema (`invalid`).
+pub async fn stored_consent(db: &Db, workspace_id: i64) -> Result<Option<Value>> {
+    let row = tx::read(db, move |conn| {
+        Ok(google_ads_settings::find_by_workspace_id(
+            conn,
+            workspace_id,
+        )?)
+    })
+    .await?;
+    Ok(match row {
+        None => Some(json!({
+            "adUserData": { "type": "notProvided", "template": null },
+            "adPersonalization": { "type": "notProvided", "template": null },
+        })),
+        Some(row) => parse_google_ads_settings_document(&row.settings.0)
+            .ok()
+            .map(|doc| {
+                json!({
+                    "adUserData": setting_view(&doc.consent.ad_user_data),
+                    "adPersonalization": setting_view(&doc.consent.ad_personalization),
+                })
+            }),
+    })
+}
+
 /// `loadGoogleAdsIntegration`: the credential-free setup plus the stored consent.
 pub async fn get_connection(db: &Db, workspace_id: i64) -> Result<Value> {
     let (integration, conn_row, settings) = tx::read(db, move |conn| {

@@ -78,6 +78,16 @@ pub trait Enqueuer: Send + Sync {
     ) -> BoxFuture<'a, Result<bool, JobsError>> {
         Box::pin(async { Ok(false) })
     }
+
+    /// `job.getState()`: a producer without a store (a test fake) knows no
+    /// job (`Unknown`).
+    fn job_state<'a>(
+        &'a self,
+        _queue: QueueName,
+        _job_id: &'a str,
+    ) -> BoxFuture<'a, Result<crate::store::JobState, JobsError>> {
+        Box::pin(async { Ok(crate::store::JobState::Unknown) })
+    }
 }
 
 impl From<chatbotx_db::DbError> for JobsError {
@@ -115,5 +125,13 @@ impl<T: Enqueuer + ?Sized> Enqueuer for std::sync::Arc<T> {
         job_id: &'a str,
     ) -> BoxFuture<'a, Result<bool, JobsError>> {
         (**self).remove_job(queue, job_id)
+    }
+
+    fn job_state<'a>(
+        &'a self,
+        queue: QueueName,
+        job_id: &'a str,
+    ) -> BoxFuture<'a, Result<crate::store::JobState, JobsError>> {
+        (**self).job_state(queue, job_id)
     }
 }

@@ -9,6 +9,7 @@
 //! route ([`public`]) after the member checks, so both stay one code path.
 
 mod admin;
+mod ads;
 mod analytics;
 mod appointments;
 mod automated_responses;
@@ -196,6 +197,9 @@ pub async fn procedure(
     if let Some(outcome) = google_ads::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = ads::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 
@@ -257,7 +261,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || appointments::ACTIONS.contains(&n)
                 || working_hours::ACTIONS.contains(&n)
                 || whatsapp::ACTIONS.contains(&n)
-                || google_ads::ACTIONS.contains(&n) =>
+                || google_ads::ACTIONS.contains(&n)
+                || ads::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -337,6 +342,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = google_ads::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = ads::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");
