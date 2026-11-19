@@ -76,6 +76,12 @@ channel", "Coexist" and "Thread control" set to `ported` with their Rust test.
 - worker: `coexist_instagram_tests.rs`, `coexist_attachment.rs` tests,
   `coexist_throttle.rs` unit tests, `coexist_messenger.rs` tests.
 
+## Gate (Dell, 2026-11-19)
+
+fmt clean; clippy `-D warnings` clean (business, api, worker); `cargo test`
+business + api + worker + server: 4373 passed, 0 failed. `pnpm --filter web
+build` passes; `tsc --noEmit`: 45 errors (baseline 45, none new).
+
 ## Parity suites (not run here)
 
 p1-10 / p1-11 WhatsApp + Meta: p1-11 `41`, `42`, `50`, `51`, `60`; p1-10 `20`,
