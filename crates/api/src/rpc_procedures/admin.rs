@@ -123,9 +123,7 @@ async fn admin(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcE
     if !is_super_admin(ctx).await? {
         return Err(not_found());
     }
-    if !NOT_ENTERPRISE.contains(&name)
-        && !chatbotx_business::license::has_enterprise_features(db, ctx.api.edition).await
-    {
+    if !NOT_ENTERPRISE.contains(&name) && ctx.api.assert_enterprise_features().await.is_err() {
         return Err(not_found());
     }
     // `(enterprise)/(non-cloud)/layout.tsx`.

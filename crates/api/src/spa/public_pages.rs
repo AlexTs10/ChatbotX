@@ -168,11 +168,7 @@ async fn landing(api: &ApiState, input: &Value) -> Response {
     if servable(api, ws).await.is_none() {
         return not_found();
     }
-    let inboxes = match tx::read(&api.db, move |conn| {
-        Ok(list_connected_link_inboxes(conn, ws)?)
-    })
-    .await
-    {
+    let inboxes = match tx::read(&api.db, move |conn| list_connected_link_inboxes(conn, ws)).await {
         Ok(inboxes) => inboxes,
         Err(e) => return internal(e),
     };
