@@ -58,6 +58,8 @@ mod connection_credentials;
 mod connection_oauth_channels;
 #[path = "connection_oauth_google_ads.rs"]
 mod connection_oauth_google_ads;
+#[path = "connection_oauth_instagram.rs"]
+mod connection_oauth_instagram;
 #[path = "contact_bulk_tag_stats.rs"]
 mod contact_bulk_tag_stats;
 #[path = "contact_create_with_inbox.rs"]

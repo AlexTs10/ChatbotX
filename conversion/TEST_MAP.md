@@ -188,7 +188,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/client-imports-no-backend-packages.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/client-imports-no-queries.test.ts` | B | - | todo | Builder app shell and shared components; builder node-env, client logic |
 | `apps/builder/__tests__/coexist-client.test.ts` | B | - | todo | Coexist (existing-app history sync); builder jsdom |
-| `apps/builder/__tests__/coexist-messenger-api.test.ts` | C | tbd | todo | Coexist (existing-app history sync); builder server code |
+| `apps/builder/__tests__/coexist-messenger-api.test.ts` | C | `crates/api/tests/rpc_channels.rs` | ported | Coexist (existing-app history sync); builder server code |
 | `apps/builder/__tests__/coexist-row-trailing.test.tsx` | B | - | todo | Coexist (existing-app history sync); builder jsdom |
 | `apps/builder/__tests__/coexist-run.test.ts` | B | - | todo | Coexist (existing-app history sync); builder node-env, client logic |
 | `apps/builder/__tests__/coexist-step.test.tsx` | B | - | todo | Coexist (existing-app history sync); builder jsdom |
@@ -277,7 +277,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/conversations-authenticated-api-block-gate.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
 | `apps/builder/__tests__/conversations-public-api.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
 | `apps/builder/__tests__/conversations-public-scope.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
-| `apps/builder/__tests__/conversations-thread-control-public-api.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
+| `apps/builder/__tests__/conversations-thread-control-public-api.test.ts` | C | `crates/api/tests/conversations_thread_control_public_api.rs` | ported | Thread control (handover protocol); builder server code |
 | `apps/builder/__tests__/conversion-events-account-reset.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
 | `apps/builder/__tests__/conversion-events-rule-types.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
 | `apps/builder/__tests__/count-contact-inboxes.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
@@ -894,7 +894,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/use-whatsapp-call-starter.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/use-whatsapp-voip-call.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/use-workspace-option-sources.test.tsx` | B | - | todo | Workspaces; builder jsdom |
-| `apps/builder/__tests__/user-persistent-menus-public-api.test.ts` | C | tbd | todo | Messenger channel; builder server code |
+| `apps/builder/__tests__/user-persistent-menus-public-api.test.ts` | C | `crates/api/tests/messenger_menus_public_api.rs` | ported | Messenger channel; builder server code |
 | `apps/builder/__tests__/user-timezone.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/v1-etag-interceptor.test.ts` | C | tbd | todo | Tags and labels; builder server code |
 | `apps/builder/__tests__/validate-ai-mcp-server.action.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions); builder server code |
@@ -1246,19 +1246,19 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/chunkers.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/clear-custom-field-step.test.ts` | C | tbd | todo | Custom fields |
 | `apps/worker/__tests__/clear-expired-support-access.test.ts` | C | tbd | todo | Workspace support access |
-| `apps/worker/__tests__/coexist-attachment-download.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `apps/worker/__tests__/coexist-attachment-download.test.ts` | C | `crates/worker/src/coexist_attachment.rs` | ported | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-historical-id.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-instagram-adapter.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-instagram-facebook-adapter.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `apps/worker/__tests__/coexist-instagram-sync.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `apps/worker/__tests__/coexist-instagram-sync.test.ts` | C | `crates/worker/src/coexist_instagram_tests.rs` | ported | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-messenger-sync.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-messenger-template.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-usage-throttle.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `apps/worker/__tests__/coexist-whatsapp-buffer.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `apps/worker/__tests__/coexist-whatsapp-buffer.test.ts` | C | `crates/worker/src/coexist_whatsapp_tests.rs` | ported | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-flush-bsuid.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-flush-lifecycle.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-flush.payloads.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `apps/worker/__tests__/coexist-whatsapp-flush.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `apps/worker/__tests__/coexist-whatsapp-flush.test.ts` | C | `crates/worker/src/coexist_whatsapp_tests.rs` | ported | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-history-photo-intent.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/coexist-whatsapp-pending-patches.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `apps/worker/__tests__/comment-automation-attachment.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
@@ -1542,7 +1542,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/thread-control-handler.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `apps/worker/__tests__/thread-control-queue-types.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `apps/worker/__tests__/thread-control-send-gate.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `apps/worker/__tests__/thread-control-step.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `apps/worker/__tests__/thread-control-step.test.ts` | C | `crates/worker/src/steps/tests.rs` | ported | Thread control (handover protocol) |
 | `apps/worker/__tests__/tiktok-comment-identity.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `apps/worker/__tests__/tiktok-high-intent-comment.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `apps/worker/__tests__/trigger-action-executor-add-tag.test.ts` | C | tbd | todo | Triggers |
@@ -1722,7 +1722,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/messenger/__tests__/comment-video.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/connection-oauth.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/conversation-routing-handlers.test.ts` | C | tbd | todo | Messenger channel |
-| `integrations/messenger/__tests__/conversation-routing-parsers.test.ts` | C | tbd | todo | Messenger channel |
+| `integrations/messenger/__tests__/conversation-routing-parsers.test.ts` | C | `crates/worker/src/thread_control.rs` | ported | Messenger channel |
 | `integrations/messenger/__tests__/disconnect.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/eager-media-compression.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/error-mapper.test.ts` | C | tbd | todo | Messenger channel |
@@ -1848,9 +1848,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/whatsapp/__tests__/contact-without-profile-webhook.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversation-handlers.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversation-routing-api.test.ts` | C | tbd | todo | WhatsApp channel |
-| `integrations/whatsapp/__tests__/conversation-routing-extractor.test.ts` | C | tbd | todo | WhatsApp channel |
+| `integrations/whatsapp/__tests__/conversation-routing-extractor.test.ts` | C | `crates/worker/src/thread_control.rs` | ported | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversation-routing-handlers.test.ts` | C | tbd | todo | WhatsApp channel |
-| `integrations/whatsapp/__tests__/conversation-routing-parsers.test.ts` | C | tbd | todo | WhatsApp channel |
+| `integrations/whatsapp/__tests__/conversation-routing-parsers.test.ts` | C | `crates/worker/src/thread_control.rs` | ported | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversions.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/delete-flow.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/delivery-receipts.test.ts` | C | tbd | todo | WhatsApp channel |
@@ -2511,15 +2511,15 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/tenant-reconcile.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
 | `packages/business/__tests__/tenant-settings-domain.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/tenant-settings-entitlement.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `packages/business/__tests__/thread-control-constants.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `packages/business/__tests__/thread-control-service.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `packages/business/__tests__/thread-control-constants.test.ts` | C | `crates/business/tests/thread_control_service.rs` | ported | Thread control (handover protocol) |
+| `packages/business/__tests__/thread-control-service.test.ts` | C | `crates/business/tests/thread_control_service.rs` | ported | Thread control (handover protocol) |
 | `packages/business/__tests__/tiktok-post-details.test.ts` | C | tbd | todo | TikTok channel |
 | `packages/business/__tests__/trigger-service-executions.test.ts` | C | `crates/business/tests/trigger_executions.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger-service-update-settings.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger-service-update-with-conditions.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/trigger.service.test.ts` | C | `crates/business/tests/trigger_service.rs` | ported | Triggers; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `packages/business/__tests__/update-from-message.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/business/__tests__/user-persistent-menu-service.test.ts` | C | tbd | todo | Messenger channel |
+| `packages/business/__tests__/user-persistent-menu-service.test.ts` | C | `crates/api/tests/messenger_menus_public_api.rs` | ported | Messenger channel |
 | `packages/business/__tests__/user-quota-access-state.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/user-quota-bootstrap-plan.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/user-quota-default-plan.test.ts` | C | tbd | todo | Licensing, billing and quotas |
@@ -2682,9 +2682,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/channel-partial.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/client-errors.test.ts` | C | `crates/db/tests/client_errors.rs` | passing | Error logs |
 | `packages/database/__tests__/coexist-channel-enum.test.ts` | C | `crates/db/tests/coexist_channel_enum.rs` | passing | Coexist (existing-app history sync) |
-| `packages/database/__tests__/coexist-run-recovery-repository.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `packages/database/__tests__/coexist-sync-run-repository.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
-| `packages/database/__tests__/coexist-sync-run-type-scoping.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `packages/database/__tests__/coexist-run-recovery-repository.test.ts` | C | `crates/db/tests/repo_coexist_run_recovery_repository.rs` | ported | Coexist (existing-app history sync) |
+| `packages/database/__tests__/coexist-sync-run-repository.test.ts` | C | `crates/db/tests/repo_coexist_sync_run_repository.rs` | ported | Coexist (existing-app history sync) |
+| `packages/database/__tests__/coexist-sync-run-type-scoping.test.ts` | C | `crates/db/tests/repo_coexist_sync_run_type_scoping.rs` | ported | Coexist (existing-app history sync) |
 | `packages/database/__tests__/comment-automation-event-purge.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `packages/database/__tests__/connect-session-cancel-pending.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/database/__tests__/connect-session-repository.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -2732,9 +2732,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/inbox-repository.test.ts` | C | `crates/db/tests/inbox_repository.rs` | passing | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/inbox-team-member-repository.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/integration-google-ads-repository.test.ts` | C | tbd | todo | Google Ads integration |
-| `packages/database/__tests__/integration-messenger-repository-personas.test.ts` | C | tbd | todo | Messenger channel |
-| `packages/database/__tests__/integration-whatsapp-mark-token-refresh-error.test.ts` | C | tbd | todo | WhatsApp channel |
-| `packages/database/__tests__/integration-whatsapp-partial.test.ts` | C | tbd | todo | WhatsApp channel |
+| `packages/database/__tests__/integration-messenger-repository-personas.test.ts` | C | `crates/db/tests/repo_integration_messenger_repository_personas.rs` | ported | Messenger channel |
+| `packages/database/__tests__/integration-whatsapp-mark-token-refresh-error.test.ts` | C | `crates/db/tests/repo_integration_whatsapp_mark_token_refresh_error.rs` | ported | WhatsApp channel |
+| `packages/database/__tests__/integration-whatsapp-partial.test.ts` | C | `crates/db/tests/partials_integration_whatsapp_partial.rs` | ported | WhatsApp channel |
 | `packages/database/__tests__/integration/ai-file-processing-run.test.ts` | C | tbd | baseline-skip | AI knowledge base (RAG, AI files); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/ai-handover-bulk-eligibility.test.ts` | C | tbd | baseline-skip | AI handover (human takeover); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/ai-handover-bulk-run-lifecycle.test.ts` | C | tbd | baseline-skip | AI handover (human takeover); P0.3: needs Postgres/Redis, not run — run in P0.7 |
@@ -2793,8 +2793,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/messaging-ad-media-partial.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/database/__tests__/messaging-ad-operation-repository.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/database/__tests__/messaging-ads-connection-repository.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
-| `packages/database/__tests__/messenger-credential-schema.test.ts` | C | tbd | todo | Messenger channel |
-| `packages/database/__tests__/messenger-welcome-message-flow-repository.test.ts` | C | tbd | todo | Messenger channel |
+| `packages/database/__tests__/messenger-credential-schema.test.ts` | C | `crates/db/tests/partials_messenger_credential_schema.rs` | ported | Messenger channel |
+| `packages/database/__tests__/messenger-welcome-message-flow-repository.test.ts` | C | `crates/db/tests/repo_messenger_welcome_message_flow_repository.rs` | ported | Messenger channel |
 | `packages/database/__tests__/meta-catalog-sendable-products-repository.test.ts` | C | tbd | todo | Meta Catalog |
 | `packages/database/__tests__/money-scale.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/database/__tests__/oauth-consent.repository.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -2813,20 +2813,20 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/tag-channel-repository.test.ts` | C | tbd | todo | Tags and labels |
 | `packages/database/__tests__/template-selectable-resource-repository.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `packages/database/__tests__/template-version-pin.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/database/__tests__/thread-control-partial.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `packages/database/__tests__/thread-control-repository.test.ts` | C | tbd | todo | Thread control (handover protocol) |
-| `packages/database/__tests__/thread-control-sdk-parity.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `packages/database/__tests__/thread-control-partial.test.ts` | C | `crates/db/tests/partials_thread_control_partial.rs` | ported | Thread control (handover protocol) |
+| `packages/database/__tests__/thread-control-repository.test.ts` | C | `crates/db/tests/repo_thread_control_repository.rs` | ported | Thread control (handover protocol) |
+| `packages/database/__tests__/thread-control-sdk-parity.test.ts` | C | `crates/core/tests/partials_thread_control_sdk_parity.rs` | ported | Thread control (handover protocol) |
 | `packages/database/__tests__/timescale.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/trigger-repository.test.ts` | C | `crates/db/tests/repo_trigger_repository.rs` | ported | Triggers; P3.3 (see specs/P3.3-test-map.tsv) |
 | `packages/database/__tests__/user-repository.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
-| `packages/database/__tests__/whatsapp-business-account-repository.test.ts` | C | tbd | todo | WhatsApp channel |
+| `packages/database/__tests__/whatsapp-business-account-repository.test.ts` | C | `crates/db/tests/repo_whatsapp_business_account_repository.rs` | ported | WhatsApp channel |
 | `packages/database/__tests__/whatsapp-call-display-outcome.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-list-for-workspace.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-outcome.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-repository.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-workspace-fk-cascade.test.ts` | C | `crates/db/tests/whatsapp_call_workspace_fk_cascade.rs` | passing | WhatsApp calling (VoIP) |
-| `packages/database/__tests__/whatsapp-credential-schema.test.ts` | C | tbd | todo | WhatsApp channel |
-| `packages/database/__tests__/whatsapp-signup-session-repository.test.ts` | C | tbd | todo | WhatsApp channel |
+| `packages/database/__tests__/whatsapp-credential-schema.test.ts` | C | `crates/db/tests/partials_whatsapp_credential_schema.rs` | ported | WhatsApp channel |
+| `packages/database/__tests__/whatsapp-signup-session-repository.test.ts` | C | `crates/db/tests/repo_whatsapp_signup_session_repository.rs` | ported | WhatsApp channel |
 | `packages/database/__tests__/with-id-tie-break.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/working-hours-repository.test.ts` | C | tbd | todo | Working hours |
 | `packages/database/__tests__/working-hours-schema.test.ts` | C | tbd | todo | Working hours |
@@ -2927,7 +2927,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/flow-config/__tests__/template-flow-node-schema.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `packages/flow-config/__tests__/template-parameter-values.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `packages/flow-config/__tests__/template-structure.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `packages/flow-config/__tests__/thread-control-step.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `packages/flow-config/__tests__/thread-control-step.test.ts` | C | `crates/core/tests/flow_config_thread_control_step.rs` | ported | Thread control (handover protocol) |
 | `packages/flow-config/__tests__/tiktok-text-rules.test.ts` | C | tbd | todo | TikTok channel |
 | `packages/flow-config/__tests__/unresolved-references.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/flow-config/__tests__/wa-template-flow-token.test.ts` | C | tbd | todo | WhatsApp message templates |
@@ -2937,7 +2937,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/flow-config/__tests__/wa-template-quick-reply-buttons.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `packages/flow-config/__tests__/wa-template.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `packages/flow-config/__tests__/whatsapp-flow-step.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
-| `packages/flow-config/__tests__/whatsapp-location.test.ts` | C | tbd | todo | WhatsApp channel |
+| `packages/flow-config/__tests__/whatsapp-location.test.ts` | C | `crates/core/tests/flow_config_whatsapp_location.rs` | ported | WhatsApp channel |
 | `packages/imports/__tests__/cell.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/imports/__tests__/contacts-header-match.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/imports/__tests__/file-validation.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -3024,7 +3024,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/ui/src/hooks/__tests__/use-debounced-callback.test.tsx` | B | - | todo | UI component library; frontend package |
 | `packages/ui/src/lib/__tests__/format.test.ts` | B | - | todo | UI component library; frontend package |
 | `packages/utils/__tests__/call-capable-channels.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/utils/__tests__/coexist-channels.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
+| `packages/utils/__tests__/coexist-channels.test.ts` | C | `crates/core/tests/utils_coexist_channels.rs` | ported | Coexist (existing-app history sync) |
 | `packages/utils/__tests__/concurrency.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/utils/__tests__/connection.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/utils/__tests__/coordinates.test.ts` | C | tbd | todo | Utils (shared helpers) |
@@ -3066,7 +3066,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/utils/__tests__/store-incoming-image.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/utils/__tests__/temporal-input.test.ts` | C | tbd | todo | Utils (shared helpers) |
 | `packages/utils/__tests__/temporal-storage.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/utils/__tests__/thread-control-channels.test.ts` | C | tbd | todo | Thread control (handover protocol) |
+| `packages/utils/__tests__/thread-control-channels.test.ts` | C | `crates/core/tests/utils_thread_control_channels.rs` | ported | Thread control (handover protocol) |
 | `packages/utils/__tests__/web-url.test.ts` | C | tbd | todo | Utils (shared helpers) |
 | `packages/utils/__tests__/whatsapp-call-hours.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/utils/__tests__/whatsapp-call.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |

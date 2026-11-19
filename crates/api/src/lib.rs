@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod booking_public;
+pub mod channel_connect;
 pub mod connect_callback;
 pub mod errors;
 pub mod files;

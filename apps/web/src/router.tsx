@@ -3,6 +3,7 @@
 // those markers for conversion/specs/P4-routes.tsv.
 import type { QueryClient } from "@tanstack/react-query"
 import {
+  type AnyRoute,
   createRootRouteWithContext,
   createRoute,
   createRouter,
@@ -556,6 +557,72 @@ const settingsRoutes = settingsRoute.addChildren([
   ]),
 ])
 
+// `(integrations)/whatsapps/[id]`, `messengers/[id]`, `instagrams/[id]`,
+// `webchats/*`: the channel settings screens (superAdmin). The `calls` and
+// `ads` tabs belong to the calling and ads units.
+const channelSettings = () => import("@/routes/channel-settings")
+const channelPage = <P extends AnyRoute>(
+  parent: () => P,
+  path: string,
+  page: keyof Awaited<ReturnType<typeof channelSettings>>,
+) =>
+  createRoute({
+    getParentRoute: parent,
+    path,
+    component: lazyRouteComponent(channelSettings, page),
+  })
+const whatsappChannelRoute = channelPage(
+  () => workspaceRoute,
+  "whatsapps/$id",
+  "WhatsappLayout",
+)
+const messengerChannelRoute = channelPage(
+  () => workspaceRoute,
+  "messengers/$id",
+  "MessengerLayout",
+)
+const instagramChannelRoute = channelPage(
+  () => workspaceRoute,
+  "instagrams/$id",
+  "InstagramLayout",
+)
+const channelSettingsRoutes = [
+  whatsappChannelRoute.addChildren(
+    (
+      [
+        ["settings", "WhatsappSettingsPage"],
+        ["account-healths", "WhatsappAccountHealthsPage"],
+        ["flows", "WhatsappFlowsPage"],
+        ["message-templates", "WhatsappMessageTemplatesPage"],
+        ["useful-links", "WhatsappUsefulLinksPage"],
+        ["ecommerce", "WhatsappEcommercePage"],
+        ["automation", "WhatsappSettingsRedirect"],
+        ["profile", "WhatsappSettingsRedirect"],
+        ["capi", "WhatsappCapiRedirect"],
+      ] as const
+    ).map(([path, page]) => channelPage(() => whatsappChannelRoute, path, page)),
+  ),
+  messengerChannelRoute.addChildren(
+    (
+      [
+        ["edit", "MessengerEditPage"],
+        ["message-templates", "MessengerMessageTemplatesPage"],
+        ["capi", "MessengerCapiRedirect"],
+      ] as const
+    ).map(([path, page]) => channelPage(() => messengerChannelRoute, path, page)),
+  ),
+  instagramChannelRoute.addChildren(
+    (
+      [
+        ["edit", "InstagramEditPage"],
+        ["capi", "InstagramCapiRedirect"],
+      ] as const
+    ).map(([path, page]) => channelPage(() => instagramChannelRoute, path, page)),
+  ),
+  channelPage(() => workspaceRoute, "webchats/create", "WebchatCreatePage"),
+  channelPage(() => workspaceRoute, "webchats/$id/edit", "WebchatEditPage"),
+]
+
 // `(no-sidebar)`: the flow editor is outside the workspace sidebar layout.
 const flowDetailRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -574,6 +641,21 @@ const createChannelRoute = createRoute({
     "CreateChannelPage",
   ),
 })
+
+// `(no-sidebar)/channels/<channel>/select`: the account pickers.
+const channelSelectRoutes = (
+  [
+    ["channels/messenger/select", "MessengerSelectPage"],
+    ["channels/instagram/select", "InstagramSelectPage"],
+    ["channels/instagram-facebook/select", "InstagramFacebookSelectPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => protectedRoute,
+    path,
+    component: lazyRouteComponent(() => import("@/routes/channel-select"), page),
+  }),
+)
 
 // `app/admin/*`: the platform-operator console (platform admin only).
 const admin = () => import("@/routes/admin")
@@ -672,6 +754,7 @@ const routeTree = rootRoute.addChildren([
     homeRoute,
     flowDetailRoute,
     createChannelRoute,
+    ...channelSelectRoutes,
     adminRoute.addChildren([...adminPages, adminDefaultTemplateRoute]),
     workspaceRoute.addChildren([
       ...workspacePages,
@@ -692,6 +775,7 @@ const routeTree = rootRoute.addChildren([
       appointmentCalendarsRoutes,
       aiRoute.addChildren(aiPages),
       settingsRoutes,
+      ...channelSettingsRoutes,
     ]),
   ]),
 ])

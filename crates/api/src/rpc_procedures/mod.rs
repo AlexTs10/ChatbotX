@@ -13,6 +13,7 @@ mod analytics;
 mod appointments;
 mod automated_responses;
 mod broadcasts;
+mod channels;
 mod comments;
 mod contacts;
 mod conversations;
@@ -148,6 +149,9 @@ pub async fn procedure(
     if let Some(outcome) = whatsapp::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = channels::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
         return Some(outcome.map(|output| output.json));
     }
@@ -257,6 +261,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || appointments::ACTIONS.contains(&n)
                 || working_hours::ACTIONS.contains(&n)
                 || whatsapp::ACTIONS.contains(&n)
+                || channels::ACTIONS.contains(&n)
                 || google_ads::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
@@ -334,6 +339,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = whatsapp::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = channels::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = google_ads::action(ctx, name, &args).await {
@@ -650,6 +658,8 @@ mod send_checks {
         assert_send(conversations::action(ctx, "threadControlAction", args));
         assert_send(whatsapp::procedure(ctx, "", input));
         assert_send(whatsapp::action(ctx, "", args));
+        assert_send(channels::procedure(ctx, "", input));
+        assert_send(channels::action(ctx, "", args));
     }
 
     fn handler_futures_are_send(state: &ApiState, call: Call<'_>) {
