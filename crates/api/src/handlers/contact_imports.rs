@@ -250,8 +250,32 @@ pub(super) async fn get_import(state: &ApiState, call: Call<'_>, import_type: Im
 /// the `bulkTagContacts` precedent). A run error is logged, the job row
 /// carries the result.
 async fn start_import(state: &ApiState, call: Call<'_>) -> Reply {
-    let ws = call.workspace_id;
-    let mut input = Input::from_body(call.params, call.body);
+    let start = start_import_input(Input::from_body(call.params, call.body), call.workspace_id)?;
+    let import_id = start_contact_import(&state.db, start)
+        .await
+        .map_err(|e| business_error(e, STARTING_IMPORT))?;
+    run_started(state, import_id).await;
+    Ok(json(201, json!({ "importId": import_id.to_string() })))
+}
+
+/// Runs a started contact import in the request (no worker queue).
+pub(crate) async fn run_started(state: &ApiState, import_id: i64) {
+    match state.files.as_deref() {
+        Some(files) => {
+            if let Err(error) = run_import(&state.db, files, import_id).await {
+                tracing::error!(%error, import_id, "contact import run failed");
+            }
+        }
+        None => tracing::error!(import_id, "file storage is not configured; import not run"),
+    }
+}
+
+/// `importContactsRequest` + `buildContactImportMeta`: the
+/// `startContactImport` input without a user (422 on a schema failure).
+pub(crate) fn start_import_input(
+    mut input: Input,
+    ws: i64,
+) -> Result<StartContactImport, crate::orpc::OrpcError> {
     let file_id = input.id("fileId");
     let value = input.get("channel").cloned();
     let channel = input.enum_at(&key("channel"), value.as_ref(), CHANNEL_TYPES, true);
@@ -321,27 +345,13 @@ async fn start_import(state: &ApiState, call: Call<'_>) -> Reply {
         field_mapping,
         tag_id: tag_id.map(|id| id.to_string()),
     };
-    let import_id = start_contact_import(
-        &state.db,
-        StartContactImport {
-            workspace_id: ws,
-            user_id: None,
-            inbox_id,
-            file_id,
-            meta,
-        },
-    )
-    .await
-    .map_err(|e| business_error(e, STARTING_IMPORT))?;
-    match state.files.as_deref() {
-        Some(files) => {
-            if let Err(error) = run_import(&state.db, files, import_id).await {
-                tracing::error!(%error, import_id, "contact import run failed");
-            }
-        }
-        None => tracing::error!(import_id, "file storage is not configured; import not run"),
-    }
-    Ok(json(201, json!({ "importId": import_id.to_string() })))
+    Ok(StartContactImport {
+        workspace_id: ws,
+        user_id: None,
+        inbox_id,
+        file_id,
+        meta,
+    })
 }
 
 /// `countryCodeSchema`: `^\+\d{1,4}$`.
@@ -445,7 +455,7 @@ pub(super) async fn workspace_language(
 }
 
 /// `contactImportPublicResource` / `productImportPublicResource`.
-pub(super) fn import_json(row: &ImportRow, import_type: ImportType) -> Value {
+pub(crate) fn import_json(row: &ImportRow, import_type: ImportType) -> Value {
     json!({
         "id": row.id.to_string(),
         "userId": row.user_id.map(|id| id.to_string()),

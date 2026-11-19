@@ -1,0 +1,226 @@
+"use client"
+
+import type { ImportStatus } from "@chatbotx.io/database/partials"
+import { DataTable } from "@chatbotx.io/ui/components/data-table/data-table"
+import { DataTableColumnHeader } from "@chatbotx.io/ui/components/data-table/data-table-column-header"
+import { DataTableToolbar } from "@chatbotx.io/ui/components/data-table/data-table-toolbar"
+import { Badge } from "@chatbotx.io/ui/components/ui/badge"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@chatbotx.io/ui/components/ui/dialog"
+import { useDataTable } from "@chatbotx.io/ui/hooks/use-data-table"
+import type { ColumnDef } from "@tanstack/react-table"
+import { format } from "date-fns"
+import { useTranslations } from "next-intl"
+import { use, useMemo } from "react"
+import type { listImports } from "../queries/list-imports.queries"
+import type { ListImportsItem } from "../schema/query"
+import {
+  getImportErrorSampleDescription,
+  getImportErrorSampleKey,
+} from "./import-error-sample"
+
+type ImportHistoryTableProps = {
+  promises: Promise<[Awaited<ReturnType<typeof listImports>>]>
+}
+
+const STATUS_VARIANTS: Record<
+  ImportStatus,
+  "default" | "secondary" | "destructive" | "outline"
+> = {
+  pending: "secondary",
+  processing: "default",
+  completed: "outline",
+  failed: "destructive",
+}
+
+function ImportErrorSampleButton({ item }: { item: ListImportsItem }) {
+  const t = useTranslations()
+  if (item.errorSample.length === 0) {
+    return <span className="text-red-600 tabular-nums">{item.failedCount}</span>
+  }
+  // A completed import can carry warnings (e.g. unresolved flow references)
+  // with failedCount at 0 — showing "0" here would look like nothing to see,
+  // so a warning-only sample gets its own amber count instead of the failure
+  // count.
+  const isWarningOnly = item.failedCount === 0
+  return (
+    <Dialog>
+      <DialogTrigger
+        render={
+          <Button
+            className={
+              isWarningOnly
+                ? "h-auto p-0 text-amber-700 dark:text-amber-400"
+                : "h-auto p-0 text-red-600"
+            }
+            variant="link"
+          >
+            {isWarningOnly ? item.errorSample.length : item.failedCount}
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("fields.import.histories.errorDetails")}</DialogTitle>
+        </DialogHeader>
+        <div className="max-h-96 space-y-2 overflow-auto">
+          {item.errorSample.map((error, index) => (
+            <div
+              className="grid grid-cols-[5rem_1fr] gap-2 rounded-md border p-2 text-sm"
+              key={getImportErrorSampleKey(error, index)}
+            >
+              <span className="font-medium">
+                {error.row === undefined
+                  ? error.path
+                  : t("fields.import.histories.row", { row: error.row })}
+              </span>
+              <span className="text-muted-foreground">
+                {getImportErrorSampleDescription(error, t)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function ImportHistoryTable({ promises }: ImportHistoryTableProps) {
+  const t = useTranslations()
+  const [{ data, pageCount }] = use(promises)
+
+  const columns = useMemo<ColumnDef<ListImportsItem>[]>(
+    () => [
+      {
+        id: "keyword",
+        accessorKey: "fileName",
+        size: 320,
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.name.label")}
+          />
+        ),
+        cell: ({ row }) => (
+          <div className="truncate font-medium" title={row.original.fileName}>
+            {row.original.fileName}
+          </div>
+        ),
+        meta: {
+          label: t("fields.name.label"),
+          placeholder: t("fields.name.searchPlaceholder"),
+          variant: "text",
+        },
+        enableColumnFilter: false,
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        accessorKey: "status",
+        size: 120,
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.status.label")}
+          />
+        ),
+        cell: ({ row }) => {
+          const status = row.original.status
+          const labelKey = `fields.status.${status}` as const
+          return (
+            <Badge variant={STATUS_VARIANTS[status]}>
+              {t.has(labelKey) ? t(labelKey) : status}
+            </Badge>
+          )
+        },
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        id: "progress",
+        size: 120,
+        header: t("fields.import.histories.progress"),
+        cell: ({ row }) => {
+          const { processedCount, totalCount } = row.original
+          return (
+            <div className="tabular-nums">
+              {processedCount}
+              {totalCount ? ` / ${totalCount}` : ""}
+            </div>
+          )
+        },
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        accessorKey: "successCount",
+        size: 100,
+        header: t("fields.import.histories.success"),
+        cell: ({ row }) => (
+          <span className="text-emerald-700 tabular-nums dark:text-emerald-400">
+            {row.original.successCount}
+          </span>
+        ),
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        accessorKey: "failedCount",
+        size: 100,
+        header: t("fields.import.histories.failed"),
+        cell: ({ row }) => <ImportErrorSampleButton item={row.original} />,
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        accessorKey: "createdAt",
+        size: 150,
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.createdAt.label")}
+          />
+        ),
+        cell: ({ row }) => format(row.original.createdAt, "yyyy/MM/dd HH:mm"),
+        enableSorting: true,
+        enableHiding: false,
+      },
+      {
+        accessorKey: "completedAt",
+        size: 150,
+        header: t("fields.import.histories.completedAt"),
+        cell: ({ row }) =>
+          row.original.completedAt
+            ? format(row.original.completedAt, "yyyy/MM/dd HH:mm")
+            : "—",
+        enableSorting: false,
+        enableHiding: false,
+      },
+    ],
+    [t],
+  )
+
+  const { table } = useDataTable({
+    data,
+    columns,
+    pageCount,
+    initialState: {
+      sorting: [{ id: "createdAt", desc: true }],
+    },
+    getRowId: (row) => row.id,
+    shallow: false,
+    clearOnDefault: true,
+  })
+
+  return (
+    <DataTable table={table}>
+      <DataTableToolbar table={table} />
+    </DataTable>
+  )
+}

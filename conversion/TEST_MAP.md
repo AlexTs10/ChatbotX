@@ -237,10 +237,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/contact-inbox-panel.test.tsx` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/contact-inbox-resource.test.ts` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/contact-scan-form.test.tsx` | B | - | todo | Contact scan; builder jsdom |
-| `apps/builder/__tests__/contact-scan-histories-page.test.tsx` | C | tbd | todo | Contact scan; builder server code |
+| `apps/builder/__tests__/contact-scan-histories-page.test.tsx` | C | `crates/api/tests/rpc_automation_pages.rs` | ported | Contact scan; builder server code; Q.F2-automation: contact_scan_refuses_an_assigned_only_member, contact_scan_schedules_once_and_lists_the_run |
 | `apps/builder/__tests__/contact-scan-history-table.test.tsx` | B | - | todo | Contact scan; builder jsdom |
 | `apps/builder/__tests__/contact-scan-public-api.test.ts` | C | tbd | todo | Contact scan; builder server code |
-| `apps/builder/__tests__/contact-scan-status-api.test.ts` | C | tbd | todo | Contact scan; builder server code |
+| `apps/builder/__tests__/contact-scan-status-api.test.ts` | C | `crates/api/tests/rpc_automation_pages.rs` | ported | Contact scan; builder server code; Q.F2-automation: the same two tests (gate before the status read) |
 | `apps/builder/__tests__/contact-search-combobox.test.tsx` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/contact-subresource-authz.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/contact-thread-control-section.test.tsx` | B | - | todo | Thread control (handover protocol); builder jsdom |
@@ -618,7 +618,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/orpc-handlers.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/orpc-unbatched-paths.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/outbound-call-mode-query-keys.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
-| `apps/builder/__tests__/page-automated-responses-route-guards.test.ts` | C | tbd | todo | Automated responses and keywords; builder server code |
+| `apps/builder/__tests__/page-automated-responses-route-guards.test.ts` | C | `crates/api/tests/rpc_automation_pages.rs` | ported | Automated responses and keywords; builder server code; Q.F2-automation: outbound_keywords_need_super_admin_not_full_permissions |
 | `apps/builder/__tests__/payment-request-param-field.test.tsx` | B | - | todo | WhatsApp message templates; builder jsdom |
 | `apps/builder/__tests__/payment-settings-card.test.tsx` | B | - | todo | Ecommerce: orders and payment providers; builder jsdom |
 | `apps/builder/__tests__/pending-reads.test.ts` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
