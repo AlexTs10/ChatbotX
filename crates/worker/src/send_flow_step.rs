@@ -432,6 +432,39 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
     } else {
         None
     };
+    // Open Mini App buttons become link buttons first, so everything below
+    // only ever sees `openWebsite` (`resolveMiniAppLinks`).
+    let mut resolved = resolved;
+    let mut raw_quick_replies = data.get("quickReplies").cloned();
+    let link_context = crate::mini_app_buttons::LinkContext {
+        workspace_id: conversation.workspace_id,
+        contact_id: conversation.contact_id,
+        conversation_id: conversation.id,
+        contact_inbox_id: contact_inbox.id,
+        flow_id: &flow_id,
+        flow_version_id: flow_version_id.as_deref(),
+        metadata: metadata.as_ref(),
+        app_url: &deps.app_url,
+    };
+    if step_type == "sendMessengerTemplateMessage" {
+        // `processMessengerTemplate` takes the step's raw buttons: only the
+        // template's URL suffix changes (`applyMiniAppResumeToTemplateParams`).
+        crate::mini_app_buttons::resolve_template_mini_app_resume(
+            deps,
+            &link_context,
+            contact_inbox.inbox_id,
+            &mut resolved,
+        )
+        .await;
+    } else {
+        crate::mini_app_buttons::resolve_mini_app_links(
+            deps,
+            &link_context,
+            &mut resolved,
+            raw_quick_replies.as_mut(),
+        )
+        .await;
+    }
     let channel = contact_inbox.channel.clone();
     let contact_inbox_text = contact_inbox.id.to_string();
     let convert = |buttons: &[Value]| {
@@ -444,8 +477,8 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
             Some(&contact_inbox_text),
         )
     };
-    let quick_replies: Vec<Value> = data
-        .get("quickReplies")
+    let quick_replies: Vec<Value> = raw_quick_replies
+        .as_ref()
         .and_then(Value::as_array)
         .map(|b| convert(b))
         .unwrap_or_default()

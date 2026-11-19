@@ -63,6 +63,7 @@ pub mod messages;
 pub mod messenger_menus;
 pub mod messenger_templates;
 pub mod meta_catalog;
+pub mod mini_apps;
 pub mod minigames;
 pub mod open_hours;
 pub mod orders;
@@ -727,6 +728,8 @@ async fn route(
         google_ads::handle(state, route_id, call).await
     } else if marketing_messages::ROUTES.contains(&route_id) {
         marketing_messages::handle(state, route_id, call).await
+    } else if mini_apps::ROUTES.contains(&route_id) {
+        mini_apps::handle(state, route_id, call).await
     } else if qr_codes::ROUTES.contains(&route_id) {
         qr_codes::handle(state, route_id, call).await
     } else if meta_catalog::ROUTES.contains(&route_id) {

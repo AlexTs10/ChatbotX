@@ -34,6 +34,7 @@ pub mod lead_ads;
 pub mod low;
 pub mod marketing_message;
 pub mod meta_catalog;
+pub mod mini_app_buttons;
 pub mod notification;
 pub mod order_payment;
 pub mod purge;

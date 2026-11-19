@@ -192,6 +192,12 @@ mod media_library_service;
 mod message_outgoing_and_list;
 #[path = "meta_catalog_service.rs"]
 mod meta_catalog_service;
+#[path = "mini_app_definition.rs"]
+mod mini_app_definition;
+#[path = "mini_app_service.rs"]
+mod mini_app_service;
+#[path = "mini_app_upload_service.rs"]
+mod mini_app_upload_service;
 #[path = "minigame_play.rs"]
 mod minigame_play;
 #[path = "minigame_service.rs"]

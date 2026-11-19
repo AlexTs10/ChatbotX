@@ -100,6 +100,14 @@ const invitationRoute = createRoute({
   ),
 })
 
+// `/mini-apps` (the Mini App runner) is public too: contacts open it.
+const miniApps = () => import("@/routes/mini-apps")
+const publicMiniAppRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "mini-apps",
+  component: lazyRouteComponent(miniApps, "PublicMiniAppPage"),
+})
+
 // `/booking/*` is public too: the signed token is the authority.
 const bookingPages = (
   [
@@ -395,6 +403,19 @@ const toolEditorPages = (
     component: lazyRouteComponent(toolEditors, page),
   }),
 )
+const miniAppPages = (
+  [
+    ["mini-apps", "MiniAppsPage"],
+    ["mini-apps/$id/edit", "EditMiniAppPage"],
+    ["mini-apps/$id/submissions", "MiniAppSubmissionsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(miniApps, page),
+  }),
+)
 const pipelinesRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: "pipelines",
@@ -644,6 +665,7 @@ const routeTree = rootRoute.addChildren([
   authRoute.addChildren(authPages),
   invitationRoute,
   shareRoutes,
+  publicMiniAppRoute,
   ...bookingPages,
   ...shopPages,
   protectedRoute.addChildren([
@@ -663,6 +685,7 @@ const routeTree = rootRoute.addChildren([
       templateInstallsRoutes,
       ...logPages,
       ...toolEditorPages,
+      ...miniAppPages,
       ...commentListRoutes,
       ...commentPages,
       pipelinesRoutes,

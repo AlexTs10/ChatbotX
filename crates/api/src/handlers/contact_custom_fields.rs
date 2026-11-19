@@ -339,7 +339,8 @@ fn bigint_param(input: &mut Input, name: &str) -> Option<i64> {
 
 /// `emitCustomFieldChanges`: one `customFieldChanged` trigger event per
 /// change (the `FieldChange` list the service returns).
-async fn emit_field_changes(
+/// Emits the `customFieldChanged` triggers of a custom-field write.
+pub async fn emit_field_changes(
     state: &ApiState,
     workspace_id: i64,
     changes: impl IntoIterator<Item = service::FieldChange>,
