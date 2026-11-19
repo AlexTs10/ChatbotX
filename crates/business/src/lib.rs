@@ -65,6 +65,7 @@ pub mod google_oauth;
 pub mod google_sheets;
 pub mod import;
 pub mod inbound_webhook;
+pub mod inbound_webhook_apply;
 pub mod inbox;
 pub mod inbox_team;
 pub mod integration;

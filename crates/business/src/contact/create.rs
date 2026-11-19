@@ -224,6 +224,19 @@ pub async fn create_with_inbox(
     options: CreateOptions,
 ) -> Result<CreatedContact> {
     tx::write(db, move |tx| {
+        create_with_inbox_in(tx, workspace_id, &input, &options)
+    })
+    .await
+}
+
+/// [`create_with_inbox`] inside the caller's write transaction.
+pub fn create_with_inbox_in(
+    tx: &Connection,
+    workspace_id: i64,
+    input: &CreateContactInput,
+    options: &CreateOptions,
+) -> Result<CreatedContact> {
+    {
         let inbox_channel: String = tx
             .query_row(
                 r#"SELECT "channel" FROM "Inbox" WHERE "workspaceId" = ?1 AND "id" = ?2"#,
@@ -268,7 +281,10 @@ pub async fn create_with_inbox(
                 target_country.as_deref(),
             )
             .ok_or_else(|| {
-                BusinessError::validation("phoneNumber", "Please include the country code (e.g. +84)")
+                BusinessError::validation(
+                    "phoneNumber",
+                    "Please include the country code (e.g. +84)",
+                )
             })?;
             phone = Some(e164);
         }
@@ -285,17 +301,28 @@ pub async fn create_with_inbox(
             && options.phone_uniqueness == PhoneUniqueness::Workspace
             && phone_taken(tx, workspace_id, phone)?
         {
-            return Err(BusinessError::validation("phoneNumber", "Phone number is exists"));
+            return Err(BusinessError::validation(
+                "phoneNumber",
+                "Phone number is exists",
+            ));
         }
-        if inbox_channel != "webchat" && source_taken(tx, workspace_id, input.inbox_id, &source_id)? {
+        if inbox_channel != "webchat" && source_taken(tx, workspace_id, input.inbox_id, &source_id)?
+        {
             let field = if is_whatsapp {
-                if is_bsuid_keyed { "sourceUserId" } else { "phoneNumber" }
+                if is_bsuid_keyed {
+                    "sourceUserId"
+                } else {
+                    "phoneNumber"
+                }
             } else if inbox_channel == "smtp" {
                 "email"
             } else {
                 "contactId"
             };
-            return Err(BusinessError::validation(field, CONTACT_ALREADY_ON_INBOX_MESSAGE));
+            return Err(BusinessError::validation(
+                field,
+                CONTACT_ALREADY_ON_INBOX_MESSAGE,
+            ));
         }
         if let Some(bsuid) = &source_user_id {
             let taken = tx
@@ -333,6 +360,5 @@ pub async fn create_with_inbox(
                 source_user_id: source_user_id.as_deref(),
             },
         )
-    })
-    .await
+    }
 }

@@ -1,7 +1,6 @@
 //! `features/spreadsheets/api/public.ts` (`spreadsheetsPublicRouter`, scope
 //! `automation`), plus the request check the `/rpc` actions share.
-//! `listWorksheets` / `listWorksheetHeaders` need the Google Sheets client
-//! (Q.I4) and answer "not ported" until then.
+//! The Google Sheets calls go through `ApiState::provider_http`.
 
 use chatbotx_business::spreadsheet as service;
 use serde_json::json;
@@ -20,6 +19,8 @@ pub const ROUTES: &[&str] = &[
     "spreadsheets.get",
     "spreadsheets.update",
     "spreadsheets.delete",
+    "spreadsheets.listWorksheets",
+    "spreadsheets.listWorksheetHeaders",
 ];
 
 /// `createSpreadsheetRequest`: `(name, url)`.
@@ -80,7 +81,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let mut input = Input::from_body(call.params, call.body);
             let (name, url) = request(&mut input);
             input.finish()?;
-            service::create(db, ws, name, url)
+            service::create(db, state.provider_http.as_ref(), ws, name, url)
                 .await
                 .map(|id| json(201, json!({ "id": id.to_string() })))
                 .map_err(|e| business_error(e, CREATING))
@@ -90,7 +91,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let (name, url) = request(&mut input);
             let id = path_id(&mut input);
             input.finish()?;
-            service::update(db, ws, id, name, url)
+            service::update(db, state.provider_http.as_ref(), ws, id, name, url)
                 .await
                 .map(|row| json(200, service::public_json(&row)))
                 .map_err(|e| business_error(e, MUTATING))
@@ -103,6 +104,26 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .await
                 .map(|()| no_content())
                 .map_err(|e| business_error(e, MUTATING))
+        }
+        "spreadsheets.listWorksheets" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id = path_id(&mut input);
+            input.finish()?;
+            service::list_worksheets(db, state.provider_http.as_ref(), ws, id)
+                .await
+                .map(|data| json(200, json!({ "data": data })))
+                .map_err(|e| business_error(e, FINDING))
+        }
+        "spreadsheets.listWorksheetHeaders" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id = path_id(&mut input);
+            let sheet = input.string("worksheetName", Str::default());
+            input.finish()?;
+            let sheet = sheet.unwrap_or_default();
+            service::list_worksheet_headers(db, state.provider_http.as_ref(), ws, id, &sheet)
+                .await
+                .map(|data| json(200, json!({ "data": data })))
+                .map_err(|e| business_error(e, FINDING))
         }
         _ => Err(crate::routes::not_ported_error()),
     }

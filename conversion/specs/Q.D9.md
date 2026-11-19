@@ -18,7 +18,7 @@ Branch `feat/conversion-d9` (from `conversion` at `e2d16a491`). Sources:
 | 6 | Google OAuth connect (`connectGoogleCalendarAction`, `connectGoogleSheets`, callback), `updateGoogleCalendarIdAction` | `crates/business/src/google_oauth.rs` (connect session bound to user + workspace, code exchange, encrypted auth), `connect_callback.rs` Google branch | done (Sheets settings page UI left) |
 | 7 | Booking webview pages (`/booking/{slug,picker,range-picker,schedule,cancel}` + their 3 submit actions) | `crates/api/src/booking_public.rs` (4 page loaders, 3 actions, guest per-IP rate limit); `apps/web/src/routes/booking.tsx` | done (`/booking/$slug` is "coming soon", as the original) |
 | 8 | Working hours | `crates/business/src/working_hours.rs` (schedules, intervals, members, date overrides, holidays; validation of the partial schemas), `handlers/working_hours.rs` (10 `workingHours.*` routes), `rpc_procedures/working_hours.rs` (options procedure, 7 actions); the read side (`steps/working_hours.rs`) existed | done (no cache layer) |
-| 9 | Web SPA appointment screens (calendar list / edit, appointments list, external calendars, working-hours editor + list) | `apps/web/src/routes/appointments.tsx`, inbox-teams page in `routes/settings.tsx`; list / get queries and page loaders in `rpc_procedures/{appointments,working_hours}.rs` | done (Response SLA card left) |
+| 9 | Web SPA appointment screens (calendar list / edit, appointments list, external calendars, working-hours editor + list) | `apps/web/src/routes/appointments.tsx`, inbox-teams page in `routes/settings.tsx`; list / get queries and page loaders in `rpc_procedures/{appointments,working_hours}.rs` | done (the Response SLA card: Q.D13a) |
 
 ## 2. Tests
 

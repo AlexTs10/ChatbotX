@@ -430,16 +430,16 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/ig-stories-public-api.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/import-contacts-action.test.ts` | B | - | todo | Imports and exports (contacts, products, flows); builder node-env, client logic |
 | `apps/builder/__tests__/import-upload-url-public-api.test.ts` | C | `crates/api/tests/import_upload_url_public_api.rs`, `crates/api/tests/product_imports_public_api.rs` | passing | Imports and exports (contacts, products, flows); builder server code |
-| `apps/builder/__tests__/inbound-webhook-actions.test.ts` | C | tbd | todo | Inbound webhooks; builder server code |
-| `apps/builder/__tests__/inbound-webhook-analytics-page.test.tsx` | C | tbd | todo | Inbound webhooks; builder server code |
+| `apps/builder/__tests__/inbound-webhook-actions.test.ts` | C | `crates/api/tests/rpc_screen_actions.rs` | ported | Inbound webhooks; builder server code; Q.D13a |
+| `apps/builder/__tests__/inbound-webhook-analytics-page.test.tsx` | C | `crates/api/tests/rpc_screen_actions.rs` | ported | Inbound webhooks; builder server code; Q.D13a: SPA route `routes/webhook-tools.tsx`; its reads are the tested queries |
 | `apps/builder/__tests__/inbound-webhook-contact-lookup-section.test.tsx` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/inbound-webhook-endpoint-url.test.ts` | B | - | todo | Inbound webhooks; builder jsdom |
 | `apps/builder/__tests__/inbound-webhook-form.test.ts` | B | - | todo | Inbound webhooks; builder jsdom |
 | `apps/builder/__tests__/inbound-webhook-json-picker.test.ts` | B | - | todo | Inbound webhooks; builder jsdom |
-| `apps/builder/__tests__/inbound-webhook-route.test.ts` | C | tbd | todo | Inbound webhooks; builder server code |
+| `apps/builder/__tests__/inbound-webhook-route.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; builder server code; Q.D13 (intake) |
 | `apps/builder/__tests__/inbound-webhook-schema.test.ts` | B | - | todo | Inbound webhooks; builder jsdom |
 | `apps/builder/__tests__/inbound-webhook-secret-url-input.test.tsx` | B | - | todo | Inbound webhooks; builder jsdom |
-| `apps/builder/__tests__/inbound-webhooks-public-api.test.ts` | C | tbd | todo | Inbound webhooks; builder server code |
+| `apps/builder/__tests__/inbound-webhooks-public-api.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; builder server code; Q.D13 + Q.D13a previewMapping |
 | `apps/builder/__tests__/inbox-card-list-linkless-channels.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/inbox-mark-read-on-outbound-switch.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/inbox-route-guards.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
@@ -490,7 +490,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/list-whatsapp-calls-query.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/load-servable-workspace.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/magic-link-route.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
-| `apps/builder/__tests__/magic-links-public-api.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
+| `apps/builder/__tests__/magic-links-public-api.test.ts` | C | `crates/api/tests/magic_links_public_api.rs` | ported | Authentication (sign-in, social, mobile, magic links); builder server code; Q.D13a |
 | `apps/builder/__tests__/main-page-default-workspace.test.tsx` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/mark-read-on-outbound-field.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/marketing-messages-api.test.ts` | B | - | todo | Facebook Marketing Messages; builder jsdom |
@@ -728,7 +728,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/resolve-last-message-preview.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
 | `apps/builder/__tests__/resolve-provider.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/resolve-workspace-realtime-gates.test.ts` | B | - | todo | Realtime (WebSocket gateway); builder jsdom |
-| `apps/builder/__tests__/response-sla-public-api.test.ts` | C | tbd | todo | Response SLA; builder server code |
+| `apps/builder/__tests__/response-sla-public-api.test.ts` | C | `crates/api/tests/saved_replies_sla_public_api.rs` | ported | Response SLA; builder server code; Q.D13 (stale row) |
 | `apps/builder/__tests__/resume-broadcast-dialog.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/routing-roles-section.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/row-status.test.ts` | B | - | todo | Builder app shell and shared components; builder node-env, client logic |
@@ -765,7 +765,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/smtp-integrations-public-api.test.ts` | C | tbd | todo | SMTP email integration; builder server code |
 | `apps/builder/__tests__/social-auth-instances.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
 | `apps/builder/__tests__/social-login-community.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
-| `apps/builder/__tests__/spreadsheets-public-api.test.ts` | C | tbd | todo | Google Sheets integration; builder server code |
+| `apps/builder/__tests__/spreadsheets-public-api.test.ts` | C | `crates/api/tests/spreadsheets_public_api.rs` | ported | Google Sheets integration; builder server code; Q.D13 + Q.D13a (stale row) |
 | `apps/builder/__tests__/spreadsheets-url-validation.test.ts` | B | - | todo | Google Sheets integration; builder jsdom |
 | `apps/builder/__tests__/start-meta-capi-oauth.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
 | `apps/builder/__tests__/start-product-import.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
@@ -913,7 +913,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/webchats-create-visibility-guard.test.ts` | C | tbd | todo | Webchat channel; builder server code |
 | `apps/builder/__tests__/webchats-public-api.test.ts` | C | tbd | todo | Webchat channel; builder server code |
 | `apps/builder/__tests__/webhook-log.test.ts` | B | - | todo | Outbound webhooks; builder node-env, client logic |
-| `apps/builder/__tests__/webhooks-public-api.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
+| `apps/builder/__tests__/webhooks-public-api.test.ts` | C | `crates/api/tests/webhooks_public_api.rs` | ported | Outbound webhooks; builder server code; Q.D13a |
 | `apps/builder/__tests__/webshop-public-api.test.ts` | C | tbd | todo | Ecommerce: webshop storefront; builder server code |
 | `apps/builder/__tests__/webshop-shop-locale.test.ts` | C | tbd | todo | Ecommerce: webshop storefront; builder server code |
 | `apps/builder/__tests__/webshop-shop-session.test.ts` | C | tbd | todo | Ecommerce: webshop storefront; builder server code |
@@ -1346,7 +1346,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/import-contacts-extractor.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/import-contacts-handler.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/import-coupons-handler.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
-| `apps/worker/__tests__/inbound-webhook-request-crons.test.ts` | C | tbd | todo | Inbound webhooks |
+| `apps/worker/__tests__/inbound-webhook-request-crons.test.ts` | C | `crates/worker/tests/inbound_webhook_worker.rs` | ported | Inbound webhooks; Q.D13a |
 | `apps/worker/__tests__/inbox-labels.test.ts` | C | tbd | todo | Tags and labels |
 | `apps/worker/__tests__/install-template-handler.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/integration-channel-origin.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
@@ -1403,7 +1403,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/notification/notify-new-order.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `apps/worker/__tests__/notification/push-notification-content.test.ts` | C | tbd | todo | Mobile API and push notifications |
 | `apps/worker/__tests__/notification/send-push-expo.test.ts` | C | tbd | todo | Mobile API and push notifications |
-| `apps/worker/__tests__/operator-handler.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
+| `apps/worker/__tests__/operator-handler.test.ts` | C | `crates/worker/src/spreadsheet.rs` (unit tests) | ported | Inbox and live chat (conversations, messages); Q.D13a |
 | `apps/worker/__tests__/orphaned-integration-cleanup.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/pipeline-matchers.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `apps/worker/__tests__/pipeline-stage-bulk-handler.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
@@ -1415,7 +1415,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/process-ai-file.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/process-broadcast-contacts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/process-conversation-source-ensure-stored.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
-| `apps/worker/__tests__/process-inbound-webhook-request.test.ts` | C | tbd | todo | Inbound webhooks |
+| `apps/worker/__tests__/process-inbound-webhook-request.test.ts` | C | `crates/worker/tests/inbound_webhook_worker.rs` | ported | Inbound webhooks; Q.D13a; log-redaction and injected-failure cases not applicable |
 | `apps/worker/__tests__/process-pending-embeddings.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/product-import-extractor.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/product-import-handler.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -1513,10 +1513,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/settle-and-log.test.ts` | C | tbd | todo | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/smart-delay-resume-job.test.ts` | C | `crates/worker/tests/smart_delay.rs` | ported | Smart delay |
 | `apps/worker/__tests__/speech-to-text-handler.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
-| `apps/worker/__tests__/spreadsheet-handler-bot-fields.test.ts` | C | tbd | todo | Google Sheets integration |
-| `apps/worker/__tests__/spreadsheet-handler-temporal.test.ts` | C | tbd | todo | Google Sheets integration |
-| `apps/worker/__tests__/spreadsheet-lookup-values.test.ts` | C | tbd | todo | Google Sheets integration |
-| `apps/worker/__tests__/spreadsheet-write-values.test.ts` | C | tbd | todo | Google Sheets integration |
+| `apps/worker/__tests__/spreadsheet-handler-bot-fields.test.ts` | C | `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
+| `apps/worker/__tests__/spreadsheet-handler-temporal.test.ts` | C | `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
+| `apps/worker/__tests__/spreadsheet-lookup-values.test.ts` | C | `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
+| `apps/worker/__tests__/spreadsheet-write-values.test.ts` | C | `crates/worker/src/spreadsheet.rs` (unit tests), `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
 | `apps/worker/__tests__/start-external-step-handlers.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/step-buttons.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/step-input-resolution.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
@@ -2208,15 +2208,15 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/import-start-contact-import.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/business/__tests__/import-start-product-statuses.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `packages/business/__tests__/import.service.test.ts` | C | tbd | todo | Business layer shared services |
-| `packages/business/__tests__/inbound-webhook-action-references-semantics.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-action-references.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-apply-mapped-fields.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-apply-payload.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-effective-channel.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-extract.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-resolve-contact.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/business/__tests__/inbound-webhook-resolve-inbox.test.ts` | C | tbd | todo | Inbound webhooks |
-| `packages/business/__tests__/inbound-webhook-service.test.ts` | C | tbd | todo | Inbound webhooks |
+| `packages/business/__tests__/inbound-webhook-action-references-semantics.test.ts` | C | `crates/business/tests/trigger_service.rs`, `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; Q.D13a: shared `find_invalid_action_references` |
+| `packages/business/__tests__/inbound-webhook-action-references.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; Q.D13a: the config save refuses unknown references |
+| `packages/business/__tests__/inbound-webhook-apply-mapped-fields.test.ts` | C | `crates/business/tests/inbound_webhook_apply_payload.rs` | ported | Inbound webhooks; Q.D13a |
+| `packages/business/__tests__/inbound-webhook-apply-payload.test.ts` | C | `crates/business/tests/inbound_webhook_apply_payload.rs` | ported | Inbound webhooks; Q.D13a |
+| `packages/business/__tests__/inbound-webhook-effective-channel.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs` | ported | Inbound webhooks; Q.D13a: activation checks of `updateSettings` |
+| `packages/business/__tests__/inbound-webhook-extract.test.ts` | C | `crates/business/src/inbound_webhook_apply.rs` (unit tests) | ported | Inbound webhooks; Q.D13a |
+| `packages/business/__tests__/inbound-webhook-resolve-contact.test.ts` | C | `crates/business/tests/inbound_webhook_apply_payload.rs` | ported | Contacts (profiles, notes, activity); Q.D13a: one write transaction replaces the create lock |
+| `packages/business/__tests__/inbound-webhook-resolve-inbox.test.ts` | C | `crates/business/tests/inbound_webhook_apply_payload.rs` | ported | Inbound webhooks; Q.D13a |
+| `packages/business/__tests__/inbound-webhook-service.test.ts` | C | `crates/api/tests/inbound_webhooks_public_api.rs`, `crates/api/tests/rpc_screen_actions.rs` | ported | Inbound webhooks; Q.D13a: through the routes and actions |
 | `packages/business/__tests__/inbox-disconnect-ai-handover.test.ts` | C | tbd | todo | AI handover (human takeover) |
 | `packages/business/__tests__/inbox-has-any-channel.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/__tests__/inbox-profile-link.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -2392,7 +2392,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/resolve-minigame-prize.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/resolve-sent-whatsapp-flow.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
 | `packages/business/__tests__/resolve-workspace-access.test.ts` | C | tbd | todo | Workspaces |
-| `packages/business/__tests__/response-sla-service.test.ts` | C | tbd | todo | Response SLA |
+| `packages/business/__tests__/response-sla-service.test.ts` | C | `crates/business/tests/response_sla_window.rs` | ported | Response SLA; Q.D13a; cache / warm-up / lock cases not applicable |
 | `packages/business/__tests__/saved-reply-service.test.ts` | C | tbd | todo | Saved replies |
 | `packages/business/__tests__/select-labels-by-ids.test.ts` | C | tbd | todo | Tags and labels |
 | `packages/business/__tests__/self-serve-config-fields.test.ts` | C | tbd | todo | Instagram channel |
@@ -2728,7 +2728,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/google-click-query.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/database/__tests__/google-click-referral-merge.test.ts` | C | tbd | todo | Google Ads integration |
 | `packages/database/__tests__/inbound-webhook-partial.test.ts` | C | `crates/db/tests/inbound_webhook_partial.rs` | passing | Inbound webhooks |
-| `packages/database/__tests__/inbound-webhook-repository.test.ts` | C | tbd | todo | Inbound webhooks |
+| `packages/database/__tests__/inbound-webhook-repository.test.ts` | C | `crates/db/tests/repo_inbound_webhook_repository.rs` | ported | Inbound webhooks; stale row fixed (Q.D13a) |
 | `packages/database/__tests__/inbox-repository.test.ts` | C | `crates/db/tests/inbox_repository.rs` | passing | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/inbox-team-member-repository.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/integration-google-ads-repository.test.ts` | C | tbd | todo | Google Ads integration |
@@ -3046,7 +3046,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/utils/__tests__/id.test.ts` | C | tbd | todo | Utils (shared helpers) |
 | `packages/utils/__tests__/image-optimize-settings.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/utils/__tests__/image-optimize.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/utils/__tests__/inbound-webhook-channel.test.ts` | C | tbd | todo | Inbound webhooks |
+| `packages/utils/__tests__/inbound-webhook-channel.test.ts` | C | `crates/core/tests/utils_inbound_webhook_channel.rs` | ported | Inbound webhooks; stale row fixed (Q.D13a) |
 | `packages/utils/__tests__/inbox-image-support.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/utils/__tests__/json-path.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/utils/__tests__/live-media.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |

@@ -453,8 +453,8 @@ async fn an_unported_procedure_passes_auth_and_answers_not_ported() {
     let (status, body) = call(
         &fixture,
         "GET",
-        // Q.D13 ported the leaderboard options; worksheets wait for Q.I4.
-        "/rpc/spreadsheetsAPI/listWorksheetsAuthenticatedAPI",
+        // Q.D13a ported the worksheet reads; the contact scan status stands in.
+        "/rpc/contactScanAPIs/getContactScanStatusAuthenticatedAPI",
         Some("membertoken"),
         json!({ "workspaceId": WORKSPACE_ID.to_string() }),
     )

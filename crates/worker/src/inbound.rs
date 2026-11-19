@@ -969,16 +969,30 @@ fn save_message_tx(
             },
         );
     }
-    tx.execute(
-                r#"UPDATE "Conversation" SET
-                     "lastActivityAt" = ?1,
-                     "contactRepliedAt" = CASE WHEN ?2 THEN ?1 ELSE "contactRepliedAt" END,
-                     "awaitingHumanReplySince" = CASE WHEN ?2 THEN COALESCE("awaitingHumanReplySince", ?1)
-                                                      ELSE "awaitingHumanReplySince" END,
-                     "updatedAt" = ?3
-                   WHERE "id" = ?4 AND "workspaceId" = ?5"#,
-                params![at, inbound, now_ms(), conversation_id, workspace_id],
-            )?;
+    // A contact message opening the window starts the response SLA.
+    let activity = |c: &chatbotx_db::rusqlite::Connection| {
+        c.execute(
+            r#"UPDATE "Conversation" SET
+                 "lastActivityAt" = ?1,
+                 "contactRepliedAt" = CASE WHEN ?2 THEN ?1 ELSE "contactRepliedAt" END,
+                 "awaitingHumanReplySince" = CASE WHEN ?2 THEN COALESCE("awaitingHumanReplySince", ?1)
+                                                  ELSE "awaitingHumanReplySince" END,
+                 "updatedAt" = ?3
+               WHERE "id" = ?4 AND "workspaceId" = ?5"#,
+            params![at, inbound, now_ms(), conversation_id, workspace_id],
+        )
+    };
+    if inbound {
+        chatbotx_business::response_sla::track_window(
+            tx,
+            workspace_id,
+            &[conversation_id],
+            false,
+            activity,
+        )?;
+    } else {
+        activity(tx)?;
+    }
     Ok((stored, true))
 }
 

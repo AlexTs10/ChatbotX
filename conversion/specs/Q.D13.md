@@ -58,17 +58,15 @@ response-SLA and working-hours suites.
 
 ## Not done
 
-- Inbound webhooks: `previewMapping` (value extraction, phone / email
-  normalisation) and the worker job `processInboundWebhookRequest` (contact
-  resolve / create, mapped fields, actions), the re-dispatch / abandon /
-  purge crons, the cloud-only `WORKSPACE_BLOCKED` answer. Accepted requests
-  stay `received` until the worker exists.
+- Inbound webhooks: `previewMapping`, the worker job and the re-dispatch
+  cron are done in Q.D13a (`specs/Q.D13a.md`).
 - Dynamic images CRUD and rendering (needs a canvas / font renderer that
   the Rust workspace does not have); decisions CRUD; leaderboards (~3.3k TS)
   and the reaction leaderboard award hook.
 - `analytics:dashboard` and `flow:clicked` listeners (no flow / dashboard bus
   listener in Rust yet, Q.W2).
-- Google Sheets reads (`listWorksheets`, headers, `listSheetNames` check):
-  Q.I4.
-- Web: no Q.D13 screen shows "not available yet"; the Q.D13 pages are `todo`
-  in `P4-routes.tsv`.
+- Google Sheets reads (`listWorksheets`, headers, `listSheetNames` check),
+  the Sheets flow steps and `runGoogleSheet`: done in Q.D13a.
+- Web: the webhook, magic link, Google Sheets and inbox-teams (response
+  SLA) screens are done in Q.D13a; the dynamic image, decision and
+  leaderboard screens are the d13b unit.

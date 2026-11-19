@@ -16,6 +16,8 @@
 // page: app/space/[workspaceId]/(settings)/settings/integrations/muse/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/integrations/openrouter/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/integrations/openai-compatible/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/google-sheets/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/inbox-teams/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/create/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/[menuId]/page.tsx
@@ -83,6 +85,12 @@ import {
   ListWorkingHoursFallback,
 } from "@/features/working-hours/components/list-working-hours"
 import { getWorkingHoursListPage } from "@/features/working-hours/queries"
+import { GoogleSheetsManage } from "@/features/integration-google-sheets/google-sheets-manage"
+import type { IntegrationGoogleSheetsResource } from "@/features/integration-google-sheets/schema"
+import {
+  ResponseSlaCard,
+  ResponseSlaCardFallback,
+} from "@/features/response-sla/components/response-sla-card"
 import type { WorkingHoursResource } from "@/features/working-hours/schema/resource"
 import { useQueryPromise } from "@/lib/query/use-query-promise"
 import { UserPersistentMenuForm } from "@/features/user-persistent-menus/components/user-persistent-menu-form"
@@ -95,7 +103,7 @@ import { ManageStripe } from "@/features/payment-providers/components/manage-str
 import type { PaymentProviderResource } from "@/features/payment-providers/schema/public"
 import { loadPage, serverQuery } from "@/lib/server-action"
 import { workspaceSettingsGeneralPath } from "@/lib/workspace/settings-paths"
-import { NotAvailablePage, NotFoundPage } from "@/routes/root"
+import { NotFoundPage } from "@/routes/root"
 import { useWorkspacePage } from "@/routes/workspace"
 import { Redirect } from "@/shims/redirect"
 
@@ -181,6 +189,10 @@ export function SettingsInboxTeamsPage() {
     () => settled(workingHours.holidays),
     [workingHours],
   )
+  const responseSlaPromise = useMemo(
+    () => settled(workingHours.responseSla),
+    [workingHours],
+  )
   return (
     <div className="flex flex-col gap-6">
       <Suspense>
@@ -198,10 +210,9 @@ export function SettingsInboxTeamsPage() {
           workspaceId={workspaceId}
         />
       </Suspense>
-      <NotAvailablePage
-        detail="The response SLA is not available yet in this version."
-        title="Response SLA"
-      />
+      <Suspense fallback={<ResponseSlaCardFallback />}>
+        <ResponseSlaCard promise={responseSlaPromise} workspaceId={workspaceId} />
+      </Suspense>
     </div>
   )
 }
@@ -450,10 +461,31 @@ export function SettingsIntegrationPage() {
       return <WorkspaceTokens />
     case "stripe":
       return <StripeIntegration />
+    case "google-sheets":
+      return <GoogleSheetsIntegration />
     default:
       // ponytail: the other integrations wait for their domain units.
       return null
   }
+}
+
+function GoogleSheetsIntegration() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "findIntegrationGoogleSheet", workspaceId],
+    queryFn: () =>
+      serverQuery<IntegrationGoogleSheetsResource | null>(
+        "findIntegrationGoogleSheet",
+        workspaceId,
+        [],
+      ),
+  })
+  return (
+    <GoogleSheetsManage
+      integrationGoogleSheets={data ?? undefined}
+      workspaceId={workspaceId}
+    />
+  )
 }
 
 // page: app/space/[workspaceId]/(settings)/settings/integrations/stripe/page.tsx
