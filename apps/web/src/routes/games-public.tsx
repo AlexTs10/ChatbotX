@@ -49,15 +49,14 @@ export function LeaderboardPublicPage() {
   )
 }
 
-type MinigamePage =
-  | { status: "comingSoon" | "forbidden" }
-  | {
-      status: "ok"
-      minigame: MinigameModel
-      contactState: { remaining: number }
-      shareUrl: string | null
-      token: string
-    }
+type MinigamePlayable = {
+  status: "ok"
+  minigame: MinigameModel
+  contactState: { remaining: number }
+  shareUrl: string | null
+  token: string
+}
+type MinigamePage = { status: "comingSoon" | "forbidden" } | MinigamePlayable
 
 function MinigameNotice(props: { title: string; description: string }) {
   return (
@@ -97,16 +96,17 @@ export function MinigamePlayPage() {
       />
     )
   }
-  const PlayScreen = MINIGAME_PLAY_SCREENS[page.minigame.type]
+  const game = page as MinigamePlayable
+  const PlayScreen = MINIGAME_PLAY_SCREENS[game.minigame.type]
   if (!PlayScreen) {
     return <NotFoundPage />
   }
   return (
     <PlayScreen
-      contactState={page.contactState as never}
-      minigame={page.minigame}
-      shareUrl={page.shareUrl}
-      token={page.token}
+      contactState={game.contactState as never}
+      minigame={game.minigame}
+      shareUrl={game.shareUrl}
+      token={game.token}
     />
   )
 }

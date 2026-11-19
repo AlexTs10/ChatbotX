@@ -192,7 +192,7 @@ pub async fn procedure(
         return Some(outcome);
     }
     if let Some(outcome) = decisions::procedure(ctx, path, input).await {
-        return outcome;
+        return Some(outcome);
     }
     if let Some(outcome) = rest::procedure(ctx, path, input).await {
         return Some(outcome);
@@ -332,7 +332,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = decisions::action(ctx, name, &args).await {
-        return outcome;
+        return Some(outcome);
     }
     if let Some(outcome) = dynamic_images::action(ctx, name, &args).await {
         return Some(outcome);

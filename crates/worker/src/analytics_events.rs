@@ -571,7 +571,7 @@ fn calendar_period(now: i64) -> Option<(i64, i64)> {
 /// `handleBotMessageSent`'s accounting: the owner quotas, the workspace usage
 /// and the period ledger, per workspace; best effort (logged, never retried).
 fn count_bot_messages(conn: &Connection, workspace_id: i64, count: i64) {
-    let run = || -> Result<(), DbError> {
+    let run = || -> chatbotx_db::repo::Result<()> {
         let Some((owner, tenant)) = conn
             .query_row(
                 r#"SELECT "ownerId", "tenantId" FROM "Workspace" WHERE "id" = ?1"#,

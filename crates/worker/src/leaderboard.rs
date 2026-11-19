@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use chatbotx_business::leaderboard::scoring::{self, Award, FlowChange, FlowStatus, FollowerCheck};
 use chatbotx_business::leaderboard::service;
+use chatbotx_db::repo::Model as _;
 use chatbotx_db::repo::models::{ContactInbox, Leaderboard, Message};
 use chatbotx_jobs::{JobCtx, JobError};
 use chatbotx_kv::cas::CasStore as _;

@@ -242,6 +242,7 @@ pub async fn message_reaction(deps: &Deps, data: &Value) -> Result<(), JobError>
         return Ok(());
     };
     if created.is_new {
+        let created_at = created.message.created_at;
         let row = message_json(&MessageWithAttachments {
             message: created.message,
             attachment_count: None,
@@ -261,7 +262,7 @@ pub async fn message_reaction(deps: &Deps, data: &Value) -> Result<(), JobError>
             conversation.contact_id,
             &reaction_source_id,
             &action,
-            created.message.created_at,
+            created_at,
         )
         .await;
         return Ok(());

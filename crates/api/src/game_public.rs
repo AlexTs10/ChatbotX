@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -207,7 +207,8 @@ async fn leaderboard_page(State(state): State<Arc<ApiState>>, body: Bytes) -> Re
 fn not_found() -> Response {
     (
         StatusCode::NOT_FOUND,
-        axum::Json(json!({ "error": "notFound" })),
+        [(header::CONTENT_TYPE, "application/json")],
+        json!({ "error": "notFound" }).to_string(),
     )
         .into_response()
 }
@@ -259,25 +260,26 @@ async fn board_route(
         .into_response()
 }
 
-#[derive(serde::Deserialize)]
-struct MeQuery {
-    token: Option<String>,
-}
-
 /// `GET /api/leaderboards/{id}/me`: the viewer's bar, never cached.
 async fn me_route(
     State(state): State<Arc<ApiState>>,
     Path(id): Path<String>,
-    Query(query): Query<MeQuery>,
+    RawQuery(query): RawQuery,
 ) -> Response {
     let Some(id) = id_of(Some(&id)) else {
         return not_found();
     };
-    let viewer = load_viewer(&state, id, query.token.as_deref()).await;
+    let token = url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
+        .find(|(key, _)| key == "token")
+        .map(|(_, value)| value.into_owned());
+    let viewer = load_viewer(&state, id, token.as_deref()).await;
     (
         StatusCode::OK,
-        [(header::CACHE_CONTROL, "private, no-store")],
-        axum::Json(json!({ "viewer": viewer })),
+        [
+            (header::CACHE_CONTROL, "private, no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        json!({ "viewer": viewer }).to_string(),
     )
         .into_response()
 }
@@ -484,7 +486,7 @@ async fn play_action(
         Err(error) if error.code() == Some("minigameNotActive") => {
             fail(StatusCode::FORBIDDEN, "This minigame has not started yet.")
         }
-        Err(error) => fail(StatusCode::BAD_REQUEST, error.message()),
+        Err(error) => fail(StatusCode::BAD_REQUEST, &error.message()),
     }
 }
 

@@ -123,7 +123,9 @@ export function LeaderboardRowMenu({
   const { handleCopy } = useClipboard()
   const invalidateLeaderboards = useInvalidateLeaderboards()
   const [dialog, setDialog] = useState<OpenDialog>(null)
-  const items = buildLeaderboardMenu(leaderboard.availableActions)
+  const items = buildLeaderboardMenu(
+    leaderboard.availableActions as Parameters<typeof buildLeaderboardMenu>[0],
+  )
   const basePath = `/space/${workspaceId}/leaderboards/${leaderboard.id}`
 
   const afterMutation = (message: string) => {
@@ -142,7 +144,12 @@ export function LeaderboardRowMenu({
   )
   const statusAction = useAction(boundStatus, {
     onSuccess: ({ input }) =>
-      afterMutation(t(STATUS_CONFIRM[input.action].successKey)),
+      afterMutation(
+        t(
+          STATUS_CONFIRM[(input as { action: keyof typeof STATUS_CONFIRM }).action]
+            .successKey,
+        ),
+      ),
     onError,
   })
   const boundReset = useMemo(

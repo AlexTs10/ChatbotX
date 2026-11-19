@@ -81,7 +81,7 @@ export function ParticipantRowMenu({
   const ban = useAction(setParticipantBannedAction.bind(null, workspaceId), {
     onSuccess: ({ input }) =>
       afterMutation(
-        input.isBanned
+        (input as { isBanned: boolean }).isBanned
           ? t("leaderboards.participants.banned")
           : t("leaderboards.participants.unbanned"),
       ),

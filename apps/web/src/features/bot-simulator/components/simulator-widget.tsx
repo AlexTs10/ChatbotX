@@ -1,6 +1,6 @@
 "use client"
 
-import Script from "next/script"
+import { useEffect } from "react"
 
 type CsmChatWidget = {
   init: (config: {
@@ -29,19 +29,20 @@ export function SimulatorWidget({
   brandColor,
   websiteUrl,
 }: SimulatorWidgetProps) {
-  const handleLoad = () => {
-    const widget = (window as Window & { csmChatWidget?: CsmChatWidget })
-      .csmChatWidget
-    widget?.init({ webchatId, workspaceId, brandColor, parentUrl: websiteUrl })
-  }
+  // ponytail: the next/script shim takes no load props, so the tag is made here.
+  useEffect(() => {
+    const script = document.createElement("script")
+    script.type = "module"
+    script.crossOrigin = "anonymous"
+    script.src = "/chat-widget/plugin.js"
+    script.onload = () => {
+      const widget = (window as Window & { csmChatWidget?: CsmChatWidget })
+        .csmChatWidget
+      widget?.init({ webchatId, workspaceId, brandColor, parentUrl: websiteUrl })
+    }
+    document.body.appendChild(script)
+    return () => script.remove()
+  }, [webchatId, workspaceId, brandColor, websiteUrl])
 
-  return (
-    <Script
-      crossOrigin="anonymous"
-      onLoad={handleLoad}
-      src="/chat-widget/plugin.js"
-      strategy="afterInteractive"
-      type="module"
-    />
-  )
+  return null
 }

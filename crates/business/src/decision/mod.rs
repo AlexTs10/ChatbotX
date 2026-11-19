@@ -1169,8 +1169,8 @@ pub struct FlowEval<'a> {
     pub step: &'a Value,
 }
 
-fn lock<'l>(
-    locks: Option<&'l chatbotx_kv::LockMap>,
+fn lock(
+    locks: Option<&chatbotx_kv::LockMap>,
     key: &str,
 ) -> std::result::Result<Option<chatbotx_kv::LockGuard>, ()> {
     match locks {
@@ -1302,6 +1302,8 @@ async fn write_mappings(
 }
 
 /// `EnabledGlobalRouter` (`usable` carries what the router needs).
+// ponytail: one short-lived value per inbound message; boxing buys nothing.
+#[allow(clippy::large_enum_variant)]
 pub enum Router {
     Absent,
     Invalid(&'static str),
