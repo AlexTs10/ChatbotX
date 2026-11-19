@@ -4,9 +4,10 @@
 //!
 //! The bound `credentialScopeSchema` arg is the input field `scope`
 //! (`"user"` | `"platform"`). Server-side messages are the English
-//! `messages/en.json` text. Not ported here: `updateStripeSettings` /
-//! `deleteStripeSettings` (Stripe Connect webhook, P3.6-D1o); the WhatsApp
-//! app-level `calls` webhook subscription after a save is Q.I1.
+//! `messages/en.json` text. `updateStripeSettings` / `deleteStripeSettings`
+//! are `savePlatformStripe` / `removePlatformStripe` (the Connect webhook on
+//! the platform's Stripe account; only a super admin writes the platform's).
+//! The WhatsApp app-level `calls` webhook subscription after a save is Q.I1.
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::connection::credentials::HttpUpstream;
@@ -60,6 +61,8 @@ pub fn action_gate(name: &str) -> Option<Gate> {
                 | "updateMakeSettings"
                 | "cloneFromMessenger"
                 | "updateTiktokSetting"
+                | "updateStripeSettings"
+                | "deleteStripeSettings"
         );
     known.then_some(Gate::Auth)
 }
@@ -558,8 +561,238 @@ pub async fn run_action(
             .await?;
             Ok(None)
         }
+        "updateStripeSettings" => {
+            let mut config = fields(
+                &mut input,
+                &[
+                    ("publishableKey", true),
+                    ("verifyToken", true),
+                    ("secretKey", true),
+                ],
+            );
+            if let Some(client_id) = input.string(
+                "connectClientId",
+                Str {
+                    pattern: Some(is_connect_client_id),
+                    ..TRIMMED
+                },
+            ) {
+                config.insert("connectClientId".into(), Value::String(client_id));
+            }
+            input.finish()?;
+            let user = stripe_scope(api, context, &scope.unwrap_or_default(), false).await?;
+            save_platform_stripe(api, user, config).await?;
+            Ok(None)
+        }
+        "deleteStripeSettings" => {
+            input.finish()?;
+            let user = stripe_scope(api, context, &scope.unwrap_or_default(), true).await?;
+            remove_platform_stripe(api, user).await?;
+            Ok(None)
+        }
         _ => Err(ActionError::Internal(format!("unknown action {name}"))),
     }
+}
+
+/// `^ca_[A-Za-z0-9]+$` (the Stripe Connect OAuth client id).
+fn is_connect_client_id(text: &str) -> bool {
+    text.strip_prefix("ca_")
+        .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// `resolveStripeCredentialScope`: the platform-wide Stripe settings (self
+/// hosted, or the `platform` scope) are written by a super admin only.
+async fn stripe_scope(
+    api: &ApiState,
+    context: &ActionContext,
+    scope: &str,
+    allow_without_entitlement: bool,
+) -> Result<Option<i64>, ActionError> {
+    let user = resolve_scope(api, context, scope, allow_without_entitlement).await?;
+    if user.is_none() && !is_super_admin(api, context.user_id).await? {
+        return Err(unauthorized());
+    }
+    Ok(user)
+}
+
+/// `ecommercePaymentRepository.countByPlatformCredential`.
+async fn count_connected(api: &ApiState, credential_id: i64) -> Result<i64, ActionError> {
+    Ok(chatbotx_business::tx::read(&api.db, move |conn| {
+        Ok(conn
+            .query_row(
+                r#"SELECT COUNT(*) FROM "EcommercePaymentProvider" WHERE "platformCredentialId" = ?1"#,
+                [credential_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(chatbotx_db::repo::Error::from)?)
+    })
+    .await?)
+}
+
+/// `stripePlatformAccountInUseException`.
+fn stripe_account_in_use(count: i64) -> ActionError {
+    ActionError::Exception(
+        BusinessError::exception(
+            format!(
+                "{count} store(s) are connected through the current Stripe account. A key of another Stripe account would cut them off; disconnect them first."
+            ),
+            "stripePlatformAccountInUse",
+            409,
+        )
+        .with_data(json!({ "count": count })),
+    )
+}
+
+fn stripe_error(error: &chatbotx_business::payments::ProviderError) -> ActionError {
+    ActionError::Exception(chatbotx_business::payment_provider::to_exception(
+        "stripe", error,
+    ))
+}
+
+/// The stored Stripe settings of the scope, with the row id.
+async fn stored_stripe(
+    api: &ApiState,
+    user: Option<i64>,
+) -> Result<Option<(i64, Map<String, Value>)>, ActionError> {
+    let encryption = encryption(api)?.clone();
+    let found = chatbotx_business::tx::read(&api.db, move |conn| {
+        pc::find_decrypted(conn, &encryption, user, "stripe", DecryptOptions::default())
+    })
+    .await?;
+    Ok(found.map(|c| (c.id, c.config)))
+}
+
+/// `savePlatformStripe`: the key's account is read (which also checks the
+/// key); a key of another account is refused while stores are connected
+/// through the current one; the Connect webhook is kept on the same account,
+/// else created (its signing secret is stored with the settings).
+async fn save_platform_stripe(
+    api: &ApiState,
+    user: Option<i64>,
+    input: Map<String, Value>,
+) -> Result<(), ActionError> {
+    use chatbotx_business::payments::stripe;
+    let base = stripe::STRIPE_API;
+    let secret_key = text(&input, "secretKey").unwrap_or_default().to_string();
+    let existing = stored_stripe(api, user).await?;
+    let account_id = stripe::read_platform_account_id(base, &secret_key)
+        .await
+        .map_err(|e| stripe_error(&e))?;
+    let previous_account = match &existing {
+        Some((_, config)) => match text(config, "platformAccountId") {
+            Some(id) => Some(id.to_string()),
+            None => stripe::read_platform_account_id(
+                base,
+                text(config, "secretKey").unwrap_or_default(),
+            )
+            .await
+            .ok(),
+        },
+        None => None,
+    };
+    let same_account = existing.is_some() && previous_account.as_deref() == Some(&account_id);
+    if let Some((id, _)) = &existing
+        && !same_account
+    {
+        let connected = count_connected(api, *id).await?;
+        if connected > 0 {
+            return Err(stripe_account_in_use(connected));
+        }
+    }
+    // A webhook belongs to the Stripe account it was created on.
+    let kept = existing
+        .as_ref()
+        .filter(|_| same_account)
+        .and_then(|(_, c)| {
+            Some((
+                text(c, "connectWebhookEndpointId")?.to_string(),
+                text(c, "connectWebhookSecret")?.to_string(),
+            ))
+        });
+    let mut config = input;
+    config.insert("platformAccountId".into(), json!(account_id));
+    if let Some((endpoint, secret)) = &kept {
+        config.insert("connectWebhookEndpointId".into(), json!(endpoint));
+        config.insert("connectWebhookSecret".into(), json!(secret));
+    }
+    save(api, user, "stripe", config.clone()).await?;
+    if !same_account
+        && let Some((_, old)) = &existing
+        && let Some(endpoint) = text(old, "connectWebhookEndpointId")
+        && let Err(err) =
+            stripe::delete_webhook(base, text(old, "secretKey").unwrap_or_default(), endpoint).await
+    {
+        tracing::warn!(err = %err.message, endpoint, "[payments] could not remove the Stripe Connect webhook");
+    }
+    let Some((saved_id, _)) = stored_stripe(api, user).await? else {
+        return Err(ActionError::Internal(
+            "Failed to save the Stripe settings".into(),
+        ));
+    };
+    // The webhook origin: the reseller's own domain for their own app, the
+    // broker otherwise (`resolveProviderOriginForCredential`).
+    let origin = match user {
+        Some(owner) => custom_domain_origin(api, owner).await?,
+        None => None,
+    }
+    .unwrap_or_else(|| crate::handlers::messenger_templates::broker_origin(&api.app_url));
+    let url = format!(
+        "{}/api/payments/stripe/webhook/{saved_id}",
+        origin.trim_end_matches('/')
+    );
+    let webhook = stripe::ensure_connect_webhook(base, &secret_key, &url, kept.clone())
+        .await
+        .map_err(|e| stripe_error(&e))?;
+    if Some(&webhook) == kept.as_ref() {
+        return Ok(());
+    }
+    config.insert("connectWebhookEndpointId".into(), json!(webhook.0));
+    config.insert("connectWebhookSecret".into(), json!(webhook.1));
+    save(api, user, "stripe", config).await
+}
+
+/// `resolveTenantCustomDomainOrigin` (cloud, the owner's active tenant).
+async fn custom_domain_origin(api: &ApiState, owner: i64) -> Result<Option<String>, ActionError> {
+    if !api.edition.is_cloud() {
+        return Ok(None);
+    }
+    let Some(tenant) = chatbotx_business::tenant::find_by_owner(&api.db, owner).await? else {
+        return Ok(None);
+    };
+    if tenant.status != "active" {
+        return Ok(None);
+    }
+    Ok(
+        chatbotx_business::tenant::find_active_domain_by_tenant(&api.db, tenant.id)
+            .await?
+            .map(|d| format!("https://{}", d.domain)),
+    )
+}
+
+/// `removePlatformStripe`: refused while stores are connected through the
+/// settings; the Connect webhook is removed best effort.
+async fn remove_platform_stripe(api: &ApiState, user: Option<i64>) -> Result<(), ActionError> {
+    let existing = stored_stripe(api, user).await?;
+    if let Some((id, _)) = &existing {
+        let connected = count_connected(api, *id).await?;
+        if connected > 0 {
+            return Err(stripe_account_in_use(connected));
+        }
+    }
+    chatbotx_business::tx::write(&api.db, move |conn| Ok(pc::remove(conn, user, "stripe")?))
+        .await?;
+    if let Some((_, old)) = &existing
+        && let Some(endpoint) = text(old, "connectWebhookEndpointId")
+        && let Err(err) = chatbotx_business::payments::stripe::delete_webhook(
+            chatbotx_business::payments::stripe::STRIPE_API,
+            text(old, "secretKey").unwrap_or_default(),
+            endpoint,
+        )
+        .await
+    {
+        tracing::warn!(err = %err.message, endpoint, "[payments] could not remove the Stripe Connect webhook");
+    }
+    Ok(())
 }
 
 /// `platformCredentialsAPI.getGiphyApiKeyAPI`: the caller's (cloud) or the

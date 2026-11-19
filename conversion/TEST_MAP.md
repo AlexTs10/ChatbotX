@@ -212,7 +212,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/connect-routes.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/connect-row-status.test.tsx` | B | - | todo | Builder app shell and shared components; builder jsdom |
 | `apps/builder/__tests__/connect-selection-form.test.tsx` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
-| `apps/builder/__tests__/connect-session-message.test.ts` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
+| `apps/builder/__tests__/connect-session-message.test.ts` | B | `crates/api/tests/spa_public_pages.rs` | ported | Channel connection and OAuth connect flow; builder jsdom; Q.F2-admin |
 | `apps/builder/__tests__/connection-status-message.test.ts` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
 | `apps/builder/__tests__/connections-private-api.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/connections-public-api.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
@@ -605,7 +605,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/on-user-created.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/open-link-button.test.tsx` | B | - | todo | Public links (open-link, QR codes, reflinks); builder jsdom |
 | `apps/builder/__tests__/open-link-labels.test.ts` | B | - | todo | Public links (open-link, QR codes, reflinks); builder jsdom |
-| `apps/builder/__tests__/open-link-page.test.tsx` | C | tbd | todo | Public links (open-link, QR codes, reflinks); builder server code |
+| `apps/builder/__tests__/open-link-page.test.tsx` | C | `crates/api/tests/spa_public_pages.rs` | ported | Public links (open-link, QR codes, reflinks); builder server code; Q.F2-admin |
 | `apps/builder/__tests__/openai-compatible-action-schema.test.ts` | B | - | todo | OpenAI-compatible integration; builder jsdom |
 | `apps/builder/__tests__/openai-compatible-actions.test.ts` | C | tbd | todo | OpenAI-compatible integration; builder server code |
 | `apps/builder/__tests__/openai-compatible-model-options.test.ts` | B | - | todo | OpenAI-compatible integration; builder jsdom |
@@ -657,9 +657,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/plain-text-tiptap-editor-dom.test.tsx` | B | - | todo | Variables (contact/bot/system variable interpolation); builder jsdom |
 | `apps/builder/__tests__/plain-text-tiptap-editor.test.ts` | B | - | todo | Variables (contact/bot/system variable interpolation); builder jsdom |
 | `apps/builder/__tests__/platform-admins-queries.test.ts` | C | tbd | todo | Platform admin; builder server code |
-| `apps/builder/__tests__/platform-audit-logs-queries.test.ts` | C | tbd | todo | Platform admin; builder server code |
+| `apps/builder/__tests__/platform-audit-logs-queries.test.ts` | C | `crates/api/tests/platform_settings.rs` | ported | Platform admin; builder server code; Q.F2-admin |
 | `apps/builder/__tests__/platform-credential-owner.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
-| `apps/builder/__tests__/platform-credentials-scope.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
+| `apps/builder/__tests__/platform-credentials-scope.test.ts` | C | `crates/api/tests/platform_settings.rs` | ported | Channel connection and OAuth connect flow; builder server code; Q.F2-admin |
 | `apps/builder/__tests__/platform-default-template-actions.test.ts` | C | tbd | todo | Template marketplace (install/share/sync); builder server code |
 | `apps/builder/__tests__/platform-default-template-settings.test.tsx` | B | - | todo | Template marketplace (install/share/sync); builder jsdom |
 | `apps/builder/__tests__/poll-form-schema.test.ts` | B | - | todo | Polls; builder jsdom |
@@ -907,7 +907,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/webchat-guest-session.test.ts` | C | `crates/business/src/integration_webchat.rs` | passing | Webchat channel; builder server code |
 | `apps/builder/__tests__/webchat-message-schema.test.ts` | B | - | todo | Webchat channel; builder jsdom |
 | `apps/builder/__tests__/webchat-mutation-schema.test.ts` | B | - | todo | Webchat channel; builder jsdom |
-| `apps/builder/__tests__/webchat-page-guards.test.tsx` | C | tbd | todo | Webchat channel; builder server code |
+| `apps/builder/__tests__/webchat-page-guards.test.tsx` | C | `crates/api/tests/spa_public_pages.rs` | ported | Webchat channel; builder server code; Q.F2-admin |
 | `apps/builder/__tests__/webchat-realtime.test.tsx` | B | - | todo | Realtime (WebSocket gateway); builder jsdom |
 | `apps/builder/__tests__/webchat-widget-css.test.ts` | B | - | todo | Webchat channel; builder jsdom |
 | `apps/builder/__tests__/webchats-create-visibility-guard.test.ts` | C | tbd | todo | Webchat channel; builder server code |

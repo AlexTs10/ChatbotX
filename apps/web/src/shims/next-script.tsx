@@ -8,6 +8,8 @@ type ScriptProps = {
   children?: string
   dangerouslySetInnerHTML?: { __html: string }
   onLoad?: () => void
+  crossOrigin?: string
+  type?: string
 }
 
 export default function Script({
@@ -16,6 +18,8 @@ export default function Script({
   children,
   dangerouslySetInnerHTML,
   onLoad,
+  crossOrigin,
+  type,
 }: ScriptProps) {
   useEffect(() => {
     if (id && document.getElementById(id)) {
@@ -29,6 +33,12 @@ export default function Script({
       script.src = src
       script.async = true
     }
+    if (crossOrigin) {
+      script.crossOrigin = crossOrigin
+    }
+    if (type) {
+      script.type = type
+    }
     if (onLoad) {
       script.addEventListener("load", onLoad)
     }
@@ -37,6 +47,6 @@ export default function Script({
       script.text = inline
     }
     document.head.appendChild(script)
-  }, [id, src, children, dangerouslySetInnerHTML, onLoad])
+  }, [id, src, children, dangerouslySetInnerHTML, onLoad, crossOrigin, type])
   return null
 }

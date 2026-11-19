@@ -91,6 +91,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | Q.F2-automation | 4 | Automation screens (specs/Q.F2-automation.md): broadcasts, sequences create / detail, keywords, page keywords, triggers, email topics, coupons, contact import + scan, agents, flow analytics + flow import history; mini-apps and shop rows checked (33 P4 rows ported) | done (branch feat/conversion-r2-autoweb, not merged) | Q.F2+ | B + C | see specs/Q.F2-automation.md | branch `feat/conversion-r2-autoweb` |
 | Q.F2+ | 4 | Frontend feature batches (cut by the web agent in `specs/P4-web.md` after the scaffold) | in progress (web run 6, screen state in `specs/P4-web.md` §6) | feat/conversion-web scaffold | B | | |
 | Q.F2-settings | 4 | Workspace settings screens (integrations, TikTok / Zalo / Threads, Google Ads, Facebook Ads, AI Router) + `(enterprise)/pricing` | done (spec specs/Q.F2-settings.md) | Q.F2+ | C + B | specs/Q.F2-settings.md | branch `feat/conversion-r2-settings` |
+| Q.F2-admin | 4 | Admin + manage consoles, public pages (unsubscribe, OAuth consent, connect, /go, /l, /bs, datetime picker, webchat), D4 SPA dispatch test (specs/Q.F2-admin.md) | in_pr | Q.F2+ | B + C | `/extensions/me` and guest file upload left | |
 | Q.P5 | 5 | Cutover: one-command build + run, RSS measurement ≤ 200 MB, full parity run, docs | todo | all | A | | |
 
 ## Proof

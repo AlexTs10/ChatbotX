@@ -33,6 +33,8 @@ pub struct ListAuditLogsInput {
 pub struct AuditLogRow {
     pub log: AuditLog,
     pub user: Option<User>,
+    /// The workspace `{ id, name }` ([`list_platform_logs`] only).
+    pub workspace: Option<(i64, String)>,
 }
 
 pub struct AuditLogPage {
@@ -67,18 +69,66 @@ pub fn date_range(from: &str, to: &str, today: NaiveDate) -> (i64, i64) {
 /// `listAuditLogs`: always scoped by the workspace; order by the sort, then
 /// `id desc`.
 pub async fn list_logs(db: &Db, input: ListAuditLogsInput) -> Result<AuditLogPage> {
+    let workspace_id = input.workspace_id;
+    query_logs(db, Some(workspace_id), input).await
+}
+
+/// `listPlatformAuditLogs` (the platform admin console): every workspace,
+/// or the one of `workspace_id`; `user_id` is not a filter there. Each row
+/// carries its workspace `{ id, name }`.
+pub async fn list_platform_logs(
+    db: &Db,
+    workspace_id: Option<i64>,
+    input: ListAuditLogsInput,
+) -> Result<AuditLogPage> {
+    let input = ListAuditLogsInput {
+        user_id: None,
+        ..input
+    };
+    let mut page = query_logs(db, workspace_id, input).await?;
+    let mut ids: Vec<i64> = page.data.iter().map(|r| r.log.workspace_id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let names = tx::read(db, move |conn| {
+        let mut out = std::collections::HashMap::new();
+        let mut stmt = conn
+            .prepare(r#"SELECT "name" FROM "Workspace" WHERE "id" = ?1"#)
+            .map_err(RepoError::from)?;
+        for id in ids {
+            if let Some(name) = stmt
+                .query_row([id], |row| row.get::<_, String>(0))
+                .optional()
+                .map_err(RepoError::from)?
+            {
+                out.insert(id, name);
+            }
+        }
+        Ok(out)
+    })
+    .await?;
+    for row in &mut page.data {
+        let id = row.log.workspace_id;
+        row.workspace = names.get(&id).map(|name| (id, name.clone()));
+    }
+    Ok(page)
+}
+
+async fn query_logs(
+    db: &Db,
+    workspace_id: Option<i64>,
+    input: ListAuditLogsInput,
+) -> Result<AuditLogPage> {
     let today = chrono::DateTime::from_timestamp_millis(chatbotx_db::repo::now_ms())
         .map(|now| now.date_naive())
         .unwrap_or_default();
     let (start, end) = date_range(&input.from, &input.to, today);
     tx::read(db, move |conn| {
-        let mut filter =
-            String::from(r#""workspaceId" = ? AND "createdAt" >= ? AND "createdAt" <= ?"#);
-        let mut binds = vec![
-            Sql::Integer(input.workspace_id),
-            Sql::Integer(start),
-            Sql::Integer(end),
-        ];
+        let mut filter = String::from(r#""createdAt" >= ? AND "createdAt" <= ?"#);
+        let mut binds = vec![Sql::Integer(start), Sql::Integer(end)];
+        if let Some(workspace_id) = workspace_id {
+            filter.push_str(r#" AND "workspaceId" = ?"#);
+            binds.push(Sql::Integer(workspace_id));
+        }
         if let Some(user_id) = input.user_id {
             filter.push_str(r#" AND "userId" = ?"#);
             binds.push(Sql::Integer(user_id));
@@ -130,7 +180,11 @@ pub async fn list_logs(db: &Db, input: ListAuditLogsInput) -> Result<AuditLogPag
                     .map_err(RepoError::from)?,
                 None => None,
             };
-            data.push(AuditLogRow { log, user });
+            data.push(AuditLogRow {
+                log,
+                user,
+                workspace: None,
+            });
         }
         let limit = pagination.limit.max(1);
         Ok(AuditLogPage {

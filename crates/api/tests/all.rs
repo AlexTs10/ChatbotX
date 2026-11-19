@@ -262,8 +262,12 @@ mod session_signup_gate;
 mod session_social_redirect_origin;
 #[path = "session_trusted_origins_build_phase.rs"]
 mod session_trusted_origins_build_phase;
+#[path = "spa_default_template_dispatch.rs"]
+mod spa_default_template_dispatch;
 #[path = "spa_pages.rs"]
 mod spa_pages;
+#[path = "spa_public_pages.rs"]
+mod spa_public_pages;
 #[path = "spreadsheets_public_api.rs"]
 mod spreadsheets_public_api;
 #[path = "tags_public_api.rs"]
