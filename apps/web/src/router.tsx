@@ -358,6 +358,7 @@ const logPages = (
   [
     ["error-logs", "ErrorLogsPage"],
     ["audit-logs", "AuditLogsPage"],
+    ["pricing", "PricingPage"],
   ] as const
 ).map(([path, page]) =>
   createRoute({

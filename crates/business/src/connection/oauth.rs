@@ -112,6 +112,12 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
             },
             multi_account: false,
         }),
+        "threads" => Some(Adapter {
+            provider: "threads",
+            credential_type: "threads",
+            slug: "threads",
+            multi_account: false,
+        }),
         "googleAds" => Some(Adapter {
             provider: "googleAds",
             credential_type: "googleAds",

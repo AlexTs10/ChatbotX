@@ -16,7 +16,7 @@ use axum::routing::get;
 use chatbotx_business::BusinessError;
 use chatbotx_business::connect_session::{self, SessionRow};
 use chatbotx_business::connection::credentials::HttpUpstream;
-use chatbotx_business::connection::oauth;
+use chatbotx_business::connection::{oauth, oauth_facebook_ads};
 use chatbotx_business::google_oauth::{self, Kind};
 use chatbotx_business::{payment_provider, tenant, tx};
 use chatbotx_db::repo;
@@ -124,7 +124,16 @@ async fn handle(
     let kind = Kind::from_slug(&provider);
     let expected = kind.map_or(oauth::provider_for_slug(&provider), |kind| kind.provider());
     let session = match connect_session::find_by_nonce(&state.db, nonce).await {
-        Ok(Some(row)) if row.id == session_id && row.provider == expected => row,
+        // The Facebook Ads grant returns through the Messenger callback (the
+        // only `redirect_uri` the Facebook app registers).
+        Ok(Some(row))
+            if row.id == session_id
+                && (row.provider == expected
+                    || (expected == "messenger"
+                        && row.provider == oauth_facebook_ads::PROVIDER)) =>
+        {
+            row
+        }
         Ok(_) => return not_found(),
         Err(error) => {
             tracing::error!(%error, "connect session lookup failed");
@@ -136,6 +145,9 @@ async fn handle(
     }
     if session.provider == "stripe" {
         return stripe_callback(&state, session, &query, &headers).await;
+    }
+    if session.provider == oauth_facebook_ads::PROVIDER {
+        return facebook_ads_callback(&state, &session, &query, &headers).await;
     }
     let return_to = return_url(&session);
     if let Some(error) = query.get("error") {
@@ -230,6 +242,73 @@ async fn handle(
                 }
             }
         },
+    }
+}
+
+/// The `flow: "facebookAds"` branch of the Messenger callback: the session
+/// must belong to the signed-in user; the token is stored and audited
+/// (`integrationFacebookAdsService.upsert`), then back to the settings.
+async fn facebook_ads_callback(
+    state: &ApiState,
+    session: &SessionRow,
+    query: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Response {
+    let return_to = return_url(session);
+    if let Some(error) = query.get("error") {
+        let code = if error == "access_denied" {
+            "provider_denied"
+        } else {
+            "provider_error"
+        };
+        connect_session::fail(&state.db, session, code, Some(PENDING)).await;
+        return redirect(&append_connect_error(&return_to, code));
+    }
+    let Some(encryption) = state.encryption.as_deref() else {
+        return not_found();
+    };
+    let user_id = match state.sessions.as_deref() {
+        Some(auth) => crate::rpc::find_rpc_session(auth, headers)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.user_id),
+        None => None,
+    };
+    let code = query.get("code").map(String::as_str).unwrap_or_default();
+    match oauth_facebook_ads::complete(
+        &state.db,
+        encryption,
+        &HttpUpstream,
+        &state.app_url,
+        session,
+        user_id,
+        code,
+    )
+    .await
+    {
+        Ok(stored) => {
+            let (action, detail) = stored.audit();
+            state
+                .audit
+                .record(chatbotx_business::audit::AuditRecordInput {
+                    user_id: user_id.map(|id| id.to_string()),
+                    workspace_id: Some(session.workspace_id.to_string()),
+                    ip_address: Some(crate::auth::guest_client_ip(headers)),
+                    user_agent: headers
+                        .get(header::USER_AGENT)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string),
+                    ..chatbotx_business::audit::AuditRecordInput::new(action, detail.to_string())
+                })
+                .await;
+            redirect(&return_to)
+        }
+        Err(error) if error.code() == Some("connectionStateMismatch") => not_found(),
+        Err(error) => {
+            tracing::error!(%error, session_id = session.id, "Failed to store the Facebook Ads connection");
+            redirect(&append_connect_error(&return_to, "provider_error"))
+        }
     }
 }
 

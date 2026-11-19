@@ -19,6 +19,26 @@
 // page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/create/page.tsx
 // page: app/space/[workspaceId]/(settings)/settings/user-persistent-menus/[menuId]/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/inbox-teams/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/channels/smtp/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/active-campaign/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/drip/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/get-response/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/klaviyo/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/mailchimp/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/mailer-lite/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/moosend/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/sendgrid/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/make/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/chatbotx-mcp/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/paypal/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/workspace-token/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/channels/tiktok/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/channels/zalo/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/channels/threads/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/google-ads/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/facebook-ads/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/decision-connections/page.tsx
 // `resolveGuardedWorkspaceId(params, "superAdmin")`: 404 without superAdmin.
 // The channel policy (creatable / connected channels) is the page loader
 // `pages.settingsChannels`; the other data comes from the builder queries.
@@ -63,6 +83,12 @@ import { listIntegrationOpenaiCompatible } from "@/features/integration-openai-c
 import { OpenRouterConnect } from "@/features/integration-openrouter/openrouter-connect"
 import { findIntegrationOpenRouter } from "@/features/integration-openrouter/queries"
 import { listIntegrationTelegrams } from "@/features/integration-telegram/queries"
+import { listIntegrationThreads } from "@/features/integration-threads/queries"
+import { ThreadsManage } from "@/features/integration-threads/threads-manage"
+import { listIntegrationTiktoks } from "@/features/integration-tiktok/queries"
+import { TiktokManage } from "@/features/integration-tiktok/tiktok-manage"
+import { listIntegrationZalo } from "@/features/integration-zalo/queries"
+import { ZaloManage } from "@/features/integration-zalo/zalo-manage"
 import { TelegramManage } from "@/features/integration-telegram/telegram-manage"
 import { listIntegrationWebchats } from "@/features/integration-webchat/queries"
 import { listIntegrationWebchatsRequest } from "@/features/integration-webchat/schema/query"
@@ -91,6 +117,31 @@ import {
   findUserPersistentMenu,
   listUserPersistentMenus,
 } from "@/features/user-persistent-menus/queries"
+import { ManageActiveCampaign } from "@/features/integration-active-campaign/components/manage-active-campaign"
+import { ManageDrip } from "@/features/integration-drip/components/manage-drip"
+import { ManageGetResponse } from "@/features/integration-get-response/components/manage-get-response"
+import { ManageKlaviyo } from "@/features/integration-klaviyo/components/manage-klaviyo"
+import { ManageMailchimp } from "@/features/integration-mailchimp/components/manage-mailchimp"
+import { ManageMailerLite } from "@/features/integration-mailer-lite/components/manage-mailer-lite"
+import { ManageMake } from "@/features/integration-make/components/manage-make"
+import { ManageMoosend } from "@/features/integration-moosend/components/manage-moosend"
+import { ManageSendGrid } from "@/features/integration-sendgrid/components/manage-sendgrid"
+import { listIntegrationSmtps } from "@/features/integration-smtp/queries"
+import { SmtpManage } from "@/features/integration-smtp/smtp-manage"
+import type { DecisionConnectionSafe } from "@chatbotx.io/business"
+import { DecisionConnectionsSettings } from "@/features/decision-connections/components/decision-connections-settings"
+import { AdAccountsSection } from "@/features/integration-facebook-ads/components/ad-accounts-section"
+import { FacebookAdsManage } from "@/features/integration-facebook-ads/facebook-ads-manage"
+import { needsFacebookAdsReconnect } from "@/features/integration-facebook-ads/lib/needs-reconnect"
+import type { IntegrationFacebookAdsResource } from "@/features/integration-facebook-ads/schema"
+import { GoogleAdsSettings } from "@/features/integration-google-ads/components/google-ads-settings"
+import { SESSION_QUERY_PARAM } from "@/features/integration-google-ads/lib/constants"
+import { parseConnectErrorParam } from "@/features/integration-google-ads/lib/load-settings-session"
+import type { GoogleAdsSettingsView } from "@/features/integration-google-ads/lib/to-settings-view"
+import type { GoogleAdsConsentView } from "@/features/integration-google-ads/schema/integration"
+import { ManageChatbotxMcp } from "@/features/mcp-oauth/manage-chatbotx-mcp"
+import type { McpOAuthGrantDto } from "@/features/mcp-oauth/schema/grant-dto"
+import { ManagePaypal } from "@/features/payment-providers/components/manage-paypal"
 import { ManageStripe } from "@/features/payment-providers/components/manage-stripe"
 import type { PaymentProviderResource } from "@/features/payment-providers/schema/public"
 import { loadPage, serverQuery } from "@/lib/server-action"
@@ -358,6 +409,14 @@ export function SettingsChannelPage() {
       return <TelegramChannel canCreate={canCreate(channel)} />
     case "webchat":
       return <WebchatChannel canCreate={canCreate(channel)} />
+    case "smtp":
+      return <SmtpChannel />
+    case "tiktok":
+      return <TiktokChannel canCreate={canCreate(channel)} />
+    case "zalo":
+      return <ZaloChannel canCreate={canCreate(channel)} />
+    case "threads":
+      return <ThreadsChannel canCreate={canCreate(channel)} />
     default:
       // ponytail: the other channel pages wait for their integration units.
       return null
@@ -392,6 +451,77 @@ function TelegramChannel({ canCreate }: { canCreate: boolean }) {
       workspaceId={workspaceId}
     />
   )
+}
+
+/** The platform credential's public app id (`publicConfig.clientId`). */
+function useChannelClientId(type: "tiktok" | "zalo" | "threads") {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["channelCredentialPage", workspaceId, type],
+    queryFn: () =>
+      serverQuery<{ clientId: string | null }>(
+        "channelCredentialPage",
+        workspaceId,
+        [type],
+      ),
+  })
+  return data.clientId
+}
+
+function TiktokChannel({ canCreate }: { canCreate: boolean }) {
+  const workspaceId = useWorkspaceId()
+  const clientId = useChannelClientId("tiktok")
+  const promises = useQueryPromise(["integrationTiktoks", workspaceId], () =>
+    Promise.all([listIntegrationTiktoks({ workspaceId })]),
+  )
+  return (
+    <TiktokManage
+      canCreate={canCreate}
+      isEnabled={Boolean(clientId)}
+      promises={promises}
+      workspaceId={workspaceId}
+    />
+  )
+}
+
+function ZaloChannel({ canCreate }: { canCreate: boolean }) {
+  const workspaceId = useWorkspaceId()
+  const clientId = useChannelClientId("zalo")
+  const promises = useQueryPromise(["integrationZalo", workspaceId], () =>
+    Promise.all([listIntegrationZalo({ workspaceId })]),
+  )
+  return (
+    <ZaloManage
+      canCreate={canCreate}
+      isEnabled={Boolean(clientId)}
+      promises={promises}
+      workspaceId={workspaceId}
+    />
+  )
+}
+
+function ThreadsChannel({ canCreate }: { canCreate: boolean }) {
+  const workspaceId = useWorkspaceId()
+  const clientId = useChannelClientId("threads")
+  const promises = useQueryPromise(["integrationThreads", workspaceId], () =>
+    Promise.all([listIntegrationThreads({ workspaceId })]),
+  )
+  return (
+    <ThreadsManage
+      canCreate={canCreate}
+      promises={promises}
+      publicConfig={clientId ? { clientId } : null}
+      workspaceId={workspaceId}
+    />
+  )
+}
+
+function SmtpChannel() {
+  const workspaceId = useWorkspaceId()
+  const promises = useQueryPromise(["integrationSmtps", workspaceId], () =>
+    listIntegrationSmtps({ workspaceId }),
+  )
+  return <SmtpManage promises={promises} workspaceId={workspaceId} />
 }
 
 function WebchatChannel({ canCreate }: { canCreate: boolean }) {
@@ -450,6 +580,27 @@ export function SettingsIntegrationPage() {
       return <WorkspaceTokens />
     case "stripe":
       return <StripeIntegration />
+    case "paypal":
+      return <PaypalIntegration />
+    case "make":
+      return <MakeIntegration />
+    case "chatbotx-mcp":
+      return <ChatbotxMcpIntegration />
+    case "google-ads":
+      return <GoogleAdsIntegration />
+    case "facebook-ads":
+      return <FacebookAdsIntegration />
+    case "decision-connections":
+      return <DecisionConnectionsIntegration />
+    case "active-campaign":
+    case "drip":
+    case "get-response":
+    case "klaviyo":
+    case "mailchimp":
+    case "mailer-lite":
+    case "moosend":
+    case "sendgrid":
+      return <EmailIntegration slug={slug} />
     default:
       // ponytail: the other integrations wait for their domain units.
       return null
@@ -458,6 +609,17 @@ export function SettingsIntegrationPage() {
 
 // page: app/space/[workspaceId]/(settings)/settings/integrations/stripe/page.tsx
 function StripeIntegration() {
+  const { workspaceId, data } = usePaymentProviders()
+  return (
+    <ManageStripe
+      available={data.stripeAvailable}
+      connection={data.data.find((row) => row.provider === "stripe") ?? null}
+      workspaceId={workspaceId}
+    />
+  )
+}
+
+function usePaymentProviders() {
   const workspaceId = useWorkspaceId()
   const { data } = useSuspenseQuery({
     queryKey: ["spa", "paymentProvidersPage", workspaceId],
@@ -467,13 +629,159 @@ function StripeIntegration() {
         stripeAvailable: boolean
       }>("paymentProvidersPage", workspaceId, [workspaceId]),
   })
+  return { workspaceId, data }
+}
+
+function PaypalIntegration() {
+  const { workspaceId, data } = usePaymentProviders()
   return (
-    <ManageStripe
-      available={data.stripeAvailable}
-      connection={data.data.find((row) => row.provider === "stripe") ?? null}
+    <ManagePaypal
+      connection={data.data.find((row) => row.provider === "paypal") ?? null}
       workspaceId={workspaceId}
     />
   )
+}
+
+function DecisionConnectionsIntegration() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "decisionConnectionsPage", workspaceId],
+    queryFn: () =>
+      serverQuery<{ connections: DecisionConnectionSafe[] }>(
+        "decisionConnectionsPage",
+        workspaceId,
+        [],
+      ),
+  })
+  return <DecisionConnectionsSettings connections={data.connections} />
+}
+
+function FacebookAdsIntegration() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "facebookAdsSettingsPage", workspaceId],
+    queryFn: () =>
+      serverQuery<{ integration: IntegrationFacebookAdsResource | null }>(
+        "facebookAdsSettingsPage",
+        workspaceId,
+        [],
+      ),
+  })
+  const integration = data.integration ?? undefined
+  return (
+    <div className="flex flex-col gap-4">
+      <FacebookAdsManage
+        integrationFacebookAds={integration}
+        workspaceId={workspaceId}
+      />
+      {/* Connected Meta ad accounts are listed here (moved from the
+          Analytics > Ads screen). */}
+      {integration && (
+        <AdAccountsSection
+          facebookAds={{
+            connected: true,
+            needsReconnect: needsFacebookAdsReconnect(integration),
+          }}
+          workspaceId={workspaceId}
+        />
+      )}
+    </div>
+  )
+}
+
+function GoogleAdsIntegration() {
+  const workspaceId = useWorkspaceId()
+  const searchParams = useSearchParams()
+  const sessionParam = searchParams.get(SESSION_QUERY_PARAM)
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "googleAdsSettingsPage", workspaceId, sessionParam],
+    queryFn: () =>
+      serverQuery<{
+        setup:
+          | (Omit<GoogleAdsSettingsView, "conversionActionsSyncedAt"> & {
+              conversionActionsSyncedAt: string | null
+            })
+          | null
+        isConfigured: boolean
+        session: { id: string; status: string } | null
+        consent: GoogleAdsConsentView
+      }>("googleAdsSettingsPage", workspaceId, [sessionParam]),
+  })
+  const setup = data.setup && {
+    ...data.setup,
+    conversionActionsSyncedAt: data.setup.conversionActionsSyncedAt
+      ? new Date(data.setup.conversionActionsSyncedAt)
+      : null,
+  }
+  return (
+    <GoogleAdsSettings
+      connectError={parseConnectErrorParam(
+        searchParams.get("connect_error") ?? undefined,
+      )}
+      consent={data.consent}
+      initialSession={data.session}
+      isConfigured={data.isConfigured}
+      setup={setup}
+      workspaceId={workspaceId}
+    />
+  )
+}
+
+function MakeIntegration() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "makeIntegrationPage", workspaceId],
+    queryFn: () =>
+      serverQuery<{ inviteUrl: string | null }>(
+        "makeIntegrationPage",
+        workspaceId,
+        [],
+      ),
+  })
+  return <ManageMake inviteUrl={data.inviteUrl ?? undefined} />
+}
+
+function ChatbotxMcpIntegration() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "chatbotxMcpPage", workspaceId],
+    queryFn: () =>
+      serverQuery<{
+        grants: McpOAuthGrantDto[]
+        mcpUrl: string
+        builderUrl: string
+      }>("chatbotxMcpPage", workspaceId, []),
+  })
+  return <ManageChatbotxMcp {...data} workspaceId={workspaceId} />
+}
+
+// The email-marketing rows: `integration<Name>Service.findByWorkspaceId`.
+const EMAIL_INTEGRATIONS = {
+  "active-campaign": ["activeCampaign", ManageActiveCampaign],
+  drip: ["drip", ManageDrip],
+  "get-response": ["getResponse", ManageGetResponse],
+  klaviyo: ["klaviyo", ManageKlaviyo],
+  mailchimp: ["mailchimp", ManageMailchimp],
+  "mailer-lite": ["mailerLite", ManageMailerLite],
+  moosend: ["moosend", ManageMoosend],
+  sendgrid: ["sendGrid", ManageSendGrid],
+} as const
+
+function EmailIntegration({
+  slug,
+}: {
+  slug: keyof typeof EMAIL_INTEGRATIONS
+}) {
+  const workspaceId = useWorkspaceId()
+  const [provider, Manage] = EMAIL_INTEGRATIONS[slug]
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "emailIntegrationPage", workspaceId, provider],
+    queryFn: () =>
+      serverQuery<{ connected: boolean }>("emailIntegrationPage", workspaceId, [
+        provider,
+      ]),
+  })
+  return <Manage isConnected={data.connected} workspaceId={workspaceId} />
 }
 
 function WorkspaceTokens() {

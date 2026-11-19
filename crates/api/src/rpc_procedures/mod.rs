@@ -16,9 +16,11 @@ mod broadcasts;
 mod comments;
 mod contacts;
 mod conversations;
+mod decision_connections;
 mod ecommerce;
 mod email_marketing;
 mod email_topics;
+mod facebook_ads;
 mod flows;
 mod google_ads;
 mod inboxes;
@@ -32,6 +34,7 @@ mod products;
 mod rest;
 mod sequences;
 mod settings;
+mod settings_integrations;
 mod templates;
 mod tools;
 mod triggers;
@@ -196,6 +199,9 @@ pub async fn procedure(
     if let Some(outcome) = google_ads::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = facebook_ads::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     lists::procedure(ctx, path, input).await
 }
 
@@ -252,12 +258,15 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || triggers::ACTIONS.contains(&n)
                 || automated_responses::ACTIONS.contains(&n)
                 || settings::ACTIONS.contains(&n)
+                || settings_integrations::ACTIONS.contains(&n)
                 || user_persistent_menus::ACTIONS.contains(&n)
                 || email_marketing::ACTIONS.contains(&n)
                 || appointments::ACTIONS.contains(&n)
                 || working_hours::ACTIONS.contains(&n)
                 || whatsapp::ACTIONS.contains(&n)
-                || google_ads::ACTIONS.contains(&n) =>
+                || google_ads::ACTIONS.contains(&n)
+                || facebook_ads::ACTIONS.contains(&n)
+                || decision_connections::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
             }
@@ -321,6 +330,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
     if let Some(outcome) = settings::action(ctx, name, &args).await {
         return Some(outcome);
     }
+    if let Some(outcome) = settings_integrations::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = user_persistent_menus::action(ctx, name, &args).await {
         return Some(outcome);
     }
@@ -337,6 +349,12 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = google_ads::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = facebook_ads::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = decision_connections::action(ctx, name, &args).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");

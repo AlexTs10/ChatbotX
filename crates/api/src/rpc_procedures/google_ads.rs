@@ -22,6 +22,10 @@ pub(super) const ACTIONS: &[&str] = &[
     "cancelGoogleAdsConnectAction",
     "disconnectGoogleAdsAction",
     "syncGoogleAdsConversionActionsAction",
+    "retryGoogleAdsEventAction",
+    "updateGoogleAdsConsentAction",
+    "validateGoogleAdsRequestAction",
+    "googleAdsSettingsPage",
 ];
 
 const PROVIDER: &str = "googleAds";
@@ -68,6 +72,15 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, _input: &Value) -> Outc
                 .map_err(fail)
         }
         "googleAdsAPI.getInFlightConnectSession" => in_flight(ctx).await.map_err(fail),
+        "googleAdsAPI.listEvents" => list_events(ctx, _input).await,
+        "connectSessionsAPI.getConnectSessionAPI" => {
+            match In(_input).str("id", false, 0, usize::MAX) {
+                Ok(id) => {
+                    super::public(ctx, "connectSessions.get", &[("id", id)], None, None).await
+                }
+                Err(e) => Err(e),
+            }
+        }
         _ => return None,
     })
 }
@@ -75,6 +88,11 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, _input: &Value) -> Outc
 /// `findLatestInFlightByProvider`: the newest unexpired active session.
 async fn in_flight(ctx: &Ctx<'_>) -> Result<Value, BusinessError> {
     assert_super_admin(ctx)?;
+    Ok(json!({ "session": latest_in_flight(ctx).await? }))
+}
+
+/// `findLatestInFlightByProvider` (workspace and `googleAds` scoped).
+async fn latest_in_flight(ctx: &Ctx<'_>) -> Result<Value, BusinessError> {
     let ws = ctx.workspace_id;
     let session: Option<(i64, String)> = tx::read(&ctx.api.db, move |conn| {
         conn.query_row(
@@ -89,9 +107,9 @@ async fn in_flight(ctx: &Ctx<'_>) -> Result<Value, BusinessError> {
         .map_err(|e| BusinessError::Repo(e.into()))
     })
     .await?;
-    Ok(json!({
-        "session": session.map(|(id, status)| json!({ "id": id.to_string(), "status": status })),
-    }))
+    Ok(json!(session.map(
+        |(id, status)| json!({ "id": id.to_string(), "status": status })
+    )))
 }
 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
@@ -119,6 +137,18 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             cancel(ctx, session_id).await.map_err(action_fail)
         }
         "disconnectGoogleAdsAction" => disconnect(ctx).await.map_err(action_fail),
+        "retryGoogleAdsEventAction" => {
+            let event_id = In(input).id("eventId")?;
+            retry(ctx, event_id).await.map_err(action_fail)
+        }
+        "updateGoogleAdsConsentAction" => {
+            assert_super_admin(ctx).map_err(action_fail)?;
+            chatbotx_business::google_ads::update_consent(&ctx.api.db, ctx.workspace_id, input)
+                .await
+                .map_err(action_fail)
+        }
+        "validateGoogleAdsRequestAction" => validate(ctx, input).await,
+        "googleAdsSettingsPage" => settings_page(ctx, arg(args, 0)).await.map_err(action_fail),
         _ => sync(ctx).await.map_err(action_fail),
     }
 }
@@ -295,4 +325,170 @@ async fn sync(ctx: &Ctx<'_>) -> Result<Value, BusinessError> {
         .await?
         .ok_or_else(|| google_ads_error("notConnected", 404))?;
     Ok(setup_view(Some(&refreshed)))
+}
+
+/// `googleAdsAPI.listEvents` (private): super admin, the filters of
+/// `listGoogleAdsEventsRequest`, `{ data, total, page, perPage }` (click ids
+/// masked by the resource).
+async fn list_events(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    assert_super_admin(ctx).map_err(fail)?;
+    let pick = |key: &str, allowed: &[&str]| -> Result<Option<String>, OrpcError> {
+        match &input[key] {
+            Value::Null => Ok(None),
+            Value::String(v) if allowed.is_empty() || allowed.contains(&v.as_str()) => {
+                Ok(Some(v.clone()))
+            }
+            _ => Err(invalid()),
+        }
+    };
+    let status = pick("status", chatbotx_business::google_ads::EVENT_STATUSES)?;
+    let channel = pick(
+        "channel",
+        chatbotx_core::utils::google_click::GOOGLE_ADS_CHANNEL_VALUES,
+    )?;
+    let action = pick("conversionActionId", &[])?;
+    if action
+        .as_deref()
+        .is_some_and(|a| a.is_empty() || !a.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err(invalid());
+    }
+    let date = |key: &str| -> Result<Option<i64>, OrpcError> {
+        match &input[key] {
+            Value::Null => Ok(None),
+            Value::String(v) => chatbotx_core::js::parse_date(v)
+                .map(Some)
+                .ok_or_else(invalid),
+            Value::Number(n) => n.as_i64().map(Some).ok_or_else(invalid),
+            _ => Err(invalid()),
+        }
+    };
+    let int = |key: &str, default: i64| -> Result<i64, OrpcError> {
+        let n = match &input[key] {
+            Value::Null => return Ok(default),
+            Value::Number(n) => n.as_f64(),
+            Value::String(v) => v.trim().parse::<f64>().ok(),
+            _ => None,
+        };
+        match n {
+            Some(n) if n.fract() == 0.0 && n >= 1.0 => Ok(n as i64),
+            _ => Err(invalid()),
+        }
+    };
+    let page = int("page", 1)?;
+    let (data, total, per_page) = chatbotx_business::google_ads::list_events_total(
+        &ctx.api.db,
+        chatbotx_db::repo::google_ads_conversion_event::ListInput {
+            workspace_id: ctx.workspace_id,
+            status,
+            channel,
+            conversion_action_id: action,
+            since: date("since")?,
+            until: date("until")?,
+            page,
+            per_page: int("perPage", 20)?,
+        },
+    )
+    .await
+    .map_err(fail)?;
+    Ok(json!({ "data": data, "total": total, "page": page, "perPage": per_page }))
+}
+
+/// `retryGoogleAdsEventAction`: a non-`failed` event is `notRetryable` (409).
+async fn retry(ctx: &Ctx<'_>, event_id: i64) -> Result<Value, BusinessError> {
+    assert_super_admin(ctx)?;
+    let jobs = ctx.api.jobs.as_deref().ok_or_else(|| {
+        BusinessError::exception("Job queue is not configured", "systemError", 500)
+    })?;
+    let retried = chatbotx_business::google_ads_conversion::retry(
+        &ctx.api.db,
+        jobs,
+        ctx.workspace_id,
+        event_id,
+    )
+    .await?;
+    if !retried {
+        return Err(BusinessError::exception(
+            "This conversion can't be retried: only failed conversions can be retried.",
+            "googleAds.notRetryable",
+            409,
+        ));
+    }
+    Ok(Value::Null)
+}
+
+/// `validateGoogleAdsRequestAction`: super admin, the request schema, then
+/// the `validateOnly` check; the click id never comes back.
+async fn validate(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let action_id = In(input).str("conversionActionId", false, 1, 20)?;
+    if !action_id.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    let click_type = In(input).str("clickIdType", false, 1, 16)?;
+    if !matches!(click_type.as_str(), "gclid" | "gbraid") {
+        return Err(invalid());
+    }
+    // `CLICK_ID_PATTERN`: /^[A-Za-z0-9_-]{10,512}$/.
+    let click_id = In(input).str("clickId", false, 10, 512)?;
+    if !click_id
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err(invalid());
+    }
+    assert_super_admin(ctx).map_err(action_fail)?;
+    chatbotx_business::google_ads_conversion::validate_ingest(
+        &ctx.api.db,
+        &HttpUpstream,
+        &ctx.api.app_url,
+        ctx.workspace_id,
+        &action_id,
+        &click_type,
+        &click_id,
+    )
+    .await
+    .map_err(action_fail)
+}
+
+/// `loadGoogleAdsSettingsPage`: setup and consent views, `isConfigured`, and
+/// the session to show (`loadSettingsSession`: the `?session=` id in any
+/// status, else the newest unexpired `authorized` / `awaiting_selection`).
+/// Like the original page, any member may load it (no secret is read); the
+/// actions keep the super-admin check.
+async fn settings_page(ctx: &Ctx<'_>, session_param: &Value) -> Result<Value, BusinessError> {
+    let db = &ctx.api.db;
+    let ws = ctx.workspace_id;
+    let mut page = chatbotx_business::google_ads::settings_page(db, ws).await?;
+    let is_configured = match ctx.api.encryption.as_deref() {
+        Some(encryption) => {
+            let credential = setup::credential(db, encryption, &ctx.api.app_url, ws).await?;
+            setup::is_configured(credential.as_ref())
+        }
+        None => false,
+    };
+    let requested = session_param
+        .as_str()
+        .filter(|v| !v.is_empty() && v.len() <= 20 && v.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|v| v.parse::<i64>().ok());
+    let by_id = match requested {
+        Some(id) => connect_session::find_for_workspace(db, id, ws)
+            .await?
+            .filter(|row| row.provider == PROVIDER)
+            .map(|row| json!({ "id": row.id.to_string(), "status": row.status })),
+        None => None,
+    };
+    let session = match by_id {
+        Some(session) => Some(session),
+        None => {
+            let current = latest_in_flight(ctx).await?;
+            matches!(
+                current["status"].as_str(),
+                Some("authorized" | "awaiting_selection")
+            )
+            .then_some(current)
+        }
+    };
+    page["isConfigured"] = json!(is_configured);
+    page["session"] = session.unwrap_or(Value::Null);
+    Ok(page)
 }
