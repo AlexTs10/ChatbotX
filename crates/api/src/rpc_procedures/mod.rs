@@ -15,8 +15,10 @@ mod automated_responses;
 mod broadcasts;
 mod channels;
 mod comments;
+mod contact_tools;
 mod contacts;
 mod conversations;
+mod coupons;
 mod ecommerce;
 mod email_marketing;
 mod email_topics;
@@ -146,6 +148,12 @@ pub async fn procedure(
     if let Some(outcome) = sequences::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = coupons::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = contact_tools::procedure(ctx, path, input).await {
+        return Some(outcome);
+    }
     if let Some(outcome) = whatsapp::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -253,6 +261,8 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || integrations::ACTIONS.contains(&n)
                 || email_topics::ACTIONS.contains(&n)
                 || sequences::ACTIONS.contains(&n)
+                || coupons::ACTIONS.contains(&n)
+                || contact_tools::ACTIONS.contains(&n)
                 || triggers::ACTIONS.contains(&n)
                 || automated_responses::ACTIONS.contains(&n)
                 || settings::ACTIONS.contains(&n)
@@ -315,6 +325,12 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = sequences::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = coupons::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = contact_tools::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = triggers::action(ctx, name, &args).await {

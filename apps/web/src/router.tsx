@@ -186,6 +186,28 @@ const workspacePages = [
       "ContactsPage",
     ),
   }),
+  ...(
+    [
+      ["contacts/import", "ContactImportPage"],
+      ["contacts/import/histories", "ContactImportHistoriesPage"],
+      ["contacts/scan", "ContactScanPage"],
+      ["contacts/scan/histories", "ContactScanHistoriesPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path,
+      component: lazyRouteComponent(
+        () => import("@/routes/contact-imports"),
+        page,
+      ),
+    }),
+  ),
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path: "agents",
+    component: lazyRouteComponent(() => import("@/routes/agents"), "AgentsPage"),
+  }),
   createRoute({
     getParentRoute: () => workspaceRoute,
     path: "inbox",
@@ -233,7 +255,51 @@ const sectionRoutes = [
     "CustomFieldsPage",
   ),
   sectionRoute("sequences", sequences, "SequencesLayout", "SequencesPage"),
+  sectionRoute(
+    "email-topics",
+    () => import("@/routes/email-topics"),
+    "EmailTopicsLayout",
+    "EmailTopicsPage",
+  ),
 ]
+
+// `sequences/create`, `sequences/$id`: outside the folder layout.
+const sequencePages = (
+  [
+    ["sequences/create", "CreateSequencePage"],
+    ["sequences/$id", "SequenceDetailPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(sequences, page),
+  }),
+)
+
+// `broadcasts/layout.tsx` (broadcast permission) and its pages.
+const broadcasts = () => import("@/routes/broadcasts")
+const broadcastsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "broadcasts",
+  component: lazyRouteComponent(broadcasts, "BroadcastsLayout"),
+})
+const broadcastsRoutes = broadcastsRoute.addChildren(
+  (
+    [
+      ["/", "BroadcastsPage"],
+      ["create", "CreateBroadcastPage"],
+      ["$broadcastId/edit", "EditBroadcastPage"],
+      ["$broadcastId/runs", "BroadcastRunsPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => broadcastsRoute,
+      path,
+      component: lazyRouteComponent(broadcasts, page),
+    }),
+  ),
+)
 
 // `dashboard/layout.tsx`: the analytics section (inbox cards + sub-pages).
 const dashboardRoute = createRoute({
@@ -351,6 +417,93 @@ const commentPages = (
     path,
     component: lazyRouteComponent(comments, page),
   }),
+)
+
+// Keywords: `(has-folder)/<x>/layout.tsx` (super admin, folders, tabs) around
+// the list; create / edit outside it (`routes/automated-responses.tsx`).
+const automatedResponses = () => import("@/routes/automated-responses")
+const automatedResponseListRoutes = (
+  [
+    [
+      "automated-responses",
+      "AutomatedResponsesLayout",
+      "AutomatedResponsesPage",
+    ],
+    [
+      "page-automated-responses",
+      "PageAutomatedResponsesLayout",
+      "PageAutomatedResponsesPage",
+    ],
+  ] as const
+).map(([path, layout, page]) => {
+  const folder = createRoute({
+    getParentRoute: () => workspaceRoute,
+    id: `${path}-folder`,
+    component: lazyRouteComponent(automatedResponses, layout),
+  })
+  return folder.addChildren([
+    createRoute({
+      getParentRoute: () => folder,
+      path,
+      component: lazyRouteComponent(automatedResponses, page),
+    }),
+  ])
+})
+const automatedResponsePages = (
+  [
+    ["automated-responses/create", "CreateAutomatedResponsePage"],
+    ["automated-responses/$id/edit", "EditAutomatedResponsePage"],
+    ["page-automated-responses/create", "CreatePageAutomatedResponsePage"],
+    ["page-automated-responses/$id/edit", "EditPageAutomatedResponsePage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(automatedResponses, page),
+  }),
+)
+
+// `(has-folder)/triggers/layout.tsx` (super admin, folders) and the editor.
+const triggers = () => import("@/routes/triggers")
+const triggersRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "triggers-folder",
+  component: lazyRouteComponent(triggers, "TriggersLayout"),
+})
+const triggersRoutes = triggersRoute.addChildren([
+  createRoute({
+    getParentRoute: () => triggersRoute,
+    path: "triggers",
+    component: lazyRouteComponent(triggers, "TriggersPage"),
+  }),
+])
+const editTriggerRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "triggers/$id/edit",
+  component: lazyRouteComponent(triggers, "EditTriggerPage"),
+})
+
+// `(coupons)/layout.tsx`: a pathless layout (tabs) around the two lists.
+const coupons = () => import("@/routes/coupons")
+const couponsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "coupons",
+  component: lazyRouteComponent(coupons, "CouponsLayout"),
+})
+const couponsRoutes = couponsRoute.addChildren(
+  (
+    [
+      ["coupons", "CouponsPage"],
+      ["topic-coupons", "TopicCouponsPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => couponsRoute,
+      path,
+      component: lazyRouteComponent(coupons, page),
+    }),
+  ),
 )
 
 // The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
@@ -633,6 +786,23 @@ const flowDetailRoute = createRoute({
   ),
 })
 
+const flowAnalyticsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "space/$workspaceId/flows/$id/analytics",
+  component: lazyRouteComponent(
+    () => import("@/routes/flow-detail"),
+    "FlowAnalyticsPage",
+  ),
+})
+const flowImportHistoriesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "space/$workspaceId/flows/import/histories",
+  component: lazyRouteComponent(
+    () => import("@/routes/contact-imports"),
+    "FlowImportHistoriesPage",
+  ),
+})
+
 const createChannelRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "channels/create",
@@ -753,6 +923,8 @@ const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
+    flowAnalyticsRoute,
+    flowImportHistoriesRoute,
     createChannelRoute,
     ...channelSelectRoutes,
     adminRoute.addChildren([...adminPages, adminDefaultTemplateRoute]),
@@ -760,6 +932,8 @@ const routeTree = rootRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
       ...sectionRoutes,
+      broadcastsRoutes,
+      ...sequencePages,
       dashboardRoutes,
       ecommerceRoute.addChildren(ecommercePages),
       productFormsRoute.addChildren(productFormPages),
@@ -770,6 +944,11 @@ const routeTree = rootRoute.addChildren([
       ...toolEditorPages,
       ...miniAppPages,
       ...commentListRoutes,
+      ...automatedResponseListRoutes,
+      ...automatedResponsePages,
+      triggersRoutes,
+      editTriggerRoute,
+      couponsRoutes,
       ...commentPages,
       pipelinesRoutes,
       appointmentCalendarsRoutes,

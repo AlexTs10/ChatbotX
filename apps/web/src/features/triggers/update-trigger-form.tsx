@@ -1,0 +1,194 @@
+"use client"
+
+import type { StoreSource } from "@chatbotx.io/database/partials"
+import type { TriggerModel } from "@chatbotx.io/database/types"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import { Form, FormMessage } from "@chatbotx.io/ui/components/ui/form"
+import { Label } from "@chatbotx.io/ui/components/ui/label"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useHookFormAction } from "@next-safe-action/adapter-react-hook-form/hooks"
+import { Loader2Icon } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
+import { useFieldArray } from "react-hook-form"
+import { toast } from "sonner"
+import {
+  LockedContent,
+  useIsEditorLocked,
+} from "@/features/templates/components/locked-editor"
+import { ConditionEditor } from "../conditions/editor"
+import { updateTriggerAction } from "./actions/update-trigger-action"
+import { AddAction } from "./add-action"
+import { AddCondition } from "./add-condition"
+import { BaseEditor } from "./base-editor"
+import { ActionEditor } from "./components/actions/editor"
+import {
+  type UpdateTriggerSchema,
+  updateTriggerSchema,
+} from "./schema/mutation"
+
+type TriggerWithConditions = TriggerModel & {
+  conditions?: Array<{
+    id: string
+    type: string
+    sourceId: string | null
+    operator: string | null
+    value: unknown
+  }>
+}
+
+type UpdateTriggerFormProps = {
+  workspaceId: string
+  trigger: TriggerWithConditions
+  storeSource?: StoreSource
+}
+
+export default function UpdateTriggerForm(props: UpdateTriggerFormProps) {
+  const { workspaceId, trigger, storeSource } = props
+  const t = useTranslations()
+  const isLocked = useIsEditorLocked()
+  const router = useRouter()
+
+  const {
+    form,
+    handleSubmitWithAction,
+    form: { control },
+  } = useHookFormAction(
+    updateTriggerAction.bind(null, workspaceId, trigger.id),
+    zodResolver(updateTriggerSchema),
+    {
+      actionProps: {
+        onSuccess: () => {
+          toast.success(
+            t("messages.updatedSuccess", {
+              feature: t("fields.trigger.label"),
+            }),
+          )
+          setTimeout(() => router.refresh())
+        },
+        onError: ({ error }) => {
+          if (error.serverError) {
+            // Services raise validation failures as message keys.
+            toast.error(
+              error.serverError.startsWith("validation.") &&
+                t.has(error.serverError as never)
+                ? t(error.serverError as never)
+                : error.serverError,
+            )
+          }
+        },
+      },
+      formProps: {
+        mode: "onChange",
+        defaultValues: {
+          conditions: (trigger.conditions || []).map((tc) => ({
+            id: tc.id,
+            type: tc.type,
+            sourceId: tc.sourceId || undefined,
+            operator: tc.operator || undefined,
+            value: tc.value ? tc.value : undefined,
+          })) as UpdateTriggerSchema["conditions"],
+          actions: trigger.actions as UpdateTriggerSchema["actions"],
+        },
+      },
+      errorMapProps: {},
+    },
+  )
+
+  const {
+    fields: conditions,
+    append: appendConditions,
+    remove: removeConditions,
+  } = useFieldArray<UpdateTriggerSchema, "conditions">({
+    control,
+    name: "conditions",
+  })
+
+  const {
+    fields: actions,
+    append: appendActions,
+    remove: removeActions,
+  } = useFieldArray<UpdateTriggerSchema, "actions">({
+    control,
+    name: "actions",
+  })
+
+  return (
+    <Form {...form}>
+      <form className="flex-1 space-y-4" onSubmit={handleSubmitWithAction}>
+        <LockedContent className="">
+          <div className="flex gap-10">
+            <div className="flex flex-1 flex-col gap-4">
+              <Label htmlFor="conditions">{t("trigger.when")}</Label>
+              {conditions.map((condition, index) => (
+                <BaseEditor
+                  conditionType={condition.type}
+                  // biome-ignore lint/suspicious/noArrayIndexKey: wip
+                  key={index}
+                  onRemove={() => removeConditions(index)}
+                >
+                  <ConditionEditor
+                    parentName={`conditions.${index}`}
+                    type={condition.type}
+                  />
+                </BaseEditor>
+              ))}
+              <FormMessage />
+              <AddCondition
+                onAdd={(option) => {
+                  const condition =
+                    option.defaultFn() as UpdateTriggerSchema["conditions"][number]
+                  appendConditions(condition)
+                }}
+                storeSource={storeSource}
+              />
+            </div>
+
+            <div className="flex flex-1 flex-col gap-4">
+              <Label htmlFor="actions">{t("fields.actions.label")}</Label>
+              {actions.map((action, index) => (
+                <BaseEditor
+                  actionType={action.type}
+                  // The array's stable id, so removing an earlier action does not
+                  // hand its mounted editor (and reset state) to the next one.
+                  key={action.id}
+                  onRemove={() => removeActions(index)}
+                >
+                  <ActionEditor
+                    parentName={`actions.${index}`}
+                    type={action.type}
+                  />
+                </BaseEditor>
+              ))}
+              <FormMessage />
+              <AddAction
+                onAdd={(option) => {
+                  const action =
+                    option.defaultFn() as UpdateTriggerSchema["actions"][number]
+                  appendActions(action)
+                }}
+              />
+            </div>
+          </div>
+        </LockedContent>
+        {/* footer */}
+        <div className="flex justify-end gap-4">
+          <Button onClick={() => router.back()} type="button" variant="ghost">
+            {t("actions.cancel")}
+          </Button>
+          <Button
+            disabled={
+              isLocked || !form.formState.isValid || form.formState.isSubmitting
+            }
+            type="submit"
+          >
+            {form.formState.isSubmitting && (
+              <Loader2Icon className="animate-spin" />
+            )}
+            {t("actions.save")}
+          </Button>
+        </div>
+      </form>
+    </Form>
+  )
+}
