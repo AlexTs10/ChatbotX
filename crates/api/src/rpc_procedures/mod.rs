@@ -128,88 +128,89 @@ pub async fn procedure(
     context.workspace.as_ref()?;
     let ctx = ctx(api, context);
     let ctx = &ctx;
-    if let Some(outcome) = broadcasts::procedure(ctx, path, input).await {
+    // ponytail: each arm is boxed, so the chain future stays small (60 inline arms overflowed a 2 MiB test-thread stack in debug).
+    if let Some(outcome) = Box::pin(broadcasts::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = contacts::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(contacts::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = analytics::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(analytics::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = templates::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(templates::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = flows::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(flows::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = email_topics::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(email_topics::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = sequences::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(sequences::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = coupons::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(coupons::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = contact_tools::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(contact_tools::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = whatsapp::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(whatsapp::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = channels::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(channels::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = crate::rpc_ai::call(api, path, &ai_context(ctx), input).await {
+    if let Some(outcome) = Box::pin(crate::rpc_ai::call(api, path, &ai_context(ctx), input)).await {
         return Some(outcome.map(|output| output.json));
     }
-    if let Some(outcome) = inboxes::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(inboxes::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = pipelines::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(pipelines::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = media_library::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(media_library::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = conversations::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(conversations::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = products::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(products::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = tools::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(tools::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = mini_apps::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(mini_apps::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = comments::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(comments::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = email_marketing::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(email_marketing::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = appointments::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(appointments::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = working_hours::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(working_hours::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = templates::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(templates::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = rest::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(rest::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = user_persistent_menus::procedure(ctx, path).await {
+    if let Some(outcome) = Box::pin(user_persistent_menus::procedure(ctx, path)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = google_ads::procedure(ctx, path, input).await {
+    if let Some(outcome) = Box::pin(google_ads::procedure(ctx, path, input)).await {
         return Some(outcome);
     }
-    lists::procedure(ctx, path, input).await
+    Box::pin(lists::procedure(ctx, path, input)).await
 }
 
 /// The AI procedures' caller (Q.D6). No support sessions in Rust yet.
@@ -229,16 +230,16 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    if let Some(outcome) = workspaces::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(workspaces::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = admin::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(admin::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = integrations::auth_action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(integrations::auth_action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = templates::auth_action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(templates::auth_action(ctx, name, &args)).await {
         return Some(outcome);
     }
     // Every other action is a `workspaceActionClient` one.
@@ -281,91 +282,91 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
             _ => None,
         };
     }
-    if let Some(outcome) = broadcasts::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(broadcasts::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = contacts::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(contacts::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = conversations::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(conversations::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = media_library::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(media_library::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = lists::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(lists::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = flows::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(flows::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = integrations::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(integrations::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = email_marketing::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(email_marketing::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = products::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(products::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = ecommerce::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(ecommerce::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = pipelines::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(pipelines::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = tools::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(tools::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = mini_apps::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(mini_apps::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = comments::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(comments::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = email_topics::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(email_topics::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = sequences::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(sequences::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = coupons::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(coupons::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = contact_tools::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(contact_tools::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = triggers::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(triggers::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = automated_responses::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(automated_responses::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = settings::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(settings::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = user_persistent_menus::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(user_persistent_menus::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = rest::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(rest::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = screens::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(screens::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = appointments::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(appointments::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = working_hours::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(working_hours::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = whatsapp::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(whatsapp::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = channels::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(channels::action(ctx, name, &args)).await {
         return Some(outcome);
     }
-    if let Some(outcome) = google_ads::action(ctx, name, &args).await {
+    if let Some(outcome) = Box::pin(google_ads::action(ctx, name, &args)).await {
         return Some(outcome);
     }
     let path = format!("actions.{name}");
