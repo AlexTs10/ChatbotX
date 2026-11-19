@@ -1,0 +1,389 @@
+"use client"
+
+import {
+  type AutomatedResponseType,
+  automatedResponseFolderTypeByType,
+} from "@chatbotx.io/database/partials"
+import { DataTable } from "@chatbotx.io/ui/components/data-table/data-table"
+import { DataTableColumnHeader } from "@chatbotx.io/ui/components/data-table/data-table-column-header"
+import { DataTableSkeleton } from "@chatbotx.io/ui/components/data-table/data-table-skeleton"
+import { DataTableToolbar } from "@chatbotx.io/ui/components/data-table/data-table-toolbar"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@chatbotx.io/ui/components/ui/card"
+import { Checkbox } from "@chatbotx.io/ui/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@chatbotx.io/ui/components/ui/dropdown-menu"
+import { Switch } from "@chatbotx.io/ui/components/ui/switch"
+import { useDataTable } from "@chatbotx.io/ui/hooks/use-data-table"
+import type { DataTableRowAction } from "@chatbotx.io/ui/types/data-table"
+import type { ColumnDef } from "@tanstack/react-table"
+import { format } from "date-fns"
+import {
+  FolderUpIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  Trash2Icon,
+} from "lucide-react"
+import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useTranslations } from "next-intl"
+import { useAction } from "next-safe-action/hooks"
+import React, { Suspense, use, useMemo } from "react"
+import { toast } from "sonner"
+import { FolderBarSlot } from "@/features/folders/folder-bar-slot"
+import { LockBadge } from "@/features/templates/components/lock-badge"
+import {
+  TemplateLockedList,
+  UndeletableGuard,
+} from "@/features/templates/components/lock-context"
+import { useWorkspaceId } from "@/hooks/routing"
+import { useFlows } from "../flows/provider/flow-hook"
+import { ChangeFolderDialog } from "../folders/change-folder"
+import { enableAutomatedResponseAction } from "./actions/enable-automated-response-action"
+import { AutomatedResponseTableToolbarActions } from "./automated-response-table-toolbar-actions"
+import { AddAutomatedResponseButton } from "./components/add-automated-response-button"
+import { KeywordConditionsSummary } from "./components/keyword-conditions-summary"
+import { DeleteAutomatedResponsesDialog } from "./delete-automated-response-dialog"
+import type { listAutomatedResponses } from "./queries"
+import type { AutomatedResponseResource } from "./schema/resource"
+
+type AutomatedResponseTableProps = {
+  workspaceId: string
+  basePath: string
+  type: AutomatedResponseType
+  promises: Promise<[Awaited<ReturnType<typeof listAutomatedResponses>>]>
+}
+
+function AutomatedResponsesTableContent({
+  workspaceId,
+  basePath,
+  type,
+  promises,
+}: AutomatedResponseTableProps) {
+  const t = useTranslations()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const folderType = automatedResponseFolderTypeByType[type]
+
+  const [{ data, pageCount }] = use(promises)
+  const { data: allFlows = [] } = useFlows(useWorkspaceId())
+
+  const [rowAction, setRowAction] =
+    React.useState<DataTableRowAction<AutomatedResponseResource> | null>(null)
+
+  const columns = useMemo<ColumnDef<AutomatedResponseResource>[]>(
+    () => [
+      {
+        id: "select",
+        size: 32,
+        header: ({ table: innerTable }) => (
+          <Checkbox
+            aria-label={t("actions.selectAll")}
+            checked={innerTable.getIsAllPageRowsSelected()}
+            indeterminate={innerTable.getIsSomePageRowsSelected()}
+            onCheckedChange={(value) =>
+              innerTable.toggleAllPageRowsSelected(Boolean(value))
+            }
+          />
+        ),
+        cell: ({ row }) => (
+          <Checkbox
+            aria-label={t("actions.selectRow")}
+            checked={row.getIsSelected()}
+            onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+          />
+        ),
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        id: "keywords",
+        accessorKey: "keywords",
+        size: 100,
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.keywords.label")}
+          />
+        ),
+        cell: ({ row }) => {
+          const { id, keywords, conditions } = row.original
+          const href = `/space/${workspaceId}/${basePath}/${id}/edit?${searchParams.toString()}`
+          if (conditions?.length) {
+            return (
+              <div className="flex max-w-[420px] items-center">
+                <Link className="block min-w-0" href={href}>
+                  <KeywordConditionsSummary conditions={conditions} />
+                </Link>
+                <LockBadge resourceId={id} />
+              </div>
+            )
+          }
+          return (
+            <div className="flex max-w-[200px] items-center">
+              <Link
+                className="min-w-0 truncate"
+                href={href}
+                title={keywords.join(",")}
+              >
+                {keywords.join(",")}
+              </Link>
+              <LockBadge resourceId={id} />
+            </div>
+          )
+        },
+        meta: {
+          label: t("fields.keywords.label"),
+        },
+        enableHiding: false,
+      },
+      {
+        id: "replies",
+        accessorKey: "replies",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.botResponse.label")}
+          />
+        ),
+        cell: ({ row }) => {
+          let reply = row.original.text
+          if (!reply) {
+            const flow = allFlows.find((f) => f.id === row.original.flowId)
+            if (flow) {
+              reply = `Flow: ${flow.name}`
+            }
+          }
+
+          return <div className="max-w-[200px] truncate">{reply ?? ""}</div>
+        },
+        enableSorting: false,
+        enableHiding: false,
+        meta: {
+          label: t("fields.botResponse.label"),
+        },
+      },
+      {
+        id: "status",
+        accessorKey: "status",
+        size: 10,
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.status.label")}
+          />
+        ),
+        cell: ({ cell, row }) => (
+          <AutomatedResponseStatusCell
+            checked={cell.getValue<AutomatedResponseResource["status"]>()}
+            id={row.original.id}
+            type={type}
+            workspaceId={workspaceId}
+          />
+        ),
+        enableSorting: false,
+        enableHiding: false,
+        meta: {
+          label: t("fields.status.label"),
+        },
+      },
+      {
+        id: "createdAt",
+        accessorKey: "createdAt",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t("fields.createdAt.label")}
+          />
+        ),
+        cell: ({ row }) => (
+          <div>{format(row.original.createdAt, "yyyy/MM/dd HH:mm")}</div>
+        ),
+        meta: {
+          label: t("fields.createdAt.label"),
+        },
+        enableSorting: true,
+        enableHiding: false,
+      },
+      {
+        id: "action",
+        size: 10,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="" />
+        ),
+        cell: ({ row }) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button size="icon" variant="ghost">
+                  <MoreHorizontalIcon className="h-4 w-4" />
+                  <span className="sr-only">Open menu</span>
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                render={
+                  <Link
+                    href={`/space/${workspaceId}/${basePath}/${row.original.id}/edit`}
+                  >
+                    <PencilIcon />
+                    {t("actions.edit")}
+                  </Link>
+                }
+              />
+              <DropdownMenuItem
+                onClick={() => setRowAction({ row, variant: "move" })}
+              >
+                <FolderUpIcon />
+                {t("actions.move")}
+              </DropdownMenuItem>
+
+              <UndeletableGuard resourceId={row.original.id}>
+                {(disabled) => (
+                  <DropdownMenuItem
+                    disabled={disabled}
+                    onClick={() => setRowAction({ row, variant: "delete" })}
+                    variant="destructive"
+                  >
+                    <Trash2Icon />
+                    {t("actions.delete")}
+                  </DropdownMenuItem>
+                )}
+              </UndeletableGuard>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+        enableSorting: false,
+        enableHiding: false,
+      },
+    ],
+    [workspaceId, basePath, t, allFlows, searchParams, type],
+  )
+
+  const { table } = useDataTable({
+    data,
+    columns,
+    pageCount,
+    initialState: {
+      sorting: [{ id: "createdAt", desc: true }],
+      columnPinning: { right: ["actions"] },
+    },
+    getRowId: (originalRow) => originalRow.id,
+    shallow: false,
+    clearOnDefault: true,
+  })
+
+  return (
+    <>
+      <TemplateLockedList
+        resourceKind="automatedResponse"
+        rows={data}
+        workspaceId={workspaceId}
+      >
+        <DataTable table={table}>
+          <DataTableToolbar table={table}>
+            <AutomatedResponseTableToolbarActions
+              folderType={folderType}
+              table={table}
+              type={type}
+              workspaceId={workspaceId}
+            />
+            <AddAutomatedResponseButton basePath={basePath} />
+          </DataTableToolbar>
+        </DataTable>
+      </TemplateLockedList>
+
+      <DeleteAutomatedResponsesDialog
+        automatedResponses={
+          rowAction?.row.original ? [rowAction?.row.original] : []
+        }
+        onOpenChange={() => setRowAction(null)}
+        onSuccess={() => {
+          router.refresh()
+        }}
+        open={rowAction?.variant === "delete"}
+        showTrigger={false}
+        type={type}
+        workspaceId={workspaceId}
+      />
+
+      <ChangeFolderDialog
+        currentFolderId={rowAction?.row.original?.folderId || null}
+        folderType={folderType}
+        modelIds={rowAction?.row.original ? [rowAction?.row.original.id] : null}
+        onOpenChange={() => setRowAction(null)}
+        open={rowAction?.variant === "move"}
+        workspaceId={workspaceId}
+      />
+    </>
+  )
+}
+
+export function AutomatedResponsesTable(props: AutomatedResponseTableProps) {
+  const t = useTranslations()
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="font-bold text-xl">
+          {t("keywords.title")}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <FolderBarSlot />
+        <Suspense fallback={<DataTableSkeleton columnCount={5} />}>
+          <AutomatedResponsesTableContent {...props} />
+        </Suspense>
+      </CardContent>
+    </Card>
+  )
+}
+
+const AutomatedResponseStatusCell = (props: {
+  id: string
+  workspaceId: string
+  checked: boolean
+  type: AutomatedResponseType
+}) => {
+  const router = useRouter()
+
+  const { execute, isPending } = useAction(
+    enableAutomatedResponseAction.bind(
+      null,
+      props.workspaceId,
+      props.id,
+      props.type,
+    ),
+    {
+      onError: ({ error }) => {
+        if (error.serverError) {
+          toast.error(error.serverError)
+        }
+      },
+      onSuccess: () => {
+        router.refresh()
+      },
+    },
+  )
+
+  return (
+    <Switch
+      checked={props.checked}
+      disabled={isPending}
+      onCheckedChange={(value) => {
+        execute({ status: value })
+      }}
+    />
+  )
+}

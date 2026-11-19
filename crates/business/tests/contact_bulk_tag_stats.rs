@@ -164,6 +164,33 @@ async fn handle_bulk_tag_contacts_dispatches_broadcast_pages_and_forwards_exclus
     assert!(linked_tag_ids(&db, 12).await.is_empty());
 }
 
+/// The action's member scope (`accessScope` of `bulkAttachToContacts`): an
+/// assigned-only member tags only contacts with a conversation assigned to
+/// them (Q.F2-automation, Rust-native).
+#[tokio::test]
+async fn handle_bulk_tag_contacts_keeps_an_assigned_only_member_to_their_contacts() {
+    let db = fixture().await;
+    recipient(&db, 10, true, false).await;
+    recipient(&db, 11, true, false).await;
+    setup(&db, |tx| {
+        tx.execute(
+            r#"INSERT INTO "User" ("id", "email") VALUES (5001, 'agent@example.test')"#,
+            [],
+        )?;
+        tx.execute(
+            r#"UPDATE "Conversation" SET "assignedUserId" = 5001 WHERE "id" = 70"#,
+            [],
+        )?;
+        Ok(())
+    })
+    .await;
+    let mut scoped = job(broadcast("message:sent"), &[1], &[]);
+    scoped.restrict_to_assigned_user_id = Some(5001);
+    let linked = run(&db, &scoped).await.expect("run");
+    assert_eq!(linked, vec![(10, 1)]);
+    assert!(linked_tag_ids(&db, 11).await.is_empty());
+}
+
 #[tokio::test]
 async fn handle_bulk_tag_contacts_dispatches_sequence_step_pages_with_workspace_and_step_scope() {
     let db = fixture().await;

@@ -9,7 +9,8 @@
 //! `bulkTagContacts` payload for the worker port. The comment-automation
 //! source finds no contacts (its stats / miss repositories belong to the
 //! comment-automation analytics port). The member access scope
-//! (`restrictToAssignedUserId`) is carried in the payload, not applied.
+//! (`restrictToAssignedUserId`) keeps only the contacts with a conversation
+//! assigned to that member (`bulkAttachToContacts` with the `accessScope`).
 
 use chatbotx_db::Db;
 use chatbotx_db::repo;
@@ -285,6 +286,9 @@ pub async fn run(db: &Db, job: &BulkTagJob) -> Result<Vec<(i64, i64)>> {
                 contact_ids.push(row.contact_id);
             }
         }
+        if let Some(user_id) = job.restrict_to_assigned_user_id {
+            contact_ids = assigned_only(db, job.workspace_id, user_id, contact_ids).await?;
+        }
         let outcome =
             crate::tag::bulk_attach_to_contacts(db, job.workspace_id, &contact_ids, &job.tag_ids)
                 .await?;
@@ -294,6 +298,38 @@ pub async fn run(db: &Db, job: &BulkTagJob) -> Result<Vec<(i64, i64)>> {
         }
     }
     Ok(linked)
+}
+
+/// `withContactAccessScope` (`restrictToAssignedUserId`): the contacts of
+/// `ids` with a conversation assigned to `user_id`.
+async fn assigned_only(
+    db: &Db,
+    workspace_id: i64,
+    user_id: i64,
+    ids: Vec<i64>,
+) -> Result<Vec<i64>> {
+    if ids.is_empty() {
+        return Ok(ids);
+    }
+    tx::read(db, move |conn| {
+        let marks = vec!["?"; ids.len()].join(", ");
+        let sql = format!(
+            r#"SELECT DISTINCT c."id" FROM "Contact" c
+               JOIN "Conversation" v ON v."contactId" = c."id"
+               WHERE c."workspaceId" = ? AND v."assignedUserId" = ? AND c."id" IN ({marks})
+               ORDER BY c."id""#
+        );
+        let mut binds = vec![workspace_id, user_id];
+        binds.extend(ids.iter().copied());
+        let mut stmt = conn.prepare(&sql).map_err(repo_err)?;
+        let rows = stmt
+            .query_map(params_from_iter(binds.iter()), |row| row.get::<_, i64>(0))
+            .map_err(repo_err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(repo_err)?;
+        Ok(rows)
+    })
+    .await
 }
 
 fn repo_err(error: chatbotx_db::rusqlite::Error) -> BusinessError {

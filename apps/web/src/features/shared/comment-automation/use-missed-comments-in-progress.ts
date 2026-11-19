@@ -38,7 +38,7 @@ export function useMissedCommentsInProgress(
           result?.serverError ?? "get-missed-comments-in-progress-failed",
         )
       }
-      return result.data.ids
+      return result.data.ids as string[]
     },
     enabled: automationIds.length > 0,
     refetchInterval: (current) =>

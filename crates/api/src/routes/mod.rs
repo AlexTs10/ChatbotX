@@ -259,6 +259,7 @@ pub async fn handle_public_request_with<D: WorkspaceTokenDeps>(
                     scopes: context.api_token.scopes.clone(),
                     read_only: context.api_token.permission == "read_only",
                     mobile: context.mobile.as_ref().map(|m| Arc::clone(&m.member)),
+                    issued_at_ms: context.request_issued_at_ms,
                 };
                 // `withAuditContext` of `workspaceTokenAuthMiddleware`.
                 let actor = AuditActor {

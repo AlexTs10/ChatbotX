@@ -35,9 +35,9 @@ broadcastAPIs.privateListBroadcastRunGroupsAPI	2		rust
 commentAutomationsAPI.automationAccountsAPI	1	web	rust
 commentAutomationsAPI.moderationLogsAPI	1	web	rust
 commentAutomationsAPI.moderationSummaryAPI	1	web	rust
-connectionsAPI.key	1		missing
-connectSessionsAPI.getConnectSessionAPI	1		missing
-connectSessionsAPI.key	1		missing
+connectionsAPI.key	1	web	missing
+connectSessionsAPI.getConnectSessionAPI	1	web	rust
+connectSessionsAPI.key	1	web	missing
 contactFilterAPI.getActivityAvailabilityAPI	1	web	rust
 contactFilterAPI.listActivityValueOptionsAPI	1	web	rust
 contactFilterAPI.resolveFilterValueLabelsAPI	1	web	rust
@@ -86,10 +86,10 @@ flowsAPI.privateListFlowsAPI	2	web	rust
 flowsAPI.privateListFlowVersionsAPI	1	web	rust
 flowsAPI.privateResetFlowStatsAPI	1		missing
 foldersAPI.listFoldersAuthenticatedAPI	1	web	rust
-googleAdsAPI.getInFlightConnectSession	1		missing
-googleAdsAPI.getIntegration	1	web	missing
-googleAdsAPI.key	1		missing
-googleAdsAPI.listEvents	1		missing
+googleAdsAPI.getInFlightConnectSession	1	web	rust
+googleAdsAPI.getIntegration	1	web	rust
+googleAdsAPI.key	1	web	missing
+googleAdsAPI.listEvents	1	web	rust
 igCommentsAPI.instagramMediaAPI	1	web	rust
 igStoriesAPI.instagramStoriesAPI	1	web	rust
 inboxesAPI.listAllInboxesAuthenticatedAPI	2	web	rust
@@ -101,8 +101,8 @@ integrationActiveCampaignAPI.listTags	1	web	missing
 integrationDripAPI.listAccounts	1	web	missing
 integrationDripAPI.listCustomFields	1	web	missing
 integrationDripAPI.listTags	1	web	missing
-integrationFacebookAdsAPI.listAdAccounts	3	web	missing
-integrationFacebookAdsAPI.listCustomAudiences	2	web	missing
+integrationFacebookAdsAPI.listAdAccounts	3	web	rust
+integrationFacebookAdsAPI.listCustomAudiences	2	web	rust
 integrationGetResponseAPI.listCampaigns	1	web	missing
 integrationGetResponseAPI.listTags	1	web	missing
 integrationInstagramAPIs.connectInstagramAccountAPI	1		missing
@@ -132,7 +132,7 @@ mediaLibraryAPI.listMediaLibraryFolders	1	web	rust
 messagesAPI.getWhatsappFlowResponseAuthenticatedAPI	1	web	missing
 messagesAPI.listMessagesAuthenticatedAPI	1	web	rust
 messengerMessageTemplateAPIs.listMessengerMessageTemplatesInternalAPI	1	web	missing
-miniAppsAPI.listMiniAppOptionsAPI	1	web	missing
+miniAppsAPI.listMiniAppOptionsAPI	1	web	rust
 personasAPIs.listMessengerPersonasAuthenticatedAPI	1	web	rust
 pipelinesAPI.key	1	web	missing
 pipelinesAPI.privateGetBoardAPI	2	web	rust
@@ -166,8 +166,8 @@ sequencesAPI.listSequencesWorkspaceAuthAPI	2	web	rust
 sequencesAPI.privateGetSequenceStepStatsAPI	1		missing
 sequencesAPI.privateListSequenceStepContactsAPI	1		missing
 spreadsheetsAPI.listSpreadsheetsAuthenticatedAPI	1	web	rust
-spreadsheetsAPI.listWorksheetHeadersAuthenticatedAPI	1	web	missing
-spreadsheetsAPI.listWorksheetsAuthenticatedAPI	1	web	missing
+spreadsheetsAPI.listWorksheetHeadersAuthenticatedAPI	1	web	rust
+spreadsheetsAPI.listWorksheetsAuthenticatedAPI	1	web	rust
 tagsAPI.key	1	web	missing
 tagsAPI.privateListWorkspaceTagsAPI	1	web	rust
 templatesAPI.key	1	web	missing

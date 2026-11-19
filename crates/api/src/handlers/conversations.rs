@@ -524,13 +524,20 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 found.assigned_inbox_team_id,
                 MUTATING,
             )?;
-            let done = actions::assign_one(db, ws, conversation, assigned.flatten())
+            let assigned = assigned.flatten();
+            // `assignedBy: context.member?.userId`: no notification when a
+            // mobile member assigns to themself.
+            let self_assigned = super::mobile_member()
+                .is_some_and(|m| assigned.as_deref() == Some(format!("u_{}", m.user_id).as_str()));
+            let done = actions::assign_one(db, ws, conversation, assigned)
                 .await
                 .map_err(mutated)?;
             if let Some(event) = done.event {
                 state.queue_realtime(ws, event).await;
             }
-            queue_jobs(state, done.job).await;
+            if !self_assigned {
+                queue_jobs(state, done.job).await;
+            }
             success()
         }
         "conversations.archive" | "conversations.unarchive" => {

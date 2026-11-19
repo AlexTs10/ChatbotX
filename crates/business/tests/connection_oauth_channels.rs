@@ -1,5 +1,6 @@
 //! Q.I2: the TikTok / Zalo OAuth connect over the connect-session engine
-//! (`integrations/{tiktok,zalo}/src/integration.ts` `connection` adapters)
+//! (`integrations/{tiktok,zalo}/src/integration.ts` `connection` adapters,
+//! and the Threads adapter of `integrations/threads/src/apis/auth.ts`)
 //! and the TikTok `authorization.removed` quota release
 //! (`connectionStateService.markUnhealthyByIdentifier` → `releaseQuotaEdge`),
 //! over a migrated database and a scripted upstream.
@@ -321,6 +322,74 @@ async fn zalo_connects_the_oa_of_the_grant() {
         scalar_i64(
             &db,
             r#"SELECT count(*) FROM "IntegrationZalo" WHERE "oaId" = '4242' AND "workspaceId" = ?1"#,
+            WS
+        )
+        .await,
+        Some(1)
+    );
+}
+
+/// Q.F2-settings: Threads over the signed connect session (the builder's
+/// callback ran `exchangeCodeForToken` + `getThreadsProfile` on a JSON
+/// state): short-lived token, long-lived `th_exchange_token`, `me`, then the
+/// `IntegrationThreads` row and its channel `Connection`.
+#[tokio::test]
+async fn threads_connects_the_profile_of_the_grant() {
+    let db = two_workspaces().await;
+    let encryption = encryption();
+    let (session_id, nonce) = start(&db, "threads").await;
+    let upstream = Script::with(vec![
+        json!({ "access_token": "short", "user_id": 77 }),
+        json!({ "access_token": "long", "token_type": "bearer", "expires_in": 5_184_000 }),
+        json!({ "id": "7777", "username": "acme" }),
+    ]);
+    let session = oauth::complete_authorization(
+        &db,
+        &encryption,
+        &upstream,
+        session_id,
+        &nonce,
+        "tc",
+        &credential("threads"),
+    )
+    .await
+    .expect("complete");
+    assert_eq!(
+        session.targets,
+        json!([{ "id": "7777", "name": "acme", "selectable": true }])
+    );
+    let seen = upstream.seen.lock().expect("lock").clone();
+    assert_eq!(seen[0].url, "https://graph.threads.com/oauth/access_token");
+    assert_eq!(
+        seen[0].body.as_deref(),
+        Some(
+            "client_id=ck&client_secret=cs&redirect_uri=https%3A%2F%2Fapp.test%2Fintegrations%2Fthreads%2Fcallback&code=tc&grant_type=authorization_code"
+        )
+    );
+    assert!(seen[1].url.contains("grant_type=th_exchange_token"));
+    assert!(seen[1].url.contains("access_token=short"));
+    assert!(
+        seen[2]
+            .url
+            .starts_with("https://graph.threads.com/v1.0/me?")
+    );
+    assert!(seen[2].url.contains("access_token=long"));
+    let result = oauth::connect_targets(
+        &db,
+        &encryption,
+        &Script::default(),
+        session_id,
+        WS,
+        &["7777".into()],
+        None,
+    )
+    .await
+    .expect("connect");
+    assert_eq!(result.outcomes[0]["status"], "connected");
+    assert_eq!(
+        scalar_i64(
+            &db,
+            r#"SELECT count(*) FROM "IntegrationThreads" WHERE "threadsUserId" = '7777' AND "username" = 'acme' AND "workspaceId" = ?1"#,
             WS
         )
         .await,

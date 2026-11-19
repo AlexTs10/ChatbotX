@@ -22,8 +22,8 @@ pub(super) const ACTIONS: &[&str] = &[
     // `args: [{ id }]`: `{ workingHours, timezone }` (404 when not in the
     // workspace).
     "workingHoursEditorPage",
-    // The working-hours part of `settings/inbox-teams/page.tsx`:
-    // `{ workingHours, members: [{ value, label }], holidays }`.
+    // The working-hours and SLA part of `settings/inbox-teams/page.tsx`:
+    // `{ workingHours, members: [{ value, label }], holidays, responseSla }`.
     "workingHoursListPage",
 ];
 
@@ -90,10 +90,14 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             })
             .await
             .map_err(fail)?;
+            let sla = chatbotx_business::response_sla::find_policy(db, ws)
+                .await
+                .map_err(fail)?;
             Ok(json!({
                 "workingHours": rows.iter().map(|s| schedule_json(s, None)).collect::<Vec<_>>(),
                 "members": members,
                 "holidays": holidays.iter().map(holiday_json).collect::<Vec<_>>(),
+                "responseSla": sla.as_ref().map(chatbotx_business::response_sla::resource),
             }))
         }
         "workingHoursEditorPage" => {

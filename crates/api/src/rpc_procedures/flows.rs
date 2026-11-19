@@ -25,6 +25,7 @@ pub const ACTIONS: &[&str] = &[
     "editFolderAction",
     "deleteFolderAction",
     "changeFolderAction",
+    "flowAnalyticsStats",
 ];
 
 /// `flowWithVersionsResource`.
@@ -46,9 +47,40 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
                 .map_err(fail),
             Err(error) => Err(error),
         },
+        // `flowAnalyticsService.getFlowStats` / `resetStatsSession`
+        // (`workspaceAuthorizedMidddleware`: membership only).
+        "flowsAPI.privateGetFlowStatsAPI" | "flowsAPI.privateResetFlowStatsAPI" => {
+            match In(input).id("flowId") {
+                Ok(flow_id) => {
+                    let route = if path.ends_with("privateGetFlowStatsAPI") {
+                        "analytics.flowStats"
+                    } else {
+                        "analytics.resetFlowStats"
+                    };
+                    public(ctx, route, &[("flowId", flow_id.to_string())], None, None).await
+                }
+                Err(error) => Err(error),
+            }
+        }
         "foldersAPI.listFoldersAuthenticatedAPI" => list_folders(ctx, input).await,
         _ => return None,
     })
+}
+
+/// `(no-sidebar)/flows/[id]/analytics/page.tsx` (`[workspaceId, { id }]`):
+/// `{ stats, smartDelayStats }` of the flow. The page loads the flow and its
+/// draft through `pages.flow` (the same `flows` permission and 404s).
+async fn analytics_stats(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcError> {
+    if !ctx.has("flows") {
+        return Err(fail(chatbotx_business::BusinessError::not_found(
+            "Page not found",
+        )));
+    }
+    let flow_id = In(arg(args, 1)).id("id")?.to_string();
+    let params = [("flowId", flow_id)];
+    let stats = public(ctx, "analytics.flowStats", &params, None, None).await?;
+    let smart_delay = public(ctx, "analytics.flowSmartDelayStats", &params, None, None).await?;
+    Ok(json!({ "stats": stats, "smartDelayStats": smart_delay }))
 }
 
 /// `listFlows` (`flowService.list`).
@@ -90,6 +122,9 @@ async fn list_folders(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
     if !ACTIONS.contains(&name) {
         return None;
+    }
+    if name == "flowAnalyticsStats" {
+        return Some(analytics_stats(ctx, args).await);
     }
     let db = &ctx.api.db;
     let ws = ctx.workspace_id;

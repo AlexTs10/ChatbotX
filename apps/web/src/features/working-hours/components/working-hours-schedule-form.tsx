@@ -105,7 +105,10 @@ export function WorkingHoursScheduleForm({
     control: form.control,
     name: "dateOverrides",
   })
-  const dateOverrides: WorkingHoursDateOverrideResource[] = sortByDate(
+  // The form values are untyped (the action schema lives on the server).
+  const dateOverrides: WorkingHoursDateOverrideResource[] = sortByDate<
+    Omit<WorkingHoursDateOverrideResource, "name"> & { name?: string | null }
+  >(
     watchedOverrides ?? [],
   ).map((row) => ({
     date: row.date,

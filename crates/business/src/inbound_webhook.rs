@@ -4,8 +4,7 @@
 //! ponytail: no token cache (the intake reads one indexed row per delivery)
 //! and no config lock: a settings change reads, checks and writes in one
 //! SQLite write job, which is already serial.
-//! ponytail: `previewMapping` and the worker processing are not ported
-//! yet (see `conversion/specs/Q.D13.md`).
+//! `previewMapping` and the payload apply: `inbound_webhook_apply`.
 
 use chatbotx_core::utils::channel::ChannelType;
 use chatbotx_core::utils::inbound_webhook_channel::{
@@ -428,6 +427,108 @@ pub async fn workspace_unavailable(db: &Db, workspace_id: i64) -> Result<bool> {
             .optional()
             .map_err(chatbotx_db::repo::Error::from)?;
         Ok(!matches!(row, Some(None)))
+    })
+    .await
+}
+
+/// `CLAIM_LEASE_MS`.
+pub const CLAIM_LEASE_MS: i64 = 15 * 60 * 1000;
+/// `UNCLAIMED_REQUEST_GRACE_MS`.
+const UNCLAIMED_REQUEST_GRACE_MS: i64 = 2 * 60 * 1000;
+/// `REDISPATCH_MAX_AGE_MS`.
+const REDISPATCH_MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// `claimRequest`: the request and a fresh claim token, or `None` when
+/// another worker owns it (or it is finished).
+pub async fn claim_request(db: &Db, id: i64) -> Result<Option<(InboundWebhookRequest, String)>> {
+    let token = chatbotx_db::repo::random_uuid();
+    tx::write(db, move |c| {
+        let now = chatbotx_db::repo::now_ms();
+        let row = repo_iw::claim_inbound_webhook_request(c, id, &token, now - CLAIM_LEASE_MS, now)?;
+        Ok(row.map(|r| (r, token)))
+    })
+    .await
+}
+
+/// `checkpointRequest`: whether the claim is still ours.
+pub async fn checkpoint_request(
+    db: &Db,
+    id: i64,
+    claim_token: String,
+    progress: repo_iw::InboundWebhookRequestProgress,
+) -> Result<bool> {
+    tx::write(db, move |c| {
+        Ok(repo_iw::checkpoint_inbound_webhook_request(
+            c,
+            id,
+            &claim_token,
+            &progress,
+            chatbotx_db::repo::now_ms(),
+        )?)
+    })
+    .await
+}
+
+/// `completeRequest`.
+pub async fn complete_request(
+    db: &Db,
+    id: i64,
+    claim_token: String,
+    completion: repo_iw::InboundWebhookRequestCompletion,
+) -> Result<bool> {
+    tx::write(db, move |c| {
+        Ok(repo_iw::complete_inbound_webhook_request(
+            c,
+            id,
+            &claim_token,
+            &completion,
+            chatbotx_db::repo::now_ms(),
+        )?)
+    })
+    .await
+}
+
+/// `releaseRequest`: `processing` back to `received`.
+pub async fn release_request(db: &Db, id: i64, claim_token: String) -> Result<bool> {
+    tx::write(db, move |c| {
+        Ok(repo_iw::release_inbound_webhook_request(
+            c,
+            id,
+            &claim_token,
+        )?)
+    })
+    .await
+}
+
+/// `listStaleRequests`: unfinished requests the re-dispatch cron re-enqueues.
+pub async fn list_stale_requests(
+    db: &Db,
+    limit: i64,
+) -> Result<Vec<repo_iw::StaleInboundWebhookRequestRow>> {
+    tx::read(db, move |c| {
+        let now = chatbotx_db::repo::now_ms();
+        Ok(repo_iw::list_stale_inbound_webhook_requests(
+            c,
+            now - UNCLAIMED_REQUEST_GRACE_MS,
+            now - CLAIM_LEASE_MS,
+            now - REDISPATCH_MAX_AGE_MS,
+            limit,
+        )?)
+    })
+    .await
+}
+
+/// `abandonStaleRequests`: closes what re-dispatch stopped retrying.
+pub async fn abandon_stale_requests(db: &Db) -> Result<i64> {
+    tx::write(db, move |c| {
+        let now = chatbotx_db::repo::now_ms();
+        Ok(repo_iw::fail_abandoned_inbound_webhook_requests(
+            c,
+            now - REDISPATCH_MAX_AGE_MS,
+            now - UNCLAIMED_REQUEST_GRACE_MS,
+            now - CLAIM_LEASE_MS,
+            now,
+        )?)
     })
     .await
 }

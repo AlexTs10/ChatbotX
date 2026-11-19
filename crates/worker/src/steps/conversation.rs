@@ -402,15 +402,18 @@ async fn disable_bot(ctx: &StepCtx<'_, '_>) -> Result<(), JobError> {
         .db
         .write(move |tx| {
             if reopen {
-                tx.execute(
-                    r#"UPDATE "Conversation" SET "awaitingHumanReplySince" = CASE
-                         WHEN "awaitingHumanReplySince" IS NULL AND "sourceId" IS NULL
-                          AND "contactRepliedAt" > COALESCE("adminRepliedAt", -9223372036854775808)
-                          AND "contactRepliedAt" > COALESCE("awaitingHumanReplyClosedAt", -9223372036854775808)
-                         THEN "contactRepliedAt" ELSE "awaitingHumanReplySince" END
-                       WHERE "workspaceId" = ?1 AND "id" = ?2"#,
-                    params![ws, id],
-                )?;
+                // Only a pause that reopens the waiting window can start an SLA.
+                chatbotx_business::response_sla::track_window(tx, ws, &[id], false, |c| {
+                    c.execute(
+                        r#"UPDATE "Conversation" SET "awaitingHumanReplySince" = CASE
+                             WHEN "awaitingHumanReplySince" IS NULL AND "sourceId" IS NULL
+                              AND "contactRepliedAt" > COALESCE("adminRepliedAt", -9223372036854775808)
+                              AND "contactRepliedAt" > COALESCE("awaitingHumanReplyClosedAt", -9223372036854775808)
+                             THEN "contactRepliedAt" ELSE "awaitingHumanReplySince" END
+                           WHERE "workspaceId" = ?1 AND "id" = ?2"#,
+                        params![ws, id],
+                    )
+                })?;
             }
             tx.execute(
                 r#"UPDATE "ContactOnSmartDelay" SET "status" = 'canceled'

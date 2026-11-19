@@ -34,6 +34,11 @@ use crate::{Deps, db_fail, id_of, str_of};
 const MAX_ERROR_DETAIL: usize = 1000;
 /// `IntegrationJobAction.processCommentAutomation`.
 pub const PROCESS_COMMENT_AUTOMATION: &str = "processCommentAutomation";
+/// `deferredCommentPrivateReply`: the TikTok DM that waits for the
+/// high-intent flag (a `processCommentAutomation` payload + `deferred`).
+pub const DEFERRED_COMMENT_PRIVATE_REPLY: &str = "deferredCommentPrivateReply";
+/// `DEFERRED_PRIVATE_REPLY_DELAYS_MS`: the re-checks; the length is the budget.
+const DEFERRED_PRIVATE_REPLY_DELAYS_MS: [u64; 3] = [45_000, 180_000, 600_000];
 /// `SINGLE_ATTEMPT_COMMENT_AUTOMATION_CHANNELS` / `SINGLE_ATTEMPT_REPLY_CHANNELS`.
 const SINGLE_ATTEMPT: &[&str] = &["threads", "tiktok"];
 /// `PUBLIC_REPLY_SPACING_MS`.
@@ -98,6 +103,60 @@ async fn finish_missed_comment_replay(deps: &Deps, automation_id: i64) {
     }
 }
 
+/// `COMMENT_AUTOMATION_JOB_RETENTION_SECONDS`.
+const COMMENT_AUTOMATION_JOB_RETENTION_SECONDS: u64 = 24 * 60 * 60;
+
+/// `LIVE_COMMENTS_PER_SECOND`: Facebook fans one comment out into up to four
+/// Page calls; Instagram Live allows only the private reply.
+fn live_comments_per_second(integration_type: &str) -> Option<f64> {
+    match integration_type {
+        "messenger" => Some(5.0),
+        "instagram" | "instagramFacebook" => Some(20.0),
+        _ => None,
+    }
+}
+
+/// `reserveLiveCommentDelay`: this live comment's slot on the account's
+/// timeline. Pacing is a protection: a store failure processes it now.
+async fn reserve_live_comment_delay(
+    deps: &Deps,
+    integration_type: &str,
+    identifier: &str,
+    comment_id: &str,
+) -> Option<u64> {
+    let per_second = live_comments_per_second(integration_type)?;
+    let store = chatbotx_kv::DurableKv::new(deps.db.clone(), Arc::new(chatbotx_kv::SystemClock));
+    let key = format!("comment-automation:live-comments:pace:{integration_type}:{identifier}");
+    match store.reserve_time_window(&key, 1000.0 / per_second).await {
+        Ok(starts_at) => u64::try_from(starts_at - now_ms()).ok().filter(|d| *d > 0),
+        Err(err) => {
+            tracing::warn!(%err, comment_id, "receiveComment: failed to reserve live comment pacing slot, processing now");
+            None
+        }
+    }
+}
+
+tokio::task_local! {
+    /// `missedCommentReplayStorage`: set while a missed-comment replay runs.
+    static REPLAY: ();
+}
+
+/// `MISSED_COMMENT_REPLAY_PRIORITY`.
+const MISSED_COMMENT_REPLAY_PRIORITY: u32 = 10;
+
+/// `withReplayPriority`: inside a replay every queued job yields to live
+/// traffic; outside one the options are unchanged.
+pub(crate) fn with_replay_priority(options: JobOptions) -> JobOptions {
+    if REPLAY.try_with(|_| ()).is_ok() {
+        JobOptions {
+            priority: Some(MISSED_COMMENT_REPLAY_PRIORITY),
+            ..options
+        }
+    } else {
+        options
+    }
+}
+
 /// `receiveComment` for a replay.
 pub(crate) async fn replay_missed_comment(
     deps: &Deps,
@@ -107,17 +166,24 @@ pub(crate) async fn replay_missed_comment(
     let Some(automation_id) = id_of(&data["replay"]["automationId"]) else {
         return Err(JobError::unrecoverable("Invalid replayMissedComment data"));
     };
-    receive_comment(deps, upstream, data, Some(automation_id)).await
+    REPLAY
+        .scope(
+            (),
+            receive_comment(deps, upstream, data, Some(automation_id)),
+        )
+        .await
 }
 
 /// The `incomingComment` integration job.
 pub async fn incoming_comment(deps: &Deps, data: &Value) -> Result<(), JobError> {
-    receive_comment(deps, &HttpUpstream, data, None).await
+    let result = receive_comment(deps, &HttpUpstream, data, None).await;
+    complete_orphaned(deps, "incomingComment", true, result).await
 }
 
 /// The `processCommentAutomation` integration job.
 pub async fn process_comment_automation_job(deps: &Deps, data: &Value) -> Result<(), JobError> {
-    process_comment_automation(deps, &HttpUpstream, data).await
+    let result = process_comment_automation(deps, &HttpUpstream, data).await;
+    complete_orphaned(deps, PROCESS_COMMENT_AUTOMATION, false, result).await
 }
 
 /// The `tiktokHighIntentComment` integration job
@@ -162,6 +228,145 @@ pub async fn tiktok_high_intent_comment(deps: &Deps, data: &Value) -> Result<(),
     }
 }
 
+/// The `IntegrationNotFoundError` text of [`resolve`]: `<prefix><type> <identifier>`.
+const INTEGRATION_NOT_FOUND: &str = "Integration not found: ";
+
+/// `runWithOrphanedIntegrationCleanup`: a job whose integration row is gone
+/// completes (no retry, no failed row) after a throttled cleanup. Inbound
+/// events log at `warn`, internal jobs at `error`.
+pub(crate) async fn complete_orphaned(
+    deps: &Deps,
+    job_type: &str,
+    inbound: bool,
+    result: Result<(), JobError>,
+) -> Result<(), JobError> {
+    let Err(JobError::Unrecoverable(error)) = &result else {
+        return result;
+    };
+    let text = error.to_string();
+    let Some((channel, identifier)) = text
+        .strip_prefix(INTEGRATION_NOT_FOUND)
+        .and_then(|rest| rest.split_once(' '))
+    else {
+        return result;
+    };
+    cleanup_orphaned_integration_once(deps, channel, identifier).await;
+    if inbound {
+        tracing::warn!(
+            channel,
+            identifier,
+            job_type,
+            "Integration not found for inbound event; skipping job"
+        );
+    } else {
+        tracing::error!(channel, identifier, job_type, err = %text, "Integration not found; completing job without retry");
+    }
+    Ok(())
+}
+
+/// `cleanupOrphanedIntegrationOnce` (once per hour per account) +
+/// `handleOrphanedIntegration`: revoke the still-live Meta webhook
+/// subscription with the platform app token. Never fails.
+async fn cleanup_orphaned_integration_once(deps: &Deps, channel: &str, identifier: &str) {
+    use crate::channels::{instagram, messenger};
+    let base = match channel {
+        "messenger" => format!("{}/{}", messenger::API_URL, messenger::DEFAULT_API_VERSION),
+        "instagram" => format!("{}/{}", instagram::API_URL, instagram::DEFAULT_API_VERSION),
+        _ => return,
+    };
+    // Meta ids are digits; anything else never reaches a URL.
+    if identifier.is_empty() || !identifier.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return;
+    }
+    let key = format!("orphan-integration-cleanup:{channel}:{identifier}");
+    match crate::inbound::kv(deps)
+        .set_number_if_not_exists(&key, 1.0, 3600)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(err) => {
+            tracing::warn!(channel, identifier, %err, "Orphaned integration cleanup throttle failed; skipping cleanup");
+            return;
+        }
+    }
+    let (channel_owned, page) = (channel.to_owned(), identifier.to_owned());
+    let token = deps
+        .db
+        .read(move |conn| {
+            // A Messenger page still shared with an Instagram channel keeps its subscription.
+            if channel_owned == "messenger" {
+                let sibling: Option<i64> = conn
+                    .query_row(
+                        r#"SELECT 1 FROM "IntegrationInstagram" WHERE "pageId" = ?1 LIMIT 1"#,
+                        [&page],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if sibling.is_some() {
+                    return Ok(Err("sibling"));
+                }
+            }
+            Ok(Ok(
+                chatbotx_business::platform_credential::resolve_platform_app_access_token(
+                    conn,
+                    chatbotx_business::meta_catalog::process_encryption(),
+                    &channel_owned,
+                )
+                .ok()
+                .flatten(),
+            ))
+        })
+        .await;
+    let token = match token {
+        Ok(Ok(Some(token))) => token,
+        Ok(Err(_)) => {
+            tracing::info!(
+                channel,
+                identifier,
+                "Skipping orphaned integration cleanup because a sibling channel still shares the subscription"
+            );
+            return;
+        }
+        Ok(Ok(None)) => {
+            tracing::warn!(
+                channel,
+                identifier,
+                "Missing platform credential for orphaned integration cleanup"
+            );
+            return;
+        }
+        Err(err) => {
+            tracing::warn!(channel, identifier, %err, "Orphaned integration cleanup failed");
+            return;
+        }
+    };
+    let reply = HttpUpstream
+        .send(UpstreamRequest {
+            method: "DELETE",
+            url: format!("{base}/{identifier}/subscribed_apps"),
+            headers: vec![("Authorization".into(), format!("Bearer {token}"))],
+            body: None,
+        })
+        .await;
+    let ok = matches!(&reply, Ok((status, body)) if (200..300).contains(status)
+        && serde_json::from_str::<Value>(body).is_ok_and(|v| v["success"] == true));
+    if ok {
+        tracing::info!(
+            channel,
+            identifier,
+            "Orphaned integration cleanup completed"
+        );
+    } else {
+        tracing::warn!(
+            channel,
+            identifier,
+            ?reply,
+            "Orphaned integration cleanup failed"
+        );
+    }
+}
+
 /// `identifyInboxAndIntegrationAuthFromIdentifier`.
 async fn resolve(
     deps: &Deps,
@@ -179,7 +384,7 @@ async fn resolve(
         .map_err(|e| JobError::unrecoverable(e.to_string()))?
         .ok_or_else(|| {
             JobError::unrecoverable(format!(
-                "Integration not found: {integration_type} {identifier}"
+                "{INTEGRATION_NOT_FOUND}{integration_type} {identifier}"
             ))
         })
 }
@@ -331,8 +536,13 @@ async fn receive_comment(
         automation["replay"] = data["replay"].clone();
         return process_comment_automation(deps, upstream, &automation).await;
     }
-    // ponytail: no live-comment pacing delay and no completed-job retention
-    // age; the job id alone rejects a redelivered webhook.
+    // The completed job is kept by age (outlasts Meta's retries), so its id
+    // rejects a redelivered webhook.
+    let delay = if is_live {
+        reserve_live_comment_delay(deps, integration_type, identifier, comment_id).await
+    } else {
+        None
+    };
     deps.jobs
         .add(
             QueueName::Integration,
@@ -341,6 +551,11 @@ async fn receive_comment(
             JobOptions {
                 job_id: Some(format!("comment-auto-{comment_id}")),
                 attempts: SINGLE_ATTEMPT.contains(&integration_type).then_some(1),
+                delay_ms: delay,
+                remove_on_complete: Some(chatbotx_jobs::Retention::KeepAge {
+                    age_secs: COMMENT_AUTOMATION_JOB_RETENTION_SECONDS,
+                    count: None,
+                }),
                 ..JobOptions::default()
             },
         )
@@ -949,8 +1164,13 @@ async fn process_comment_automation(
         attachments: None,
         data: data.clone(),
     };
+    let deferred = data.get("deferred").filter(|d| d.is_object());
     for mut automation in automations {
         automation.limit_live(&run.channel_type);
+        if let Some(deferred) = deferred {
+            run.deferred_private_reply(&automation, deferred).await?;
+            continue;
+        }
         if let Some(reason) = run
             .automation(&automation, &tz, &mut private_claimed)
             .await?
@@ -1147,14 +1367,16 @@ impl<U: Upstream> Run<'_, U> {
                 )
                 .await?;
             } else if ct == "tiktok" && !high_intent {
-                // ponytail: `enqueueDeferredPrivateReply` (wait for the
-                // high-intent webhook, then send) is not ported.
+                // `enqueueDeferredPrivateReply`: re-check the flag later.
                 *private_claimed = true;
                 deferred = true;
-                tracing::warn!(
-                    automation_id = a.id,
-                    "TikTok private reply waits for high intent: deferral not ported, not sent"
-                );
+                if let Err(err) = self.enqueue_deferred_private_reply(a.id, 0, delay).await {
+                    tracing::error!(
+                        ?err,
+                        automation_id = a.id,
+                        "Failed to defer the private reply"
+                    );
+                }
             } else {
                 let sent = self.private_reply(a, delay).await?;
                 *private_claimed |= sent.1.is_ok();
@@ -1213,6 +1435,113 @@ impl<U: Upstream> Run<'_, U> {
     }
 
     /// `recordBlockedPrivateReply`.
+    /// `enqueueDeferredPrivateReply`: one attempt per scheduled re-check.
+    async fn enqueue_deferred_private_reply(
+        &self,
+        automation_id: i64,
+        attempt: usize,
+        delay: u64,
+    ) -> Result<(), JobError> {
+        let mut data = self.data.clone();
+        data["onlyAutomationId"] = json!(automation_id.to_string());
+        data["deferred"] = json!({ "attempt": attempt, "delay": delay });
+        self.deps
+            .jobs
+            .add(
+                QueueName::Integration,
+                DEFERRED_COMMENT_PRIVATE_REPLY,
+                json!({ "type": DEFERRED_COMMENT_PRIVATE_REPLY, "data": data }),
+                with_replay_priority(JobOptions {
+                    delay_ms: DEFERRED_PRIVATE_REPLY_DELAYS_MS.get(attempt).copied(),
+                    job_id: Some(format!(
+                        "comment-private-{automation_id}-{}-{attempt}",
+                        self.comment.id
+                    )),
+                    attempts: Some(1),
+                    ..JobOptions::default()
+                }),
+            )
+            .await
+            .map(|_| ())
+            .map_err(db_fail)
+    }
+
+    /// `runDeferredCommentPrivateReply`: sends the deferred DM once TikTok
+    /// flagged the comment high intent; never rolls back the dedup row (a
+    /// missed DM beats a duplicate public reply).
+    async fn deferred_private_reply(
+        &self,
+        a: &Automation,
+        deferred: &Value,
+    ) -> Result<(), JobError> {
+        let attempt = deferred["attempt"].as_u64().unwrap_or(0) as usize;
+        let configured = deferred["delay"].as_u64().unwrap_or(0);
+        let private_type = a.private_reply["type"].as_str().unwrap_or("none");
+        // What the deferral wait did not already spend of `replyAfter`.
+        let elapsed = u64::try_from(now_ms() - self.comment.created_ms()).unwrap_or(0);
+        let remaining = configured.saturating_sub(elapsed);
+        let high_intent = self
+            .comment_message
+            .as_ref()
+            .and_then(|m| m.content_attributes.as_ref())
+            .and_then(|attributes| attributes.0.get(TIKTOK_HIGH_INTENT))
+            .is_some_and(|flag| !flag.is_null() && flag != &json!(false));
+        if !high_intent {
+            if attempt + 1 < DEFERRED_PRIVATE_REPLY_DELAYS_MS.len() {
+                tracing::info!(
+                    automation_id = a.id,
+                    attempt = attempt + 1,
+                    "Deferred private reply: comment still not flagged high intent, re-checking later"
+                );
+                return self
+                    .enqueue_deferred_private_reply(a.id, attempt + 1, configured)
+                    .await;
+            }
+            return self
+                .blocked_private(
+                    a.id,
+                    private_type,
+                    "comment was never flagged high intent",
+                    "Private reply not sent: TikTok did not flag this comment as high intent, which Comment-to-Message requires".to_owned(),
+                )
+                .await;
+        }
+        let (window, label) = private_reply_window(&self.channel_type, self.comment.is_live);
+        if now_ms() + remaining as i64 - self.comment.created_ms() > window {
+            return self
+                .blocked_private(
+                    a.id,
+                    private_type,
+                    &format!("comment older than {label}"),
+                    format!("Private reply not sent: the comment is outside {label}"),
+                )
+                .await;
+        }
+        let (reply_type, outcome) = self.private_reply(a, remaining).await?;
+        let sent = outcome.is_ok();
+        self.record_event(a.id, "private", reply_type, outcome)
+            .await?;
+        if reply_type == "AIAgent" {
+            self.dispatch_ai_reply(a, "private", remaining).await;
+        }
+        if sent {
+            // On this channel the counters measure the DM.
+            let automation_id = a.id;
+            self.deps
+                .db
+                .write(move |tx| {
+                    tx.execute(
+                        r#"UPDATE "CommentAutomation" SET "repliesCount" = "repliesCount" + 1 WHERE "id" = ?1"#,
+                        [automation_id],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .map_err(db_fail)?;
+        }
+        Ok(())
+    }
+
     async fn blocked_private(
         &self,
         automation_id: i64,
@@ -1304,7 +1633,7 @@ impl<U: Upstream> Run<'_, U> {
         let name = str_of(&job, "type").unwrap_or("").to_owned();
         self.deps
             .jobs
-            .add(QueueName::Chat, &name, job, options)
+            .add(QueueName::Chat, &name, job, with_replay_priority(options))
             .await
             .map(|_| ())
             .map_err(db_fail)
@@ -1514,11 +1843,11 @@ impl<U: Upstream> Run<'_, U> {
                 QueueName::Integration,
                 crate::flow::SEND_FLOW,
                 json!({ "type": crate::flow::SEND_FLOW, "data": data }),
-                JobOptions {
+                with_replay_priority(JobOptions {
                     delay_ms: Some(delay),
                     attempts,
                     ..JobOptions::default()
-                },
+                }),
             )
             .await
             .map(|_| Some(flow_name))
@@ -1602,7 +1931,7 @@ impl<U: Upstream> Run<'_, U> {
                         reply_type, reply_text, status, detail, http, (status == "failed").then_some(now), occurred
                     ],
                 )?;
-                if inserted > 0 {
+                if inserted > 0 && comment_ai::counts_toward_stats(tx, automation_id, channel)? {
                     let column = if status == "sent" { "sentCount" } else { "failedCount" };
                     tx.execute(
                         &format!(r#"UPDATE "CommentAutomation" SET "{column}" = "{column}" + 1 WHERE "id" = ?1"#),
@@ -1738,8 +2067,8 @@ async fn render(
 
 #[path = "comment_ai.rs"]
 mod comment_ai;
-pub(crate) use comment_ai::story_reply_text;
 pub use comment_ai::{COMMENT_AI_REPLY, COMMENT_MODERATION, comment_ai_reply, comment_moderation};
+pub(crate) use comment_ai::{settle_anchor_delivered, settle_anchor_failed, story_reply_text};
 
 #[cfg(test)]
 #[path = "low_tests.rs"]

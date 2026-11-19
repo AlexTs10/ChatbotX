@@ -55,10 +55,14 @@ import { FilterSheet } from "./filter-sheet"
 import { ItemCard } from "./item-card"
 import { StageColumn } from "./stage-column"
 import type {
+  BoardColumn,
   BoardFilterInput,
   BoardFilterRequest,
   BoardSortInput,
 } from "./types"
+
+/** The `privateGetBoardAPI` output the cache updates read (the client is untyped). */
+type Board = { stages: BoardColumn[] }
 
 type ItemDialogState = { kind: "transfer" | "delete"; itemId: string } | null
 
@@ -193,7 +197,7 @@ export function PipelineBoard({
     if (boardFetchedAt() !== fetchedAt) {
       return
     }
-    queryClient.setQueryData(
+    queryClient.setQueryData<Board>(
       boardOptions.queryKey,
       (current) =>
         current ? appendStagePage(current, stageId, cursor, page) : current,
@@ -238,7 +242,7 @@ export function PipelineBoard({
   const moveItem = async (itemId: string, toStageId: string) => {
     // An in-flight refetch would otherwise overwrite the optimistic state.
     await queryClient.cancelQueries({ queryKey: boardOptions.queryKey })
-    queryClient.setQueryData(
+    queryClient.setQueryData<Board>(
       boardOptions.queryKey,
       (current) =>
         current ? moveItemInBoard(current, itemId, toStageId) : current,

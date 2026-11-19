@@ -197,7 +197,90 @@ async fn a_replay_runs_the_automation_through_the_queues_and_the_channel() {
         })
         .await
         .unwrap();
-    assert_eq!(counts, (2, 2, 1, 2, "keyword".to_owned()));
+    // Messenger has a DM: only the private reply moves `sentCount`.
+    assert_eq!(counts, (2, 1, 1, 2, "keyword".to_owned()));
+}
+
+/// `countsTowardStats`: private always; public only on Threads (no DM).
+#[tokio::test]
+async fn only_private_replies_count_where_the_channel_has_a_dm() {
+    let (deps, _jobs) = setup().await;
+    add_automation(
+        &deps,
+        r#"INSERT INTO "CommentAutomation" ("id", "name", "workspaceId", "type", "post")
+           VALUES (7, 'M', 2, 'messenger', '{"type":"all","value":[]}'),
+                  (9, 'T', 2, 'threads', '{"type":"all","value":[]}')"#,
+    )
+    .await;
+    let counts = deps
+        .db
+        .read(|c| {
+            Ok(
+                [(7, "private"), (7, "public"), (9, "public"), (99, "public")]
+                    .map(|(id, ch)| comment_ai::counts_toward_stats(c, id, ch).unwrap()),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(counts, [true, false, true, false]);
+}
+
+/// `settleCommentAutomationFailure` / `Delivered`: the anchor on a reply
+/// message names its event row.
+#[tokio::test]
+async fn a_terminal_send_failure_settles_the_anchored_event() {
+    let (deps, _jobs) = setup().await;
+    add_automation(
+        &deps,
+        r#"INSERT INTO "CommentAutomation" ("id", "name", "workspaceId", "type", "post")
+           VALUES (9, 'T', 2, 'threads', '{"type":"all","value":[]}');
+           INSERT INTO "CommentAutomationEvent" ("id", "workspaceId", "automationId", "postId", "commentId",
+               "replyChannel", "replyType", "replyText", "status", "occurredAt")
+           VALUES (1, 2, 9, 'p', 'c1', 'public', 'text', 'Hi', 'sent', 0)"#,
+    )
+    .await;
+    let attributes = json!({
+        "replyToCommentId": "c1",
+        "commentAutomation": { "automationId": "9", "replyChannel": "public" },
+    });
+    crate::low::settle_anchor_failed(&deps, Some(&attributes), "token revoked").await;
+    crate::low::settle_anchor_failed(&deps, Some(&attributes), "again").await;
+    crate::low::settle_anchor_failed(&deps, Some(&json!({ "replyToCommentId": "c1" })), "x").await;
+    let row: (String, String, Option<String>, i64) = deps
+        .db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT e."status", e."errorDetail", e."replyText", a."failedCount"
+                   FROM "CommentAutomationEvent" e JOIN "CommentAutomation" a ON a."id" = e."automationId""#,
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        row,
+        (
+            "failed".into(),
+            "token revoked".into(),
+            Some("Hi".into()),
+            1
+        )
+    );
+    crate::low::settle_anchor_delivered(&deps, Some(&attributes)).await;
+    let row: (String, i64, i64) = deps
+        .db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT e."status", a."failedCount", a."deliveredCount"
+                   FROM "CommentAutomationEvent" e JOIN "CommentAutomation" a ON a."id" = e."automationId""#,
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(row, ("sent".into(), 0, 1));
 }
 
 /// A webhook comment queues `processCommentAutomation`; a keyword miss is

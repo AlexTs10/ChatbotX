@@ -16,7 +16,48 @@ pub const ACTIONS: &[&str] = &[
     "updateAutomatedResponseAction",
     "deleteAutomatedResponseAction",
     "enableAutomatedResponseAction",
+    // The list / edit page queries (`features/automated-response/queries`).
+    "listAutomatedResponses",
+    "findAutomatedResponse",
 ];
+
+/// `listAutomatedResponses` / `findAutomatedResponse` (`[workspaceId, input]`);
+/// the edit page's `findBy` miss is `null`.
+// ponytail: the page guard runs here too, since the SPA has no server page.
+async fn query(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcError> {
+    // The pages are `superAdmin` only (every keywords layout): 404 otherwise.
+    if !ctx.has("superAdmin") {
+        return Err(super::fail(BusinessError::not_found("Page not found")));
+    }
+    let input = In(arg(args, 1));
+    let kind = response_type(input.get("type").unwrap_or(&Value::Null))?;
+    if name == "findAutomatedResponse" {
+        let Ok(id) = input.id("id") else {
+            return Ok(Value::Null);
+        };
+        return service::find_by(&ctx.api.db, ctx.workspace_id, id, kind)
+            .await
+            .map(|row| row.map_or(Value::Null, |r| r.to_json()))
+            .map_err(super::fail);
+    }
+    let result = service::list(
+        &ctx.api.db,
+        service::ListAutomatedResponses {
+            workspace_id: ctx.workspace_id,
+            kind,
+            folder_id: Some(input.opt_id("folderId")?.unwrap_or(0).to_string()),
+            keyword: input.opt_str("keyword")?.filter(|k| !k.is_empty()),
+            page: input.opt_positive("page")?.unwrap_or(1),
+            per_page: input.opt_positive("perPage")?.unwrap_or(10),
+        },
+    )
+    .await
+    .map_err(super::fail)?;
+    Ok(super::page(
+        result.data.iter().map(|r| r.to_json()),
+        result.page_count,
+    ))
+}
 
 /// The `automatedResponseTypes` bind arg.
 fn response_type(value: &Value) -> Result<ResponseType, OrpcError> {
@@ -139,6 +180,9 @@ fn update_fail(error: BusinessError) -> OrpcError {
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
     if !ACTIONS.contains(&name) {
         return None;
+    }
+    if matches!(name, "listAutomatedResponses" | "findAutomatedResponse") {
+        return Some(query(ctx, name, args).await);
     }
     let db = &ctx.api.db;
     let ws = ctx.workspace_id;

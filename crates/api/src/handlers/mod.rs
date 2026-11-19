@@ -80,6 +80,7 @@ pub mod product_vendors;
 pub mod products;
 pub mod qr_codes;
 pub mod questionnaires;
+pub mod realtime;
 pub mod reflinks;
 pub mod response_sla;
 pub mod saved_replies;
@@ -94,6 +95,7 @@ pub mod webchats;
 pub mod webhooks;
 pub mod webshop;
 pub mod whatsapp_calls;
+pub mod whatsapp_channels;
 pub mod whatsapp_coexist;
 pub mod whatsapp_flows;
 pub mod whatsapp_templates;
@@ -157,6 +159,9 @@ pub struct ApiState {
     pub graph_url: String,
     /// The auth state (`POST /v1/me/password`); `None` = off (tests).
     pub sessions: Option<Arc<crate::session::AuthState>>,
+    /// The provider transport of the Google Sheets reads (SSRF-safe
+    /// `SafeHttp`; tests give a fake).
+    pub provider_http: Arc<dyn chatbotx_business::email_marketing::Http>,
 }
 
 impl ApiState {
@@ -180,6 +185,7 @@ impl ApiState {
             embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
             graph_url: chatbotx_business::whatsapp::GRAPH_API_URL.to_owned(),
             sessions: None,
+            provider_http: Arc::new(chatbotx_business::email_marketing::SafeHttp::default()),
         }
     }
 
@@ -262,6 +268,15 @@ impl ApiState {
     /// Uses `kv`.
     pub fn with_kv(mut self, kv: Arc<Kv>) -> ApiState {
         self.kv = Some(kv);
+        self
+    }
+
+    /// Uses `http` for the Google Sheets reads.
+    pub fn with_provider_http(
+        mut self,
+        http: Arc<dyn chatbotx_business::email_marketing::Http>,
+    ) -> ApiState {
+        self.provider_http = http;
         self
     }
 
@@ -423,6 +438,8 @@ pub struct Principal {
     pub read_only: bool,
     /// `context.member` of a mobile principal (Q.A1 §3); `None` for a token.
     pub mobile: Option<Arc<crate::auth::MobileMember>>,
+    /// `context.requestIssuedAtMs` (set for a mobile access token).
+    pub issued_at_ms: Option<i64>,
 }
 
 /// A handler outcome.
@@ -749,6 +766,8 @@ async fn route(
         minigames::handle(state, route_id, call).await
     } else if questionnaires::ROUTES.contains(&route_id) {
         questionnaires::handle(state, route_id, call).await
+    } else if realtime::ROUTES.contains(&route_id) {
+        realtime::handle(state, route_id, call, principal).await
     } else if reflinks::ROUTES.contains(&route_id) {
         reflinks::handle(state, route_id, call).await
     } else if workspace_members::ROUTES.contains(&route_id) {
@@ -783,6 +802,8 @@ async fn route(
         whatsapp_calls::handle(state, route_id, call).await
     } else if whatsapp_coexist::ROUTES.contains(&route_id) {
         whatsapp_coexist::handle(state, route_id, call).await
+    } else if whatsapp_channels::ROUTES.contains(&route_id) {
+        whatsapp_channels::handle(state, route_id, call).await
     } else if saved_replies::ROUTES.contains(&route_id) {
         saved_replies::handle(state, route_id, call).await
     } else if response_sla::ROUTES.contains(&route_id) {

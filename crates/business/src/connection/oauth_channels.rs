@@ -1,9 +1,11 @@
-//! The TikTok and Zalo `connection` adapters
+//! The TikTok, Zalo and Threads `connection` adapters
 //! (`integrations/tiktok/src/integration.ts` with `apis/auth.ts`,
 //! `apis/user.ts`, `lib/scopes.ts`; `integrations/zalo/src/integration.ts`
-//! with `api/auth.ts`) for the OAuth connect engine in [`super::oauth`]:
-//! authorize URL, code exchange, `describe` and the `connectAndPersist`
-//! satellite rows (`IntegrationTiktok` / `IntegrationZalo`, `keep_row`).
+//! with `api/auth.ts`; `integrations/threads/src/apis/auth.ts`) for the
+//! OAuth connect engine in [`super::oauth`]: authorize URL, code exchange,
+//! `describe` and the `connectAndPersist` satellite rows
+//! (`IntegrationTiktok` / `IntegrationZalo` / `IntegrationThreads`,
+//! `keep_row`).
 
 use chatbotx_db::repo::new_id;
 use chatbotx_db::rusqlite::{Connection, params};
@@ -28,10 +30,17 @@ const TIKTOK_MESSAGING: &[&str] = &[
 const TIKTOK_PROFILE: &[&str] = &["user.info.profile", "user.info.stats", "user.account.type"];
 const TIKTOK_COMMENT_CORE: &[&str] = &["comment.list", "comment.list.manage"];
 const TIKTOK_COMMENT_AUTOMATION: &[&str] = &["comment.list", "comment.list.manage", "video.list"];
+const THREADS_AUTHORIZE: &str = "https://threads.com/oauth/authorize";
+const THREADS_API: &str = "https://graph.threads.com";
+/// `DEFAULT_API_VERSION`.
+const THREADS_VERSION: &str = "v1.0";
+/// `THREADS_SCOPES`.
+const THREADS_SCOPES: &str =
+    "threads_basic,threads_read_replies,threads_manage_replies,threads_content_publish";
 
 /// `true` for the providers of this module.
 pub fn handles(provider: &str) -> bool {
-    matches!(provider, "tiktok" | "zalo")
+    matches!(provider, "tiktok" | "zalo" | "threads")
 }
 
 /// The satellite table and its identity column.
@@ -39,6 +48,7 @@ pub fn satellite(provider: &str) -> Option<(&'static str, &'static str)> {
     match provider {
         "tiktok" => Some(("IntegrationTiktok", "openId")),
         "zalo" => Some(("IntegrationZalo", "oaId")),
+        "threads" => Some(("IntegrationThreads", "threadsUserId")),
         _ => None,
     }
 }
@@ -61,6 +71,21 @@ pub fn tiktok_requested_scopes(config: &Value) -> String {
         scopes.extend(TIKTOK_COMMENT_AUTOMATION);
     }
     scopes.join(",")
+}
+
+/// `tiktokNeedsReauthorization`: the stored grant lacks a comment-automation
+/// scope (and the credential asked for comments).
+pub fn tiktok_needs_reauthorization(auth: &Value) -> bool {
+    let metadata = &auth["metadata"];
+    if metadata["features"]["comments"] == false {
+        return false;
+    }
+    let Some(granted) = metadata["scopes"].as_array() else {
+        return true;
+    };
+    TIKTOK_COMMENT_AUTOMATION
+        .iter()
+        .any(|scope| !granted.iter().any(|g| g.as_str() == Some(scope)))
 }
 
 /// `tiktokRequiredScopes`.
@@ -110,6 +135,16 @@ pub fn authorize_url(provider: &str, config: &Value, callback_url: &str, state: 
                 ("scope", &tiktok_requested_scopes(config)),
                 ("redirect_uri", callback_url),
                 ("disable_auto_auth", "1"),
+                ("state", state),
+            ],
+        ),
+        "threads" => query_url(
+            THREADS_AUTHORIZE,
+            &[
+                ("client_id", text(config, "clientId")),
+                ("redirect_uri", callback_url),
+                ("response_type", "code"),
+                ("scope", THREADS_SCOPES),
                 ("state", state),
             ],
         ),
@@ -175,8 +210,91 @@ pub async fn exchange_code(
 ) -> std::result::Result<Value, ProviderFailure> {
     match provider {
         "tiktok" => tiktok_exchange(upstream, config, callback_url, code).await,
+        "threads" => threads_exchange(upstream, config, callback_url, code).await,
         _ => zalo_exchange(upstream, config, callback_url, code).await,
     }
+}
+
+/// `exchangeCodeForToken` (the short-lived token, then the long-lived
+/// `th_exchange_token` one), `getThreadsProfile` and `buildThreadsAuthValue`.
+async fn threads_exchange(
+    upstream: &impl Upstream,
+    config: &Value,
+    callback_url: &str,
+    code: &str,
+) -> std::result::Result<Value, ProviderFailure> {
+    let form = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("client_id", text(config, "clientId"))
+        .append_pair("client_secret", text(config, "clientSecret"))
+        .append_pair("redirect_uri", callback_url)
+        .append_pair("code", code)
+        .append_pair("grant_type", "authorization_code")
+        .finish();
+    let short = call(
+        upstream,
+        UpstreamRequest {
+            method: "POST",
+            url: format!("{THREADS_API}/oauth/access_token"),
+            headers: vec![(
+                "content-type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )],
+            body: Some(form),
+        },
+    )
+    .await?;
+    let long = call(
+        upstream,
+        get(query_url(
+            &format!("{THREADS_API}/access_token"),
+            &[
+                ("grant_type", "th_exchange_token"),
+                ("client_secret", text(config, "clientSecret")),
+                ("access_token", text(&short, "access_token")),
+            ],
+        )),
+    )
+    .await?;
+    let access_token = text(&long, "access_token");
+    if access_token.is_empty() {
+        return Err(ProviderFailure::Rejected("Token exchange failed".into()));
+    }
+    let version = Some(text(config, "version"))
+        .filter(|v| !v.is_empty())
+        .unwrap_or(THREADS_VERSION);
+    let profile = call(
+        upstream,
+        get(query_url(
+            &format!("{THREADS_API}/{version}/me"),
+            &[
+                (
+                    "fields",
+                    "id,username,threads_profile_picture_url,threads_biography",
+                ),
+                ("access_token", access_token),
+            ],
+        )),
+    )
+    .await?;
+    let expires_at = if long["expires_in"].is_number() {
+        iso_in(&long["expires_in"])
+    } else {
+        Value::Null
+    };
+    let mut tokens = json!({ "accessToken": access_token });
+    if !expires_at.is_null() {
+        tokens["expiresAt"] = expires_at;
+    }
+    Ok(oauth2_auth(
+        config,
+        callback_url,
+        tokens,
+        Some(json!({
+            "threadsUserId": text(&profile, "id"),
+            "username": text(&profile, "username"),
+            "version": version,
+        })),
+    ))
 }
 
 async fn tiktok_exchange(
@@ -311,6 +429,13 @@ pub fn describe(provider: &str, auth: &Value) -> Result<(String, String)> {
                 .unwrap_or("TikTok");
             (text(meta, "openId"), name)
         }
+        "threads" => {
+            let meta = &auth["metadata"];
+            let name = Some(text(meta, "username"))
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Threads");
+            (text(meta, "threadsUserId"), name)
+        }
         _ => {
             let name = Some(text(&auth["metadata"], "oaName"))
                 .filter(|s| !s.is_empty())
@@ -361,7 +486,15 @@ pub fn persist(
             ],
         )
         .map_err(repo_err)?;
-    if moved == 0 {
+    if moved == 0 && provider == "threads" {
+        conn.execute(
+            r#"INSERT INTO "IntegrationThreads" ("id", "createdAt", "updatedAt", "auth", "threadsUserId",
+                   "username", "name", "workspaceId", "inboxId")
+               VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?5, ?6, ?7)"#,
+            params![new_id(), now, auth.to_string(), source_id, name, workspace_id, inbox_id],
+        )
+        .map_err(super::oauth::unique_or_repo)?;
+    } else if moved == 0 {
         conn.execute(
             &format!(
                 r#"INSERT INTO "{table}" ("id", "createdAt", "updatedAt", "auth", "{column}", "name",

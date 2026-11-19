@@ -417,8 +417,8 @@ const loadExisting = async (
 
   return {
     flows: new Set(flowIdRows),
-    flowNodes: new Map(
-      flowNodeRows.map((flow) => [
+    flowNodes: new Map<string, Set<string>>(
+      flowNodeRows.map((flow): [string, Set<string>] => [
         flow.flowId,
         new Set(flow.nodes.map((node) => node.id)),
       ]),

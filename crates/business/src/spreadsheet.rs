@@ -1,9 +1,9 @@
 //! `packages/business/src/spreadsheet/service.ts` and the URL part of
 //! `features/spreadsheets/lib/{google-sheets,manage-spreadsheet}.ts`.
 //!
-//! ponytail: the Google Sheets reads (`listSheetNames` on create / update,
-//! `listWorksheets`, `listWorksheetHeaders`) wait for the Google Sheets
-//! client (Q.I4); create / update check the integration row and the URL only.
+//! Create / update check the integration row, the URL and that Google can
+//! read the spreadsheet (`listSheetNames`); `listWorksheets` and
+//! `listWorksheetHeaders` read it (`features/spreadsheets/lib/google-sheets.ts`).
 
 use chatbotx_db::Db;
 use chatbotx_db::repo::models::Spreadsheet;
@@ -11,8 +11,9 @@ use chatbotx_db::repo::{self, id_list, new_id, now_ms};
 use chatbotx_db::rusqlite::{Connection, params};
 use serde_json::Value;
 
+use crate::email_marketing::Http;
 use crate::errors::{BusinessError, Result};
-use crate::tx;
+use crate::{google_sheets, tx};
 
 const NOT_FOUND: &str = "Spreadsheet not found";
 /// `manageMessages.integrationMissing`.
@@ -65,27 +66,64 @@ pub async fn find_or_fail(db: &Db, workspace_id: i64, id: i64) -> Result<Spreads
     tx::read(db, move |c| find_in(c, workspace_id, id)).await
 }
 
-/// `resolveSpreadsheetIdFromUrl` without the remote read (see the module note).
-async fn resolve_id(db: &Db, workspace_id: i64, url: &str) -> Result<String> {
-    let has_integration = tx::read(db, move |c| {
-        Ok(c.query_row(
-            r#"SELECT count(*) FROM "IntegrationGoogleSheet" WHERE "workspaceId" = ?1"#,
-            [workspace_id],
-            |r| r.get::<_, i64>(0),
-        )
-        .map_err(repo::Error::from)?
-            > 0)
-    })
-    .await?;
-    if !has_integration {
+/// `resolveSpreadsheetIdFromUrl`: the integration, the URL, then one
+/// `listSheetNames` read (any failure is the URL error).
+async fn resolve_id(db: &Db, http: &dyn Http, workspace_id: i64, url: &str) -> Result<String> {
+    let Some(row) = google_sheets::find_by_workspace(db, workspace_id).await? else {
         return Err(BusinessError::validation("url", INTEGRATION_MISSING));
+    };
+    let id =
+        parse_spreadsheet_id(url).ok_or_else(|| BusinessError::validation("url", INVALID_URL))?;
+    if let Err(err) = google_sheets::list_sheet_names(http, &row.auth, &id).await {
+        tracing::error!(workspace_id, err = %err.message, "Unable to get data from google sheets");
+        return Err(BusinessError::validation("url", INVALID_URL));
     }
-    parse_spreadsheet_id(url).ok_or_else(|| BusinessError::validation("url", INVALID_URL))
+    Ok(id)
+}
+
+/// A Sheets call failure of a read (the original rethrows: a 500).
+fn provider(err: crate::email_marketing::ProviderError) -> BusinessError {
+    BusinessError::Repo(repo::Error::msg(err.message))
+}
+
+/// `listWorksheets`: the sheet tab names.
+pub async fn list_worksheets(
+    db: &Db,
+    http: &dyn Http,
+    workspace_id: i64,
+    id: i64,
+) -> Result<Vec<String>> {
+    let spreadsheet = find_or_fail(db, workspace_id, id).await?;
+    let row = google_sheets::find_by_workspace_or_fail(db, workspace_id).await?;
+    google_sheets::list_sheet_names(http, &row.auth, &spreadsheet.spreadsheet_id)
+        .await
+        .map_err(provider)
+}
+
+/// `listWorksheetHeaders`: the first row of a sheet.
+pub async fn list_worksheet_headers(
+    db: &Db,
+    http: &dyn Http,
+    workspace_id: i64,
+    id: i64,
+    sheet_name: &str,
+) -> Result<Vec<String>> {
+    let spreadsheet = find_or_fail(db, workspace_id, id).await?;
+    let row = google_sheets::find_by_workspace_or_fail(db, workspace_id).await?;
+    google_sheets::list_sheet_headers(http, &row.auth, &spreadsheet.spreadsheet_id, sheet_name)
+        .await
+        .map_err(provider)
 }
 
 /// `createSpreadsheet`: the new id.
-pub async fn create(db: &Db, workspace_id: i64, name: String, url: String) -> Result<i64> {
-    let spreadsheet_id = resolve_id(db, workspace_id, &url).await?;
+pub async fn create(
+    db: &Db,
+    http: &dyn Http,
+    workspace_id: i64,
+    name: String,
+    url: String,
+) -> Result<i64> {
+    let spreadsheet_id = resolve_id(db, http, workspace_id, &url).await?;
     tx::write(db, move |c| {
         let id = new_id();
         let now = now_ms();
@@ -103,12 +141,13 @@ pub async fn create(db: &Db, workspace_id: i64, name: String, url: String) -> Re
 /// `updateSpreadsheet`.
 pub async fn update(
     db: &Db,
+    http: &dyn Http,
     workspace_id: i64,
     id: i64,
     name: String,
     url: String,
 ) -> Result<Spreadsheet> {
-    let spreadsheet_id = resolve_id(db, workspace_id, &url).await?;
+    let spreadsheet_id = resolve_id(db, http, workspace_id, &url).await?;
     tx::write(db, move |c| {
         find_in(c, workspace_id, id)?;
         c.execute(

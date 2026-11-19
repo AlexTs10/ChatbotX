@@ -27,6 +27,7 @@ use crate::orpc::OrpcError;
 /// The ported actions.
 pub const ACTIONS: &[&str] = &[
     "peekImportHeadersAction",
+    "bulkTagStatsContactsAction",
     "addContactTagAction",
     "removeContactTagAction",
     "addContactSequenceAction",
@@ -53,6 +54,10 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
         "contactsAPIs.listContactsByPOSTAuthenticatedAPI" => list_table(ctx, input).await,
         "contactsAPIs.countContactsAuthenticatedAPI" => count_contacts(ctx, input).await,
         "contactsAPIs.getContactAuthenticatedAPI" => get_contact(ctx, input).await,
+        "contactsAPIs.countContactInboxesAuthenticatedAPI"
+        | "contactsAPIs.listContactInboxesAudiencePreviewAuthenticatedAPI" => {
+            audience(ctx, path, input).await
+        }
         "contactsAPIs.listExportFilesAuthenticatedAPI" => match require_scope(ctx) {
             Ok(_) => {
                 let query = query_of(input, &["perPage", "cursor"]);
@@ -115,6 +120,33 @@ fn require_scope(ctx: &Ctx<'_>) -> Result<Member, OrpcError> {
             400,
         ))
     })
+}
+
+/// `countContactInboxes` / `listAudienceInboxesPreview`: the broadcast
+/// audience under the member's contact scope (`requireContactPermissionScope`).
+async fn audience(ctx: &Ctx<'_>, path: &str, input: &Value) -> Result<Value, OrpcError> {
+    let member = require_scope(ctx)?;
+    let mut parsed = Input::from_object(input.as_object().cloned().unwrap_or_default());
+    let (mut audience, page, per_page, mode) =
+        crate::handlers::broadcasts::preview_input(&mut parsed, ctx.workspace_id);
+    parsed.finish().map_err(|_| invalid())?;
+    audience.can_view_email_and_phone = member.can_view_email_and_phone;
+    audience.restrict_to_assigned_user_id = member.restrict_to_assigned_user_id;
+    if path.ends_with("listContactInboxesAudiencePreviewAuthenticatedAPI") {
+        let data = crate::handlers::broadcasts::audience_preview(ctx.api, audience, page, per_page)
+            .await
+            .map_err(fail)?;
+        return Ok(json!({ "data": data }));
+    }
+    let counted =
+        chatbotx_business::broadcast::audience::count_audience(&ctx.api.db, audience, mode)
+            .await
+            .map_err(fail)?;
+    let mut out = json!({ "total": counted.total, "totalCountCapped": counted.total_count_capped });
+    if let Some(cap) = counted.count_cap {
+        out["countCap"] = json!(cap);
+    }
+    Ok(out)
 }
 
 fn list_scope(member: Member) -> ListScope {
@@ -421,6 +453,50 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                     .await
                     .map(|headers| json!(headers))
                     .map_err(action_fail);
+                }
+                // [workspaceId], bulkTagStatsContactsRequest: the signed-in
+                // user requests it, under their contact scope. Runs in the
+                // request (no default-queue worker, as `contacts.bulkTagByStats`).
+                "bulkTagStatsContactsAction" => {
+                    let member = require_scope(ctx)?;
+                    let body = arg(args, 1).to_string();
+                    let call = crate::handlers::Call {
+                        workspace_id: ctx.workspace_id,
+                        params: &[],
+                        query: None,
+                        body: body.as_bytes(),
+                    };
+                    let request = crate::handlers::contacts_bulk::by_stats_request(&call)
+                        .map_err(super::schema_errors)?;
+                    chatbotx_business::contact::bulk_tag_stats::assert_source_owned(db, ctx.workspace_id, &request.source)
+                        .await
+                        .map_err(action_fail)?;
+                    let job = chatbotx_business::contact::bulk_tag_stats::prepare(
+                        db,
+                        ctx.workspace_id,
+                        ctx.user_id,
+                        &request,
+                        member.restrict_to_assigned_user_id,
+                    )
+                    .await
+                    .map_err(action_fail)?;
+                    if let Some(job) = job {
+                        let linked = chatbotx_business::contact::bulk_tag_stats::run(db, &job).await.map_err(action_fail)?;
+                        let workspace = ctx.workspace_id.to_string();
+                        let events: Vec<_> = linked
+                            .iter()
+                            .map(|(contact, tag)| {
+                                chatbotx_business::events::trigger::tag_applied(
+                                    &workspace,
+                                    &contact.to_string(),
+                                    &tag.to_string(),
+                                    None,
+                                )
+                            })
+                            .collect();
+                        ctx.api.emit_triggers(events).await;
+                    }
+                    return Ok(Value::Null);
                 }
                 "createContactAction" => {
                     let created =

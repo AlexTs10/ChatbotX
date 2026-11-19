@@ -335,6 +335,15 @@ pub async fn send_message_to_channel(
                 )
                 .await;
             }
+            // Terminal failures only: a retried attempt may still land.
+            if !will_retry {
+                crate::low::settle_anchor_failed(
+                    deps,
+                    message.get("contentAttributes"),
+                    error.message(),
+                )
+                .await;
+            }
             if should_suppress_retryable_channel_error(&error, &contact_inbox.channel) {
                 return Ok(SendResult::default());
             }
@@ -382,6 +391,8 @@ pub async fn send_message_to_channel(
             .await;
         }
     }
+    // Meta sends no receipt for a public comment reply: this is its delivery.
+    crate::low::settle_anchor_delivered(deps, message.get("contentAttributes")).await;
     let at = created_at.unwrap_or_else(now_ms);
     record_outbound_message_sent(deps, &contact_inbox, conversation.workspace_id, at).await;
     // A public comment reply reaches no one's inbox; a private reply does.

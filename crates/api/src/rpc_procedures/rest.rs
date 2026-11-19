@@ -56,6 +56,32 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
                 })
                 .map_err(fail)
         }
+        "spreadsheetsAPI.listWorksheetsAuthenticatedAPI" => {
+            let id = match In(input).id("spreadsheetId") {
+                Ok(id) => id,
+                Err(error) => return Some(Err(error)),
+            };
+            let http = api.provider_http.as_ref();
+            chatbotx_business::spreadsheet::list_worksheets(&api.db, http, ws, id)
+                .await
+                .map(|data| json!({ "data": data }))
+                .map_err(fail)
+        }
+        "spreadsheetsAPI.listWorksheetHeadersAuthenticatedAPI" => {
+            let (id, sheet) = match (
+                In(input).id("spreadsheetId"),
+                In(input).opt_str("sheetName"),
+            ) {
+                (Ok(id), Ok(Some(sheet))) => (id, sheet),
+                (Err(error), _) | (_, Err(error)) => return Some(Err(error)),
+                (_, Ok(None)) => return Some(Err(super::invalid())),
+            };
+            let http = api.provider_http.as_ref();
+            chatbotx_business::spreadsheet::list_worksheet_headers(&api.db, http, ws, id, &sheet)
+                .await
+                .map(|data| json!({ "data": data }))
+                .map_err(fail)
+        }
         "decisionProfilesAPI.listActiveForFlow" => {
             if !ctx.has("flows") {
                 return Some(Err(OrpcError::new(
@@ -242,20 +268,33 @@ async fn run(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Value, OrpcErr
             let mut input = input_at(args, 1);
             let (name, url) = crate::handlers::spreadsheets::request(&mut input);
             checked(input)?;
-            chatbotx_business::spreadsheet::create(&api.db, ws, name, url)
-                .await
-                .map(|id| json!({ "id": id.to_string() }))
-                .map_err(action_fail)
+            chatbotx_business::spreadsheet::create(
+                &api.db,
+                api.provider_http.as_ref(),
+                ws,
+                name,
+                url,
+            )
+            .await
+            .map(|id| json!({ "id": id.to_string() }))
+            .map_err(action_fail)
         }
         "updateSpreadsheetAction" => {
             let id = bound(args, 1)?;
             let mut input = input_at(args, 2);
             let (name, url) = crate::handlers::spreadsheets::request(&mut input);
             checked(input)?;
-            chatbotx_business::spreadsheet::update(&api.db, ws, id, name, url)
-                .await
-                .map(|row| row.to_json())
-                .map_err(action_fail)
+            chatbotx_business::spreadsheet::update(
+                &api.db,
+                api.provider_http.as_ref(),
+                ws,
+                id,
+                name,
+                url,
+            )
+            .await
+            .map(|row| row.to_json())
+            .map_err(action_fail)
         }
         "deleteSpreadsheetAction" => {
             let ids = In(arg(args, 1)).ids("ids")?;
