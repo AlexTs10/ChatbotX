@@ -42,6 +42,7 @@ pub mod copy_name;
 pub mod count_mode;
 pub mod coupon;
 pub mod custom_field;
+pub mod decision_connection;
 pub mod discount_code;
 pub mod ecommerce_analytics;
 pub mod ecommerce_open_hours;

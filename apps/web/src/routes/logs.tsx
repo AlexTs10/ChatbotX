@@ -1,6 +1,9 @@
 // page: app/space/[workspaceId]/error-logs/page.tsx
 // page: app/space/[workspaceId]/(enterprise)/layout.tsx
 // page: app/space/[workspaceId]/(enterprise)/audit-logs/page.tsx
+// page: app/space/[workspaceId]/(enterprise)/pricing/page.tsx
+import { PricingTableFour } from "@chatbotx.io/ui/components/billingsdk/pricing-table-four"
+import { samplePlans } from "@chatbotx.io/ui/lib/billingsdk-config"
 import { useParams } from "@tanstack/react-router"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
@@ -90,5 +93,28 @@ function AuditLogs() {
         <AuditLogsTable promises={promises} search={search} />
       </Suspense>
     </div>
+  )
+}
+
+export function PricingPage() {
+  return isCommunity() ? <NotFoundPage /> : <Pricing />
+}
+
+// ponytail: the original page shows the sample plans and only logs the
+// selection (its upgrade call is commented out); kept as is.
+function Pricing() {
+  return (
+    <PricingTableFour
+      billingToggleLabels={{ monthly: "Monthly", yearly: "Yearly" }}
+      className="w-full"
+      description="Transform your project with our comprehensive pricing options designed for every need."
+      onPlanSelect={(planId: string) => console.log("Selected plan:", planId)}
+      plans={samplePlans}
+      showBillingToggle={false}
+      size="medium"
+      subtitle="Simple Pricing"
+      theme="classic"
+      title="Choose Your Perfect Plan"
+    />
   )
 }

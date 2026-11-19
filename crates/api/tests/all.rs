@@ -184,6 +184,8 @@ mod rpc_automation_pages;
 mod rpc_channel_connect;
 #[path = "rpc_channels.rs"]
 mod rpc_channels;
+#[path = "rpc_google_ads_settings.rs"]
+mod rpc_google_ads_settings;
 #[path = "rpc_help_items.rs"]
 mod rpc_help_items;
 #[path = "rpc_inbox_teams.rs"]
@@ -196,6 +198,8 @@ mod rpc_procedures;
 mod rpc_screen_actions;
 #[path = "rpc_session_auth.rs"]
 mod rpc_session_auth;
+#[path = "rpc_settings_integrations.rs"]
+mod rpc_settings_integrations;
 #[path = "rpc_spa_procedures.rs"]
 mod rpc_spa_procedures;
 #[path = "rpc_template_actions.rs"]

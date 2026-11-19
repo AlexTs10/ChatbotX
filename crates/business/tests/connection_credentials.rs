@@ -403,3 +403,50 @@ async fn allow_update_replaces_key_and_config_in_place() {
         Some("sk-2")
     );
 }
+
+/// Port of: apps/builder/src/features/integration-klaviyo/actions/__tests__/connect.action.test.ts:56 "connectKlaviyoAction > delegates to connectFromCredentials with allowUpdate: true (upsert semantics)"
+/// (over the real connect: a repeat connect with `allow_update` replaces the
+/// key of the same connection; without it the repeat is 409).
+#[tokio::test]
+async fn connect_klaviyo_action_delegates_to_connect_from_credentials_with_allow_update_true() {
+    use chatbotx_business::connection::api_key;
+    let db = two_workspaces().await;
+    let provider = api_key::api_key_provider("klaviyo").expect("provider");
+    let upstream = Script::with(vec![ok(), ok(), ok()]);
+    let key = |k: &str| config(json!({ "apiKey": k }));
+    let first = api_key::connect(&db, &upstream, WS, provider, &key("pk-1"), None, true)
+        .await
+        .expect("connect");
+    let error = api_key::connect(&db, &upstream, WS, provider, &key("pk-x"), None, false)
+        .await
+        .expect_err("strict");
+    assert_eq!(error.code(), Some("connectionAlreadyConnected"));
+    let second = api_key::connect(&db, &upstream, WS, provider, &key("pk-2"), None, true)
+        .await
+        .expect("upsert");
+    assert_eq!(
+        (second.id, second.integration_id),
+        (first.id, first.integration_id)
+    );
+}
+
+/// Port of: apps/builder/src/features/integration-klaviyo/actions/__tests__/connect.action.test.ts:73 "connectKlaviyoAction > logs and rethrows when connectFromCredentials rejects"
+#[tokio::test]
+async fn connect_klaviyo_action_logs_and_rethrows_when_connect_from_credentials_rejects() {
+    use chatbotx_business::connection::api_key;
+    let db = two_workspaces().await;
+    let provider = api_key::api_key_provider("klaviyo").expect("provider");
+    let upstream = Script::with(vec![Ok((401, "{}".into()))]);
+    let error = api_key::connect(
+        &db,
+        &upstream,
+        WS,
+        provider,
+        &config(json!({ "apiKey": "bad-key" })),
+        None,
+        true,
+    )
+    .await
+    .expect_err("rejected");
+    assert_eq!(error.code(), Some("connectionCredentialsRejected"));
+}

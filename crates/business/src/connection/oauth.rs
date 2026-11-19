@@ -124,6 +124,12 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
             slug: "instagram-facebook",
             multi_account: true,
         }),
+        "threads" => Some(Adapter {
+            provider: "threads",
+            credential_type: "threads",
+            slug: "threads",
+            multi_account: false,
+        }),
         "googleAds" => Some(Adapter {
             provider: "googleAds",
             credential_type: "googleAds",

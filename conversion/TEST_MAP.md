@@ -397,8 +397,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/google-ads-dashboard-entry.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
 | `apps/builder/__tests__/google-ads-enum-labels.test.ts` | B | - | todo | Google Ads integration; builder jsdom |
 | `apps/builder/__tests__/google-ads-events-history.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
-| `apps/builder/__tests__/google-ads-load-settings-page.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
-| `apps/builder/__tests__/google-ads-load-settings-session.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
+| `apps/builder/__tests__/google-ads-load-settings-page.test.ts` | C | `crates/business/tests/google_ads_conversion.rs`, `crates/api/tests/rpc_google_ads_settings.rs` | ported | Google Ads integration; builder server code; Q.F2-settings |
+| `apps/builder/__tests__/google-ads-load-settings-session.test.ts` | C | `crates/api/tests/rpc_google_ads_settings.rs` | ported | Google Ads integration; builder server code; Q.F2-settings; the `parseConnectErrorParam` cases test client code kept as is in `apps/web` (no web test runner) |
 | `apps/builder/__tests__/google-ads-notice-alert.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
 | `apps/builder/__tests__/google-ads-public-api.test.ts` | C | tbd | todo | Google Ads integration; builder server code |
 | `apps/builder/__tests__/google-ads-select-field.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
@@ -454,7 +454,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/instagram-select-page.test.tsx` | C | tbd | todo | Instagram channel; builder server code |
 | `apps/builder/__tests__/instagram-settings-actions.test.ts` | C | tbd | todo | Instagram channel; builder server code |
 | `apps/builder/__tests__/install-source-badge.test.tsx` | B | - | todo | Ads analytics and CTWA tracking; builder jsdom |
-| `apps/builder/__tests__/integration-actions-create-disconnect.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
+| `apps/builder/__tests__/integration-actions-create-disconnect.test.ts` | C | `crates/api/tests/rpc_settings_integrations.rs` | ported | Channel connection and OAuth connect flow; builder server code; Q.F2-settings; :82-:131 test the TS factory hooks (`afterDisconnect`, `log`), which Rust does not have |
 | `apps/builder/__tests__/integration-api-token-hash.test.ts` | B | - | todo | API channel integration (custom channels); builder jsdom |
 | `apps/builder/__tests__/integration-credential-connect-actions.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/integration-klaviyo-api.test.ts` | B | - | todo | Klaviyo integration; builder jsdom |
@@ -463,7 +463,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/integration-moosend-api.test.ts` | B | - | todo | Moosend integration; builder jsdom |
 | `apps/builder/__tests__/integration-sendgrid-api.test.ts` | C | tbd | todo | SendGrid integration; builder server code |
 | `apps/builder/__tests__/integration-tiktok-connect.action.test.ts` | C | tbd | todo | TikTok channel; builder server code |
-| `apps/builder/__tests__/integration-tiktok-queries.test.ts` | C | tbd | todo | TikTok channel; builder server code |
+| `apps/builder/__tests__/integration-tiktok-queries.test.ts` | C | `crates/business/tests/channel_integration_settings.rs` | ported | TikTok channel; builder server code; Q.F2-settings |
 | `apps/builder/__tests__/integration-webhook-real-dispatch.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/integration-webhook-routing.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
 | `apps/builder/__tests__/integration-webhook-threads.test.ts` | C | tbd | todo | Threads channel; builder server code |
@@ -851,7 +851,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/update-conversation-assignee.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/update-handover-resume-flow-action.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
 | `apps/builder/__tests__/update-instagram-action.test.ts` | C | tbd | todo | Instagram channel; builder server code |
-| `apps/builder/__tests__/update-mark-read-on-outbound.action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
+| `apps/builder/__tests__/update-mark-read-on-outbound.action.test.ts` | C | `crates/api/tests/rpc_settings_integrations.rs` | ported | Inbox and live chat (conversations, messages); builder server code; Q.F2-settings |
 | `apps/builder/__tests__/update-messenger-action.test.ts` | C | tbd | todo | Messenger channel; builder server code |
 | `apps/builder/__tests__/update-messenger-handover-resume-flow-action.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
 | `apps/builder/__tests__/update-pix-redirect-action.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
@@ -1124,7 +1124,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/src/features/inboxes/provider/__tests__/inbox-hook.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/src/features/integration-facebook-ads/lib/__tests__/needs-reconnect.test.ts` | B | - | todo | Facebook Ads integration; builder jsdom |
 | `apps/builder/src/features/integration-instagram/actions/__tests__/reconnect-callback.test.ts` | C | tbd | todo | Instagram channel; builder server code |
-| `apps/builder/src/features/integration-klaviyo/actions/__tests__/connect.action.test.ts` | C | tbd | todo | Klaviyo integration; builder server code |
+| `apps/builder/src/features/integration-klaviyo/actions/__tests__/connect.action.test.ts` | C | `crates/business/tests/connection_credentials.rs` | ported | Klaviyo integration; builder server code; Q.F2-settings |
 | `apps/builder/src/features/integration-messenger/actions/__tests__/disconnect-messenger.test.ts` | C | tbd | todo | Messenger channel; builder server code |
 | `apps/builder/src/features/integration-messenger/actions/__tests__/reconnect-callback.test.ts` | C | tbd | todo | Messenger channel; builder server code |
 | `apps/builder/src/features/integration-messenger/actions/__tests__/toggle-tag-sync.test.ts` | C | tbd | todo | Messenger channel; builder server code |
@@ -1133,7 +1133,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/src/features/integration-whatsapp/flows/lib/__tests__/build-flow-field-mappings.test.ts` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/src/features/integration-whatsapp/message-templates/components/__tests__/meta-catalog-product-select.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/src/features/integration-zalo/actions/__tests__/reconnect-callback.test.ts` | C | tbd | todo | Zalo channel; builder server code |
-| `apps/builder/src/features/integration-zalo/actions/__tests__/toggle-tag-sync.test.ts` | C | tbd | todo | Zalo channel; builder server code |
+| `apps/builder/src/features/integration-zalo/actions/__tests__/toggle-tag-sync.test.ts` | C | `crates/api/tests/rpc_settings_integrations.rs` | ported | Zalo channel; builder server code; Q.F2-settings |
 | `apps/builder/src/features/messages/components/__tests__/create-appointment-trigger.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/src/features/messages/components/__tests__/inbound-commerce-bubbles.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/src/features/messages/components/__tests__/input-menu.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
@@ -2582,12 +2582,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/connection/__tests__/store-bindings.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/connection/__tests__/upsert.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/conversation/__tests__/conversation.service.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/business/src/decision/adapters.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/connection-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
+| `packages/business/src/decision/adapters.test.ts` | C | `crates/business/tests/decision_connection.rs` | todo | Decision engine (routing profiles); Q.F2-settings ported :66 (response normalize); :25/:40 test `compileDecisionProfileRequest` of the decision-profile runtime, not a settings screen |
+| `packages/business/src/decision/connection-service.test.ts` | C | `crates/business/tests/decision_connection.rs` | ported | Decision engine (routing profiles); Q.F2-settings |
 | `packages/business/src/decision/contracts.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
 | `packages/business/src/decision/global-router-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
 | `packages/business/src/decision/profile-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/transport.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
+| `packages/business/src/decision/transport.test.ts` | C | `crates/business/tests/decision_connection.rs` | ported | Decision engine (routing profiles); Q.F2-settings |
 | `packages/business/src/discount-code/__tests__/discount-code-service.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; Q.D8 (mock-based service test, see DECISIONS) |
 | `packages/business/src/discount-code/__tests__/pricing.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; Q.D8 (mock-based service test, see DECISIONS) |
 | `packages/business/src/ecommerce-analytics/__tests__/ecommerce-analytics-service.test.ts` | C | parity p1-08 `03` | dropped | Ecommerce: settings, open hours, analytics; Q.D8 (mock-based service test, see DECISIONS) |

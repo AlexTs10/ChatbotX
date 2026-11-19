@@ -259,7 +259,9 @@ async fn probe(
     }
 }
 
-/// `connectFromCredentials` of an email-marketing provider.
+/// `connectFromCredentials` of an email-marketing provider; `allow_update`
+/// (the builder connect actions) replaces the credentials of an active
+/// connection instead of answering `connectionAlreadyConnected`.
 pub async fn connect(
     db: &Db,
     upstream: &impl Upstream,
@@ -267,6 +269,7 @@ pub async fn connect(
     provider: ApiKeyProvider,
     config: &Map<String, Value>,
     actor_user_id: Option<i64>,
+    allow_update: bool,
 ) -> Result<ConnectionRow> {
     let fields = config_fields(provider.provider);
     let parsed = parse_config(fields, config)?;
@@ -303,7 +306,7 @@ pub async fn connect(
         crate::email_marketing::seal_auth(&auth)?,
         Vec::new(),
         actor_user_id,
-        false,
+        allow_update,
     )
     .await
 }

@@ -50,12 +50,16 @@ mod broadcast_materialize;
 mod broadcast_service;
 #[path = "capabilities_service.rs"]
 mod capabilities_service;
+#[path = "channel_integration_settings.rs"]
+mod channel_integration_settings;
 #[path = "comment_automation_post_lists.rs"]
 mod comment_automation_post_lists;
 #[path = "connection_credentials.rs"]
 mod connection_credentials;
 #[path = "connection_oauth_channels.rs"]
 mod connection_oauth_channels;
+#[path = "connection_oauth_facebook_ads.rs"]
+mod connection_oauth_facebook_ads;
 #[path = "connection_oauth_google_ads.rs"]
 mod connection_oauth_google_ads;
 #[path = "connection_oauth_instagram.rs"]
@@ -128,6 +132,8 @@ mod count_mode;
 mod coupon_template_guards;
 #[path = "custom_field_service_update.rs"]
 mod custom_field_service_update;
+#[path = "decision_connection.rs"]
+mod decision_connection;
 #[path = "ecommerce_open_hours_is_open.rs"]
 mod ecommerce_open_hours_is_open;
 #[path = "ecommerce_open_hours_service.rs"]

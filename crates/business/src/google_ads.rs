@@ -276,12 +276,22 @@ pub fn event_resource(row: &GoogleAdsConversionEvent) -> Value {
 }
 
 /// `listGoogleAdsEventResources` + the public `pageCount` (`perPage` clamped, never rejected).
-pub async fn list_events(db: &Db, mut input: ListInput) -> Result<(Vec<Value>, i64)> {
+pub async fn list_events(db: &Db, input: ListInput) -> Result<(Vec<Value>, i64)> {
+    let (rows, total, per_page) = list_events_total(db, input).await?;
+    let page_count = ((total + per_page - 1) / per_page).max(1);
+    Ok((rows, page_count))
+}
+
+/// `listGoogleAdsEventResources`: the rows, the total and the clamped page size.
+pub async fn list_events_total(db: &Db, mut input: ListInput) -> Result<(Vec<Value>, i64, i64)> {
     input.per_page = input.per_page.min(GOOGLE_ADS_EVENTS_MAX_PER_PAGE);
     let per_page = input.per_page.max(1);
     let result = tx::read(db, move |conn| Ok(events::list_by_workspace(conn, &input)?)).await?;
-    let page_count = ((result.total + per_page - 1) / per_page).max(1);
-    Ok((result.rows.iter().map(event_resource).collect(), page_count))
+    Ok((
+        result.rows.iter().map(event_resource).collect(),
+        result.total,
+        per_page,
+    ))
 }
 
 fn setting_view(source: &GoogleAdsConsentSource) -> Value {
@@ -291,6 +301,130 @@ fn setting_view(source: &GoogleAdsConsentSource) -> Value {
         }
         other => json!({ "type": to_value(other)["type"], "template": null }),
     }
+}
+
+/// `getConsent` + `toConsentView`: no row = absent; a row failing the
+/// document schema = invalid.
+fn consent_view(settings: Option<&chatbotx_db::repo::models::GoogleAdsSettings>) -> Value {
+    match settings {
+        None => json!({
+            "status": "absent",
+            "adUserData": { "type": "notProvided", "template": null },
+            "adPersonalization": { "type": "notProvided", "template": null },
+        }),
+        Some(row) => match parse_google_ads_settings_document(&row.settings.0) {
+            Ok(doc) => json!({
+                "status": "ok",
+                "adUserData": setting_view(&doc.consent.ad_user_data),
+                "adPersonalization": setting_view(&doc.consent.ad_personalization),
+            }),
+            Err(_) => json!({ "status": "invalid", "adUserData": null, "adPersonalization": null }),
+        },
+    }
+}
+
+/// `getConsent` for a sender: the stored consent setting (`NOT_PROVIDED`
+/// when absent), `None` = an invalid document.
+pub async fn settings_page_consent(db: &Db, workspace_id: i64) -> Result<Option<Value>> {
+    let settings = tx::read(db, move |conn| {
+        Ok(google_ads_settings::find_by_workspace_id(
+            conn,
+            workspace_id,
+        )?)
+    })
+    .await?;
+    Ok(match settings {
+        None => Some(json!({
+            "adUserData": { "type": "notProvided" },
+            "adPersonalization": { "type": "notProvided" },
+        })),
+        Some(row) => parse_google_ads_settings_document(&row.settings.0)
+            .ok()
+            .map(|doc| serde_json::to_value(doc.consent).unwrap_or(Value::Null)),
+    })
+}
+
+/// `loadGoogleAdsSettingsPage` without the session part: `setup`
+/// (`toGoogleAdsSettingsView`, no `auth` / tokens) and `consent`.
+pub async fn settings_page(db: &Db, workspace_id: i64) -> Result<Value> {
+    let settings = tx::read(db, move |conn| {
+        Ok(google_ads_settings::find_by_workspace_id(
+            conn,
+            workspace_id,
+        )?)
+    })
+    .await?;
+    let consent = consent_view(settings.as_ref());
+    let Some(found) = crate::google_ads_setup::get_setup(db, workspace_id).await? else {
+        return Ok(json!({ "setup": null, "consent": consent }));
+    };
+    let integration = &found.integration;
+    let auth = crate::google_ads_setup::auth_of(integration);
+    let upload_method = match auth["metadata"]["uploadMethod"].as_str() {
+        Some("legacy") => "legacy",
+        _ => "dataManager",
+    };
+    let actions: Vec<Value> = integration
+        .conversion_actions
+        .as_ref()
+        .and_then(|a| a.0.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|a| {
+            json!({
+                "id": a["id"],
+                "name": a["name"],
+                "category": a["category"],
+                "status": a["status"],
+                "countingType": a["countingType"],
+                "attributionModel": a.get("attributionModel").cloned().unwrap_or(Value::Null),
+                "lookbackDays": a.get("clickThroughLookbackWindowDays").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "setup": {
+            "customerId": integration.customer_id,
+            "loginCustomerId": integration.login_customer_id,
+            "descriptiveName": integration.descriptive_name,
+            "currencyCode": integration.currency_code,
+            "conversionCustomerId": integration.conversion_customer_id,
+            "acceptedCustomerDataTerms": integration.accepted_customer_data_terms,
+            "setupError": integration.setup_error,
+            "uploadMethod": upload_method,
+            "readiness": found.readiness,
+            "connectionStatus": found.connection_status.as_deref().unwrap_or("disconnected"),
+            "conversionActions": actions,
+            "conversionActionsSyncedAt": integration.conversion_actions_synced_at.map(iso),
+        },
+        "consent": consent,
+    }))
+}
+
+/// `googleAdsSettingsService.updateConsent`: the consent schema (first issue
+/// as the validation error), then the version-1 document.
+pub async fn update_consent(db: &Db, workspace_id: i64, consent: &Value) -> Result<Value> {
+    let parsed = chatbotx_db::repo::partials::google_ads::parse_google_ads_consent(consent)
+        .map_err(|error| {
+            let issue = error.issues.first();
+            crate::BusinessError::validation(
+                issue
+                    .map(|i| i.path.as_str())
+                    .filter(|p| !p.is_empty())
+                    .unwrap_or("consent"),
+                issue.map_or("Invalid Google Ads consent".to_string(), |i| {
+                    i.message.clone()
+                }),
+            )
+        })?;
+    let value = serde_json::to_value(&parsed).unwrap_or(Value::Null);
+    let document = chatbotx_db::repo::Json(json!({ "version": 1, "consent": value }));
+    tx::write(db, move |conn| {
+        google_ads_settings::upsert_settings(conn, workspace_id, &document)?;
+        Ok(())
+    })
+    .await?;
+    Ok(value)
 }
 
 /// `loadGoogleAdsIntegration`: the credential-free setup plus the stored consent.
@@ -306,22 +440,7 @@ pub async fn get_connection(db: &Db, workspace_id: i64) -> Result<Value> {
     })
     .await?;
 
-    // `getConsent`: no row = absent; a row failing the document schema = invalid.
-    let consent = match settings {
-        None => json!({
-            "status": "absent",
-            "adUserData": { "type": "notProvided", "template": null },
-            "adPersonalization": { "type": "notProvided", "template": null },
-        }),
-        Some(row) => match parse_google_ads_settings_document(&row.settings.0) {
-            Ok(doc) => json!({
-                "status": "ok",
-                "adUserData": setting_view(&doc.consent.ad_user_data),
-                "adPersonalization": setting_view(&doc.consent.ad_personalization),
-            }),
-            Err(_) => json!({ "status": "invalid", "adUserData": null, "adPersonalization": null }),
-        },
-    };
+    let consent = consent_view(settings.as_ref());
 
     let Some(integration) = integration else {
         return Ok(json!({
