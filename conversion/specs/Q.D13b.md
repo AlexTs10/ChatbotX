@@ -49,6 +49,16 @@ unit tests in `worker/src/leaderboard.rs`, `worker/src/analytics_events.rs`,
 
 Decisions: `DECISIONS.md` lines tagged `Q.D13b`.
 
+## Gate (Dell, after the merge of conversion `e020607f1`)
+
+fmt and clippy clean; business + api + worker + server tests: 0 failed
+(two business unit test expectations fixed, then business lib 255 passed);
+web build ok; tsc 0. Parity not run.
+
+The SPA decision connection writes are the Q.F2-settings
+`rpc_procedures/decision_connections.rs` (same table and AAD);
+`rpc_procedures/decisions.rs` keeps the profiles and the connection list.
+
 ## Parity suites that cover this unit
 
 - p1-08 `01-dynamic-images`
