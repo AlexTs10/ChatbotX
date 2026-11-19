@@ -190,6 +190,19 @@ const workspacePages = [
     path: "inbox",
     component: lazyRouteComponent(() => import("@/routes/inbox"), "InboxPage"),
   }),
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path: "calls",
+    component: lazyRouteComponent(() => import("@/routes/calls"), "CallsPage"),
+  }),
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path: "whatsapps/$id/calls",
+    component: lazyRouteComponent(
+      () => import("@/routes/calls"),
+      "WhatsappCallsSettingsPage",
+    ),
+  }),
 ]
 const flowsRoute = createRoute({
   getParentRoute: () => workspaceRoute,

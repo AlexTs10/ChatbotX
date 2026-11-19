@@ -37,6 +37,7 @@ mod tools;
 mod triggers;
 mod user_persistent_menus;
 mod whatsapp;
+mod whatsapp_calls;
 mod working_hours;
 mod workspaces;
 
@@ -257,6 +258,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || appointments::ACTIONS.contains(&n)
                 || working_hours::ACTIONS.contains(&n)
                 || whatsapp::ACTIONS.contains(&n)
+                || whatsapp_calls::ACTIONS.contains(&n)
                 || google_ads::ACTIONS.contains(&n) =>
             {
                 Some(Err(fail(BusinessError::not_found("Workspace not found"))))
@@ -334,6 +336,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = whatsapp::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = whatsapp_calls::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = google_ads::action(ctx, name, &args).await {
@@ -650,6 +655,7 @@ mod send_checks {
         assert_send(conversations::action(ctx, "threadControlAction", args));
         assert_send(whatsapp::procedure(ctx, "", input));
         assert_send(whatsapp::action(ctx, "", args));
+        assert_send(whatsapp_calls::action(ctx, "", args));
     }
 
     fn handler_futures_are_send(state: &ApiState, call: Call<'_>) {

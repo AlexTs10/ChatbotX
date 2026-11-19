@@ -55,6 +55,7 @@ pub mod webhook;
 pub mod whatsapp_call;
 pub mod whatsapp_call_media;
 pub mod whatsapp_call_webhook;
+pub mod whatsapp_voip;
 
 use std::sync::Arc;
 
@@ -298,6 +299,10 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
         handler(deps, |deps, job| {
             Box::pin(whatsapp_call_media::handle_transcription(deps, job))
         }),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::WhatsappVoipSignaling),
+        handler(deps, |deps, job| Box::pin(whatsapp_voip::handle(deps, job))),
     )?;
     runtime.spawn_worker(
         spec_of(QueueName::Schedule),

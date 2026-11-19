@@ -140,12 +140,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/build-redirect-search.test.ts` | B | - | todo | Builder app shell and shared components; builder node-env, client logic |
 | `apps/builder/__tests__/bulk-tag-stats-contacts-action-behavior.test.ts` | C | tbd | todo | Tags and labels; builder server code |
 | `apps/builder/__tests__/bulk-tag-stats-contacts-action.test.ts` | B | - | todo | Tags and labels; builder node-env, client logic |
-| `apps/builder/__tests__/calling-action-client-gates.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/calling-action-client-gates.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/calls-filter-bar-selects.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
-| `apps/builder/__tests__/calls-page-access-gate.test.tsx` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/calls-page-access-gate.test.tsx` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/calls-page-client.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
-| `apps/builder/__tests__/calls-page-components.test.tsx` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/calls-page-invalid-filter-params.test.tsx` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/calls-page-components.test.tsx` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/calls-page-invalid-filter-params.test.tsx` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/calls-table.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/capabilities-public-api.test.ts` | C | tbd | todo | Capabilities discovery; builder server code |
 | `apps/builder/__tests__/capi-ads-pages.test.tsx` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
@@ -355,7 +355,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/filter-value-labels.test.ts` | B | - | todo | Contact filters and segments; builder jsdom |
 | `apps/builder/__tests__/find-contact-inbox-by-channel.test.ts` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/__tests__/find-qr-code-query.test.ts` | C | tbd | todo | Public links (open-link, QR codes, reflinks); builder server code |
-| `apps/builder/__tests__/fix-whatsapp-calls-subscription-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/fix-whatsapp-calls-subscription-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/flow-button-edge-read-only.test.tsx` | B | - | todo | Flow builder and execution; builder jsdom |
 | `apps/builder/__tests__/flow-export-route.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/flow-node-toolbar-read-only.test.tsx` | B | - | todo | Flow builder and execution; builder jsdom |
@@ -369,15 +369,15 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/format-call-duration.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/format-error-content.test.ts` | B | - | todo | Builder app shell and shared components; builder jsdom |
 | `apps/builder/__tests__/full-bleed.test.tsx` | B | - | todo | Builder app shell and shared components; builder jsdom |
-| `apps/builder/__tests__/generate-call-ai-summary-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/generate-call-ai-summary-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/generate-call-summary.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/get-call-recording-url-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/get-call-summary-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/get-call-transcript-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/get-call-recording-url-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/get-call-summary-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/get-call-transcript-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/get-contact.query.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/get-inbox-initial-state.test.ts` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
-| `apps/builder/__tests__/get-outbound-voip-answer-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/get-pending-incoming-voip-call-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/get-outbound-voip-answer-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/get-pending-incoming-voip-call-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/get-post-details-query.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
 | `apps/builder/__tests__/get-user-data-menu-default.test.ts` | B | - | todo | Get user data webview; builder jsdom |
 | `apps/builder/__tests__/get-user-data-webview-calendar-grid.test.ts` | B | - | todo | Get user data webview; builder jsdom |
@@ -477,8 +477,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/leaderboards-admin-ui.test.tsx` | B | - | todo | Leaderboards; builder jsdom |
 | `apps/builder/__tests__/list-broadcasts-for-calendar.test.ts` | C | tbd | todo | Broadcasts (incl. recurring); builder server code |
 | `apps/builder/__tests__/list-broadcasts-query.test.ts` | C | tbd | todo | Broadcasts (incl. recurring); builder server code |
-| `apps/builder/__tests__/list-call-filter-options-query.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/list-call-summary-providers-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/list-call-filter-options-query.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/list-call-summary-providers-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/list-contact-appointments-api.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/list-contact-fields-iso.test.ts` | C | tbd | todo | Custom fields; builder server code |
 | `apps/builder/__tests__/list-conversations-ad-referral.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking; builder server code |
@@ -486,8 +486,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/list-my-workspaces-api.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/list-questionnaires-for-flow-api.test.ts` | C | tbd | todo | Questionnaires; builder server code |
 | `apps/builder/__tests__/list-selectable-resources.test.ts` | C | tbd | todo | Template marketplace (install/share/sync); builder server code |
-| `apps/builder/__tests__/list-whatsapp-calls-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/list-whatsapp-calls-query.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/list-whatsapp-calls-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/list-whatsapp-calls-query.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/load-servable-workspace.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/magic-link-route.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
 | `apps/builder/__tests__/magic-links-public-api.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
@@ -918,14 +918,14 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/webshop-shop-locale.test.ts` | C | tbd | todo | Ecommerce: webshop storefront; builder server code |
 | `apps/builder/__tests__/webshop-shop-session.test.ts` | C | tbd | todo | Ecommerce: webshop storefront; builder server code |
 | `apps/builder/__tests__/whatsapp-account-health-page.test.tsx` | C | tbd | todo | WhatsApp channel; builder server code |
-| `apps/builder/__tests__/whatsapp-answer-voip-call-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-answer-voip-call-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-blocked-outbound-countries.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-call-ai-summary-dialog.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
-| `apps/builder/__tests__/whatsapp-call-announcement-options.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-call-announcement-options.test.ts` | C | `crates/business/tests/whatsapp_call_announcement_options.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-call-announcement-validation-error.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-call-card-real-store.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/whatsapp-call-card.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
-| `apps/builder/__tests__/whatsapp-call-hours-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-call-hours-action.test.ts` | C | `crates/business/tests/whatsapp_call_hours.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-call-hours-section.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/whatsapp-call-hours.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder node-env, client logic |
 | `apps/builder/__tests__/whatsapp-call-info-sheet.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
@@ -935,7 +935,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/whatsapp-call-recording-upload-route.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-calling-preflight-messaging-limit.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-calling-preflight.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
-| `apps/builder/__tests__/whatsapp-calling-public-api.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-calling-public-api.test.ts` | C | `crates/api/tests/whatsapp_calling_public_api.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-calling-settings-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-calls-card.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/whatsapp-calls-public-api.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
@@ -955,29 +955,29 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/whatsapp-effective-calling-settings.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/whatsapp-embedded-signup-auto-connect.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-embedded-signup.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
-| `apps/builder/__tests__/whatsapp-end-voip-call-as-agent.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-end-voip-call-as-agent.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-flow-file-mappings.test.tsx` | B | - | todo | WhatsApp Flows (forms); builder jsdom |
 | `apps/builder/__tests__/whatsapp-flow-response-dialog.test.tsx` | B | - | todo | WhatsApp Flows (forms); builder jsdom |
 | `apps/builder/__tests__/whatsapp-flow-response.test.ts` | C | tbd | todo | WhatsApp Flows (forms); builder server code |
 | `apps/builder/__tests__/whatsapp-flows-public-api.test.ts` | C | tbd | todo | WhatsApp Flows (forms); builder server code |
-| `apps/builder/__tests__/whatsapp-hangup-voip-call-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/whatsapp-heartbeat-active-voip-call-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/whatsapp-initiate-outbound-voip-call-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-hangup-voip-call-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-heartbeat-active-voip-call-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-initiate-outbound-voip-call-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-manual-webhook-route.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
-| `apps/builder/__tests__/whatsapp-meta-call-permission.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-meta-call-permission.test.ts` | C | `crates/business/tests/whatsapp_meta_call_permission.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-oauth-callback-outcome.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/whatsapp-oauth-popup-cancel.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-oauth-relay.test.ts` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-onboarding-result-done.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
-| `apps/builder/__tests__/whatsapp-outbound-voip-turn-credentials-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-outbound-voip-turn-credentials-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-payment-settings-public-api.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-permission-status.test.ts` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-phone-verification-queue.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-public-api-lib.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-reconnect-action.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-reconnect-button.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
-| `apps/builder/__tests__/whatsapp-request-call-permission-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/whatsapp-resolve-outbound-call-mode-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-request-call-permission-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-resolve-outbound-call-mode-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-ringing-calls-list.test.tsx` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/whatsapp-settings-actions.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-template-preview-substitute.test.ts` | B | - | todo | WhatsApp message templates; builder jsdom |
@@ -989,7 +989,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/whatsapp-voip-call-hangup-route.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-voip-call-store.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
 | `apps/builder/__tests__/whatsapp-voip-ringtone.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
-| `apps/builder/__tests__/whatsapp-voip-turn-credentials-action.test.ts` | C | tbd | todo | WhatsApp calling (VoIP); builder server code |
+| `apps/builder/__tests__/whatsapp-voip-turn-credentials-action.test.ts` | C | `crates/business/tests/whatsapp_voip_turn_credentials.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/woocommerce-public-api.test.ts` | C | tbd | todo | WooCommerce integration; builder server code |
 | `apps/builder/__tests__/worker-only-business-subpaths.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/working-hours-actions.test.ts` | C | tbd | todo | Working hours; builder server code |
@@ -2536,14 +2536,14 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/whatsapp-call-lifecycle-service.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/business/__tests__/whatsapp-call-permission-service.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/business/__tests__/whatsapp-call-recording-service.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/business/__tests__/whatsapp-call-ring-targets.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
+| `packages/business/__tests__/whatsapp-call-ring-targets.test.ts` | C | `crates/business/tests/whatsapp_call_ring_targets.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/business/__tests__/whatsapp-call-summary-service.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/business/__tests__/whatsapp-call-voip-call-service.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
+| `packages/business/__tests__/whatsapp-call-voip-call-service.test.ts` | C | `crates/business/tests/whatsapp_call_voip_call_service.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/business/__tests__/whatsapp-flow-response-service.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
 | `packages/business/__tests__/whatsapp-integration.service.connect-phone.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/business/__tests__/whatsapp-integration.service.set-coexist.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `packages/business/__tests__/whatsapp-message-template-list.test.ts` | C | tbd | todo | WhatsApp message templates |
-| `packages/business/__tests__/whatsapp-voip-sdp.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
+| `packages/business/__tests__/whatsapp-voip-sdp.test.ts` | C | `crates/business/tests/whatsapp_voip_sdp.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/business/__tests__/with-blocked-owner-guard.test.ts` | C | tbd | todo | Business layer shared services |
 | `packages/business/__tests__/working-hours-date-overrides.test.ts` | C | tbd | todo | Working hours |
 | `packages/business/__tests__/working-hours-duration.test.ts` | C | tbd | todo | Working hours |
@@ -2776,7 +2776,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/integration/statement-timeout.test.ts` | C | `crates/db/tests/integration_statement_timeout.rs` | passing | Database (Drizzle, schema, repositories, sharding); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/template-installed-resource-kinds.test.ts` | C | tbd | baseline-skip | Template marketplace (install/share/sync); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/thread-control-guarded-update.test.ts` | C | tbd | baseline-skip | Thread control (handover protocol); P0.3: needs Postgres/Redis, not run — run in P0.7 |
-| `packages/database/__tests__/integration/whatsapp-call-recording-retention.test.ts` | C | tbd | baseline-skip | WhatsApp calling (VoIP); P0.3: needs Postgres/Redis, not run — run in P0.7 |
+| `packages/database/__tests__/integration/whatsapp-call-recording-retention.test.ts` | C | `crates/db/tests/repo_integration_whatsapp_call_recording_retention.rs` | ported | WhatsApp calling (VoIP); P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/working-hours-constraints.test.ts` | C | `crates/db/tests/integration_working_hours_constraints.rs` | passing | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/working-hours-contact-filter.test.ts` | C | tbd | baseline-skip | Contact filters and segments; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/working-hours-date-overrides.test.ts` | C | tbd | baseline-skip | Working hours; P0.3: needs Postgres/Redis, not run — run in P0.7 |
@@ -2820,10 +2820,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/trigger-repository.test.ts` | C | `crates/db/tests/repo_trigger_repository.rs` | ported | Triggers; P3.3 (see specs/P3.3-test-map.tsv) |
 | `packages/database/__tests__/user-repository.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
 | `packages/database/__tests__/whatsapp-business-account-repository.test.ts` | C | tbd | todo | WhatsApp channel |
-| `packages/database/__tests__/whatsapp-call-display-outcome.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/database/__tests__/whatsapp-call-list-for-workspace.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/database/__tests__/whatsapp-call-outcome.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/database/__tests__/whatsapp-call-repository.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
+| `packages/database/__tests__/whatsapp-call-display-outcome.test.ts` | C | `crates/db/tests/partials_whatsapp_call_display_outcome.rs` | ported | WhatsApp calling (VoIP) |
+| `packages/database/__tests__/whatsapp-call-list-for-workspace.test.ts` | C | `crates/db/tests/repo_whatsapp_call_list_for_workspace.rs` | ported | WhatsApp calling (VoIP) |
+| `packages/database/__tests__/whatsapp-call-outcome.test.ts` | C | `crates/db/tests/partials_whatsapp_call_outcome.rs` | ported | WhatsApp calling (VoIP) |
+| `packages/database/__tests__/whatsapp-call-repository.test.ts` | C | `crates/db/tests/repo_whatsapp_call_repository.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-call-workspace-fk-cascade.test.ts` | C | `crates/db/tests/whatsapp_call_workspace_fk_cascade.rs` | passing | WhatsApp calling (VoIP) |
 | `packages/database/__tests__/whatsapp-credential-schema.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/database/__tests__/whatsapp-signup-session-repository.test.ts` | C | tbd | todo | WhatsApp channel |
@@ -3023,7 +3023,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/ui/src/hooks/__tests__/create-debounced-fn.test.ts` | B | - | todo | UI component library; frontend package |
 | `packages/ui/src/hooks/__tests__/use-debounced-callback.test.tsx` | B | - | todo | UI component library; frontend package |
 | `packages/ui/src/lib/__tests__/format.test.ts` | B | - | todo | UI component library; frontend package |
-| `packages/utils/__tests__/call-capable-channels.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
+| `packages/utils/__tests__/call-capable-channels.test.ts` | C | `crates/core/tests/utils_call_capable_channels.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/utils/__tests__/coexist-channels.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `packages/utils/__tests__/concurrency.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics |
 | `packages/utils/__tests__/connection.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -3068,8 +3068,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/utils/__tests__/temporal-storage.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/utils/__tests__/thread-control-channels.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `packages/utils/__tests__/web-url.test.ts` | C | tbd | todo | Utils (shared helpers) |
-| `packages/utils/__tests__/whatsapp-call-hours.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
-| `packages/utils/__tests__/whatsapp-call.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
+| `packages/utils/__tests__/whatsapp-call-hours.test.ts` | C | `crates/core/tests/utils_whatsapp_call_hours.rs` | ported | WhatsApp calling (VoIP) |
+| `packages/utils/__tests__/whatsapp-call.test.ts` | C | `crates/core/tests/utils_whatsapp_call.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/utils/__tests__/zod.test.ts` | C | tbd | todo | Utils (shared helpers) |
 | `packages/variables/__tests__/assigned-helpers.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |
 | `packages/variables/__tests__/bot-field-variable.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |

@@ -23,7 +23,16 @@ pub trait PresenceSink: Send + Sync {
         workspace_id: &'a str,
         user_ids: &'a [String],
     ) -> BoxFuture<'a, Result<(), BoxError>>;
+
+    /// `workspacePresenceService.listOnlineMembers`: the live user ids,
+    /// most recently renewed first (none for a sink that keeps no state).
+    fn online_members(&self, _workspace_id: &str) -> Vec<String> {
+        Vec::new()
+    }
 }
+
+/// `LIST_ONLINE_MEMBERS_LIMIT` of the presence scan.
+pub const ONLINE_MEMBERS_SCAN_LIMIT: usize = 200;
 
 /// A sink that drops every report.
 #[derive(Debug, Default, Clone, Copy)]
@@ -65,6 +74,13 @@ impl PresenceSink for KvPresence {
             PRESENCE_TTL_MS,
         );
         Box::pin(async { Ok(()) })
+    }
+
+    fn online_members(&self, workspace_id: &str) -> Vec<String> {
+        self.kv.presence.live_members(
+            &workspace_presence_key(workspace_id),
+            ONLINE_MEMBERS_SCAN_LIMIT,
+        )
     }
 }
 

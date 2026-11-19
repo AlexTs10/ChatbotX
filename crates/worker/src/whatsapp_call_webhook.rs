@@ -3,9 +3,9 @@
 //! and `enqueueNativeCallCapture`): one `whatsappCallEvent` job per call event,
 //! and the native recording / transcript fetch jobs.
 //!
-//! ponytail: the VoIP connect signalling (`captureConnectOffer`,
-//! `rejectUnprocessableConnect`, `captureOutboundAnswer`) is not ported, so a
-//! session SDP is never read past its validity check. Optional fields of the
+//! The VoIP connect signalling (`enqueueVoipConnectSignaling`) reads the
+//! session SDP here, at the webhook boundary: it goes to the durable kv, never
+//! into a job. Optional fields of the
 //! wrong JSON type read as absent (zod fails the whole `calls` value). The
 //! native fetch jobs carry no `whatsappCallId`; the job resolves the row by
 //! wacid, as the original does for a not-yet-created row.
@@ -480,6 +480,172 @@ pub fn call_jobs(body: &Value, pinned: Option<&str>) -> Vec<CallJob> {
         }
     }
     jobs
+}
+
+/// `CONNECT_TIMESTAMP_TOLERANCE_MS`.
+const CONNECT_TIMESTAMP_TOLERANCE_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// `metaTimestampToEpochMs`: Meta's unix seconds, `None` when missing or
+/// implausible (more than a day from `now`).
+pub fn meta_timestamp_ms(timestamp: Option<&str>, now: i64) -> Option<i64> {
+    let seconds = timestamp?.trim().parse::<f64>().ok()?;
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return None;
+    }
+    let ms = (seconds * 1000.0) as i64;
+    ((ms - now).abs() <= CONNECT_TIMESTAMP_TOLERANCE_MS).then_some(ms)
+}
+
+/// One VoIP signal of a `calls` delivery.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VoipSignal {
+    /// An inbound connect with a valid offer (`captureConnectOffer`).
+    Offer {
+        wacid: String,
+        sdp: String,
+        phone_number_id: String,
+        received_at: Option<i64>,
+    },
+    /// An inbound connect with an invalid offer (`rejectUnprocessableConnect`).
+    Unprocessable {
+        wacid: String,
+        phone_number_id: String,
+        received_at: Option<i64>,
+    },
+    /// The customer's answer to our dial (`captureOutboundAnswer`).
+    Answer {
+        attempt_id: String,
+        wacid: String,
+        sdp: String,
+    },
+}
+
+/// The VoIP signals of one delivery, for the route-pinned number only.
+pub fn voip_signals(body: &Value, pinned: Option<&str>, now: i64) -> Vec<VoipSignal> {
+    let mut out = Vec::new();
+    let changes = body
+        .get("entry")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("changes").and_then(Value::as_array))
+        .flatten()
+        .filter(|c| c.get("field").and_then(Value::as_str) == Some("calls"));
+    for change in changes {
+        let value = &change["value"];
+        let Some(phone) = value
+            .pointer("/metadata/phone_number_id")
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        if pinned.is_some_and(|p| p != phone) {
+            continue;
+        }
+        for item in value
+            .get("calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let event = item.get("event").and_then(Value::as_str);
+            if !matches!(event, Some("connect" | "call_created")) {
+                continue;
+            }
+            let (Some(wacid), Some(dir)) = (s(item, "id"), direction(item)) else {
+                continue;
+            };
+            let outbound = dir == "businessInitiated";
+            let session = item.get("session");
+            let valid = session_valid(session, if outbound { "answer" } else { "offer" });
+            let sdp = || {
+                session
+                    .and_then(|v| v.get("sdp"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            if outbound {
+                if valid == Some(true) {
+                    let attempt_id = s(item, "biz_opaque_callback_data").unwrap_or_default();
+                    if attempt_id.is_empty() {
+                        tracing::warn!(
+                            phone_number_id = phone,
+                            wacid,
+                            "Whatsapp outbound answer: bizOpaqueCallbackData missing; falling back to wacid lookup"
+                        );
+                    }
+                    out.push(VoipSignal::Answer {
+                        attempt_id,
+                        wacid,
+                        sdp: sdp(),
+                    });
+                }
+                continue;
+            }
+            let received_at = meta_timestamp_ms(str_or_num(item, "timestamp").as_deref(), now);
+            match valid {
+                Some(true) => out.push(VoipSignal::Offer {
+                    wacid,
+                    sdp: sdp(),
+                    phone_number_id: phone.to_owned(),
+                    received_at,
+                }),
+                Some(false) => out.push(VoipSignal::Unprocessable {
+                    wacid,
+                    phone_number_id: phone.to_owned(),
+                    received_at,
+                }),
+                None => {}
+            }
+        }
+    }
+    out
+}
+
+/// `enqueueVoipConnectSignaling`: failures propagate so Meta redelivers.
+pub async fn capture_voip_signals(
+    db: &std::sync::Arc<chatbotx_db::Db>,
+    jobs: &dyn chatbotx_jobs::Enqueuer,
+    body: &Value,
+    pinned: Option<&str>,
+) -> Result<(), String> {
+    use chatbotx_business::whatsapp_voip as voip;
+    let signals = voip_signals(body, pinned, chatbotx_db::repo::now_ms());
+    if signals.is_empty() {
+        return Ok(());
+    }
+    let store = voip::VoipStore::new(db.clone());
+    for signal in signals {
+        let result = match &signal {
+            VoipSignal::Offer {
+                wacid,
+                sdp,
+                phone_number_id,
+                received_at,
+            } => {
+                voip::capture_connect_offer(&store, jobs, wacid, sdp, phone_number_id, *received_at)
+                    .await
+            }
+            VoipSignal::Unprocessable {
+                wacid,
+                phone_number_id,
+                received_at,
+            } => {
+                voip::reject_unprocessable_connect(jobs, wacid, phone_number_id, *received_at).await
+            }
+            VoipSignal::Answer {
+                attempt_id,
+                wacid,
+                sdp,
+            } => voip::capture_outbound_answer(db, &store, jobs, attempt_id, wacid, sdp).await,
+        };
+        if let Err(error) = result {
+            tracing::error!(err = %error.message(), ?signal, "Whatsapp VoIP connect signaling enqueue failed");
+            return Err(error.message());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

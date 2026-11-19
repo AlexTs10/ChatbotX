@@ -6,6 +6,7 @@ mod mini_apps;
 mod web;
 mod webchat;
 mod whatsapp;
+mod whatsapp_voip_routes;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -320,6 +321,12 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
                 auth: Arc::clone(&sessions),
                 api: Arc::clone(&api),
                 is_cloud: is_cloud(),
+            },
+        ))
+        .merge(whatsapp_voip_routes::router(
+            whatsapp_voip_routes::VoipRouteState {
+                auth: Arc::clone(&sessions),
+                api: Arc::clone(&api),
             },
         ))
         .merge(auth_routes)

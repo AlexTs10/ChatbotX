@@ -38,6 +38,8 @@ pub const PORTED: &[&str] = &[
     "dispatchMarketingMessages",
     "finalizeMarketingMessages",
     "redispatchTemplateJobs",
+    "sweepStaleWhatsappCalls",
+    "purgeExpiredCallRecordings",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -92,6 +94,14 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         "cleanupWebhookExecutions" => {
             crate::datetime_sweep::cleanup(&deps, true).await?;
+            Value::Null
+        }
+        "sweepStaleWhatsappCalls" => {
+            crate::whatsapp_voip::sweep_stale_whatsapp_calls(&deps).await?;
+            Value::Null
+        }
+        "purgeExpiredCallRecordings" => {
+            crate::whatsapp_voip::purge_expired_call_recordings(&deps).await?;
             Value::Null
         }
         "redispatchTemplateJobs" => {

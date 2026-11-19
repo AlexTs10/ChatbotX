@@ -274,6 +274,7 @@ async fn request_call_permission(state: &ApiState, call: Call<'_>) -> Reply {
         text.unwrap_or_default(),
         inbox_id,
         &whatsapp::ENGLISH_CALL_PERMISSION_MESSAGES,
+        None,
     )
     .await
     .map_err(|e| business_error(e, MUTATING))?;

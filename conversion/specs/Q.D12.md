@@ -58,12 +58,8 @@ the conversations thread-control cases. Not run in this unit.
 
 ## Left
 
-- WhatsApp calls: the call-event worker, native recording / transcript
-  fetch, `whatsappCallRecordingReady`, `transcribeCall` and
-  `whatsappCalls.generateSummary` are ported (follow-up 2). Left: the
-  `whatsappCalling.*` routes, the VoIP actions and signalling (WebRTC SDP,
-  `whatsappVoipSignaling` queue, Redis control record, agent realtime hints)
-  and the inbox summary server action in `apps/web`.
+- WhatsApp calls: done (see "WhatsApp calling (Q.D12-calls)" below); what
+  is left there is listed in that section.
 - Coexist: `coexistAttachmentDownload` (WhatsApp media only) and
   `coexistMessengerSync` are ported. Left: `coexistInstagramSync` (the
   scheduler queues it; the job fails as an undefined action) and the
@@ -78,3 +74,47 @@ the conversations thread-control cases. Not run in this unit.
   WhatsApp channel list / connect screens). The inbox thread-control buttons
   and the flow-editor template / Flow option lists already exist and now get
   real data.
+
+## WhatsApp calling (Q.D12-calls)
+
+Branch `feat/conversion-r2-wacall`. Done:
+
+| Part | Rust | Original |
+|------|------|----------|
+| VoIP signalling: offer / answer SDP captured at the webhook boundary, the durable-kv control record (reserve, claim, commit, release, end, heartbeat, stale sweep), ring targets, agent realtime hints, TURN credentials | `business::whatsapp_voip`, `worker::whatsapp_voip`, `worker::whatsapp_call_webhook` (`voip_signals`), `rt::Realtime::online_members` | `packages/business/src/whatsapp-call/voip-*`, `apps/worker/src/integration/handlers/whatsapp-voip-signaling.ts` |
+| Server actions: answer, initiate outbound, hangup, heartbeat, outbound answer, pending incoming, TURN (both), resolve outbound mode, request call permission, calling settings, call hours, fix calls subscription | `business::whatsapp_voip_actions`, `api::rpc_procedures::whatsapp_calls` | `features/integration-whatsapp/calling/actions/*` |
+| Inbox call-summary actions: `getCallSummaryAction`, `generateCallAiSummaryAction`, `getCallTranscriptAction`, `listCallSummaryProvidersAction`, `getCallRecordingUrlAction` | `api::rpc_procedures::whatsapp_calls` (reuses `api::handlers::whatsapp_calls`) | `features/messages/actions/*call*` |
+| `/v1 whatsappChannels.getCallingSettings` / `updateCallingSettings` / `updateCallHours` | `api::handlers::whatsapp_calling` | `calling/api/public.ts` |
+| `POST /api/whatsapp-voip-call-hangup` (beacon), `POST /api/whatsapp-call-recording` (browser recording upload -> `whatsappCallRecordingReady`) | `server::whatsapp_voip_routes` | `app/api/whatsapp-*/route.ts` |
+| Calls screen `/space/$workspaceId/calls` (`callsPage`, `listWhatsappCallsAction`) and the channel tab `whatsapps/$id/calls` (`whatsappCallsPage`) | `apps/web/src/routes/calls.tsx` | `app/space/[workspaceId]/calls`, `(integrations)/whatsapps/[id]/calls` |
+
+The in-inbox call UI (`calling/voip/*`, `whatsapp-call-card`, summary dialog)
+was already copied to `apps/web`; its action stubs now reach the Rust actions.
+
+Security: every action checks the member like the builder (`requireCallingAccess`
+= contacts or only-assigned contacts, admin actions = workspace super admin,
+history = contacts or analytics, artifacts = `canReadCall`); the conversation /
+call / integration is read inside the workspace. The beacon and recording routes
+refuse cross-site requests (403) and signed-out users (401), then check the
+membership. The TURN actions keep the 10 / min limit per user. Graph calls go
+to the fixed Graph URL; the app secret is read with `chatbotx_core::encryption`.
+
+Tests: `crates/business/tests/whatsapp_{call_ring_targets,voip_sdp,call_announcement_options,meta_call_permission,call_voip_call_service,voip_turn_credentials,call_hours}.rs`,
+`crates/api/tests/whatsapp_calling_{actions,public_api}.rs` (TEST_MAP rows set to `ported`).
+
+Parity suites to run (not run here): p1-10 (`10-inboxes`, `30-integrations`)
+and p1-11 (`42-messages-whatsapp`); no parity suite drives calls yet.
+
+Left (and why):
+
+- ICE diagnostics (`ice-candidate-summary`) and the provider-error log
+  (`logProviderErrorForChannel`): logging only, no behaviour.
+- The 5-minute calling-settings cache and the 60 s permission cache: every
+  read goes to Meta (correct, slower).
+- The owner-quota check of the recording route: no owner quota outside cloud.
+- Worker / service test files (`whatsapp-call-handler`, `-finalize`,
+  `-native-*`, `-transcribe`, `-recording`, `-permission-grant`,
+  `sweep-stale-whatsapp-calls`, `whatsapp-voip-signaling`, the business
+  `whatsapp-call-*-service` files): the code is ported; the tests are not yet
+  ported (TEST_MAP rows stay `todo`).
+- No Rust test drives the beacon / recording routes yet (`crates/server`).

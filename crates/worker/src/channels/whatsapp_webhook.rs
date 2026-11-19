@@ -490,6 +490,7 @@ fn standby_jobs(
 
 /// Queues the jobs of one verified delivery (`REDELIVERABLE_JOB_OPTIONS`).
 pub async fn enqueue_webhook_jobs(
+    db: &Arc<Db>,
     jobs: &dyn Enqueuer,
     body: &[u8],
     pinned: Option<&str>,
@@ -504,6 +505,8 @@ pub async fn enqueue_webhook_jobs(
             .await
             .map_err(|e| e.to_string())?;
     }
+    // Then the VoIP connect signalling (`enqueueVoipConnectSignaling`).
+    crate::whatsapp_call_webhook::capture_voip_signals(db, jobs, &parsed, pinned).await?;
     for job in webhook_jobs(&parsed, pinned) {
         jobs.add(
             QueueName::Integration,
@@ -608,7 +611,7 @@ pub async fn manual_webhook(
         );
         return json_reply(401, "Whatsapp webhook signature verification failed");
     }
-    match enqueue_webhook_jobs(jobs, body, Some(&row.phone_number_id)).await {
+    match enqueue_webhook_jobs(db, jobs, body, Some(&row.phone_number_id)).await {
         Ok(()) => WebhookReply {
             status: 200,
             content_type: "text/plain;charset=UTF-8",
@@ -727,7 +730,7 @@ pub async fn platform_webhook(
         );
         return json_reply(401, "Whatsapp webhook signature verification failed");
     }
-    match enqueue_webhook_jobs(jobs, request.body, None).await {
+    match enqueue_webhook_jobs(db, jobs, request.body, None).await {
         Ok(()) => WebhookReply {
             status: 200,
             content_type: "text/plain;charset=UTF-8",

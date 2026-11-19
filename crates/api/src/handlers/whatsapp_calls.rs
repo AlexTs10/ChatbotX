@@ -35,7 +35,7 @@ pub const ROUTES: &[&str] = &[
 
 /// `aiProviders` with `PROVIDER_LABELS` and the integration table
 /// (`listConnectedCallSummaryProviders`; `openaiCompatible` is left out).
-const SUMMARY_PROVIDERS: [(&str, &str, &str); 6] = [
+pub(crate) const SUMMARY_PROVIDERS: [(&str, &str, &str); 6] = [
     ("openai", "OpenAI", "IntegrationOpenai"),
     ("gemini", "Gemini", "IntegrationGemini"),
     ("claude", "Claude", "IntegrationClaude"),
@@ -98,7 +98,7 @@ pub fn call_kind(status: &str, outcome: Option<&str>, direction: &str) -> Option
     })
 }
 
-fn row_json(row: &WhatsappCallListRow) -> Value {
+pub(crate) fn row_json(row: &WhatsappCallListRow) -> Value {
     let call = &row.call;
     let user = |u: &Option<calls::CallUser>| {
         u.as_ref().map_or(
@@ -224,62 +224,20 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "whatsappCalls.list" => list(state, call).await,
         "whatsappCalls.getRecording" => {
             let id = id_input(&call)?;
-            let path = tx::read(&state.db, move |c| {
-                Ok(calls::find_by_id_for_workspace(c, id, ws)?)
-            })
-            .await
-            .map_err(|e| business_error(e, FINDING))?
-            .and_then(|c| c.recording_path)
-            .filter(|p| !p.is_empty())
-            .ok_or_else(|| {
-                business_error(
-                    BusinessError::not_found("Call recording not found"),
-                    FINDING,
-                )
-            })?;
-            let files = state
-                .files
-                .as_ref()
-                .ok_or_else(|| internal_error("file store is off"))?;
-            let url = files
-                .get_presigned_download(&path, Some(RECORDING_URL_TTL_SECONDS))
+            recording_url(state, ws, id, FINDING)
                 .await
-                .map_err(|e| internal_error(&e.to_string()))?;
-            Ok(json(200, json!({ "url": url })))
+                .map(|url| json(200, json!({ "url": url })))
         }
         "whatsappCalls.getTranscript" => {
             let id = id_input(&call)?;
-            let run = async {
-                let found = load_call(state, ws, id).await?;
-                let segments: Vec<Value> = found
-                    .transcript_segments
-                    .as_ref()
-                    .and_then(|s| s.0.as_array().cloned())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|s| json!({ "speaker": s["speaker"], "start": s["start"], "end": s["end"], "text": s["text"] }))
-                    .collect();
-                let has_speakers = segments
-                    .iter()
-                    .any(|s| s["speaker"].as_str().is_some_and(|v| !v.is_empty()));
-                let names = speaker_names(state, &found).await?;
-                Ok(
-                    json!({ "segments": segments, "speakerNames": names, "hasSpeakers": has_speakers }),
-                )
-            };
-            run.await
+            transcript(state, ws, id)
+                .await
                 .map(|out| json(200, out))
                 .map_err(|e| business_error(e, FINDING))
         }
-        "whatsappCalls.listSummaryProviders" => connected_providers(state, ws)
+        "whatsappCalls.listSummaryProviders" => providers_json(state, ws)
             .await
-            .map(|providers| {
-                let providers: Vec<Value> = providers
-                    .iter()
-                    .map(|(id, provider, label)| json!({ "id": id.to_string(), "provider": provider, "label": label }))
-                    .collect();
-                json(200, json!({ "providers": providers }))
-            })
+            .map(|providers| json(200, json!({ "providers": providers })))
             .map_err(|e| business_error(e, LISTING)),
         "whatsappCalls.generateSummary" => generate_summary(state, call).await,
         _ => {
@@ -294,6 +252,70 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .map_err(|e| business_error(e, FINDING))
         }
     }
+}
+
+/// `callRecordingService.getRecordingUrlForCall`: a 15-minute signed URL.
+pub(crate) async fn recording_url(
+    state: &ApiState,
+    ws: i64,
+    id: i64,
+    errors: ErrorMap,
+) -> Result<String, crate::orpc::OrpcError> {
+    let path = tx::read(&state.db, move |c| {
+        Ok(calls::find_by_id_for_workspace(c, id, ws)?)
+    })
+    .await
+    .map_err(|e| business_error(e, errors))?
+    .and_then(|c| c.recording_path)
+    .filter(|p| !p.is_empty())
+    .ok_or_else(|| business_error(BusinessError::not_found("Call recording not found"), errors))?;
+    let files = state
+        .files
+        .as_ref()
+        .ok_or_else(|| internal_error("file store is off"))?;
+    files
+        .get_presigned_download(&path, Some(RECORDING_URL_TTL_SECONDS))
+        .await
+        .map_err(|e| internal_error(&e.to_string()))
+}
+
+/// `whatsappCallTranscriptService.getTranscriptForCall`.
+pub(crate) async fn transcript(state: &ApiState, ws: i64, id: i64) -> Result<Value, BusinessError> {
+    let found = load_call(state, ws, id).await?;
+    let segments: Vec<Value> = found
+        .transcript_segments
+        .as_ref()
+        .and_then(|s| s.0.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| json!({ "speaker": s["speaker"], "start": s["start"], "end": s["end"], "text": s["text"] }))
+        .collect();
+    let has_speakers = segments
+        .iter()
+        .any(|s| s["speaker"].as_str().is_some_and(|v| !v.is_empty()));
+    let names = speaker_names(state, &found).await?;
+    Ok(json!({ "segments": segments, "speakerNames": names, "hasSpeakers": has_speakers }))
+}
+
+/// `listConnectedCallSummaryProviders` as JSON options.
+pub(crate) async fn providers_json(state: &ApiState, ws: i64) -> Result<Vec<Value>, BusinessError> {
+    Ok(connected_providers(state, ws)
+        .await?
+        .iter()
+        .map(|(id, provider, label)| json!({ "id": id.to_string(), "provider": provider, "label": label }))
+        .collect())
+}
+
+/// `whatsappCallSummaryService.getSummaryForCall`: `None` = no summary yet.
+pub(crate) async fn summary_for_call(
+    state: &ApiState,
+    ws: i64,
+    id: i64,
+) -> Result<Option<Value>, BusinessError> {
+    let found = load_call(state, ws, id).await?;
+    Ok(found.ai_summary.map(|s| s.0).filter(|s| !s.is_null()).map(
+        |summary| json!({ "aiSummary": summary, "aiSummaryProvider": found.ai_summary_provider }),
+    ))
 }
 
 /// `listConnectedCallSummaryProviders`: (integration id, provider, label).
@@ -353,7 +375,7 @@ async fn generate_summary(state: &ApiState, call: Call<'_>) -> Reply {
 
 /// `generateCallSummaryForCall`: transcript, provider, the 120 s generate
 /// lock, `generateCallSummary`, `attachSummary`.
-async fn generate_call_summary(
+pub(crate) async fn generate_call_summary(
     state: &ApiState,
     ws: i64,
     id: i64,
@@ -579,7 +601,41 @@ async fn list(state: &ApiState, call: Call<'_>) -> Reply {
     let agent_user_id = digits_at(&mut input, &key("agentUserId"), agent.as_ref(), false);
     let cursor = input.opt_string("cursor", Str::default());
     input.finish()?;
-    let cursor = match cursor.as_deref().filter(|c| !c.is_empty()) {
+    let filter = ListFilter {
+        activity,
+        inbox_id,
+        agent_user_id,
+        cursor,
+    };
+    let (rows, next) = list_calls(
+        state,
+        call.workspace_id,
+        WhatsappCallHistoryScope::AllCalls,
+        filter,
+    )
+    .await?;
+    Ok(json(
+        200,
+        json!({ "data": rows.iter().map(row_json).collect::<Vec<_>>(), "nextCursor": next }),
+    ))
+}
+
+/// The list inputs of `whatsappCallHistoryService.list`.
+pub(crate) struct ListFilter {
+    pub activity: Option<String>,
+    pub inbox_id: Option<i64>,
+    pub agent_user_id: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// `whatsappCallHistoryService.list`: one page and the next cursor.
+pub(crate) async fn list_calls(
+    state: &ApiState,
+    workspace_id: i64,
+    scope: WhatsappCallHistoryScope,
+    filter: ListFilter,
+) -> Result<(Vec<WhatsappCallListRow>, Option<String>), crate::orpc::OrpcError> {
+    let cursor = match filter.cursor.as_deref().filter(|c| !c.is_empty()) {
         Some(text) => Some(decode_cursor(text).ok_or_else(|| {
             business_error(
                 BusinessError::exception(
@@ -593,21 +649,21 @@ async fn list(state: &ApiState, call: Call<'_>) -> Reply {
         None => None,
     };
     // `CALL_ACTIVITY_FILTERS`.
-    let direction = match activity.as_deref() {
+    let direction = match filter.activity.as_deref() {
         Some("missed") => Some("userInitiated".to_owned()),
         Some(_) => Some("businessInitiated".to_owned()),
         None => None,
     };
     let filters = WhatsappCallListFilters {
-        outcome: activity.as_ref().map(|_| "failed".to_owned()),
+        outcome: filter.activity.as_ref().map(|_| "failed".to_owned()),
         direction,
-        inbox_id,
-        agent_user_id,
+        inbox_id: filter.inbox_id,
+        agent_user_id: filter.agent_user_id,
         ongoing: false,
     };
     let query = ListForWorkspaceInput {
-        workspace_id: call.workspace_id,
-        scope: WhatsappCallHistoryScope::AllCalls,
+        workspace_id,
+        scope,
         filters,
         cursor,
         limit: PAGE_SIZE + 1,
@@ -625,10 +681,7 @@ async fn list(state: &ApiState, call: Call<'_>) -> Reply {
             id: row.call.id,
         })
     });
-    Ok(json(
-        200,
-        json!({ "data": rows.iter().map(row_json).collect::<Vec<_>>(), "nextCursor": next }),
-    ))
+    Ok((rows, next))
 }
 
 #[cfg(test)]

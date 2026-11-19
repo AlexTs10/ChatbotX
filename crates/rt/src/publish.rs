@@ -278,6 +278,11 @@ impl Realtime {
         &self.inner.deps.clock
     }
 
+    /// The online member ids of a workspace (`listOnlineMembers`).
+    pub fn online_members(&self, workspace_id: &str) -> Vec<String> {
+        self.inner.deps.presence.online_members(workspace_id)
+    }
+
     pub fn hub(&self) -> &Arc<Hub> {
         &self.inner.hub
     }
