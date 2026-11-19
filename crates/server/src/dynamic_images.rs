@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Query, State};
+use axum::extract::{RawQuery, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -27,8 +27,17 @@ pub fn router(api: Arc<ApiState>, deps: chatbotx_worker::Deps) -> Router {
         .with_state(TriggerState { api, deps })
 }
 
+fn json_response(status: StatusCode, body: Value) -> Response {
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
 fn message(status: StatusCode, text: &str) -> Response {
-    (status, axum::Json(json!({ "message": text }))).into_response()
+    json_response(status, json!({ "message": text }))
 }
 
 fn redirect(url: &str) -> Response {
@@ -54,10 +63,11 @@ async fn servable(api: &ApiState, workspace_id: i64) -> bool {
     .unwrap_or(false)
 }
 
-async fn trigger(
-    State(state): State<TriggerState>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Response {
+async fn trigger(State(state): State<TriggerState>, RawQuery(query): RawQuery) -> Response {
+    let query: HashMap<String, String> =
+        url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
+            .into_owned()
+            .collect();
     let api = &state.api;
     let Some(image_id) = query.get("dynamicImageId").filter(|v| !v.is_empty()) else {
         return message(StatusCode::BAD_REQUEST, "dynamicImageId is required");
@@ -76,11 +86,10 @@ async fn trigger(
         return message(StatusCode::NOT_FOUND, "Dynamic image is disabled");
     }
     if !servable(api, row.workspace_id).await {
-        return (
+        return json_response(
             StatusCode::GONE,
-            axum::Json(json!({ "code": "workspaceScheduledDeletion" })),
-        )
-            .into_response();
+            json!({ "code": "workspaceScheduledDeletion" }),
+        );
     }
     let storage = chatbotx_api::handlers::contacts::tenant_urls(api).storage_url;
     let to_background = || match service::background_url(&row, &storage) {
