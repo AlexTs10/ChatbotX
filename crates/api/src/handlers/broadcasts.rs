@@ -668,8 +668,51 @@ fn id_of(value: &Value, name: &str) -> Option<i64> {
         .and_then(|s| s.parse().ok())
 }
 
+/// `listAudiencePreview` rows for the wire: the avatar resolved and
+/// `createdAt` renamed `occurredAt` (the public route and the private
+/// `contactsAPIs` procedure).
+pub(crate) async fn audience_preview(
+    state: &ApiState,
+    audience: AudienceInput,
+    page: Option<i64>,
+    per_page: Option<i64>,
+) -> chatbotx_business::Result<Vec<Value>> {
+    let ws = audience.workspace_id;
+    let rows = audience::list_audience_preview(
+        &state.db,
+        audience,
+        Some(page.unwrap_or(1)),
+        Some(per_page.unwrap_or(20)),
+    )
+    .await?;
+    let urls = tenant_urls(state);
+    Ok(rows
+        .into_iter()
+        .map(|mut row| {
+            // ponytail: the avatar resolves against this row's contact inbox only.
+            let inbox = AvatarInbox {
+                id: id_of(&row, "contactInboxId").unwrap_or_default(),
+                channel: row["channel"].as_str().unwrap_or_default().to_owned(),
+                last_message_at: None,
+            };
+            row["avatar"] = json!(resolve_contact_avatar_url(
+                ws,
+                row["avatar"].as_str(),
+                &[inbox],
+                &urls,
+                now_ms()
+            ));
+            if let Some(obj) = row.as_object_mut() {
+                let created = obj.remove("createdAt").unwrap_or(Value::Null);
+                obj.insert("occurredAt".into(), created);
+            }
+            row
+        })
+        .collect())
+}
+
 /// `previewBroadcastAudiencePublicRequest`.
-fn preview_input(
+pub(crate) fn preview_input(
     input: &mut Input,
     workspace_id: i64,
 ) -> (AudienceInput, Option<i64>, Option<i64>, Option<CountMode>) {
@@ -925,38 +968,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let counted = audience::count_audience(db, audience.clone(), mode)
                 .await
                 .map_err(|e| business_error(e, COUNTING))?;
-            let rows = audience::list_audience_preview(
-                db,
-                audience,
-                Some(page.unwrap_or(1)),
-                Some(per_page.unwrap_or(20)),
-            )
-            .await
-            .map_err(|e| business_error(e, COUNTING))?;
-            let urls = tenant_urls(state);
-            let data: Vec<Value> = rows
-                .into_iter()
-                .map(|mut row| {
-                    // ponytail: the avatar resolves against this row's contact inbox only.
-                    let inbox = AvatarInbox {
-                        id: id_of(&row, "contactInboxId").unwrap_or_default(),
-                        channel: row["channel"].as_str().unwrap_or_default().to_owned(),
-                        last_message_at: None,
-                    };
-                    row["avatar"] = json!(resolve_contact_avatar_url(
-                        ws,
-                        row["avatar"].as_str(),
-                        &[inbox],
-                        &urls,
-                        now_ms()
-                    ));
-                    if let Some(obj) = row.as_object_mut() {
-                        let created = obj.remove("createdAt").unwrap_or(Value::Null);
-                        obj.insert("occurredAt".into(), created);
-                    }
-                    row
-                })
-                .collect();
+            let data = audience_preview(state, audience, page, per_page)
+                .await
+                .map_err(|e| business_error(e, COUNTING))?;
             let mut out = Map::new();
             out.insert("total".into(), json!(counted.total));
             out.insert("totalCountCapped".into(), json!(counted.total_count_capped));

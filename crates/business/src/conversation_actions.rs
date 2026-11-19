@@ -118,19 +118,22 @@ pub async fn assign_one(
                 job: None,
             });
         };
-        Sql::new(
-            "UPDATE \"Conversation\" SET \"assignedUserId\" = ?1, \"assignedInboxTeamId\" = ?2, \
-             \"assignedUserAt\" = CASE WHEN ?1 IS NULL THEN NULL WHEN \"assignedUserId\" IS NOT ?1 THEN ?3 ELSE \"assignedUserAt\" END, \
-             \"updatedAt\" = ?3 WHERE \"workspaceId\" = ?4 AND \"id\" = ?5",
-            vec![
-                opt_int(user),
-                opt_int(team),
-                now.into(),
-                workspace_id.into(),
-                conversation_id.into(),
-            ],
-        )
-        .execute(conn)?;
+        // A reassignment recomputes the open window's SLA for the new agent.
+        crate::response_sla::track_window(conn, workspace_id, &[conversation_id], true, |c| {
+            Sql::new(
+                "UPDATE \"Conversation\" SET \"assignedUserId\" = ?1, \"assignedInboxTeamId\" = ?2, \
+                 \"assignedUserAt\" = CASE WHEN ?1 IS NULL THEN NULL WHEN \"assignedUserId\" IS NOT ?1 THEN ?3 ELSE \"assignedUserAt\" END, \
+                 \"updatedAt\" = ?3 WHERE \"workspaceId\" = ?4 AND \"id\" = ?5",
+                vec![
+                    opt_int(user),
+                    opt_int(team),
+                    now.into(),
+                    workspace_id.into(),
+                    conversation_id.into(),
+                ],
+            )
+            .execute(c)
+        })?;
         let ids = vec![conversation_id.to_string()];
         let event = Envelope::routed(
             EventType::ConversationAssigned,

@@ -290,3 +290,41 @@ async fn inbound_webhook_channels_list_every_channel_in_enum_order() {
     assert_eq!(out[2]["inboxIdentifiers"][0]["kind"], "pageId");
     assert_eq!(out[2]["channelUserId"]["kind"], "psid");
 }
+
+/// `describe("previewMapping")`: the shared extraction runs in the token's
+/// workspace and its result comes back as is; a bad config is a 422.
+#[tokio::test]
+async fn preview_mapping_runs_the_shared_extraction() {
+    let fx = fixture().await;
+    let input = json!({
+        "payload": { "page": "p-1", "email": " Ada@Example.COM ", "name": "Ada" },
+        "inboxResolution": { "mode": "payload", "channel": "messenger", "identifierKind": "pageId", "jsonPath": "$.page" },
+        "identifiers": [{ "kind": "email", "jsonPath": "$.email" }],
+        "fieldMappings": [{ "jsonPath": "$.name", "target": "first_name" }],
+    });
+    let (status, out) = call(
+        &fx,
+        "inboundWebhooks.previewMapping",
+        WS,
+        &[],
+        None,
+        Some(input),
+    )
+    .await;
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(out["inboxIdentifier"], "p-1", "{out}");
+    assert_eq!(out["identities"]["email"], "Ada@Example.COM", "{out}");
+    assert_eq!(out["fields"][0]["target"], "first_name", "{out}");
+    assert_eq!(out["fields"][0]["value"], "Ada", "{out}");
+
+    let (status, out) = call(
+        &fx,
+        "inboundWebhooks.previewMapping",
+        WS,
+        &[],
+        None,
+        Some(json!({ "inboxResolution": null, "identifiers": [], "fieldMappings": [] })),
+    )
+    .await;
+    assert_eq!(status, 422, "{out}");
+}

@@ -3,6 +3,7 @@
 // those markers for conversion/specs/P4-routes.tsv.
 import type { QueryClient } from "@tanstack/react-query"
 import {
+  type AnyRoute,
   createRootRouteWithContext,
   createRoute,
   createRouter,
@@ -26,6 +27,7 @@ const dashboard = () => import("@/routes/dashboard")
 const ecommerce = () => import("@/routes/ecommerce")
 const tools = () => import("@/routes/tools")
 const toolEditors = () => import("@/routes/tool-editors")
+const webhookTools = () => import("@/routes/webhook-tools")
 const comments = () => import("@/routes/comments")
 const appointments = () => import("@/routes/appointments")
 const booking = () => import("@/routes/booking")
@@ -208,6 +210,28 @@ const workspacePages = [
       "ContactsPage",
     ),
   }),
+  ...(
+    [
+      ["contacts/import", "ContactImportPage"],
+      ["contacts/import/histories", "ContactImportHistoriesPage"],
+      ["contacts/scan", "ContactScanPage"],
+      ["contacts/scan/histories", "ContactScanHistoriesPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path,
+      component: lazyRouteComponent(
+        () => import("@/routes/contact-imports"),
+        page,
+      ),
+    }),
+  ),
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path: "agents",
+    component: lazyRouteComponent(() => import("@/routes/agents"), "AgentsPage"),
+  }),
   createRoute({
     getParentRoute: () => workspaceRoute,
     path: "inbox",
@@ -255,7 +279,51 @@ const sectionRoutes = [
     "CustomFieldsPage",
   ),
   sectionRoute("sequences", sequences, "SequencesLayout", "SequencesPage"),
+  sectionRoute(
+    "email-topics",
+    () => import("@/routes/email-topics"),
+    "EmailTopicsLayout",
+    "EmailTopicsPage",
+  ),
 ]
+
+// `sequences/create`, `sequences/$id`: outside the folder layout.
+const sequencePages = (
+  [
+    ["sequences/create", "CreateSequencePage"],
+    ["sequences/$id", "SequenceDetailPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(sequences, page),
+  }),
+)
+
+// `broadcasts/layout.tsx` (broadcast permission) and its pages.
+const broadcasts = () => import("@/routes/broadcasts")
+const broadcastsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "broadcasts",
+  component: lazyRouteComponent(broadcasts, "BroadcastsLayout"),
+})
+const broadcastsRoutes = broadcastsRoute.addChildren(
+  (
+    [
+      ["/", "BroadcastsPage"],
+      ["create", "CreateBroadcastPage"],
+      ["$broadcastId/edit", "EditBroadcastPage"],
+      ["$broadcastId/runs", "BroadcastRunsPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => broadcastsRoute,
+      path,
+      component: lazyRouteComponent(broadcasts, page),
+    }),
+  ),
+)
 
 // `dashboard/layout.tsx`: the analytics section (inbox cards + sub-pages).
 const dashboardRoute = createRoute({
@@ -375,12 +443,100 @@ const commentPages = (
   }),
 )
 
+// Keywords: `(has-folder)/<x>/layout.tsx` (super admin, folders, tabs) around
+// the list; create / edit outside it (`routes/automated-responses.tsx`).
+const automatedResponses = () => import("@/routes/automated-responses")
+const automatedResponseListRoutes = (
+  [
+    [
+      "automated-responses",
+      "AutomatedResponsesLayout",
+      "AutomatedResponsesPage",
+    ],
+    [
+      "page-automated-responses",
+      "PageAutomatedResponsesLayout",
+      "PageAutomatedResponsesPage",
+    ],
+  ] as const
+).map(([path, layout, page]) => {
+  const folder = createRoute({
+    getParentRoute: () => workspaceRoute,
+    id: `${path}-folder`,
+    component: lazyRouteComponent(automatedResponses, layout),
+  })
+  return folder.addChildren([
+    createRoute({
+      getParentRoute: () => folder,
+      path,
+      component: lazyRouteComponent(automatedResponses, page),
+    }),
+  ])
+})
+const automatedResponsePages = (
+  [
+    ["automated-responses/create", "CreateAutomatedResponsePage"],
+    ["automated-responses/$id/edit", "EditAutomatedResponsePage"],
+    ["page-automated-responses/create", "CreatePageAutomatedResponsePage"],
+    ["page-automated-responses/$id/edit", "EditPageAutomatedResponsePage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(automatedResponses, page),
+  }),
+)
+
+// `(has-folder)/triggers/layout.tsx` (super admin, folders) and the editor.
+const triggers = () => import("@/routes/triggers")
+const triggersRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "triggers-folder",
+  component: lazyRouteComponent(triggers, "TriggersLayout"),
+})
+const triggersRoutes = triggersRoute.addChildren([
+  createRoute({
+    getParentRoute: () => triggersRoute,
+    path: "triggers",
+    component: lazyRouteComponent(triggers, "TriggersPage"),
+  }),
+])
+const editTriggerRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: "triggers/$id/edit",
+  component: lazyRouteComponent(triggers, "EditTriggerPage"),
+})
+
+// `(coupons)/layout.tsx`: a pathless layout (tabs) around the two lists.
+const coupons = () => import("@/routes/coupons")
+const couponsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "coupons",
+  component: lazyRouteComponent(coupons, "CouponsLayout"),
+})
+const couponsRoutes = couponsRoute.addChildren(
+  (
+    [
+      ["coupons", "CouponsPage"],
+      ["topic-coupons", "TopicCouponsPage"],
+    ] as const
+  ).map(([path, page]) =>
+    createRoute({
+      getParentRoute: () => couponsRoute,
+      path,
+      component: lazyRouteComponent(coupons, page),
+    }),
+  ),
+)
+
 // The tools lists; `pipelines/layout.tsx` adds the contacts-access check.
 const logs = () => import("@/routes/logs")
 const logPages = (
   [
     ["error-logs", "ErrorLogsPage"],
     ["audit-logs", "AuditLogsPage"],
+    ["pricing", "PricingPage"],
   ] as const
 ).map(([path, page]) =>
   createRoute({
@@ -426,6 +582,38 @@ const toolEditorPages = (
     component: lazyRouteComponent(toolEditors, page),
   }),
 )
+// The super-admin tool screens (Q.D13a).
+const webhookToolPages = (
+  [
+    ["inbound-webhooks", "InboundWebhooksPage"],
+    ["inbound-webhooks/$id", "InboundWebhookEditorPage"],
+    ["inbound-webhooks/$id/analytics", "InboundWebhookAnalyticsPage"],
+    ["webhooks/$id/edit", "EditWebhookPage"],
+    ["magic-links", "MagicLinksPage"],
+    ["magic-links/$magicLinkId/analytics", "MagicLinkAnalyticsPage"],
+    ["google-sheets", "GoogleSheetsPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(webhookTools, page),
+  }),
+)
+// `(has-folder)/webhooks/layout.tsx`: the folder store around the list (the
+// edit page sits outside it).
+const webhooksFolderRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  id: "webhooks-folder",
+  component: lazyRouteComponent(webhookTools, "WebhooksLayout"),
+})
+const webhooksListRoute = webhooksFolderRoute.addChildren([
+  createRoute({
+    getParentRoute: () => webhooksFolderRoute,
+    path: "webhooks",
+    component: lazyRouteComponent(webhookTools, "WebhooksPage"),
+  }),
+])
 const miniAppPages = (
   [
     ["mini-apps", "MiniAppsPage"],
@@ -579,6 +767,72 @@ const settingsRoutes = settingsRoute.addChildren([
   ]),
 ])
 
+// `(integrations)/whatsapps/[id]`, `messengers/[id]`, `instagrams/[id]`,
+// `webchats/*`: the channel settings screens (superAdmin). The `calls` and
+// `ads` tabs belong to the calling and ads units.
+const channelSettings = () => import("@/routes/channel-settings")
+const channelPage = <P extends AnyRoute>(
+  parent: () => P,
+  path: string,
+  page: keyof Awaited<ReturnType<typeof channelSettings>>,
+) =>
+  createRoute({
+    getParentRoute: parent,
+    path,
+    component: lazyRouteComponent(channelSettings, page),
+  })
+const whatsappChannelRoute = channelPage(
+  () => workspaceRoute,
+  "whatsapps/$id",
+  "WhatsappLayout",
+)
+const messengerChannelRoute = channelPage(
+  () => workspaceRoute,
+  "messengers/$id",
+  "MessengerLayout",
+)
+const instagramChannelRoute = channelPage(
+  () => workspaceRoute,
+  "instagrams/$id",
+  "InstagramLayout",
+)
+const channelSettingsRoutes = [
+  whatsappChannelRoute.addChildren(
+    (
+      [
+        ["settings", "WhatsappSettingsPage"],
+        ["account-healths", "WhatsappAccountHealthsPage"],
+        ["flows", "WhatsappFlowsPage"],
+        ["message-templates", "WhatsappMessageTemplatesPage"],
+        ["useful-links", "WhatsappUsefulLinksPage"],
+        ["ecommerce", "WhatsappEcommercePage"],
+        ["automation", "WhatsappSettingsRedirect"],
+        ["profile", "WhatsappSettingsRedirect"],
+        ["capi", "WhatsappCapiRedirect"],
+      ] as const
+    ).map(([path, page]) => channelPage(() => whatsappChannelRoute, path, page)),
+  ),
+  messengerChannelRoute.addChildren(
+    (
+      [
+        ["edit", "MessengerEditPage"],
+        ["message-templates", "MessengerMessageTemplatesPage"],
+        ["capi", "MessengerCapiRedirect"],
+      ] as const
+    ).map(([path, page]) => channelPage(() => messengerChannelRoute, path, page)),
+  ),
+  instagramChannelRoute.addChildren(
+    (
+      [
+        ["edit", "InstagramEditPage"],
+        ["capi", "InstagramCapiRedirect"],
+      ] as const
+    ).map(([path, page]) => channelPage(() => instagramChannelRoute, path, page)),
+  ),
+  channelPage(() => workspaceRoute, "webchats/create", "WebchatCreatePage"),
+  channelPage(() => workspaceRoute, "webchats/$id/edit", "WebchatEditPage"),
+]
+
 // `(no-sidebar)`: the flow editor is outside the workspace sidebar layout.
 const flowDetailRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -586,6 +840,23 @@ const flowDetailRoute = createRoute({
   component: lazyRouteComponent(
     () => import("@/routes/flow-detail"),
     "FlowDetailPage",
+  ),
+})
+
+const flowAnalyticsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "space/$workspaceId/flows/$id/analytics",
+  component: lazyRouteComponent(
+    () => import("@/routes/flow-detail"),
+    "FlowAnalyticsPage",
+  ),
+})
+const flowImportHistoriesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "space/$workspaceId/flows/import/histories",
+  component: lazyRouteComponent(
+    () => import("@/routes/contact-imports"),
+    "FlowImportHistoriesPage",
   ),
 })
 
@@ -597,6 +868,21 @@ const createChannelRoute = createRoute({
     "CreateChannelPage",
   ),
 })
+
+// `(no-sidebar)/channels/<channel>/select`: the account pickers.
+const channelSelectRoutes = (
+  [
+    ["channels/messenger/select", "MessengerSelectPage"],
+    ["channels/instagram/select", "InstagramSelectPage"],
+    ["channels/instagram-facebook/select", "InstagramFacebookSelectPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => protectedRoute,
+    path,
+    component: lazyRouteComponent(() => import("@/routes/channel-select"), page),
+  }),
+)
 
 // `app/admin/*`: the platform-operator console (platform admin only).
 const admin = () => import("@/routes/admin")
@@ -721,13 +1007,18 @@ const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     homeRoute,
     flowDetailRoute,
+    flowAnalyticsRoute,
+    flowImportHistoriesRoute,
     createChannelRoute,
+    ...channelSelectRoutes,
     adminRoute.addChildren([...adminPages, adminDefaultTemplateRoute]),
     manageRoute.addChildren(managePages),
     workspaceRoute.addChildren([
       ...workspacePages,
       flowsRoute.addChildren(flowsPages),
       ...sectionRoutes,
+      broadcastsRoutes,
+      ...sequencePages,
       dashboardRoutes,
       ecommerceRoute.addChildren(ecommercePages),
       productFormsRoute.addChildren(productFormPages),
@@ -736,13 +1027,21 @@ const routeTree = rootRoute.addChildren([
       templateInstallsRoutes,
       ...logPages,
       ...toolEditorPages,
+      ...webhookToolPages,
+      webhooksListRoute,
       ...miniAppPages,
       ...commentListRoutes,
+      ...automatedResponseListRoutes,
+      ...automatedResponsePages,
+      triggersRoutes,
+      editTriggerRoute,
+      couponsRoutes,
       ...commentPages,
       pipelinesRoutes,
       appointmentCalendarsRoutes,
       aiRoute.addChildren(aiPages),
       settingsRoutes,
+      ...channelSettingsRoutes,
     ]),
   ]),
 ])

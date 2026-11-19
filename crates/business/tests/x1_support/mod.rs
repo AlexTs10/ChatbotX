@@ -189,6 +189,11 @@ impl RecordingLog {
         let layer = CaptureLayer {
             entries: Arc::clone(&entries),
         };
+        // A global no-op subscriber first: with only one dispatcher registered,
+        // tracing-core asks the *calling thread's* default for a new callsite's
+        // interest, so a parallel test thread without a subscriber caches
+        // `Interest::never` and this recorder loses that event.
+        let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
         let guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
         RecordingLog {
             entries,

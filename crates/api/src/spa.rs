@@ -256,8 +256,14 @@ async fn page(
         .ok()
         .and_then(|payload| payload.get("json").cloned())
         .unwrap_or(Value::Null);
-    if let Some(response) =
-        public_pages::page(&state, api.as_deref(), &name, &headers, &input).await
+    if let Some(response) = Box::pin(public_pages::page(
+        &state,
+        api.as_deref(),
+        &name,
+        &headers,
+        &input,
+    ))
+    .await
     {
         return response;
     }
@@ -283,6 +289,13 @@ async fn page(
                 channels_create_page(&state, api.as_deref(), session.user_id, &input).await
             }
             Err(response) => *response,
+        },
+        "channelConnectSelect" => match (require_session(&state, &headers).await, api.as_deref()) {
+            (Ok(session), Some(api)) => {
+                ok(crate::rpc::channel_connect::select_page(api, session.user_id, &input).await)
+            }
+            (Err(response), _) => *response,
+            (Ok(_), None) => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
         },
         "invitation" => invitation_page(&state, &headers, &input).await,
         "templateShare" => template_share_page(&state, &headers, &input).await,
@@ -311,7 +324,8 @@ async fn page(
             Ok(_) => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
             Err(response) => *response,
         },
-        "workspace" | "contactsAccess" | "folder" | "flow" | "aiAgents" | "settingsChannels" => {
+        "workspace" | "contactsAccess" | "contactScanAccess" | "folder" | "flow" | "aiAgents"
+        | "settingsChannels" => {
             let session = match require_session(&state, &headers).await {
                 Ok(session) => session,
                 Err(response) => return *response,
@@ -618,6 +632,16 @@ async fn workspace_page(state: &AuthState, name: &str, user_id: i64, input: Valu
         "contactsAccess" => ok(json!({
             "canViewEmailAndPhone": flag(permissions, "superAdmin") || flag(permissions, "emailAndPhone"),
         })),
+        // `requireContactsAccess` + `requireContactScanPageAccess`: an
+        // assigned-only member gets the not-found page too.
+        "contactScanAccess"
+            if flag(permissions, "superAdmin")
+                || (flag(permissions, "contacts")
+                    && !flag(permissions, "onlyAssignedContacts")) =>
+        {
+            ok(json!({}))
+        }
+        "contactScanAccess" => error(StatusCode::NOT_FOUND, "NOT_FOUND", "Page not found"),
         "folder" => folder_page(state, workspace_id, &input).await,
         "flow" if flag(permissions, "superAdmin") || flag(permissions, "flows") => {
             flow_page(state, workspace_id, &input).await

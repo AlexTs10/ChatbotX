@@ -30,7 +30,7 @@ const SCHEDULING: ErrorMap = &[
 ];
 
 /// `z.coerce.date()`: `new Date(value)` must be valid.
-fn coerced_date(input: &mut Input, name: &str) -> Option<i64> {
+pub(crate) fn coerced_date(input: &mut Input, name: &str) -> Option<i64> {
     let parsed = match input.get(name) {
         Some(Value::String(text)) => chatbotx_core::js::parse_date(text),
         Some(Value::Number(n)) => n.as_f64().map(|n| n as i64),
@@ -61,6 +61,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 ws,
                 inbox_id.unwrap_or(-1),
                 scan_from_at.unwrap_or_default(),
+                None,
             )
             .await
             .map_err(|e| business_error(e, SCHEDULING))?;

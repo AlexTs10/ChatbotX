@@ -97,6 +97,38 @@ pub async fn list_topics(
     page: i64,
     per_page: i64,
 ) -> Result<(Vec<Value>, i64)> {
+    let out = list_topic_rows(db, workspace_id, archived, search, page, per_page, false).await?;
+    let data = out
+        .rows
+        .iter()
+        .map(|(topic, coupons)| {
+            let mut row = topic_json(topic);
+            row["couponCount"] = json!(coupons);
+            row
+        })
+        .collect();
+    Ok((data, out.page_count))
+}
+
+/// One page of [`list_topic_rows`]: each topic with its coupon count.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TopicPage {
+    pub rows: Vec<(CouponTopic, i64)>,
+    pub page_count: i64,
+    pub total: i64,
+}
+
+/// `couponRepository.listTopics`: by name (`desc` = the `name` sort entry
+/// says so), with the coupon counts and the total.
+pub async fn list_topic_rows(
+    db: &chatbotx_db::Db,
+    workspace_id: i64,
+    archived: bool,
+    search: Option<String>,
+    page: i64,
+    per_page: i64,
+    desc: bool,
+) -> Result<TopicPage> {
     tx::read(db, move |conn| {
         let mut where_sql = Sql::raw(r#"WHERE t."workspaceId" = "#);
         where_sql.push_bind(workspace_id);
@@ -115,19 +147,66 @@ pub async fn list_topics(
         );
         select.append(where_sql);
         select.push(&format!(
-            r#" ORDER BY t."name" ASC LIMIT {per_page} OFFSET {}"#,
+            r#" ORDER BY t."name" {} LIMIT {per_page} OFFSET {}"#,
+            if desc { "DESC" } else { "ASC" },
             (page - 1) * per_page
         ));
         let ids: Vec<(i64, i64)> = select.query_map(conn, |r| Ok((r.get(0)?, r.get(1)?)))?;
-        let mut data = Vec::with_capacity(ids.len());
+        let mut rows = Vec::with_capacity(ids.len());
         for (id, coupons) in ids {
             if let Some(topic) = find_one::<CouponTopic>(conn, r#""id" = ?1"#, &[&id])? {
-                let mut row = topic_json(&topic);
-                row["couponCount"] = json!(coupons);
-                data.push(row);
+                rows.push((topic, coupons));
             }
         }
-        Ok((data, page_count(total, per_page)))
+        Ok(TopicPage {
+            rows,
+            page_count: page_count(total, per_page),
+            total,
+        })
+    })
+    .await
+}
+
+/// `couponTopicResource` of the builder: the row (with `deletedAt` and
+/// `createdById`).
+pub fn private_topic_json(t: &CouponTopic) -> Value {
+    let mut out = topic_json(t);
+    out["deletedAt"] = json!(t.deleted_at.map(iso));
+    out["createdById"] = id_text(t.created_by_id);
+    out
+}
+
+/// `listActiveTopicOptions`: `{ id, name, expiresAt }` of the active topics
+/// by name; `issueable_only` drops the expired ones.
+pub async fn list_active_topic_options(
+    db: &chatbotx_db::Db,
+    workspace_id: i64,
+    keyword: Option<String>,
+    issueable_only: bool,
+) -> Result<Vec<Value>> {
+    tx::read(db, move |conn| {
+        let mut select = Sql::raw(
+            r#"SELECT "id", "name", "expiresAt" FROM "CouponTopic" WHERE "deletedAt" IS NULL AND "status" = 'active' AND "workspaceId" = "#,
+        );
+        select.push_bind(workspace_id);
+        if let Some(keyword) = keyword.filter(|k| !k.is_empty()) {
+            select.push(r#" AND ilike("name", "#);
+            select.push_bind(like_contains(&keyword));
+            select.push(")");
+        }
+        if issueable_only {
+            select.push(r#" AND ("expiresAt" IS NULL OR "expiresAt" > "#);
+            select.push_bind(now_ms());
+            select.push(")");
+        }
+        select.push(r#" ORDER BY "name" ASC"#);
+        Ok(select.query_map(conn, |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?.to_string(),
+                "name": r.get::<_, String>(1)?,
+                "expiresAt": r.get::<_, Option<i64>>(2)?.map(iso),
+            }))
+        })?)
     })
     .await
 }
@@ -242,6 +321,18 @@ pub async fn create_topic(
     description: Option<String>,
     expires_at: Option<i64>,
 ) -> Result<CouponTopic> {
+    create_topic_by(db, workspace_id, None, name, description, expires_at).await
+}
+
+/// [`create_topic`] with its `createdById` (the builder's signed-in user).
+pub async fn create_topic_by(
+    db: &chatbotx_db::Db,
+    workspace_id: i64,
+    created_by: Option<i64>,
+    name: String,
+    description: Option<String>,
+    expires_at: Option<i64>,
+) -> Result<CouponTopic> {
     tx::write(db, move |tx| {
         let conn: &Connection = tx;
         let name = name.trim().to_string();
@@ -252,8 +343,8 @@ pub async fn create_topic(
         let now = now_ms();
         conn.execute(
             r#"INSERT INTO "CouponTopic" ("id", "createdAt", "updatedAt", "workspaceId", "name", "description", "expiresAt", "status", "hasEverHadCoupon", "createdById")
-               VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, 'active', 0, NULL)"#,
-            params![id, now, workspace_id, name, description, expires_at],
+               VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, 'active', 0, ?7)"#,
+            params![id, now, workspace_id, name, description, expires_at, created_by],
         )
         .map_err(|e| BusinessError::Repo(e.into()))?;
         find_topic(conn, workspace_id, id)?.ok_or_else(topic_not_found)
@@ -450,6 +541,36 @@ pub async fn list_coupons(
     page: i64,
     per_page: i64,
 ) -> Result<(Vec<Value>, i64)> {
+    let (data, pages, _) = list_coupons_page(db, workspace_id, filter, page, per_page).await?;
+    Ok((data, pages))
+}
+
+/// `countCoupons`: the coupons [`list_coupons`] would list.
+pub async fn count_coupons(
+    db: &chatbotx_db::Db,
+    workspace_id: i64,
+    filter: CouponFilter,
+) -> Result<i64> {
+    tx::read(db, move |conn| {
+        let mut count = Sql::raw("SELECT count(*) ");
+        count.append(coupon_where(workspace_id, &filter));
+        Ok(count
+            .query_map(conn, |r| r.get(0))?
+            .first()
+            .copied()
+            .unwrap_or(0))
+    })
+    .await
+}
+
+/// [`list_coupons`] with the total: `(data, pageCount, total)`.
+pub async fn list_coupons_page(
+    db: &chatbotx_db::Db,
+    workspace_id: i64,
+    filter: CouponFilter,
+    page: i64,
+    per_page: i64,
+) -> Result<(Vec<Value>, i64, i64)> {
     tx::read(db, move |conn| {
         let mut count = Sql::raw("SELECT count(*) ");
         count.append(coupon_where(workspace_id, &filter));
@@ -467,7 +588,7 @@ pub async fn list_coupons(
             .iter()
             .map(|(c, name)| listed_json(c, name))
             .collect();
-        Ok((data, page_count(total, per_page)))
+        Ok((data, page_count(total, per_page), total))
     })
     .await
 }
@@ -766,13 +887,27 @@ pub async fn export(
     workspace_id: i64,
     filter: CouponFilter,
 ) -> Result<i64> {
+    export_for(db, uploader, workspace_id, None, filter).await
+}
+
+/// [`export`] for a user (`None` = the workspace owner, the API caller).
+pub async fn export_for(
+    db: &chatbotx_db::Db,
+    uploader: Option<&chatbotx_files::Uploader>,
+    workspace_id: i64,
+    user_id: Option<i64>,
+    filter: CouponFilter,
+) -> Result<i64> {
     use chatbotx_core::utils::csv::{CsvCell, CsvDialect, UTF8_BOM, to_csv_row};
     let file_id = new_id();
     let path = format!("workspaces/{workspace_id}/exports/coupons/coupon_{file_id}.csv");
     let file_name = format!("coupons-{}.csv", &iso(now_ms())[..10]);
     let (body, total) = tx::write(db, move |tx| {
         let conn: &Connection = tx;
-        let owner = owner_id(conn, workspace_id)?;
+        let owner = match user_id {
+            Some(user) => Some(user),
+            None => owner_id(conn, workspace_id)?,
+        };
         let now = now_ms();
         conn.execute(
             r#"INSERT INTO "File" ("id", "createdAt", "updatedAt", "workspaceId", "userId", "contextType", "subType", "path", "fileName", "mimeType", "status")
@@ -850,8 +985,22 @@ pub async fn get_export(
     workspace_id: i64,
     file_id: i64,
 ) -> Result<Value> {
+    get_export_for(db, uploader, workspace_id, None, file_id).await
+}
+
+/// [`get_export`] of a user's export (`None` = the workspace owner's).
+pub async fn get_export_for(
+    db: &chatbotx_db::Db,
+    uploader: Option<&chatbotx_files::Uploader>,
+    workspace_id: i64,
+    user_id: Option<i64>,
+    file_id: i64,
+) -> Result<Value> {
     let row: Option<(String, String, String, Option<String>)> = tx::read(db, move |conn| {
-        let owner = owner_id(conn, workspace_id)?;
+        let owner = match user_id {
+            Some(user) => Some(user),
+            None => owner_id(conn, workspace_id)?,
+        };
         conn.query_row(
             r#"SELECT "status", "fileName", "path", "meta" FROM "File"
                WHERE "id" = ?1 AND "workspaceId" = ?2 AND "userId" IS ?3 AND "contextType" = 'export' AND "subType" = 'coupons'"#,

@@ -169,10 +169,7 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
             return Ok(None);
         }
     }
-    // ponytail: the Zalo / Telegram tap label (`resolvePostbackButtonLabel`,
-    // `resolveStepInputSkipLabel`), profile lookups, Google click and
-    // thread-control recording are not ported: they need the channel
-    // profile fetcher / ads units.
+    // ponytail: Google click lookups are not ported (ads unit).
     // A cart or product question is named before the save, so the stored
     // message already carries it.
     crate::inbound_cart::enrich(deps, &inbox, &mut received).await;
@@ -180,12 +177,31 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
     // Orchestrator decision (DECISIONS 2026-11-17): the contact lookup /
     // creation, the contact updates and the message insert are one write
     // transaction, so no reader sees a new contact without its message.
-    let (tx_inbox, tx_received) = (inbox.clone(), received.clone());
-    let (contact_inbox, conversation, is_new_contact, saved) = deps
+    let (tx_inbox, tx_received, tx_skip) =
+        (inbox.clone(), received.clone(), skip_challenge_id.clone());
+    let (contact_inbox, conversation, is_new_contact, saved, tap_label) = deps
         .db
         .write(move |tx| {
             let (contact_inbox, conversation, is_new_contact) =
                 detect_contact_and_conversation_tx(tx, &tx_inbox, &tx_received.contact, source)?;
+            // Zalo / Telegram echo a tap's raw payload as the text: show the
+            // label the contact pressed instead.
+            let tap_label =
+                postback_button_label(tx, tx_inbox.workspace_id, &tx_received).or_else(|| {
+                    tx_skip.as_deref().and_then(|id| {
+                        step_input_skip_label(
+                            tx,
+                            tx_inbox.workspace_id,
+                            &conversation,
+                            &tx_received,
+                            id,
+                        )
+                    })
+                });
+            let mut tx_received = tx_received.clone();
+            if let Some(label) = &tap_label {
+                apply_tap_label(&mut tx_received, label);
+            }
             let mut saved = None;
             if let Some(incoming) = &tx_received.message {
                 if incoming.message_type != "outgoing" {
@@ -208,10 +224,19 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
                     &tx_received,
                 )?);
             }
-            Ok((contact_inbox, conversation, is_new_contact, saved))
+            Ok((
+                contact_inbox,
+                conversation,
+                is_new_contact,
+                saved,
+                tap_label,
+            ))
         })
         .await
         .map_err(db_fail)?;
+    if let Some(label) = &tap_label {
+        apply_tap_label(&mut received, label);
+    }
 
     let mut message = None;
     let mut message_id = None;
@@ -341,6 +366,133 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
 
 /// The Skip tap's challenge id (`decodeStepInputSkipPostback` of the raw
 /// postback, then of the raw quick reply).
+/// The saved text and `buttonTitle` of a tap whose label was resolved.
+fn apply_tap_label(received: &mut Received, label: &str) {
+    if let Some(message) = received.message.as_mut() {
+        message.text = Some(label.to_owned());
+    }
+    if received.button_title.as_deref().is_none_or(str::is_empty) {
+        received.button_title = Some(label.to_owned());
+    }
+}
+
+/// Whether `text` is the bare (Telegram) or `postback_`-prefixed (Zalo) echo
+/// of `payload`.
+fn is_payload_echo(text: Option<&str>, payload: &str) -> bool {
+    use chatbotx_core::flow_config::util::ZALO_POSTBACK_TEXT_PREFIX;
+    text.is_some_and(|t| t == payload || t.strip_prefix(ZALO_POSTBACK_TEXT_PREFIX) == Some(payload))
+}
+
+/// `detectFlowVersion`'s nodes (the given version, else the active flow's
+/// current one); `None` when gone.
+fn flow_nodes(
+    conn: &Connection,
+    workspace_id: i64,
+    flow_id: i64,
+    version_id: Option<i64>,
+) -> Option<Vec<Value>> {
+    let version_id = match version_id {
+        Some(id) => Some(id),
+        None => conn
+            .query_row(
+                r#"SELECT "currentVersionId" FROM "Flow" WHERE "id" = ?1 AND "workspaceId" = ?2 AND "active" = 1"#,
+                params![flow_id, workspace_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .ok()??,
+    }?;
+    let nodes: String = conn
+        .query_row(
+            r#"SELECT "nodes" FROM "FlowVersion" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+            params![version_id, workspace_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()??;
+    serde_json::from_str::<Value>(&nodes)
+        .ok()?
+        .as_array()
+        .cloned()
+}
+
+/// `resolvePostbackButtonLabel`: the tapped button's label when the channel
+/// sent only the payload echo; `None` leaves the text (a stale tap never
+/// fails the save).
+fn postback_button_label(
+    conn: &Connection,
+    workspace_id: i64,
+    received: &Received,
+) -> Option<String> {
+    let action = received.postback_action.as_deref()?;
+    if received
+        .button_title
+        .as_deref()
+        .is_some_and(|t| !t.is_empty())
+    {
+        return None;
+    }
+    let text = received.message.as_ref()?.text.as_deref();
+    if !is_payload_echo(text, action) {
+        return None;
+    }
+    let payload = chatbotx_core::flow_config::util::decode_button_payload(action, false)?;
+    let button_id = payload.button_id.as_deref()?;
+    let version = match payload.flow_version_id.as_deref() {
+        Some(id) => Some(id.parse().ok()?),
+        None => None,
+    };
+    let nodes = flow_nodes(conn, workspace_id, payload.flow_id.parse().ok()?, version)?;
+    let target = chatbotx_core::flow_config::util::resolve_flow_action_target(&nodes, button_id)?;
+    target.details["label"].as_str().map(str::to_owned)
+}
+
+/// `resolveStepInputSkipLabel`: the Skip label of the step the pending
+/// challenge belongs to, when the text is the raw Skip payload echo.
+fn step_input_skip_label(
+    conn: &Connection,
+    workspace_id: i64,
+    conversation: &Conversation,
+    received: &Received,
+    challenge_id: &str,
+) -> Option<String> {
+    let payload =
+        chatbotx_core::flow_config::step_input_resolution::encode_step_input_skip_postback(
+            challenge_id,
+        );
+    let text = received.message.as_ref()?.text.as_deref();
+    if received
+        .button_title
+        .as_deref()
+        .is_some_and(|t| !t.is_empty())
+        || !is_payload_echo(text, &payload)
+    {
+        return None;
+    }
+    let challenge = conversation
+        .additional_attributes
+        .as_ref()?
+        .0
+        .get("challenge")?;
+    let data = &challenge["data"];
+    if challenge["type"] != "step" || data["challengeId"] != challenge_id {
+        return None;
+    }
+    let nodes = flow_nodes(
+        conn,
+        workspace_id,
+        crate::id_of(&data["flowId"])?,
+        crate::id_of(&data["flowVersionId"]),
+    )?;
+    let node = nodes.iter().find(|n| n["id"] == data["nodeId"])?;
+    let step = node["data"]["details"]["steps"]
+        .as_array()?
+        .iter()
+        .find(|s| s["id"] == data["stepId"])?;
+    let label = step["skipButtonLabel"].as_str()?.trim();
+    (!label.is_empty()).then(|| label.to_owned())
+}
+
 fn step_input_skip_challenge_id(received: &Received) -> Option<String> {
     use chatbotx_core::flow_config::step_input_resolution::decode_step_input_skip_postback;
     decode_step_input_skip_postback(received.postback_action.as_deref())
@@ -817,16 +969,30 @@ fn save_message_tx(
             },
         );
     }
-    tx.execute(
-                r#"UPDATE "Conversation" SET
-                     "lastActivityAt" = ?1,
-                     "contactRepliedAt" = CASE WHEN ?2 THEN ?1 ELSE "contactRepliedAt" END,
-                     "awaitingHumanReplySince" = CASE WHEN ?2 THEN COALESCE("awaitingHumanReplySince", ?1)
-                                                      ELSE "awaitingHumanReplySince" END,
-                     "updatedAt" = ?3
-                   WHERE "id" = ?4 AND "workspaceId" = ?5"#,
-                params![at, inbound, now_ms(), conversation_id, workspace_id],
-            )?;
+    // A contact message opening the window starts the response SLA.
+    let activity = |c: &chatbotx_db::rusqlite::Connection| {
+        c.execute(
+            r#"UPDATE "Conversation" SET
+                 "lastActivityAt" = ?1,
+                 "contactRepliedAt" = CASE WHEN ?2 THEN ?1 ELSE "contactRepliedAt" END,
+                 "awaitingHumanReplySince" = CASE WHEN ?2 THEN COALESCE("awaitingHumanReplySince", ?1)
+                                                  ELSE "awaitingHumanReplySince" END,
+                 "updatedAt" = ?3
+               WHERE "id" = ?4 AND "workspaceId" = ?5"#,
+            params![at, inbound, now_ms(), conversation_id, workspace_id],
+        )
+    };
+    if inbound {
+        chatbotx_business::response_sla::track_window(
+            tx,
+            workspace_id,
+            &[conversation_id],
+            false,
+            activity,
+        )?;
+    } else {
+        activity(tx)?;
+    }
     Ok((stored, true))
 }
 

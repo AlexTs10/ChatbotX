@@ -728,3 +728,114 @@ pub fn handle_step_update_impact(
     }
     reactivate_completed(conn, sequence_id, workspace_id, updated_step_order, now)
 }
+
+/// `sequenceAnalyticsService.getStepStats`: dispatch counts of one step
+/// (`message:sent` = delivered + failed).
+pub async fn step_stats(
+    db: &Db,
+    workspace_id: i64,
+    sequence_id: i64,
+    step_id: i64,
+) -> Result<serde_json::Value> {
+    tx::read(db, move |conn| {
+        let (delivered, seen, clicked, failed): (i64, i64, i64, i64) = conn.query_row(
+            r#"SELECT COUNT("deliveredAt"), COUNT("seenAt"), COUNT("clickedAt"), COUNT("failedAt")
+               FROM "SequenceDispatch" WHERE "workspaceId" = ?1 AND "sequenceId" = ?2 AND "stepId" = ?3"#,
+            params![workspace_id, sequence_id, step_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        Ok(serde_json::json!({
+            "message:sent": delivered + failed,
+            "message:delivered": delivered,
+            "message:seen": seen,
+            "flow:clicked": clicked,
+            "message:failed": failed,
+        }))
+    })
+    .await
+}
+
+/// `listStepContactsPage` (+ `sequenceStatsRepository.getContacts`,
+/// `contactInboxService.findManyByIds`, `mapStatsContactRow`): the
+/// dispatches of a step that reached `event_type`, newest first, with their
+/// contact. A dispatch whose contact is gone is dropped from the page (not
+/// from `total`), as the original.
+pub async fn list_step_contacts_page(
+    db: &Db,
+    workspace_id: i64,
+    sequence_id: i64,
+    step_id: i64,
+    event_type: String,
+    page: i64,
+    per_page: i64,
+) -> Result<serde_json::Value> {
+    tx::read(db, move |conn| {
+        let condition = crate::contact::bulk_tag_stats::event_condition(&event_type);
+        let order = match event_type.as_str() {
+            "message:seen" => "seenAt",
+            "message:failed" => "failedAt",
+            "flow:clicked" => "clickedAt",
+            _ => "deliveredAt",
+        };
+        let dispatches = format!(
+            r#"(SELECT * FROM "SequenceDispatch" WHERE "workspaceId" = ?1 AND "sequenceId" = ?2
+                AND "stepId" = ?3 AND {condition})"#
+        );
+        let total: i64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM {dispatches}"),
+            params![workspace_id, sequence_id, step_id],
+            |row| row.get(0),
+        )?;
+        let sql = format!(
+            r#"SELECT r."contactId", r."contactInboxId", r."deliveredAt", r."failedAt", r."seenAt",
+                      r."clickedAt", r."errorContent", c."id", c."firstName", c."lastName",
+                      c."fullName", ci."sourceId", c."avatar", ci."channel",
+                      (SELECT v."id" FROM "Conversation" v WHERE v."contactId" = ci."contactId" LIMIT 1)
+               FROM {dispatches} r
+               LEFT JOIN "ContactInbox" ci ON ci."id" = r."contactInboxId"
+               LEFT JOIN "Contact" c ON c."id" = ci."contactId" AND c."workspaceId" = ?1
+               ORDER BY r."{order}" DESC NULLS LAST LIMIT ?4 OFFSET ?5"#
+        );
+        let now = chatbotx_db::repo::iso(chatbotx_db::repo::now_ms());
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![workspace_id, sequence_id, step_id, per_page, (page - 1) * per_page],
+            |row| {
+                if row.get::<_, Option<i64>>(7)?.is_none() {
+                    return Ok(None);
+                }
+                let at = |i: usize| row.get::<_, Option<i64>>(i);
+                let occurred = match event_type.as_str() {
+                    "message:sent" => at(2)?.or(at(3)?),
+                    "message:seen" => at(4)?,
+                    "message:failed" => at(3)?,
+                    "flow:clicked" => at(5)?,
+                    "message:delivered" => at(2)?,
+                    _ => None,
+                };
+                Ok(Some(serde_json::json!({
+                    "contactId": row.get::<_, i64>(0)?.to_string(),
+                    "contactInboxId": row.get::<_, i64>(1)?.to_string(),
+                    "firstName": row.get::<_, Option<String>>(8)?,
+                    "lastName": row.get::<_, Option<String>>(9)?,
+                    "fullName": row.get::<_, Option<String>>(10)?,
+                    "sourceId": row.get::<_, Option<String>>(11)?,
+                    "avatar": row.get::<_, Option<String>>(12)?,
+                    "channel": row.get::<_, String>(13)?,
+                    "errorContent": row.get::<_, Option<String>>(6)?,
+                    "occurredAt": occurred.map(chatbotx_db::repo::iso).unwrap_or_else(|| now.clone()),
+                    "conversationId": row.get::<_, Option<i64>>(14)?.map(|id| id.to_string()).unwrap_or_default(),
+                })))
+            },
+        )?;
+        let data = rows
+            .filter_map(|row| row.transpose())
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(serde_json::json!({
+            "data": data,
+            "total": total,
+            "pageCount": (total + per_page - 1) / per_page,
+        }))
+    })
+    .await
+}

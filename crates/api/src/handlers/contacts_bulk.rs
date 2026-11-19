@@ -282,7 +282,7 @@ fn names(input: &mut Input, name: &str) -> Option<Vec<String>> {
 }
 
 /// `bulkTagByStatsPublicRequest` (a discriminated union on `source`).
-fn by_stats_request(call: &Call<'_>) -> Result<BulkTagRequest, crate::orpc::OrpcError> {
+pub(crate) fn by_stats_request(call: &Call<'_>) -> Result<BulkTagRequest, crate::orpc::OrpcError> {
     let mut input = Input::from_body(call.params, call.body);
     let source = input.get("source").cloned();
     let source = match source.as_ref().and_then(Value::as_str) {

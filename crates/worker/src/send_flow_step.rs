@@ -702,6 +702,13 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
                 step_ids,
             )
             .await;
+            // A `flow` comment reply reports delivery as a `text` one does
+            // (only the first step settles: `deliveredAt IS NULL`).
+            crate::low::settle_anchor_delivered(
+                deps,
+                message.message.content_attributes.as_ref().map(|a| &a.0),
+            )
+            .await;
             if !is_public_reply && result.sent_count > 0 {
                 mark_read_after_delivery(
                     deps,
@@ -715,6 +722,13 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         }
         Err(error) => {
             tracing::error!(err = %error, "sendFlowStep error for conversationId: {conversation_id}");
+            // Always terminal here: nothing re-attempts the step's send.
+            crate::low::settle_anchor_failed(
+                deps,
+                message.message.content_attributes.as_ref().map(|a| &a.0),
+                error.message(),
+            )
+            .await;
             if !is_public_reply {
                 // The public path's `sendMessageToChannel` emitted it already.
                 let mut extra = step_ids;

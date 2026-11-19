@@ -145,8 +145,15 @@ fn is_scan_channel(channel: &str) -> bool {
     matches!(channel, "messenger" | "instagram")
 }
 
-/// `schedule`: the run id of a new `init` run.
-pub async fn schedule(db: &Db, workspace_id: i64, inbox_id: i64, scan_from_at: i64) -> Result<i64> {
+/// `schedule`: the run id of a new `init` run (`requestedByUserId` = the
+/// signed-in user of the session action; the public route passes `None`).
+pub async fn schedule(
+    db: &Db,
+    workspace_id: i64,
+    inbox_id: i64,
+    scan_from_at: i64,
+    requested_by: Option<i64>,
+) -> Result<i64> {
     let now = now_ms();
     if scan_from_at >= now {
         return Err(exception(
@@ -187,9 +194,9 @@ pub async fn schedule(db: &Db, workspace_id: i64, inbox_id: i64, scan_from_at: i
             .execute(
                 r#"INSERT INTO "CoexistSyncRun" ("id", "createdAt", "updatedAt", "workspaceId", "integrationId",
                      "channel", "type", "status", "triggerSource", "scanFromAt", "requestedByUserId")
-                   VALUES (?1, ?2, ?2, ?3, ?4, ?5, 'contact_scan', 'init', ?6, ?7, NULL)
+                   VALUES (?1, ?2, ?2, ?3, ?4, ?5, 'contact_scan', 'init', ?6, ?7, ?8)
                    ON CONFLICT DO NOTHING"#,
-                chatbotx_db::rusqlite::params![id, now, workspace_id, integration_id, channel, TRIGGER_SOURCE, scan_from_at],
+                chatbotx_db::rusqlite::params![id, now, workspace_id, integration_id, channel, TRIGGER_SOURCE, scan_from_at, requested_by],
             )
             .map_err(repo_err)?;
         if inserted == 0 {

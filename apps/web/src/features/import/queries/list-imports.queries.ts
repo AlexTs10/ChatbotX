@@ -1,8 +1,9 @@
 // apps/builder/src/features/import/queries/list-imports.queries.ts for the
-// SPA: the pages get the import history from their page query
-// (`productsPage`); this module keeps the type the components import.
+// SPA: the Rust `/rpc` page query (`rpc_procedures/contact_tools.rs`).
+import { serverQuery } from "@/lib/server-action"
 import type { ListImportsRequest, ListImportsResponse } from "../schema/query"
 
-export declare function listImports(
+export const listImports = (
   input: ListImportsRequest & { workspaceId: string },
-): Promise<ListImportsResponse>
+): Promise<ListImportsResponse> =>
+  serverQuery("listImports", input.workspaceId, [input.workspaceId, input])

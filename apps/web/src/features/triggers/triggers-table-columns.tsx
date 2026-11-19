@@ -1,0 +1,215 @@
+"use client"
+
+import { DataTableColumnHeader } from "@chatbotx.io/ui/components/data-table/data-table-column-header"
+import { Button } from "@chatbotx.io/ui/components/ui/button"
+import { Checkbox } from "@chatbotx.io/ui/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@chatbotx.io/ui/components/ui/dropdown-menu"
+import { Switch } from "@chatbotx.io/ui/components/ui/switch"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@chatbotx.io/ui/components/ui/tooltip"
+import type { DataTableRowAction } from "@chatbotx.io/ui/types/data-table"
+import type { ColumnDef } from "@tanstack/react-table"
+import {
+  FolderUpIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  TextIcon,
+  Trash2Icon,
+} from "lucide-react"
+import Link from "next/link"
+import type { useTranslations } from "next-intl"
+import { useAction } from "next-safe-action/hooks"
+import type { Dispatch, SetStateAction } from "react"
+import { LockBadge } from "@/features/templates/components/lock-badge"
+import {
+  LockedGuard,
+  UndeletableGuard,
+} from "@/features/templates/components/lock-context"
+import { updateTriggerSettingsAction } from "./actions/update-trigger-settings-action"
+import type { TriggerResource } from "./schema/resource"
+
+type GetColumnsProps = {
+  workspaceId: string
+  t: ReturnType<typeof useTranslations>
+  setRowAction: Dispatch<
+    SetStateAction<DataTableRowAction<TriggerResource> | null>
+  >
+}
+
+export function getColumns({
+  workspaceId,
+  t,
+  setRowAction,
+}: GetColumnsProps): ColumnDef<TriggerResource>[] {
+  return [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          aria-label={t("actions.selectAll")}
+          checked={table.getIsAllPageRowsSelected()}
+          className="translate-y-0.5"
+          indeterminate={table.getIsSomePageRowsSelected()}
+          onCheckedChange={(value) =>
+            table.toggleAllPageRowsSelected(Boolean(value))
+          }
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          aria-label={t("actions.selectRow")}
+          checked={row.getIsSelected()}
+          className="translate-y-0.5"
+          onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+        />
+      ),
+      size: 20,
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
+      id: "name",
+      accessorKey: "name",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t("fields.name.label")} />
+      ),
+      cell: ({ row }) => (
+        <div className="flex max-w-[300px] items-center">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <div className="inline-block max-w-[300px] truncate">
+                  <Link
+                    className="truncate"
+                    href={`/space/${workspaceId}/triggers/${row.original.id}/edit`}
+                  >
+                    {row.original.name}
+                  </Link>
+                </div>
+              }
+            />
+            <TooltipContent>
+              <p>{row.original.name}</p>
+            </TooltipContent>
+          </Tooltip>
+          <LockBadge resourceId={row.original.id} />
+        </div>
+      ),
+      size: 400,
+      meta: {
+        label: t("fields.name.label"),
+        placeholder: t("fields.name.placeholder"),
+        variant: "text",
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+    },
+    {
+      id: "status",
+      accessorKey: "status",
+      header: ({ column }) => (
+        <DataTableColumnHeader
+          column={column}
+          title={t("fields.status.label")}
+        />
+      ),
+      cell: ({ row }) => {
+        const { execute, isPending } = useAction(
+          updateTriggerSettingsAction.bind(
+            null,
+            row.original.workspaceId,
+            row.original.id,
+          ),
+          {
+            onSuccess: () => {
+              row.original.active = !row.original.active
+            },
+          },
+        )
+        return (
+          <Switch
+            checked={row.original.active}
+            disabled={isPending}
+            onCheckedChange={(value) => {
+              execute({ active: value })
+            }}
+          />
+        )
+      },
+      meta: {
+        label: t("fields.status.label"),
+      },
+      size: 30,
+      enableSorting: true,
+    },
+
+    {
+      id: "action",
+      size: 10,
+      header: t("actions.actions"),
+      cell: ({ row }) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button size="icon" variant="ghost">
+                <MoreHorizontalIcon className="h-4 w-4" />
+                <span className="sr-only">Open menu</span>
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              render={
+                <Link
+                  href={`/space/${workspaceId}/triggers/${row.original.id}/edit`}
+                >
+                  <PencilIcon />
+                  {t("actions.edit")}
+                </Link>
+              }
+            />
+            <LockedGuard resourceId={row.original.id}>
+              {(locked) => (
+                <DropdownMenuItem
+                  disabled={locked}
+                  onClick={() => setRowAction({ row, variant: "rename" })}
+                >
+                  <TextIcon />
+                  {t("actions.rename")}
+                </DropdownMenuItem>
+              )}
+            </LockedGuard>
+            <DropdownMenuItem
+              onClick={() => setRowAction({ row, variant: "move" })}
+            >
+              <FolderUpIcon />
+              {t("actions.move")}
+            </DropdownMenuItem>
+            <UndeletableGuard resourceId={row.original.id}>
+              {(disabled) => (
+                <DropdownMenuItem
+                  disabled={disabled}
+                  onClick={() => setRowAction({ row, variant: "delete" })}
+                  variant="destructive"
+                >
+                  <Trash2Icon />
+                  {t("actions.delete")}
+                </DropdownMenuItem>
+              )}
+            </UndeletableGuard>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
+  ]
+}

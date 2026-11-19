@@ -1,8 +1,7 @@
 //! `features/inbound-webhooks/api/public.ts` (`inboundWebhooksPublicRouter`,
 //! `inboundWebhookChannelsPublicRouter`; scope `integrations`).
 //!
-//! ponytail: `previewMapping` is not ported (it answers the not-ported
-//! error); see `conversion/specs/Q.D13.md`.
+//! `previewMapping` runs `inbound_webhook_apply::preview_mapping` (no write).
 
 use chatbotx_business::inbound_webhook as service;
 use chatbotx_core::flow_config::z::{self, Schema};
@@ -33,6 +32,7 @@ pub const ROUTES: &[&str] = &[
     "inboundWebhooks.get",
     "inboundWebhooks.update",
     "inboundWebhooks.updateSettings",
+    "inboundWebhooks.previewMapping",
     "inboundWebhooks.regenerateToken",
     "inboundWebhooks.listRequests",
     "inboundWebhooks.getRequest",
@@ -62,7 +62,7 @@ fn summary(row: &InboundWebhookListRow) -> Value {
 }
 
 /// `toInboundWebhookResource` (`endpointUrl` only when given).
-fn resource(row: &InboundWebhook, endpoint: Option<String>) -> Value {
+pub(crate) fn resource(row: &InboundWebhook, endpoint: Option<String>) -> Value {
     let mut out = json!({
         "id": row.id.to_string(),
         "name": row.name,
@@ -333,6 +333,31 @@ fn config_schema() -> Schema {
     ])
 }
 
+/// The `previewMapping` body (`inboundWebhookPreviewPayloadSchema` + the
+/// config parts).
+fn preview_schema() -> Schema {
+    let config = config_schema();
+    let payload = z::unknown()
+        .refine(
+            is_jsonb_storable,
+            Some("The payload is nested too deeply or contains unsupported text"),
+            None,
+        )
+        .abort()
+        .refine(
+            |v| serde_json::to_vec(v).is_ok_and(|b| b.len() <= service::MAX_PAYLOAD_BYTES),
+            Some("The payload is too large"),
+            None,
+        )
+        .nonoptional();
+    z::object(vec![
+        ("payload", payload),
+        ("inboxResolution", config.field("inboxResolution")),
+        ("identifiers", config.field("identifiers")),
+        ("fieldMappings", config.field("fieldMappings")),
+    ])
+}
+
 /// Parses the config body into `input`'s issues.
 fn parse_config(input: &mut Input) -> Option<service::Config> {
     let parsed = config_schema().safe_parse(&Value::Object(input.obj.clone()));
@@ -448,6 +473,33 @@ pub async fn handle(
                     .await;
             }
             Ok(json(200, resource(&row, Some(url(&row.token)))))
+        }
+        "inboundWebhooks.previewMapping" => {
+            let mut input = Input::from_body(call.params, call.body);
+            let parsed = preview_schema().safe_parse(&Value::Object(input.obj.clone()));
+            if !parsed.success {
+                let issues = parsed
+                    .issues()
+                    .iter()
+                    .filter_map(|issue| serde_json::to_value(issue).ok())
+                    .collect();
+                input.extend_issues(issues);
+            }
+            input.finish()?;
+            let data = parsed.data.unwrap_or_default();
+            let take = |k: &str| data.get(k).cloned().unwrap_or(Value::Null);
+            let resolution = Some(take("inboxResolution")).filter(|v| !v.is_null());
+            let out = chatbotx_business::inbound_webhook_apply::preview_mapping(
+                db,
+                ws,
+                take("payload"),
+                resolution,
+                take("identifiers"),
+                take("fieldMappings"),
+            )
+            .await
+            .map_err(|e| business_error(e, FINDING))?;
+            Ok(json(200, out))
         }
         "inboundWebhooks.regenerateToken" => {
             let mut input = Input::from_body(call.params, call.body);
