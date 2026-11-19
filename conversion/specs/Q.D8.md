@@ -57,7 +57,19 @@ inbound order / `replyToInboundCart` worker suites.
 
 ## Not ported (left for a later unit)
 
-- Checkout of a Shopify / WooCommerce store from the public shop
-  (`placeExternalOrder`): answers `webshopClosed` / `orderingUnavailable`.
-- The blocked-owner part of the workspace freeze check of `orderingState`
-  (only trial expiry / scheduled deletion are checked).
+- (done 2026-11-19) Checkout of a Shopify / WooCommerce store from the
+  public shop: `webshop::external_checkout` (`checkoutOnExternalStore`,
+  `shopify/checkout.ts`, `woocommerce/checkout.ts`). `webCheckout` answers
+  `{ orderId: null, total: 0, currency: "", paymentUrl }` (Shopify cart
+  permalink with `attributes[cbx_ref]`, or the payment page of a `pending`
+  WooCommerce order); `inApp` places the cash-on-delivery order on the store
+  (Shopify `orderCreate` with `DECREMENT_OBEYING_POLICY`, WooCommerce
+  `processing` + `cod`), mirrors it (`mirror_order`, announced) and takes the
+  ordered lines out of the cart. Errors: `shopifyVariantMissing` /
+  `woocommerceProductMissing` 409, `shopifyOrderRejected` /
+  `woocommerceOrderRejected` 422 (`data.detail`). Unit tests in the module.
+- (done 2026-11-19) The blocked-owner part of the freeze check of
+  `orderingState` (cloud only: the owner's `UserQuota` through
+  `access_state_from_quota`). Left: a plan-less owner counts as on the
+  tenant's default plan (active); that plan's contact limit is in the KV
+  snapshot and is not read inside the read transaction.

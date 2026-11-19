@@ -162,7 +162,7 @@ pub async fn graphql(credentials: &Credentials, query: &str, variables: Value) -
 }
 
 /// `assertNoUserErrors`.
-fn assert_no_user_errors(errors: &Value) -> ApiResult<()> {
+pub(crate) fn assert_no_user_errors(errors: &Value) -> ApiResult<()> {
     let Some(list) = errors.as_array().filter(|l| !l.is_empty()) else {
         return Ok(());
     };

@@ -702,7 +702,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/quick-replies-popover.test.tsx` | B | - | todo | Flow steps: messages and buttons; builder jsdom |
 | `apps/builder/__tests__/quota-metrics-trial.test.ts` | C | tbd | todo | Licensing, billing and quotas; builder server code |
 | `apps/builder/__tests__/read-conversation.action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
-| `apps/builder/__tests__/realtime-connect-token-api.test.ts` | C | tbd | todo | Realtime (WebSocket gateway); builder server code |
+| `apps/builder/__tests__/realtime-connect-token-api.test.ts` | C | `crates/api/tests/rpc_procedures.rs`, `crates/api/tests/mobile_member_scope.rs` | ported | Realtime (WebSocket gateway); builder server code; Q.A1 (`/rpc` mint + public `realtime.getConnectToken`) |
 | `apps/builder/__tests__/realtime-warn-limiter.test.ts` | B | - | todo | Realtime (WebSocket gateway); builder jsdom |
 | `apps/builder/__tests__/recurrence-defaults.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/recurrence-rule-fields.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
@@ -1790,7 +1790,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/sendgrid/__tests__/client.test.ts` | C | tbd | todo | SendGrid integration |
 | `integrations/sendgrid/__tests__/connection.test.ts` | C | tbd | todo | SendGrid integration |
 | `integrations/sendgrid/__tests__/integration.test.ts` | C | tbd | todo | SendGrid integration |
-| `integrations/shopify/__tests__/lib.test.ts` | C | tbd | todo | Shopify integration |
+| `integrations/shopify/__tests__/lib.test.ts` | C | `crates/business/src/webshop/external_checkout.rs` (unit) | ported | Shopify integration; Q.D8: `buildShopifyCartPermalink` ported; webhook signature + gid cases stay with the Shopify receiver unit |
 | `integrations/smtp/__tests__/smoke.test.ts` | C | tbd | todo | SMTP email integration |
 | `integrations/telegram/__tests__/call-phone-number-button.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
 | `integrations/telegram/__tests__/connection.test.ts` | C | `crates/worker/src/channels/telegram_tests.rs` | passing | Telegram channel |
@@ -1982,13 +1982,13 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/auth/__tests__/mcp-resource.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/mobile-auth.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/mobile-resource.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/auth/__tests__/provisioning.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
+| `packages/auth/__tests__/provisioning.test.ts` | C | - | not-applicable | Authentication (sign-in, social, mobile, magic links); Q.A1: reseller account provisioning, the Rust auth runs one tenant (P3.5 §10) |
 | `packages/auth/__tests__/schema-parity.test.ts` | C | `crates/db/tests/schema_parity.rs` | passing | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/send-magic-link.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/signup-gate.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/auth/__tests__/social-redirect-origin.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/auth/__tests__/tenant-credential-lookup.integration.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/auth/__tests__/tenant-scoping.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
+| `packages/auth/__tests__/tenant-credential-lookup.integration.test.ts` | C | - | not-applicable | Authentication (sign-in, social, mobile, magic links); Q.A1: tenant-scoped better-auth adapter, the Rust auth runs one tenant (P3.5 §10) |
+| `packages/auth/__tests__/tenant-scoping.test.ts` | C | `crates/business/tests/tenant_service.rs` | ported | Authentication (sign-in, social, mobile, magic links); Q.A1: `resolveTenantOwnerId` / `resolveTenantByDomain` ported; `withTenant`, OAuth-state tenant and the tenant-scoped adapter n-a (one tenant) |
 | `packages/auth/__tests__/trusted-origins-build-phase.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/automated-response/__tests__/dispatch-reply-ads-conversion.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/automated-response/__tests__/dispatch-reply-contact-activity.test.ts` | C | tbd | todo | Automated responses and keywords |
