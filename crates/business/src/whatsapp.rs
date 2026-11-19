@@ -359,6 +359,7 @@ pub async fn request_call_permission(
     text: String,
     inbox_id: Option<i64>,
     messages: &CallPermissionMessages,
+    user_id: Option<i64>,
 ) -> Result<crate::message::Outgoing> {
     let pinned = match inbox_id {
         Some(inbox) => {
@@ -407,7 +408,7 @@ pub async fn request_call_permission(
             content_attributes: Some(json!({ "type": "whatsapp_call_permission_request" })),
             ..OutgoingInput::default()
         },
-        None,
+        user_id,
     )
     .await
 }

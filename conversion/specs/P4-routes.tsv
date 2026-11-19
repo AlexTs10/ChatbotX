@@ -94,7 +94,7 @@ app/space/[workspaceId]/(integrations)/google-sheets/page.tsx	/space/$workspaceI
 app/space/[workspaceId]/(integrations)/whatsapps/[id]/account-healths/page.tsx	/space/$workspaceId/whatsapps/$id/account-healths	ported
 app/space/[workspaceId]/(integrations)/whatsapps/[id]/ads/page.tsx	/space/$workspaceId/whatsapps/$id/ads	todo
 app/space/[workspaceId]/(integrations)/whatsapps/[id]/automation/page.tsx	/space/$workspaceId/whatsapps/$id/automation	ported
-app/space/[workspaceId]/(integrations)/whatsapps/[id]/calls/page.tsx	/space/$workspaceId/whatsapps/$id/calls	todo
+app/space/[workspaceId]/(integrations)/whatsapps/[id]/calls/page.tsx	/space/$workspaceId/whatsapps/$id/calls	ported
 app/space/[workspaceId]/(integrations)/whatsapps/[id]/capi/page.tsx	/space/$workspaceId/whatsapps/$id/capi	ported
 app/space/[workspaceId]/(integrations)/whatsapps/[id]/ecommerce/page.tsx	/space/$workspaceId/whatsapps/$id/ecommerce	ported
 app/space/[workspaceId]/(integrations)/whatsapps/[id]/flows/page.tsx	/space/$workspaceId/whatsapps/$id/flows	ported
@@ -162,7 +162,7 @@ app/space/[workspaceId]/broadcasts/[broadcastId]/edit/page.tsx	/space/$workspace
 app/space/[workspaceId]/broadcasts/[broadcastId]/runs/page.tsx	/space/$workspaceId/broadcasts/$broadcastId/runs	ported
 app/space/[workspaceId]/broadcasts/create/page.tsx	/space/$workspaceId/broadcasts/create	ported
 app/space/[workspaceId]/broadcasts/page.tsx	/space/$workspaceId/broadcasts	ported
-app/space/[workspaceId]/calls/page.tsx	/space/$workspaceId/calls	todo
+app/space/[workspaceId]/calls/page.tsx	/space/$workspaceId/calls	ported
 app/space/[workspaceId]/contacts/import/histories/page.tsx	/space/$workspaceId/contacts/import/histories	ported
 app/space/[workspaceId]/contacts/import/page.tsx	/space/$workspaceId/contacts/import	ported
 app/space/[workspaceId]/contacts/page.tsx	/space/$workspaceId/contacts	ported

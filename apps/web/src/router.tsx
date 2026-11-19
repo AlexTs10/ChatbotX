@@ -215,6 +215,11 @@ const workspacePages = [
     path: "inbox",
     component: lazyRouteComponent(() => import("@/routes/inbox"), "InboxPage"),
   }),
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path: "calls",
+    component: lazyRouteComponent(() => import("@/routes/calls"), "CallsPage"),
+  }),
 ]
 const flowsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -810,9 +815,19 @@ const instagramChannelRoute = channelPage(
   "instagrams/$id",
   "InstagramLayout",
 )
+// The `calls` tab (`whatsapps/[id]/calls`) of the calling unit.
+const whatsappCallsRoute = createRoute({
+  getParentRoute: () => whatsappChannelRoute,
+  path: "calls",
+  component: lazyRouteComponent(
+    () => import("@/routes/calls"),
+    "WhatsappCallsSettingsPage",
+  ),
+})
 const channelSettingsRoutes = [
-  whatsappChannelRoute.addChildren(
-    (
+  whatsappChannelRoute.addChildren([
+    whatsappCallsRoute,
+    ...(
       [
         ["settings", "WhatsappSettingsPage"],
         ["account-healths", "WhatsappAccountHealthsPage"],
@@ -825,7 +840,7 @@ const channelSettingsRoutes = [
         ["capi", "WhatsappCapiRedirect"],
       ] as const
     ).map(([path, page]) => channelPage(() => whatsappChannelRoute, path, page)),
-  ),
+  ]),
   messengerChannelRoute.addChildren(
     (
       [

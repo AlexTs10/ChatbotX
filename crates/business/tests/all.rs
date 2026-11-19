@@ -324,6 +324,20 @@ mod user_quota_plan;
 mod user_quota_reconcile;
 #[path = "vendor_service.rs"]
 mod vendor_service;
+#[path = "whatsapp_call_announcement_options.rs"]
+mod whatsapp_call_announcement_options;
+#[path = "whatsapp_call_hours.rs"]
+mod whatsapp_call_hours;
+#[path = "whatsapp_call_ring_targets.rs"]
+mod whatsapp_call_ring_targets;
+#[path = "whatsapp_call_voip_call_service.rs"]
+mod whatsapp_call_voip_call_service;
+#[path = "whatsapp_meta_call_permission.rs"]
+mod whatsapp_meta_call_permission;
+#[path = "whatsapp_voip_sdp.rs"]
+mod whatsapp_voip_sdp;
+#[path = "whatsapp_voip_turn_credentials.rs"]
+mod whatsapp_voip_turn_credentials;
 #[path = "workspace_api_token_credentials.rs"]
 mod workspace_api_token_credentials;
 #[path = "workspace_deletion_schedule.rs"]

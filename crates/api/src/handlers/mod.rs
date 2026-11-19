@@ -91,6 +91,7 @@ pub mod triggers;
 pub mod webchats;
 pub mod webhooks;
 pub mod webshop;
+pub mod whatsapp_calling;
 pub mod whatsapp_calls;
 pub mod whatsapp_channels;
 pub mod whatsapp_coexist;
@@ -795,6 +796,8 @@ async fn route(
         whatsapp_coexist::handle(state, route_id, call).await
     } else if whatsapp_channels::ROUTES.contains(&route_id) {
         whatsapp_channels::handle(state, route_id, call).await
+    } else if whatsapp_calling::ROUTES.contains(&route_id) {
+        whatsapp_calling::handle(state, route_id, call).await
     } else if saved_replies::ROUTES.contains(&route_id) {
         saved_replies::handle(state, route_id, call).await
     } else if response_sla::ROUTES.contains(&route_id) {

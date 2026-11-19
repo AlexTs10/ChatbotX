@@ -272,6 +272,10 @@ mod triggers_public_api;
 mod webchats_public_api;
 #[path = "webhooks_public_api.rs"]
 mod webhooks_public_api;
+#[path = "whatsapp_calling_actions.rs"]
+mod whatsapp_calling_actions;
+#[path = "whatsapp_calling_public_api.rs"]
+mod whatsapp_calling_public_api;
 #[path = "whatsapp_flows_public_api.rs"]
 mod whatsapp_flows_public_api;
 #[path = "whatsapp_templates_public_api.rs"]

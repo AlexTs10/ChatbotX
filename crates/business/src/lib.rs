@@ -131,6 +131,8 @@ pub mod webhook;
 pub mod webshop;
 pub mod whatsapp;
 pub mod whatsapp_flow;
+pub mod whatsapp_voip;
+pub mod whatsapp_voip_actions;
 pub mod woocommerce;
 pub mod working_hours;
 pub mod workspace;

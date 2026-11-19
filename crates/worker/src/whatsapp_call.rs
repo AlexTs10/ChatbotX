@@ -4,11 +4,9 @@
 //! contact / conversation activity and the `incomingCall` / `callEnded` /
 //! `missedAudioCall` events.
 //!
-//! ponytail: the VoIP control record (Redis CAS of the browser calling
-//! session: `markOutboundRinging` / `markOutboundAccepted`, `endCall`,
-//! `deleteOffer`) and the agent-targeted realtime hints
-//! (`whatsappCallOutboundStatus`, `whatsappCallTransportEnded`) are not
-//! ported: no VoIP session exists without the calling actions.
+//! The VoIP hooks (`markOutboundRinging` / `markOutboundAccepted` +
+//! `whatsappCallOutboundStatus`, `emitCallEndedToAgent`) live in
+//! [`crate::whatsapp_voip`].
 use chatbotx_business::events::{Event, TriggerEvent};
 use chatbotx_business::message::message_json;
 use chatbotx_core::utils::whatsapp_call::{WhatsappCallMediaToggles, transcribes_calls};
@@ -328,6 +326,7 @@ async fn outbound_status(
                 calls::update_interim_status(c, &wacid, "ringing", Some(&current))
             })
             .await?;
+            crate::whatsapp_voip::outbound_status_hook(deps, &call, "ringing").await?;
         }
         "accepted" => {
             let Some(agent) = call.answered_by_user_id else {
@@ -337,10 +336,9 @@ async fn outbound_status(
                 );
                 return Ok(());
             };
-            write(deps, move |c| {
-                calls::mark_accepted_if_active(c, call.id, agent)
-            })
-            .await?;
+            let id = call.id;
+            write(deps, move |c| calls::mark_accepted_if_active(c, id, agent)).await?;
+            crate::whatsapp_voip::outbound_status_hook(deps, &call, "accepted").await?;
         }
         _ => {
             let entity = json!({ "type": "whatsapp_call", "direction": "businessInitiated", "status": "rejected" });
@@ -476,6 +474,25 @@ pub fn activity_text(entity: &Value) -> String {
     }
 }
 
+/// `finalizeCallSideEffects({ call, entity })`.
+pub(crate) async fn finalize_card(
+    deps: &Deps,
+    call: WhatsappCall,
+    entity: Value,
+) -> Result<(), JobError> {
+    finalize(
+        deps,
+        Finalize {
+            call,
+            entity,
+            ended_at: None,
+            started_at: None,
+            last_error: None,
+        },
+    )
+    .await
+}
+
 struct Finalize {
     call: WhatsappCall,
     /// `{ type, direction, status, durationSeconds? }`.
@@ -608,6 +625,13 @@ async fn finalize(deps: &Deps, input: Finalize) -> Result<(), JobError> {
         current: Some(call.clone()),
     };
     write(deps, move |c| calls::finalize_by_id(c, &finalize)).await?;
+    // Transport cleanup on every delivery (each step is idempotent).
+    let persisted = match terminal {
+        WhatsappCallTerminalStatus::Completed => "completed",
+        WhatsappCallTerminalStatus::Rejected => "rejected",
+        WhatsappCallTerminalStatus::Failed => "failed",
+    };
+    crate::whatsapp_voip::emit_call_ended_to_agent(deps, &call, persisted).await?;
     if !saved.is_new {
         return Ok(());
     }

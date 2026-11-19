@@ -45,6 +45,7 @@ mod tools;
 mod triggers;
 mod user_persistent_menus;
 mod whatsapp;
+mod whatsapp_calls;
 mod working_hours;
 mod workspaces;
 
@@ -285,6 +286,7 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
                 || appointments::ACTIONS.contains(&n)
                 || working_hours::ACTIONS.contains(&n)
                 || whatsapp::ACTIONS.contains(&n)
+                || whatsapp_calls::ACTIONS.contains(&n)
                 || channels::ACTIONS.contains(&n)
                 || google_ads::ACTIONS.contains(&n)
                 || facebook_ads::ACTIONS.contains(&n)
@@ -381,6 +383,9 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = Box::pin(channels::action(ctx, name, &args)).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = Box::pin(whatsapp_calls::action(ctx, name, &args)).await {
         return Some(outcome);
     }
     if let Some(outcome) = Box::pin(google_ads::action(ctx, name, &args)).await {
@@ -708,6 +713,7 @@ mod send_checks {
         assert_send(whatsapp::action(ctx, "", args));
         assert_send(channels::procedure(ctx, "", input));
         assert_send(channels::action(ctx, "", args));
+        assert_send(whatsapp_calls::action(ctx, "", args));
     }
 
     fn handler_futures_are_send(state: &ApiState, call: Call<'_>) {
