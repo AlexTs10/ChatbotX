@@ -245,16 +245,20 @@ async fn calls_page_is_open_to_contacts_access_or_analytics_only() {
 #[tokio::test]
 async fn the_history_scope_follows_the_member_permissions() {
     let r = router().await;
-    // onlyAssignedContacts: the calls of its assigned conversations.
-    let (_, page) = action(&r, "listWhatsappCallsAction", AGENT, vec![json!({})]).await;
+    // contacts: only the calls the member answered or started.
+    let (_, page) = action(&r, "listWhatsappCallsAction", OTHER_AGENT, vec![json!({})]).await;
     let ids: Vec<&str> = page["data"]
         .as_array()
         .unwrap()
         .iter()
         .map(|c| c["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec![CALL_MINE.to_string()]);
+    assert_eq!(ids, vec![CALL_OTHER.to_string()]);
     assert!(page["data"][0].get("recordingPath").is_some());
+    // onlyAssignedContacts: also only on its assigned conversations; it took
+    // part in no call (901 on its conversation was never answered).
+    let (_, page) = action(&r, "listWhatsappCallsAction", AGENT, vec![json!({})]).await;
+    assert_eq!(page["data"], json!([]));
     // The missed chip keeps the failed inbound call only.
     let (_, page) = action(
         &r,

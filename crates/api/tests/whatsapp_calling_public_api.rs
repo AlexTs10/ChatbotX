@@ -285,7 +285,7 @@ async fn sends_the_whole_call_hours_keeping_upcoming_holidays_and_mirrors_them()
     .await;
     assert_eq!(status, 204, "{body}");
     let posts = meta.lock().unwrap().posts.clone();
-    let hours = &posts[0]["call_hours"];
+    let hours = &posts[0]["calling"]["call_hours"];
     assert_eq!(hours["status"], "ENABLED");
     assert_eq!(hours["timezone_id"], "Europe/Berlin");
     assert_eq!(
