@@ -163,7 +163,9 @@ export function AnalyticsSheet({
   const adminRows = useMemo<AdminRow[]>(() => {
     const byActor = stats.data?.byActor ?? []
     const userRows = byActor.filter((row) => row.actorKind === "user")
-    const byUser = new Map(userRows.map((row) => [row.actorUserId, row]))
+    const byUser = new Map<string, Omit<AdminRow, "key" | "name">>(
+      userRows.map((row) => [row.actorUserId, row]),
+    )
     const zero = { created: 0, won: 0, wonValue: 0, lost: 0, lostValue: 0 }
     const memberRows = members.flatMap((member) =>
       member.user?.id

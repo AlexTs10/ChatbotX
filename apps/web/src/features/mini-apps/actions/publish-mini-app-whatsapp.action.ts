@@ -2,4 +2,10 @@
 // The server code runs in the Rust server: POST /rpc/actions/<name>.
 import { serverAction } from "@/lib/server-action"
 
-export const publishMiniAppWhatsappAction = serverAction("publishMiniAppWhatsappAction", { workspace: true })
+/** `toPublishResponse` (builder `features/mini-apps/api/mappers.ts`). */
+export const publishMiniAppWhatsappAction = serverAction<{
+  status: string
+  published: boolean
+  whatsappFlowId: string | null
+  validationErrors: unknown[]
+}>("publishMiniAppWhatsappAction", { workspace: true })
