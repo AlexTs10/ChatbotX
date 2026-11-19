@@ -895,3 +895,100 @@ mod guest_tests {
         )));
     }
 }
+
+/// `parseSimulatorWebsiteUrl`: only an absolute http(s) URL can be framed.
+pub fn parse_simulator_website_url(value: &str) -> Option<url::Url> {
+    let url = url::Url::parse(value.trim()).ok()?;
+    matches!(url.scheme(), "http" | "https").then_some(url)
+}
+
+/// `isSimulatorWebsiteAllowed`: an empty list allows any website.
+pub fn is_simulator_website_allowed(website: &url::Url, authorized_domains: &[String]) -> bool {
+    authorized_domains.is_empty()
+        || is_origin_authorized(
+            Some(&website.origin().ascii_serialization()),
+            authorized_domains,
+        )
+}
+
+/// `buildBotSimulatorLink`: `<appUrl>/bs/<workspace>/<webchat>?url=<website>`.
+pub fn build_bot_simulator_link(
+    app_url: &str,
+    workspace_id: i64,
+    webchat_id: i64,
+    website_url: &str,
+) -> String {
+    let path = format!("/bs/{workspace_id}/{webchat_id}");
+    match url::Url::parse(app_url).and_then(|base| base.join(&path)) {
+        Ok(mut link) => {
+            link.query_pairs_mut()
+                .append_pair("url", website_url.trim());
+            link.to_string()
+        }
+        Err(_) => format!("{}{path}", app_url.trim_end_matches('/')),
+    }
+}
+
+/// `createBotSimulatorLink`: the `/bs` page checks (http(s) website, enabled
+/// webchat, website on its allowed domains) before the link is handed out.
+pub async fn create_bot_simulator_link(
+    db: &Db,
+    app_url: &str,
+    workspace_id: i64,
+    webchat_id: i64,
+    website_url: &str,
+) -> Result<String> {
+    let website = parse_simulator_website_url(website_url).ok_or_else(|| {
+        BusinessError::validation("websiteUrl", "Website URL must be an absolute http(s) URL")
+    })?;
+    let webchat = find_by_id_for_workspace(db, webchat_id, workspace_id).await?;
+    if !webchat.enable {
+        return Err(BusinessError::validation(
+            "webchatId",
+            "Webchat is disabled",
+        ));
+    }
+    if !is_simulator_website_allowed(&website, &webchat.authorized_domains) {
+        return Err(BusinessError::validation(
+            "websiteUrl",
+            format!(
+                "Website is not on the webchat's allowed domains: {}",
+                webchat.authorized_domains.join(", ")
+            ),
+        ));
+    }
+    Ok(build_bot_simulator_link(
+        app_url,
+        workspace_id,
+        webchat.id,
+        website.as_str(),
+    ))
+}
+
+#[cfg(test)]
+mod bot_simulator_tests {
+    use super::*;
+
+    #[test]
+    fn only_http_websites_are_framed() {
+        assert!(parse_simulator_website_url("https://example.com/pricing").is_some());
+        assert!(parse_simulator_website_url("javascript:alert(1)").is_none());
+        assert!(parse_simulator_website_url("example.com").is_none());
+    }
+
+    #[test]
+    fn allowed_domains_include_subdomains() {
+        let site = parse_simulator_website_url("https://shop.example.com/a").unwrap();
+        assert!(is_simulator_website_allowed(&site, &[]));
+        assert!(is_simulator_website_allowed(&site, &["example.com".into()]));
+        assert!(!is_simulator_website_allowed(&site, &["other.com".into()]));
+    }
+
+    #[test]
+    fn builds_the_preview_link() {
+        assert_eq!(
+            build_bot_simulator_link("https://app.test", 1, 2, " https://example.com/a b "),
+            "https://app.test/bs/1/2?url=https%3A%2F%2Fexample.com%2Fa+b"
+        );
+    }
+}

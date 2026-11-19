@@ -16,6 +16,8 @@ mod broadcasts;
 mod comments;
 mod contacts;
 mod conversations;
+mod decisions;
+mod dynamic_images;
 mod ecommerce;
 mod email_marketing;
 mod email_topics;
@@ -23,11 +25,13 @@ mod flows;
 mod google_ads;
 mod inboxes;
 pub(crate) mod integrations;
+mod leaderboards;
 mod lists;
 mod media_library;
 mod mini_apps;
 mod pipeline_board;
 mod pipelines;
+mod places;
 mod products;
 mod rest;
 mod sequences;
@@ -187,6 +191,9 @@ pub async fn procedure(
     if let Some(outcome) = templates::procedure(ctx, path, input).await {
         return Some(outcome);
     }
+    if let Some(outcome) = decisions::procedure(ctx, path, input).await {
+        return outcome;
+    }
     if let Some(outcome) = rest::procedure(ctx, path, input).await {
         return Some(outcome);
     }
@@ -322,6 +329,18 @@ pub async fn action(state: &RpcState, name: &str, context: &RpcContext, input: &
         return Some(outcome);
     }
     if let Some(outcome) = user_persistent_menus::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = decisions::action(ctx, name, &args).await {
+        return outcome;
+    }
+    if let Some(outcome) = dynamic_images::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = leaderboards::action(ctx, name, &args).await {
+        return Some(outcome);
+    }
+    if let Some(outcome) = places::action(ctx, name, &args).await {
         return Some(outcome);
     }
     if let Some(outcome) = rest::action(ctx, name, &args).await {

@@ -46,6 +46,31 @@ impl Telegram {
         Telegram::with_base_url(API_URL)
     }
 
+    /// `getTelegramChatMemberStatus` + `isTelegramMemberStatus`.
+    pub async fn chat_member_status(
+        &self,
+        token: &str,
+        chat_id: &str,
+        user_id: &str,
+    ) -> Result<bool, ApiError> {
+        let query: String = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("chat_id", chat_id)
+            .append_pair("user_id", user_id)
+            .finish();
+        let member = call(
+            &self.client,
+            &self.base_url,
+            token,
+            &format!("getChatMember?{query}"),
+            None,
+        )
+        .await?;
+        Ok(is_member_status(
+            member["status"].as_str().unwrap_or(""),
+            member["is_member"].as_bool(),
+        ))
+    }
+
     pub fn with_base_url(base_url: impl Into<String>) -> Telegram {
         Telegram {
             client: reqwest::Client::builder()

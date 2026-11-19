@@ -95,7 +95,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/bot-fields-public-api.test.ts` | C | tbd | todo | Bot fields; builder server code |
 | `apps/builder/__tests__/bot-fields-public-id-schema.test.ts` | C | tbd | todo | Bot fields; builder server code |
 | `apps/builder/__tests__/bot-simulator-link.test.ts` | B | - | todo | Flow builder and execution; builder jsdom |
-| `apps/builder/__tests__/bot-simulator-public-api.test.ts` | C | tbd | todo | Flow builder and execution; builder server code |
+| `apps/builder/__tests__/bot-simulator-public-api.test.ts` | C | `crates/api/tests/bot_simulator_public_api.rs` | ported | Flow builder and execution; builder server code; Q.D13b |
 | `apps/builder/__tests__/bounded-seen-set.test.ts` | B | - | todo | Builder app shell and shared components; builder jsdom |
 | `apps/builder/__tests__/broadcast-audience-preview-dialog-send-limit.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/broadcast-audience-preview-request.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
@@ -325,7 +325,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/disconnect-whatsapp-action.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/discount-codes-public-api.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; builder server code; Q.D8 (mock-based service test, see DECISIONS) |
 | `apps/builder/__tests__/download-flow-export.test.ts` | B | - | todo | Imports and exports (contacts, products, flows); builder jsdom |
-| `apps/builder/__tests__/dynamic-images-public-api.test.ts` | C | tbd | todo | Dynamic images; builder server code |
+| `apps/builder/__tests__/dynamic-images-public-api.test.ts` | C | `crates/api/tests/dynamic_images_public_api.rs` | ported | Dynamic images; builder server code; Q.D13b |
 | `apps/builder/__tests__/ecommerce-analytics-public-api.test.ts` | C | parity p1-08 `03` | dropped | Ecommerce: settings, open hours, analytics; builder server code; Q.D8 (mock-based service test, see DECISIONS) |
 | `apps/builder/__tests__/ecommerce-open-hours-public-api.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics; builder server code |
 | `apps/builder/__tests__/ecommerce-public-scope.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics; builder server code |
@@ -473,7 +473,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/keywords-public-api.test.ts` | C | tbd | todo | Automated responses and keywords; builder server code |
 | `apps/builder/__tests__/lang-selector.test.tsx` | B | - | todo | i18n (UI translations); builder jsdom |
 | `apps/builder/__tests__/last-message-window.test.ts` | B | - | todo | Automated responses and keywords; builder jsdom |
-| `apps/builder/__tests__/leaderboards-actions.test.ts` | C | tbd | todo | Leaderboards; builder server code |
+| `apps/builder/__tests__/leaderboards-actions.test.ts` | C | `crates/api/tests/rpc_leaderboard_actions.rs` | ported | Leaderboards; builder server code; Q.D13b |
 | `apps/builder/__tests__/leaderboards-admin-ui.test.tsx` | B | - | todo | Leaderboards; builder jsdom |
 | `apps/builder/__tests__/list-broadcasts-for-calendar.test.ts` | C | tbd | todo | Broadcasts (incl. recurring); builder server code |
 | `apps/builder/__tests__/list-broadcasts-query.test.ts` | C | tbd | todo | Broadcasts (incl. recurring); builder server code |
@@ -652,7 +652,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/places-near-me-categories-ui.test.tsx` | B | - | todo | Places near me; builder jsdom |
 | `apps/builder/__tests__/places-near-me-category-options.test.ts` | C | tbd | todo | Places near me; builder server code |
 | `apps/builder/__tests__/places-near-me-locations-ui.test.tsx` | B | - | todo | Places near me; builder jsdom |
-| `apps/builder/__tests__/places-near-me-public-api.test.ts` | C | tbd | todo | Places near me; builder server code |
+| `apps/builder/__tests__/places-near-me-public-api.test.ts` | C | `crates/api/tests/places_near_me_public_api.rs` | ported | Places near me; builder server code; Q.D13b (stale row) |
 | `apps/builder/__tests__/places-near-me-public-schema.test.ts` | B | - | todo | Places near me; builder jsdom |
 | `apps/builder/__tests__/plain-text-tiptap-editor-dom.test.tsx` | B | - | todo | Variables (contact/bot/system variable interpolation); builder jsdom |
 | `apps/builder/__tests__/plain-text-tiptap-editor.test.ts` | B | - | todo | Variables (contact/bot/system variable interpolation); builder jsdom |
@@ -708,8 +708,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/recurrence-rule-fields.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/recurrence-summary.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/recurrence-weekday-options.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
-| `apps/builder/__tests__/reflink-widget-route.test.ts` | C | tbd | todo | Leaderboards; builder server code |
-| `apps/builder/__tests__/reflinks-public-api.test.ts` | C | tbd | todo | Leaderboards; builder server code |
+| `apps/builder/__tests__/reflink-widget-route.test.ts` | C | `crates/api/tests/reflink_chat_widget.rs` | ported | Leaderboards; builder server code; Q.D13b (stale row) |
+| `apps/builder/__tests__/reflinks-public-api.test.ts` | C | `crates/api/tests/qr_reflinks_public_api.rs`, `crates/api/tests/reflink_chat_widget.rs` | ported | Leaderboards; builder server code; Q.D13b (stale row) |
 | `apps/builder/__tests__/refresh-all-channel-tokens-action.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/refresh-contact-profile-action.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/remove-contact-sequence.action.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
@@ -1222,7 +1222,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/ai-output-length.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/ai-segment-image-step-registration.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/analytics-agent-replied.test.ts` | C | tbd | todo | Analytics dashboards |
-| `apps/worker/__tests__/analytics-dashboard-listener.test.ts` | C | tbd | todo | Analytics dashboards |
+| `apps/worker/__tests__/analytics-dashboard-listener.test.ts` | C | `crates/worker/tests/analytics_events.rs` | ported | Analytics dashboards; Q.D13b (abort-signal case n-a: the Rust listener has no abort) |
 | `apps/worker/__tests__/appointment-scheduling-handler.test.ts` | C | tbd | todo | Appointments and booking |
 | `apps/worker/__tests__/auto-assign-step-handler.test.ts` | C | tbd | todo | Flow steps: contact and conversation actions |
 | `apps/worker/__tests__/automated-response-default-reply.test.ts` | C | tbd | todo | Automated responses and keywords |
@@ -1308,7 +1308,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/export-contacts-handler.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/export-contacts-where.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/export-coupons.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
-| `apps/worker/__tests__/export-leaderboard-participants.test.ts` | C | tbd | todo | Leaderboards |
+| `apps/worker/__tests__/export-leaderboard-participants.test.ts` | C | `crates/business/tests/leaderboard_service.rs` | ported | Leaderboards; Q.D13b (CSV body and columns; upload backpressure n-a: one put_object) |
 | `apps/worker/__tests__/external-request-handler.test.ts` | C | tbd | todo | Outbound webhooks |
 | `apps/worker/__tests__/external-request-step-registration.test.ts` | C | tbd | todo | Outbound webhooks |
 | `apps/worker/__tests__/extract-data.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
@@ -1316,7 +1316,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/facebook-custom-audience-step-registration.test.ts` | C | tbd | todo | Facebook Ads integration |
 | `apps/worker/__tests__/fan-out-template-update.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/finalize-broadcasts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
-| `apps/worker/__tests__/find-places-near-me-step.test.ts` | C | tbd | todo | Places near me |
+| `apps/worker/__tests__/find-places-near-me-step.test.ts` | C | `crates/worker/src/steps/tests.rs` | ported | Places near me; Q.D13b (stale row) |
 | `apps/worker/__tests__/flow-action-sanitize.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/flow-continuation-priority.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/flow-execution-key.test.ts` | C | tbd | todo | Flow builder and execution |
@@ -1370,7 +1370,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/lead-ads.test.ts` | C | tbd | todo | Facebook Lead Ads automation |
 | `apps/worker/__tests__/leaderboard-follower-check.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/leaderboard-jobs.test.ts` | C | tbd | todo | Leaderboards |
-| `apps/worker/__tests__/leaderboard-sources.test.ts` | C | tbd | todo | Leaderboards |
+| `apps/worker/__tests__/leaderboard-sources.test.ts` | C | `crates/worker/src/leaderboard.rs` (unit) | ported | Leaderboards; Q.D13b (pure source rules; DB paths in parity p1-10) |
 | `apps/worker/__tests__/live-comment.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `apps/worker/__tests__/lock-contention-deferral.test.ts` | C | `crates/jobs/tests/lock_contention_deferral.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/low-worker-boot.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
@@ -1464,9 +1464,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/run-import.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/run-job-with-audit-context.test.ts` | C | tbd | todo | Audit logs |
 | `apps/worker/__tests__/run-leased-template-job.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `apps/worker/__tests__/run-ref-leaderboard.test.ts` | C | tbd | todo | Leaderboards |
+| `apps/worker/__tests__/run-ref-leaderboard.test.ts` | C | tbd | todo | Leaderboards; Q.D13b: left, the runRef handler is not ported (no unit owns it) |
 | `apps/worker/__tests__/run-ref-minigame-share.test.ts` | C | tbd | todo | Minigames |
-| `apps/worker/__tests__/run-ref-referral.test.ts` | C | tbd | todo | Leaderboards |
+| `apps/worker/__tests__/run-ref-referral.test.ts` | C | tbd | todo | Leaderboards; Q.D13b: left, the runRef handler is not ported (no unit owns it) |
 | `apps/worker/__tests__/sanitize-capi-error.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `apps/worker/__tests__/save-result-to-custom-field.test.ts` | C | tbd | todo | Custom fields |
 | `apps/worker/__tests__/scan-abandoned-carts.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
@@ -1965,8 +1965,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/analytics/__tests__/mac-tracking.service.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/mac.repository.sql.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/mac.repository.test.ts` | C | tbd | todo | Analytics dashboards |
-| `packages/analytics/__tests__/magic-link-analytics.service.test.ts` | C | tbd | todo | Analytics dashboards |
-| `packages/analytics/__tests__/ref-link-analytics.service.test.ts` | C | tbd | todo | Analytics dashboards |
+| `packages/analytics/__tests__/magic-link-analytics.service.test.ts` | C | `crates/worker/tests/analytics_events.rs` | ported | Analytics dashboards; Q.D13b |
+| `packages/analytics/__tests__/ref-link-analytics.service.test.ts` | C | `crates/worker/tests/analytics_events.rs` | ported | Analytics dashboards; Q.D13b |
 | `packages/analytics/__tests__/sequence-analytics.service.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/stats-contact-ids-page.repository.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/stats-occurred-at.test.ts` | C | tbd | todo | Analytics dashboards |
@@ -2142,7 +2142,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/dataset-fallback.test.ts` | C | tbd | todo | Business layer shared services |
 | `packages/business/__tests__/default-reply-throttle.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/business/__tests__/device-token-service.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
-| `packages/business/__tests__/dynamic-image-avatar-user.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
+| `packages/business/__tests__/dynamic-image-avatar-user.test.ts` | C | `crates/api/tests/dynamic_images_public_api.rs` | ported | Contacts (profiles, notes, activity); Q.D13b; adapted: the avatar is the stored contact avatar (DECISIONS 2026-11-19) |
 | `packages/business/__tests__/edge-safe-import-graph.test.ts` | C | tbd | todo | Builder app shell and shared components |
 | `packages/business/__tests__/email-topic-click-url.test.ts` | C | tbd | todo | Email topics and tracking |
 | `packages/business/__tests__/email-tracking.service.test.ts` | C | tbd | todo | Email topics and tracking |
@@ -2302,12 +2302,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/javascript-execution.test.ts` | - | - | dropped | Execute JavaScript flow step; feature dropped (DECISIONS 2026-11-11) |
 | `packages/business/__tests__/javascript-output-mapping.test.ts` | - | - | dropped | Execute JavaScript flow step; feature dropped (DECISIONS 2026-11-11) |
 | `packages/business/__tests__/last-user-input.test.ts` | C | tbd | todo | Automated responses and keywords |
-| `packages/business/__tests__/leaderboard-email-telegram-sources.test.ts` | C | tbd | todo | Leaderboards |
-| `packages/business/__tests__/leaderboard-helpers.test.ts` | C | tbd | todo | Leaderboards |
-| `packages/business/__tests__/leaderboard-participants-security.test.ts` | C | tbd | todo | Leaderboards |
-| `packages/business/__tests__/leaderboard-partitions.test.ts` | C | tbd | todo | Leaderboards |
-| `packages/business/__tests__/leaderboard-rewards.test.ts` | C | tbd | todo | Leaderboards |
-| `packages/business/__tests__/leaderboard-scoring.test.ts` | C | tbd | todo | Leaderboards |
+| `packages/business/__tests__/leaderboard-email-telegram-sources.test.ts` | C | tbd | todo | Leaderboards; Q.D13b: left, email-topic tracking routes are not ported |
+| `packages/business/__tests__/leaderboard-helpers.test.ts` | C | `crates/business/tests/leaderboard_service.rs` | ported | Leaderboards; Q.D13b |
+| `packages/business/__tests__/leaderboard-participants-security.test.ts` | C | `crates/business/tests/leaderboard_service.rs` | ported | Leaderboards; Q.D13b |
+| `packages/business/__tests__/leaderboard-partitions.test.ts` | C | - | not-applicable | Leaderboards; Q.D13b (Postgres partitions; SQLite has none, DECISIONS) |
+| `packages/business/__tests__/leaderboard-rewards.test.ts` | C | `crates/business/tests/leaderboard_service.rs` | ported | Leaderboards; Q.D13b (finished guard; claim/retry paths in parity p1-10 `52`) |
+| `packages/business/__tests__/leaderboard-scoring.test.ts` | C | `crates/business/tests/leaderboard_service.rs` | ported | Leaderboards; Q.D13b (status transitions; Redis mirror asserts n-a, SQLite ranking) |
 | `packages/business/__tests__/leaderboard-welcome-flow.test.ts` | C | tbd | todo | Leaderboards |
 | `packages/business/__tests__/license.refresh.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/license.service.test.ts` | C | tbd | todo | Licensing, billing and quotas |
@@ -2342,7 +2342,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/mini-app-submission-custom-fields.test.ts` | C | `crates/business/tests/mini_app_service.rs` | ported | Mini-apps; Q.D1m |
 | `packages/business/__tests__/mini-app-upload-service.test.ts` | C | `crates/business/tests/mini_app_upload_service.rs` | ported | Mini-apps; Q.D1m |
 | `packages/business/__tests__/minigame-contact-service-scoping.test.ts` | C | tbd | todo | Minigames |
-| `packages/business/__tests__/minigame-leaderboard-award.test.ts` | C | tbd | todo | Minigames |
+| `packages/business/__tests__/minigame-leaderboard-award.test.ts` | C | `crates/business/tests/minigame_play.rs` | ported | Minigames; Q.D13b (stale row) |
 | `packages/business/__tests__/minigame-outcome-message-text.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/minigame-referral-bonus.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/minigame-service-update.test.ts` | C | tbd | todo | Minigames |
@@ -2385,9 +2385,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/realtime-redis-url.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
 | `packages/business/__tests__/realtime-relay-metrics.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
 | `packages/business/__tests__/realtime-stream-publisher.test.ts` | C | tbd | todo | Realtime (WebSocket gateway) |
-| `packages/business/__tests__/referral-ref-encoding.test.ts` | C | tbd | todo | Leaderboards |
-| `packages/business/__tests__/referral-utils-poll.test.ts` | C | tbd | todo | Leaderboards |
-| `packages/business/__tests__/reflink-service.test.ts` | C | tbd | todo | Leaderboards |
+| `packages/business/__tests__/referral-ref-encoding.test.ts` | C | tbd | todo | Leaderboards; Q.D13b: left, decodeRef comes with the runRef handler |
+| `packages/business/__tests__/referral-utils-poll.test.ts` | C | tbd | todo | Leaderboards; Q.D13b: left, decodeRef comes with the runRef handler |
+| `packages/business/__tests__/reflink-service.test.ts` | C | `crates/business/tests/reflink_service.rs` | ported | Leaderboards; Q.D13b (stale row) |
 | `packages/business/__tests__/reply-format-validators.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/__tests__/resolve-minigame-prize.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/resolve-sent-whatsapp-flow.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
@@ -2582,12 +2582,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/connection/__tests__/store-bindings.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/connection/__tests__/upsert.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/conversation/__tests__/conversation.service.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `packages/business/src/decision/adapters.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/connection-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/contracts.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/global-router-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/profile-service.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
-| `packages/business/src/decision/transport.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
+| `packages/business/src/decision/adapters.test.ts` | C | `crates/business/src/decision/contract.rs` (unit tests) | ported | Decision engine (routing profiles); Q.D13b |
+| `packages/business/src/decision/connection-service.test.ts` | C | `crates/api/tests/decisions_public_api.rs` | ported | Decision engine (routing profiles); Q.D13b; adapted: real database in place of the mocked repository |
+| `packages/business/src/decision/contracts.test.ts` | C | `crates/business/src/decision/contract.rs` (unit tests) | ported | Decision engine (routing profiles); Q.D13b |
+| `packages/business/src/decision/global-router-service.test.ts` | C | `crates/business/src/decision/mod.rs` (unit tests) | ported | Decision engine (routing profiles); Q.D13b; the inbound dispatch is Q.D6 |
+| `packages/business/src/decision/profile-service.test.ts` | C | `crates/api/tests/decisions_public_api.rs` | ported | Decision engine (routing profiles); Q.D13b; adapted: real database in place of the mocked repository |
+| `packages/business/src/decision/transport.test.ts` | C | `crates/business/src/decision/transport.rs` (unit tests) | ported | Decision engine (routing profiles); Q.D13b; the redirect-follow case differs (DECISIONS 2026-11-19) |
 | `packages/business/src/discount-code/__tests__/discount-code-service.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; Q.D8 (mock-based service test, see DECISIONS) |
 | `packages/business/src/discount-code/__tests__/pricing.test.ts` | C | parity p1-07 `15` | dropped | Coupons and discount codes; Q.D8 (mock-based service test, see DECISIONS) |
 | `packages/business/src/ecommerce-analytics/__tests__/ecommerce-analytics-service.test.ts` | C | parity p1-08 `03` | dropped | Ecommerce: settings, open hours, analytics; Q.D8 (mock-based service test, see DECISIONS) |
@@ -2622,11 +2622,11 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/order/__tests__/order-sync-external.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
 | `packages/business/src/payment-provider/__tests__/payment-provider-service.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `packages/business/src/payment-provider/__tests__/platform-stripe.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
-| `packages/business/src/place-near-me/__tests__/category-service.test.ts` | C | tbd | todo | Places near me |
-| `packages/business/src/place-near-me/__tests__/contact-location.test.ts` | C | tbd | todo | Places near me |
-| `packages/business/src/place-near-me/__tests__/location-service.test.ts` | C | tbd | todo | Places near me |
-| `packages/business/src/place-near-me/__tests__/nearest.test.ts` | C | tbd | todo | Places near me |
-| `packages/business/src/place-near-me/__tests__/preview-url.test.ts` | C | tbd | todo | Places near me |
+| `packages/business/src/place-near-me/__tests__/category-service.test.ts` | C | `crates/business/tests/place_near_me_category_service.rs` | ported | Places near me; Q.D13b (stale row) |
+| `packages/business/src/place-near-me/__tests__/contact-location.test.ts` | C | `crates/business/tests/place_near_me_contact_location.rs` | ported | Places near me; Q.D13b (stale row) |
+| `packages/business/src/place-near-me/__tests__/location-service.test.ts` | C | `crates/business/tests/place_near_me_location_service.rs` | ported | Places near me; Q.D13b (stale row) |
+| `packages/business/src/place-near-me/__tests__/nearest.test.ts` | C | `crates/business/tests/place_near_me_nearest.rs` | ported | Places near me; Q.D13b (stale row) |
+| `packages/business/src/place-near-me/__tests__/preview-url.test.ts` | C | `crates/business/tests/place_near_me_preview_url.rs` | ported | Places near me; Q.D13b (stale row) |
 | `packages/business/src/resource-deletion-log/__tests__/service.test.ts` | C | tbd | todo | Workspaces |
 | `packages/business/src/shopify/__tests__/mappers.test.ts` | C | tbd | todo | Shopify integration |
 | `packages/business/src/shopify/__tests__/sync-currency.test.ts` | C | tbd | todo | Shopify integration |
@@ -2784,7 +2784,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/integration/workspace-repository.test.ts` | C | tbd | baseline-skip | Workspaces; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/integration/zoned-date-key-timezone.test.ts` | C | `crates/db/tests/zoned_date_key_timezone.rs` | passing | Analytics dashboards; P0.3: needs Postgres/Redis, not run — run in P0.7 |
 | `packages/database/__tests__/keyword-condition-schema.test.ts` | C | tbd | todo | Automated responses and keywords |
-| `packages/database/__tests__/leaderboard-participant-repository.test.ts` | C | tbd | todo | Leaderboards |
+| `packages/database/__tests__/leaderboard-participant-repository.test.ts` | C | `crates/db/tests/repo_leaderboard_participant_repository.rs` | ported | Leaderboards; Q.D13b (stale row) |
 | `packages/database/__tests__/mac-partitions-repository.test.ts` | C | - | not-applicable | Analytics dashboards; Postgres partitions only (P2.3 user decision; P2.5 spec) |
 | `packages/database/__tests__/media-library-file-repository.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/database/__tests__/media-library-folder-repository.test.ts` | C | tbd | todo | Media library and file storage |
@@ -2805,7 +2805,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/product-repository-list.test.ts` | C | tbd | todo | Ecommerce: products, categories, vendors |
 | `packages/database/__tests__/purge-fk-indexes.test.ts` | C | `crates/db/tests/purge_fk_indexes.rs`, `crates/db/tests/purge_fk_indexes_part2.rs`, `crates/db/tests/purge_fk_indexes_part3.rs` | passing | Scheduler and scheduled jobs |
 | `packages/database/__tests__/reference-existence-repository.test.ts` | C | tbd | todo | Database (Drizzle, schema, repositories, sharding) |
-| `packages/database/__tests__/reflink-repository.test.ts` | C | tbd | todo | Leaderboards |
+| `packages/database/__tests__/reflink-repository.test.ts` | C | `crates/db/tests/repo_reflink_repository.rs` | ported | Leaderboards; Q.D13b (stale row) |
 | `packages/database/__tests__/sequence-dispatch-repository.test.ts` | C | tbd | todo | Sequences |
 | `packages/database/__tests__/sharded-message-repository.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/database/__tests__/sharding-shared.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -2835,11 +2835,11 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/database/__tests__/workspace-purge-coverage.test.ts` | C | `crates/db/tests/workspace_purge_coverage.rs`, `crates/db/tests/workspace_purge_coverage_part3.rs` | passing | Workspaces |
 | `packages/database/__tests__/workspace-purge-repository.test.ts` | C | tbd | todo | Workspaces |
 | `packages/database/__tests__/zoned-date-key.test.ts` | C | `crates/db/tests/zoned_date_key.rs` | passing | Analytics dashboards |
-| `packages/decision-config/__tests__/profile.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
+| `packages/decision-config/__tests__/profile.test.ts` | C | `crates/core/tests/decision_config_profile.rs` | ported | Decision engine (routing profiles); stale row (Q.D13b check) |
 | `packages/encryption/__tests__/appointment-tokens.test.ts` | C | tbd | todo | Encryption and signed tokens |
 | `packages/encryption/__tests__/encryption.test.ts` | C | tbd | todo | Encryption and signed tokens |
 | `packages/encryption/__tests__/keys.test.ts` | C | tbd | todo | Encryption and signed tokens |
-| `packages/encryption/__tests__/leaderboard-view-token.test.ts` | C | tbd | todo | Encryption and signed tokens |
+| `packages/encryption/__tests__/leaderboard-view-token.test.ts` | C | `crates/core/tests/encryption_leaderboard_view_token.rs` | ported | Encryption and signed tokens; Q.D13b (stale row) |
 | `packages/encryption/__tests__/link-signature.test.ts` | C | tbd | todo | Encryption and signed tokens |
 | `packages/encryption/__tests__/media-token.test.ts` | C | tbd | todo | Encryption and signed tokens |
 | `packages/encryption/__tests__/minigame-play-token.test.ts` | C | tbd | todo | Encryption and signed tokens |
@@ -2885,11 +2885,11 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/flow-config/__tests__/copy-text-button.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `packages/flow-config/__tests__/deep-link.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `packages/flow-config/__tests__/drip-subscribe-subscriber.test.ts` | C | tbd | todo | Drip integration |
-| `packages/flow-config/__tests__/evaluate-decision.test.ts` | C | tbd | todo | Decision engine (routing profiles) |
+| `packages/flow-config/__tests__/evaluate-decision.test.ts` | C | `crates/core/tests/flow_config_evaluate_decision.rs` | ported | Decision engine (routing profiles); stale row (Q.D13b check) |
 | `packages/flow-config/__tests__/execute-javascript.test.ts` | - | - | dropped | Execute JavaScript flow step; feature dropped (DECISIONS 2026-11-11) |
 | `packages/flow-config/__tests__/external-request.test.ts` | C | tbd | todo | Outbound webhooks |
 | `packages/flow-config/__tests__/field-reference.test.ts` | C | tbd | todo | Custom fields |
-| `packages/flow-config/__tests__/find-places-near-me.test.ts` | C | tbd | todo | Places near me |
+| `packages/flow-config/__tests__/find-places-near-me.test.ts` | C | `crates/core/tests/flow_config_find_places_near_me.rs` | ported | Places near me; Q.D13b (stale row) |
 | `packages/flow-config/__tests__/flow-action-target.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/flow-config/__tests__/follow-up.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `packages/flow-config/__tests__/get-response-add-contact.test.ts` | C | tbd | todo | GetResponse integration |

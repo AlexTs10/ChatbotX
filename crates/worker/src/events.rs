@@ -7,9 +7,12 @@
 //! The `broadcast-ops` listeners (`message:sent` / `delivered` / `failed`)
 //! record the broadcast recipients' outcome.
 //!
+//! The `flow:clicked` / `flow:ref` / `analytics:dashboard` listeners live in
+//! `analytics_events`.
+//!
 //! ponytail: the other analytics listeners (sequence / flow /
 //! comment-automation ops, broadcast `seen`, MAC tracking, active hourly, contact blocked
-//! detection, ads contact-replied, the dashboard bus) wait for the analytics
+//! detection, ads contact-replied) wait for the analytics
 //! package; their buses still run so the entries are acked.
 
 use std::collections::BTreeMap;
@@ -720,11 +723,11 @@ pub async fn start(db: Arc<Db>) -> Result<(EventBuses, EventWorker), String> {
                 },
                 EventModule {
                     bus: flow,
-                    listeners: BTreeMap::new(),
+                    listeners: crate::analytics_events::flow_listeners(&db),
                 },
                 EventModule {
                     bus: dashboard,
-                    listeners: BTreeMap::new(),
+                    listeners: crate::analytics_events::dashboard_listeners(&db),
                 },
                 EventModule {
                     bus: error_log,

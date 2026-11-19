@@ -10,6 +10,7 @@ pub mod ai;
 pub mod ai_agent;
 pub mod ai_file;
 pub mod ai_handover;
+pub mod analytics_events;
 pub mod appointment;
 pub mod channel;
 pub mod channels;
@@ -31,6 +32,7 @@ pub mod inbound_events;
 pub mod inbox_labels;
 pub mod integration;
 pub mod lead_ads;
+pub mod leaderboard;
 pub mod low;
 pub mod marketing_message;
 pub mod meta_catalog;
@@ -302,6 +304,14 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     runtime.spawn_worker(
         spec_of(QueueName::Schedule),
         handler(deps, |deps, job| Box::pin(schedule::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::Leaderboard).concurrency(concurrency_env(
+            "LEADERBOARD_WORKER_CONCURRENCY",
+            10,
+            200,
+        )),
+        handler(deps, |deps, job| Box::pin(leaderboard::handle(deps, job))),
     )?;
     runtime.spawn_worker(
         spec_of(QueueName::Template),

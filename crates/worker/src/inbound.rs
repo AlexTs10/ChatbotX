@@ -320,8 +320,17 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
             );
             add_job(deps, QueueName::Integration, &job.name, job.data, job.opts).await?;
         }
+        if is_new {
+            crate::leaderboard::award_inbound_message(
+                deps,
+                &inbox,
+                contact_inbox.contact_id,
+                &stored.message,
+                received.referral.as_ref(),
+            )
+            .await;
+        }
         if owns_automation {
-            // Q.D13 hook: `awardInboundMessageLeaderboard` goes here.
             message_id = row["id"].as_str().and_then(|s| s.parse().ok());
             message = Some(row);
         }

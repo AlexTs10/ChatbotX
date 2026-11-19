@@ -108,6 +108,22 @@ const publicMiniAppRoute = createRoute({
   component: lazyRouteComponent(miniApps, "PublicMiniAppPage"),
 })
 
+// `/leaderboards` and `/minigames` are public: the signed token is the authority.
+const gamesPublic = () => import("@/routes/games-public")
+const gamePublicPages = (
+  [
+    ["leaderboards", "LeaderboardPublicPage"],
+    ["minigames", "MinigamePlayPage"],
+    ["bs/$workspaceId/$webchatId", "BotSimulatorPreviewPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    component: lazyRouteComponent(gamesPublic, page),
+  }),
+)
+
 // `/booking/*` is public too: the signed token is the authority.
 const bookingPages = (
   [
@@ -416,6 +432,29 @@ const miniAppPages = (
     component: lazyRouteComponent(miniApps, page),
   }),
 )
+// Q.D13b: dynamic images, decisions, leaderboards, places, bot simulator.
+const restTools = () => import("@/routes/rest-tools")
+const restToolPages = (
+  [
+    ["dynamic-images", "DynamicImagesPage"],
+    ["dynamic-images/create", "CreateDynamicImagePage"],
+    ["dynamic-images/$id/edit", "EditDynamicImagePage"],
+    ["tools", "ToolsPage"],
+    ["tools/decision-profiles", "DecisionProfilesPage"],
+    ["leaderboards", "LeaderboardsPage"],
+    ["leaderboards/create", "CreateLeaderboardPage"],
+    ["leaderboards/$id/edit", "EditLeaderboardPage"],
+    ["leaderboards/$id/participants", "LeaderboardParticipantsPage"],
+    ["places-near-me", "PlacesNearMePage"],
+    ["bot-simulator", "BotSimulatorPage"],
+  ] as const
+).map(([path, page]) =>
+  createRoute({
+    getParentRoute: () => workspaceRoute,
+    path,
+    component: lazyRouteComponent(restTools, page),
+  }),
+)
 const pipelinesRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: "pipelines",
@@ -667,6 +706,7 @@ const routeTree = rootRoute.addChildren([
   shareRoutes,
   publicMiniAppRoute,
   ...bookingPages,
+  ...gamePublicPages,
   ...shopPages,
   protectedRoute.addChildren([
     homeRoute,
@@ -686,6 +726,7 @@ const routeTree = rootRoute.addChildren([
       ...logPages,
       ...toolEditorPages,
       ...miniAppPages,
+      ...restToolPages,
       ...commentListRoutes,
       ...commentPages,
       pipelinesRoutes,

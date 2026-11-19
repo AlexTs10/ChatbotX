@@ -2,8 +2,7 @@
 //! `publishedVersionNumber`, `list`, `findForButtonPayload`,
 //! `revertDraftToPublished`, `restore`, `updateDraftByFlowId`, `publish`,
 //! `afterPublishIfLive`. No versions-list cache, no template locks, no
-//! welcome-message sync / quick-reply cleanup jobs, no audit records, no
-//! decision-profile / pipeline publish checks.
+//! welcome-message sync / quick-reply cleanup jobs, no audit records.
 
 use chatbotx_core::flow_config::authoring::normalize_flow_graph_decision_mappings;
 use chatbotx_db::Db;
@@ -230,6 +229,7 @@ pub async fn publish(
     let nodes = Value::Array(normalize_flow_graph_decision_mappings(&nodes));
     let edges = Value::Array(edges);
     assert_flow_graph_publishable(&nodes, &edges)?;
+    crate::decision::assert_flow_references_publishable(db, workspace_id, &nodes).await?;
     crate::pipeline::flow_publish_check::assert_flow_pipeline_steps_publishable(
         db,
         workspace_id,

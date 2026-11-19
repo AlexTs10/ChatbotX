@@ -46,6 +46,8 @@ import { SettingsTab } from "@/app/space/[workspaceId]/(settings)/settings/tab"
 import { isCommunity } from "@/env"
 import { ListInboxTeams } from "@/enterprise/features/inbox-teams/list-inbox-teams"
 import { listInboxTeams } from "@/enterprise/features/inbox-teams/queries"
+import { DecisionConnectionsSettings } from "@/features/decision-connections/components/decision-connections-settings"
+import { listDecisionConnections } from "@/features/decision-connections/queries/list-decision-connections.query"
 import { ApiManage } from "@/features/integration-api/api-manage"
 import { listIntegrationApis } from "@/features/integration-api/queries"
 import { ClaudeConnect } from "@/features/integration-claude/claude-connect"
@@ -450,6 +452,8 @@ export function SettingsIntegrationPage() {
       return <WorkspaceTokens />
     case "stripe":
       return <StripeIntegration />
+    case "decision-connections":
+      return <DecisionConnectionsIntegration />
     default:
       // ponytail: the other integrations wait for their domain units.
       return null
@@ -457,6 +461,7 @@ export function SettingsIntegrationPage() {
 }
 
 // page: app/space/[workspaceId]/(settings)/settings/integrations/stripe/page.tsx
+// page: app/space/[workspaceId]/(settings)/settings/integrations/decision-connections/page.tsx
 function StripeIntegration() {
   const workspaceId = useWorkspaceId()
   const { data } = useSuspenseQuery({
@@ -543,4 +548,14 @@ function OpenaiCompatibleIntegration() {
       Promise.all([listIntegrationOpenaiCompatible({ workspaceId })] as const),
   )
   return <OpenaiCompatibleConnect promises={promises} />
+}
+
+/** The settings layout already requires `superAdmin`. */
+function DecisionConnectionsIntegration() {
+  const workspaceId = useWorkspaceId()
+  const { data } = useSuspenseQuery({
+    queryKey: ["spa", "listDecisionConnections", workspaceId],
+    queryFn: () => listDecisionConnections(workspaceId),
+  })
+  return <DecisionConnectionsSettings connections={data} />
 }

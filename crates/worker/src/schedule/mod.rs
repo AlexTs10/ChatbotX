@@ -38,6 +38,7 @@ pub const PORTED: &[&str] = &[
     "dispatchMarketingMessages",
     "finalizeMarketingMessages",
     "redispatchTemplateJobs",
+    "finishOverdueLeaderboards",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -161,6 +162,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             )
             .await?
         }
+        other if crate::leaderboard::run_schedule(&deps, other).await => Value::Null,
         other => {
             tracing::warn!(job_type = other, "Unknown schedule job type");
             Value::Null

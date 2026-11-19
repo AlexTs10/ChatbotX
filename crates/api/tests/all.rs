@@ -36,6 +36,8 @@ mod auth_workspace_token_scope_enforcement;
 mod auth_workspace_token_scope_registry;
 #[path = "bot_fields_public_api.rs"]
 mod bot_fields_public_api;
+#[path = "bot_simulator_public_api.rs"]
+mod bot_simulator_public_api;
 #[path = "broadcasts_public_api.rs"]
 mod broadcasts_public_api;
 #[path = "broadcasts_recurrence_public_api.rs"]
@@ -74,6 +76,10 @@ mod conversations_public_api;
 mod conversations_thread_control_public_api;
 #[path = "custom_fields_public_api.rs"]
 mod custom_fields_public_api;
+#[path = "decisions_public_api.rs"]
+mod decisions_public_api;
+#[path = "dynamic_images_public_api.rs"]
+mod dynamic_images_public_api;
 #[path = "ecommerce_open_hours_public_api.rs"]
 mod ecommerce_open_hours_public_api;
 #[path = "email_topics_public_api.rs"]
@@ -180,6 +186,8 @@ mod routes_public_scope;
 mod rpc_help_items;
 #[path = "rpc_inbox_teams.rs"]
 mod rpc_inbox_teams;
+#[path = "rpc_leaderboard_actions.rs"]
+mod rpc_leaderboard_actions;
 #[path = "rpc_platform_credentials.rs"]
 mod rpc_platform_credentials;
 #[path = "rpc_procedures.rs"]

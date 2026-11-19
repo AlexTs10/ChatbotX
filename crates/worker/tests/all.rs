@@ -2,6 +2,8 @@
 // Each test file keeps its own copy of its helper modules, as before.
 #![allow(clippy::duplicate_mod)]
 
+#[path = "analytics_events.rs"]
+mod analytics_events;
 #[path = "schedule_broadcast.rs"]
 mod schedule_broadcast;
 #[path = "schedule_recurring.rs"]

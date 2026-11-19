@@ -8,6 +8,7 @@ mod appointment;
 mod condition;
 mod contact;
 mod conversation;
+mod decision;
 pub mod delay;
 mod email_marketing;
 mod messenger;
@@ -165,6 +166,8 @@ pub(crate) async fn run(
         "condition" => condition::handle(&ctx).await,
         "pipeline" => pipeline::handle(&ctx).await,
         "findPlacesNearMe" => places::handle(&ctx).await,
+        "evaluateDecision" => decision::handle(&ctx).await,
+        "changeGamificationScore" => crate::leaderboard::change_score_step(&ctx).await,
         // The dropped Execute JavaScript step (DECISIONS 2026-11-11) has no
         // handler: like any unknown step type it is an implicit success.
         "executeJavascript" => {

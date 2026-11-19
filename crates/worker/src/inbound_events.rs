@@ -255,7 +255,15 @@ pub async fn message_reaction(deps: &Deps, data: &Value) -> Result<(), JobError>
             row,
         )
         .await;
-        // ponytail: `awardReactionLeaderboard` (leaderboard points) is not ported.
+        crate::leaderboard::award_reaction(
+            deps,
+            &inbox,
+            conversation.contact_id,
+            &reaction_source_id,
+            &action,
+            created.message.created_at,
+        )
+        .await;
         return Ok(());
     }
     if let Some(id) = changed {

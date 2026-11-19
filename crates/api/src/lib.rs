@@ -5,6 +5,7 @@ pub mod booking_public;
 pub mod connect_callback;
 pub mod errors;
 pub mod files;
+pub mod game_public;
 pub mod handlers;
 pub mod idempotency;
 pub mod inbound_webhook_intake;
