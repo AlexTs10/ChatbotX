@@ -1406,7 +1406,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/operator-handler.test.ts` | C | `crates/worker/src/spreadsheet.rs` (unit tests) | ported | Inbox and live chat (conversations, messages); Q.D13a |
 | `apps/worker/__tests__/orphaned-integration-cleanup.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/pipeline-matchers.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
-| `apps/worker/__tests__/pipeline-stage-bulk-handler.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
+| `apps/worker/__tests__/pipeline-stage-bulk-handler.test.ts` | C | `crates/business/tests/pipeline_stage_bulk_job.rs` | ported | Pipelines (CRM deals) |
 | `apps/worker/__tests__/pipeline-step.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `apps/worker/__tests__/poll-ref.test.ts` | C | tbd | todo | Polls |
 | `apps/worker/__tests__/poll-sentinel-flow-analytics.test.ts` | C | tbd | todo | Polls |
@@ -1431,7 +1431,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/purge-expired-contact-exports.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/purge-expired-oauth-tokens.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `apps/worker/__tests__/purge-whatsapp-signup-sessions.test.ts` | C | tbd | todo | WhatsApp channel |
-| `apps/worker/__tests__/purge-workspaces.test.ts` | C | tbd | todo | Workspaces |
+| `apps/worker/__tests__/purge-workspaces.test.ts` | C | `crates/worker/tests/schedule_housekeeping.rs` | ported | Workspaces |
 | `apps/worker/__tests__/questionnaire-engine.test.ts` | C | tbd | todo | Questionnaires |
 | `apps/worker/__tests__/questionnaires-handler.test.ts` | C | tbd | todo | Questionnaires |
 | `apps/worker/__tests__/quick-reply-resume.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
@@ -1469,7 +1469,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/run-ref-referral.test.ts` | C | tbd | todo | Leaderboards; Q.D13b: left, the runRef handler is not ported (no unit owns it) |
 | `apps/worker/__tests__/sanitize-capi-error.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `apps/worker/__tests__/save-result-to-custom-field.test.ts` | C | tbd | todo | Custom fields |
-| `apps/worker/__tests__/scan-abandoned-carts.test.ts` | C | tbd | todo | Ecommerce: orders and payment providers |
+| `apps/worker/__tests__/scan-abandoned-carts.test.ts` | C | `crates/worker/tests/schedule_housekeeping.rs` | ported | Ecommerce: orders and payment providers |
 | `apps/worker/__tests__/scan-ai-handover-bulk-runs.test.ts` | C | tbd | todo | AI handover (human takeover) |
 | `apps/worker/__tests__/scan-appointment-reminders.test.ts` | C | tbd | todo | Appointments and booking |
 | `apps/worker/__tests__/scan-coexist-runs.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
@@ -1487,7 +1487,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/send-appointment-reminder.test.ts` | C | tbd | todo | Appointments and booking |
 | `apps/worker/__tests__/send-audit-log.test.ts` | C | tbd | todo | Audit logs |
 | `apps/worker/__tests__/send-conversion-event.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
-| `apps/worker/__tests__/send-email.test.ts` | C | tbd | todo | SMTP email integration |
+| `apps/worker/__tests__/send-email.test.ts` | C | `crates/worker/tests/schedule_housekeeping.rs` | ported | SMTP email integration |
 | `apps/worker/__tests__/send-flow-job.test.ts` | C | tbd | todo | Flow builder and execution |
 | `apps/worker/__tests__/send-flow-message.test.ts` | C | tbd | todo | Flow builder and execution |
 | `apps/worker/__tests__/send-flow-step.test.ts` | C | tbd | todo | Flow builder and execution |

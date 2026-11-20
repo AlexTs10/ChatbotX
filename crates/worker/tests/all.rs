@@ -10,6 +10,8 @@ mod appointment_google_event;
 mod inbound_webhook_worker;
 #[path = "schedule_broadcast.rs"]
 mod schedule_broadcast;
+#[path = "schedule_housekeeping.rs"]
+mod schedule_housekeeping;
 #[path = "schedule_recurring.rs"]
 mod schedule_recurring;
 #[path = "sequence_worker.rs"]

@@ -25,6 +25,19 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         if kind == "processInboundWebhookRequest" {
             crate::inbound_webhook::skip_blocked_request(&deps, data).await?;
         }
+        if kind == PROCESS_PIPELINE_STAGE_BULK
+            && let Some(job) = StageBulkJob::of(data)
+        {
+            chatbotx_business::pipeline::structure::release_stage_bulk_claim(
+                &deps.db,
+                job.workspace_id,
+                job.pipeline_id,
+                job.stage_id,
+                job.bulk_job_id,
+            )
+            .await
+            .map_err(|e| JobError::retryable(e.to_string()))?;
+        }
         return Ok(Value::Null);
     }
     match kind {
@@ -44,6 +57,29 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::inbound_webhook::process_request(&deps, &job, data).await?;
         }
         REVOKE_RETRY_JOB_NAME => retry_realtime_member_revoke(&deps, &job, data).await?,
+        PROCESS_PIPELINE_STAGE_BULK => {
+            let Some(job) = StageBulkJob::of(data) else {
+                return Err(JobError::unrecoverable(
+                    "processPipelineStageBulk: bad data",
+                ));
+            };
+            let actor = chatbotx_business::pipeline::mutation::PipelineActor {
+                kind: str_of(data, "actorKind").unwrap_or("system").to_owned(),
+                user_id: str_of(data, "actorUserId").and_then(|id| id.parse().ok()),
+                source_id: str_of(data, "actorSourceId").map(str::to_owned),
+            };
+            chatbotx_business::pipeline::structure::process_queued_stage_bulk(
+                &deps.db,
+                job.workspace_id,
+                job.pipeline_id,
+                job.stage_id,
+                job.bulk_job_id,
+                str_of(data, "moveItemsToStageId").and_then(|id| id.parse().ok()),
+                actor,
+            )
+            .await
+            .map_err(|e| JobError::retryable(e.to_string()))?
+        }
         // ponytail: the other default jobs are later units. An unported
         // action fails (kept for a retry) instead of the original's
         // "Unknown job name" completion, so no job is lost.
@@ -54,6 +90,29 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
     }
     Ok(Value::Null)
+}
+
+/// `DefaultJobAction.processPipelineStageBulk`.
+pub const PROCESS_PIPELINE_STAGE_BULK: &str = "processPipelineStageBulk";
+
+/// The stage claim of a `processPipelineStageBulk` job.
+struct StageBulkJob {
+    workspace_id: i64,
+    pipeline_id: i64,
+    stage_id: i64,
+    bulk_job_id: String,
+}
+
+impl StageBulkJob {
+    fn of(data: &Value) -> Option<StageBulkJob> {
+        let id = |key: &str| str_of(data, key).and_then(|v| v.parse::<i64>().ok());
+        Some(StageBulkJob {
+            workspace_id: id("workspaceId")?,
+            pipeline_id: id("pipelineId")?,
+            stage_id: id("stageId")?,
+            bulk_job_id: str_of(data, "bulkJobId")?.to_owned(),
+        })
+    }
 }
 
 /// `retryRealtimeMemberRevoke`: the revoke again; the last failed attempt

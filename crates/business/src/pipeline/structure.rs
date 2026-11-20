@@ -9,8 +9,8 @@ use chatbotx_db::repo::patch::Patch;
 use chatbotx_db::repo::pipeline::{self as pipeline_repo, PipelineFieldInsert, StripFieldKeyInput};
 use chatbotx_db::repo::pipeline_item::{self as item_repo, MoveStageItemsInput};
 use chatbotx_db::repo::pipeline_stage::{self as stage_repo, PipelineStageInsert};
-use chatbotx_db::rusqlite::Connection;
 use chatbotx_db::rusqlite::types::Value;
+use chatbotx_db::rusqlite::{Connection, OptionalExtension as _};
 
 use super::access::{PipelineAccessScope, PipelineAction};
 use super::mutation::{ActivityContext, PipelineActor, activity_row_for};
@@ -424,6 +424,105 @@ pub async fn delete_stage(
             queued: false,
             job_id: None,
         })
+    })
+    .await
+}
+
+/// `pipelineStageBulkService.processQueued` (the `processPipelineStageBulk`
+/// job): drains a stage claimed by `bulk_job_id`, deletes its row and
+/// compacts the positions. A lost claim is a no-op; a vanished destination
+/// gives the stage back. ponytail: one transaction for the whole drain (the
+/// Rust `delete_stage` works inline and never queues, so this only serves
+/// claims written elsewhere).
+pub async fn process_queued_stage_bulk(
+    db: &Db,
+    workspace_id: i64,
+    pipeline_id: i64,
+    stage_id: i64,
+    bulk_job_id: String,
+    move_items_to_stage_id: Option<i64>,
+    actor: PipelineActor,
+) -> Result<()> {
+    tx::write(db, move |tx| {
+        let conn: &Connection = tx;
+        let stages = stage_repo::list_by_pipeline(conn, workspace_id, pipeline_id)?;
+        let Some(stage) = stages.iter().find(|s| s.id == stage_id) else {
+            return Ok(());
+        };
+        if stage.bulk_job_id.as_deref() != Some(bulk_job_id.as_str()) {
+            tracing::warn!(
+                workspace_id,
+                pipeline_id,
+                stage_id,
+                "Pipeline stage job no longer owns the stage; stopping"
+            );
+            return Ok(());
+        }
+        if let Some(target) = move_items_to_stage_id
+            && !stages.iter().any(|s| s.id == target && s.id != stage_id)
+        {
+            stage_repo::release_bulk_claim(
+                conn,
+                workspace_id,
+                pipeline_id,
+                stage_id,
+                &bulk_job_id,
+            )?;
+            tracing::warn!(
+                workspace_id,
+                pipeline_id,
+                stage_id,
+                "Pipeline stage move aborted: destination stage no longer exists"
+            );
+            return Ok(());
+        }
+        let actor = match actor.user_id {
+            Some(user_id)
+                if conn
+                    .query_row(r#"SELECT 1 FROM "User" WHERE "id" = ?1"#, [user_id], |_| {
+                        Ok(())
+                    })
+                    .optional()?
+                    .is_none() =>
+            {
+                PipelineActor {
+                    user_id: None,
+                    ..actor
+                }
+            }
+            _ => actor,
+        };
+        drain_stage(
+            conn,
+            workspace_id,
+            pipeline_id,
+            stage_id,
+            move_items_to_stage_id,
+            &actor,
+        )?;
+        stage_repo::delete(conn, workspace_id, pipeline_id, stage_id)?;
+        let remaining: Vec<i64> = stage_repo::list_by_pipeline(conn, workspace_id, pipeline_id)?
+            .iter()
+            .map(|s| s.id)
+            .collect();
+        stage_repo::reorder(conn, workspace_id, pipeline_id, &remaining)?;
+        Ok(())
+    })
+    .await
+}
+
+/// `pipelineStageBulkService.releaseClaim` (a blocked owner): clears only
+/// this job's claim.
+pub async fn release_stage_bulk_claim(
+    db: &Db,
+    workspace_id: i64,
+    pipeline_id: i64,
+    stage_id: i64,
+    bulk_job_id: String,
+) -> Result<()> {
+    tx::write(db, move |tx| {
+        stage_repo::release_bulk_claim(tx, workspace_id, pipeline_id, stage_id, &bulk_job_id)?;
+        Ok(())
     })
     .await
 }

@@ -1475,3 +1475,203 @@ mod tests {
         );
     }
 }
+
+// ---- abandoned carts (Q.P6-U5, `scanAbandonedCarts`) -----------------------------
+
+/// One claimed abandoned cart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AbandonedCart {
+    pub id: i64,
+    pub workspace_id: i64,
+    pub contact_id: i64,
+    pub contact_inbox_id: Option<i64>,
+    pub last_activity_at: i64,
+}
+
+/// `claimAbandonedCarts` (`cartRepository.claimAbandoned`): marks up to
+/// `limit` carts left longer than their store's delay as notified, oldest
+/// first, and returns them. Each cart is claimed once.
+pub async fn claim_abandoned_carts(
+    db: &chatbotx_db::Db,
+    limit: i64,
+    now: i64,
+) -> Result<Vec<AbandonedCart>> {
+    tx::write(db, move |tx| {
+        let mut stmt = tx.prepare(
+            r#"UPDATE "Cart" SET "abandonedNotifiedAt" = ?1
+               WHERE "abandonedNotifiedAt" IS NULL AND "id" IN (
+                 SELECT c."id" FROM "Cart" c
+                 JOIN "EcommerceSettings" s ON s."workspaceId" = c."workspaceId"
+                 WHERE c."abandonedNotifiedAt" IS NULL AND s."abandonedCartDelayMinutes" IS NOT NULL
+                   AND json_array_length(c."items") > 0
+                   AND c."lastActivityAt" < ?1 - s."abandonedCartDelayMinutes" * 60000
+                 ORDER BY c."lastActivityAt" LIMIT ?2)
+               RETURNING "id", "workspaceId", "contactId", "contactInboxId", "lastActivityAt""#,
+        )?;
+        let mut carts = stmt
+            .query_map(params![now, limit], |r| {
+                Ok(AbandonedCart {
+                    id: r.get(0)?,
+                    workspace_id: r.get(1)?,
+                    contact_id: r.get(2)?,
+                    contact_inbox_id: r.get(3)?,
+                    last_activity_at: r.get(4)?,
+                })
+            })?
+            .collect::<chatbotx_db::rusqlite::Result<Vec<_>>>()?;
+        carts.sort_by_key(|c| (c.last_activity_at, c.id));
+        Ok(carts)
+    })
+    .await
+}
+
+/// `remindAbandonedCart`'s outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reminder {
+    Reminded,
+    Disabled,
+    Empty,
+    Stale,
+}
+
+/// `remindAbandonedCart`: the `cartAbandoned` trigger event and the store's
+/// abandoned-cart flow in the customer's conversation (the cart's channel
+/// when it is still there). Nothing for an emptied cart, a cart changed since
+/// the claim, or a store that turned the reminder off.
+pub async fn remind_abandoned_cart(
+    db: &chatbotx_db::Db,
+    jobs: &dyn chatbotx_jobs::Enqueuer,
+    bus: &crate::events::EventBus,
+    cart: AbandonedCart,
+) -> Result<Reminder> {
+    let (settings, latest) = tx::read(db, move |conn| {
+        let settings: Option<(Option<i64>, Option<i64>)> = conn
+            .query_row(
+                r#"SELECT "abandonedCartDelayMinutes", "abandonedCartFlowId" FROM "EcommerceSettings" WHERE "workspaceId" = ?1"#,
+                [cart.workspace_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let latest: Option<i64> = conn
+            .query_row(
+                r#"SELECT "lastActivityAt" FROM "Cart" WHERE "workspaceId" = ?1 AND "contactId" = ?2"#,
+                [cart.workspace_id, cart.contact_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok((settings, latest))
+    })
+    .await?;
+    let Some((Some(_), flow_id)) = settings else {
+        return Ok(Reminder::Disabled);
+    };
+    if latest != Some(cart.last_activity_at) {
+        return Ok(Reminder::Stale);
+    }
+    let priced = cart::get_cart(db, cart.workspace_id, cart.contact_id, None, false).await?;
+    let lines = priced["lines"].as_array().cloned().unwrap_or_default();
+    if lines.is_empty() {
+        return Ok(Reminder::Empty);
+    }
+    let ids: Vec<i64> = lines
+        .iter()
+        .filter_map(|l| l["productId"].as_str()?.parse().ok())
+        .collect();
+    let ws = cart.workspace_id;
+    let products = tx::read(db, move |conn| {
+        Ok(product_repo::find_by_ids(conn, ws, &ids)?)
+    })
+    .await?;
+    let target =
+        match crate::conversation::resolve_contact_inbox_for_send(db, ws, cart.contact_id, None)
+            .await
+        {
+            Ok((found, recent)) => {
+                let chosen = found
+                    .contact_inboxes
+                    .iter()
+                    .find(|ci| Some(ci.id) == cart.contact_inbox_id)
+                    .cloned()
+                    .unwrap_or(recent);
+                Some((found.conversation.id, chosen.id, chosen.channel))
+            }
+            Err(error) if error.code() == Some("notFound") => None,
+            Err(error) => return Err(error),
+        };
+    let items: Vec<Value> = lines
+        .iter()
+        .map(|line| {
+            let product = line["productId"]
+                .as_str()
+                .and_then(|id| id.parse::<i64>().ok())
+                .and_then(|id| products.iter().find(|p| p.id == id));
+            let category_ids: Vec<String> = product
+                .map(|p| [p.category_id, p.subcategory_id])
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|id| id.to_string())
+                .collect();
+            json!({
+                "productId": line["productId"],
+                "variantId": line["variantId"],
+                "name": line["name"],
+                "categoryIds": category_ids,
+                "quantity": line["quantity"],
+            })
+        })
+        .collect();
+    let mut metadata = Map::new();
+    metadata.insert(
+        "channel".into(),
+        json!(target.as_ref().map(|t| t.2.clone())),
+    );
+    metadata.insert(
+        "conversationId".into(),
+        json!(target.as_ref().map(|t| t.0.to_string())),
+    );
+    metadata.insert(
+        "itemCount".into(),
+        json!(
+            lines
+                .iter()
+                .map(|l| l["quantity"].as_i64().unwrap_or(0))
+                .sum::<i64>()
+        ),
+    );
+    metadata.insert("total".into(), priced["totals"]["total"].clone());
+    metadata.insert("currency".into(), priced["currency"].clone());
+    metadata.insert("items".into(), Value::Array(items));
+    let contact_inbox = target.as_ref().map(|t| t.1.to_string());
+    let event = crate::events::trigger::cart_item_changed(
+        "cartAbandoned",
+        &ws.to_string(),
+        &cart.contact_id.to_string(),
+        metadata,
+        contact_inbox.as_deref(),
+    );
+    bus.publish(crate::events::Event::Trigger(event)).await;
+    if let (Some(flow_id), Some((conversation_id, contact_inbox_id, _))) = (flow_id, &target) {
+        let opts = chatbotx_jobs::JobOptions {
+            // Once per abandonment: a cart changed and left again is a new one.
+            job_id: Some(format!(
+                "abandoned-cart-flow-{}-{}",
+                cart.id, cart.last_activity_at
+            )),
+            ..chatbotx_jobs::JobOptions::default()
+        };
+        jobs.add(
+            chatbotx_jobs::QueueName::Integration,
+            "sendFlow",
+            json!({ "type": "sendFlow", "data": {
+                "conversationId": conversation_id.to_string(),
+                "contactInboxId": contact_inbox_id.to_string(),
+                "flowId": flow_id.to_string(),
+            }}),
+            opts,
+        )
+        .await
+        .map_err(|e| BusinessError::exception(e.to_string(), "internalServerError", 500))?;
+    }
+    Ok(Reminder::Reminded)
+}

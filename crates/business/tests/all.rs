@@ -260,6 +260,8 @@ mod pipeline_item_assignees;
 mod pipeline_mutation_engine;
 #[path = "pipeline_naming.rs"]
 mod pipeline_naming;
+#[path = "pipeline_stage_bulk_job.rs"]
+mod pipeline_stage_bulk_job;
 #[path = "pipeline_template.rs"]
 mod pipeline_template;
 #[path = "pipeline_update_lock.rs"]
