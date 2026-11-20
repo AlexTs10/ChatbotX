@@ -234,6 +234,8 @@ mod rpc_workspace_members;
 mod saved_replies_sla_public_api;
 #[path = "sequences_create_public_api.rs"]
 mod sequences_create_public_api;
+#[path = "sequences_list_step_contacts_api.rs"]
+mod sequences_list_step_contacts_api;
 #[path = "sequences_public_api.rs"]
 mod sequences_public_api;
 #[path = "session_account.rs"]

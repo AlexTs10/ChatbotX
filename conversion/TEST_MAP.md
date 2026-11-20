@@ -748,7 +748,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/sequence-delay.test.ts` | B | - | todo | Sequences; builder jsdom |
 | `apps/builder/__tests__/sequence-detail-resource.test.ts` | B | - | todo | Sequences; builder node-env, client logic |
 | `apps/builder/__tests__/sequence-folders-public-api.test.ts` | C | `crates/api/tests/sequences_public_api.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
-| `apps/builder/__tests__/sequences-list-step-contacts-api.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
+| `apps/builder/__tests__/sequences-list-step-contacts-api.test.ts` | C | `crates/api/tests/sequences_list_step_contacts_api.rs` | ported | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/sequences-public-api.test.ts` | C | `crates/api/tests/sequences_public_api.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/sequences-public-scope.test.ts` | C | `crates/api/tests/sequences_public_api.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/set-custom-field-boolean-value.test.tsx` | B | - | todo | Custom fields; builder jsdom |
