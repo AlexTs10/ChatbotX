@@ -620,7 +620,7 @@ pub async fn submit(deps: &Deps, data: &Value) -> Result<(), JobError> {
         return Err(job_err(error));
     }
     fail_run(db, run_id, &error).await.map_err(job_err)?;
-    // ponytail: `logProviderError` is not ported.
+    super::log_provider_error(deps, workspace_id, &error).await;
     Ok(())
 }
 
@@ -781,6 +781,7 @@ pub async fn check(deps: &Deps, data: &Value) -> Result<(), JobError> {
                 mark_invalid(db, workspace_id).await.map_err(job_err)?;
             }
             fail_run(db, run_id, &error).await.map_err(job_err)?;
+            super::log_provider_error(deps, workspace_id, &error).await;
             Ok(())
         }
     }

@@ -1774,7 +1774,7 @@ pub(crate) mod tests {
     }
 
     #[derive(Default)]
-    struct Emitted(Mutex<Vec<(String, Value)>>);
+    pub(crate) struct Emitted(pub(crate) Mutex<Vec<(String, Value)>>);
 
     impl chatbotx_jobs::events::EventEmitter for Emitted {
         fn emit<'a>(
