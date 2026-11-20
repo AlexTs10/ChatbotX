@@ -166,7 +166,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/change-password-schema.test.ts` | B | - | todo | Authentication (sign-in, social, mobile, magic links); builder jsdom |
 | `apps/builder/__tests__/channel-connect-credential-consistency.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/channel-integrations-public-api.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
-| `apps/builder/__tests__/channel-post-options-api.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
+| `apps/builder/__tests__/channel-post-options-api.test.ts` | C | `crates/api/tests/rpc_channel_post_options.rs` | ported | Comment automation (FB/IG/Threads/TikTok); builder server code; Q.P6-U1; schema cases in channel_posts_public_api |
 | `apps/builder/__tests__/channel-reconnect-actions.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/channel-reconnect-handlers.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/channel-route-guards.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
@@ -314,7 +314,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/delete-broadcast-dialog.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/delete-contact-action.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/delete-me-data-action.test.ts` | C | tbd | todo | Workspaces; builder server code |
-| `apps/builder/__tests__/delete-message-action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
+| `apps/builder/__tests__/delete-message-action.test.ts` | C | `crates/business/tests/message_edit_delete_actions.rs` | ported | Inbox and live chat (conversations, messages); builder server code; Q.P6-U1 |
 | `apps/builder/__tests__/delete-mini-apps-whatsapp-flows.test.ts` | C | `crates/api/tests/mini_apps_whatsapp_public_api.rs` | ported | Mini-apps; Q.D1m; keep / report (deprecated) / number left; the Meta-failure and concurrency cases are covered by parity `51-mini-apps-whatsapp` |
 | `apps/builder/__tests__/delete-sequence-step.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/delete-sequence.action.test.ts` | C | `crates/api/tests/rpc_spa_procedures.rs`, `crates/business/tests/sequence_service.rs` | ported | Sequences; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
@@ -331,7 +331,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/ecommerce-public-scope.test.ts` | C | tbd | todo | Ecommerce: settings, open hours, analytics; builder server code |
 | `apps/builder/__tests__/ecommerce-settings-legacy-keys.test.ts` | B | - | todo | Ecommerce: settings, open hours, analytics; builder jsdom |
 | `apps/builder/__tests__/edge-instrumentation-graph.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
-| `apps/builder/__tests__/edit-message-action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
+| `apps/builder/__tests__/edit-message-action.test.ts` | C | `crates/business/tests/message_edit_delete_actions.rs` | ported | Inbox and live chat (conversations, messages); builder server code; Q.P6-U1 |
 | `apps/builder/__tests__/email-topic-click-route.test.ts` | C | tbd | todo | Email topics and tracking; builder server code |
 | `apps/builder/__tests__/email-topic-open-route.test.ts` | C | tbd | todo | Email topics and tracking; builder server code |
 | `apps/builder/__tests__/email-topics-columns.test.ts` | B | - | todo | Email topics and tracking; builder node-env, client logic |
@@ -378,7 +378,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/get-inbox-initial-state.test.ts` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/get-outbound-voip-answer-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/get-pending-incoming-voip-call-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/get-post-details-query.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
+| `apps/builder/__tests__/get-post-details-query.test.ts` | C | `crates/business/tests/post_details_query.rs` | ported | Comment automation (FB/IG/Threads/TikTok); builder server code; Q.P6-U1; degraded-TTL and cache-tag cases not ported (in-process cache) |
 | `apps/builder/__tests__/get-user-data-menu-default.test.ts` | B | - | todo | Get user data webview; builder jsdom |
 | `apps/builder/__tests__/get-user-data-webview-calendar-grid.test.ts` | B | - | todo | Get user data webview; builder jsdom |
 | `apps/builder/__tests__/google-ads-account-picker.test.tsx` | B | - | todo | Google Ads integration; builder jsdom |
@@ -524,7 +524,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/me-extension-download-route.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/media-library-actions.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/media-library-public-api.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
-| `apps/builder/__tests__/media-proxy-route.test.ts` | C | `crates/api/tests/avatar_proxy_route.rs` | ported | Media library and file storage; builder server code; avatar part only (Q.P6-U3); attachment proxy not ported |
+| `apps/builder/__tests__/media-proxy-route.test.ts` | C | `crates/api/tests/avatar_proxy_route.rs`, `crates/api/tests/media_proxy_route.rs` | ported | Media library and file storage; builder server code; avatar part (Q.P6-U3) and attachment part (Q.P6-U1); the Graph re-derivation cases are not ported |
 | `apps/builder/__tests__/media-public-scope.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/message-input-client-id.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/message-input-thread-control.test.tsx` | B | - | todo | Thread control (handover protocol); builder jsdom |
@@ -2604,7 +2604,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/integration/__tests__/find-token-refresh-errors.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/media/__tests__/no-avatar-sentinel.test.ts` | C | `crates/core/tests/utils_no_avatar_sentinel.rs` | ported | Media library and file storage; Q.P6-U3 |
 | `packages/business/src/media/__tests__/optimize-stored-image.test.ts` | C | tbd | todo | Media library and file storage |
-| `packages/business/src/media/__tests__/resolve-media-url.test.ts` | C | tbd | todo | Media library and file storage |
+| `packages/business/src/media/__tests__/resolve-media-url.test.ts` | C | `crates/business/tests/resolve_media_url.rs` | todo | Media library and file storage; Q.P6-U1: attachment half ported; avatar half open |
 | `packages/business/src/messaging-ads-connection/__tests__/context.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/business/src/messaging-ads-connection/__tests__/graph-cache.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/business/src/messaging-ads-connection/__tests__/graph-reads.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |

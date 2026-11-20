@@ -240,6 +240,8 @@ mod magic_link_update_empty;
 mod mcp_oauth_service;
 #[path = "media_library_service.rs"]
 mod media_library_service;
+#[path = "message_edit_delete_actions.rs"]
+mod message_edit_delete_actions;
 #[path = "message_outgoing_and_list.rs"]
 mod message_outgoing_and_list;
 #[path = "message_outgoing_media.rs"]
@@ -306,6 +308,8 @@ mod poll_service;
 mod poll_state;
 #[path = "poll_vote.rs"]
 mod poll_vote;
+#[path = "post_details_query.rs"]
+mod post_details_query;
 #[path = "product_category_service.rs"]
 mod product_category_service;
 #[path = "product_message_resolve.rs"]
@@ -322,6 +326,8 @@ mod questionnaire_service;
 mod quota_enforcement_service;
 #[path = "reflink_service.rs"]
 mod reflink_service;
+#[path = "resolve_media_url.rs"]
+mod resolve_media_url;
 #[path = "response_sla_window.rs"]
 mod response_sla_window;
 #[path = "sequence_service.rs"]

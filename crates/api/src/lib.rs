@@ -15,6 +15,7 @@ pub mod iso8601;
 pub mod jobs_admin;
 pub mod magic_link_redirect;
 pub mod mail;
+pub mod media_proxy;
 pub mod orpc;
 pub mod payment_webhooks;
 pub mod presigned_upload;

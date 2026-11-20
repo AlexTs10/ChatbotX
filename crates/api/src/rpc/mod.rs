@@ -190,6 +190,8 @@ pub fn rpc_router(state: Arc<AuthState>) -> Router {
 pub fn rpc_router_with(state: RpcState) -> Router {
     Router::new()
         .route("/rpc/{*rest}", any(handle))
+        // next.config `serverActions.bodySizeLimit: "21mb"` (device files).
+        .layer(axum::extract::DefaultBodyLimit::max(21 * 1024 * 1024))
         .with_state(Arc::new(state))
 }
 
@@ -265,6 +267,8 @@ fn rpc_input(method: &Method, uri: &Uri, body: &Bytes) -> Value {
                     .map(|(_, value)| decode_query_component(value))
             })
             .unwrap_or_default()
+    } else if let Some(input) = multipart_input(body) {
+        return input;
     } else {
         String::from_utf8_lossy(body).into_owned()
     };
@@ -272,6 +276,38 @@ fn rpc_input(method: &Method, uri: &Uri, body: &Bytes) -> Value {
         .ok()
         .and_then(|payload| payload.get("json").cloned())
         .unwrap_or(Value::Null)
+}
+
+/// The oRPC RPC `FormData` body of an input with `Blob`s: part `data` is
+/// `{ json, meta, maps }`, part `<i>` the blob at the path `maps[i]`. Each
+/// blob becomes a file value (`handlers::contact_messages::file_value`).
+fn multipart_input(body: &[u8]) -> Option<Value> {
+    let parts = crate::handlers::ai_files::parse_multipart(body)?;
+    let data = parts.iter().find(|part| part.name == "data")?;
+    let payload: Value = serde_json::from_slice(&data.data).ok()?;
+    let mut json = payload.get("json").cloned().unwrap_or(Value::Null);
+    for (index, path) in payload["maps"].as_array().into_iter().flatten().enumerate() {
+        let Some(part) = parts.iter().find(|part| part.name == index.to_string()) else {
+            continue;
+        };
+        let mut at = &mut json;
+        for segment in path.as_array().into_iter().flatten() {
+            at = match segment {
+                Value::String(key) => &mut at[key.as_str()],
+                Value::Number(n) => match (n.as_u64(), at.as_array_mut()) {
+                    (Some(i), Some(items)) if (i as usize) < items.len() => &mut items[i as usize],
+                    _ => return None,
+                },
+                _ => return None,
+            };
+        }
+        *at = crate::handlers::contact_messages::file_value(
+            part.filename.as_deref().unwrap_or("blob"),
+            part.content_type.as_deref().unwrap_or_default(),
+            &part.data,
+        );
+    }
+    Some(json)
 }
 
 /// `auth.api.getSession({ headers })` for the oRPC context: a signed,

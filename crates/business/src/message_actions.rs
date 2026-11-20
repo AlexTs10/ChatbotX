@@ -1,8 +1,7 @@
 //! The message actions of the public `/v1/conversations/{id}/messages/*`
 //! routes: `findByIdWithUrls`, `resolveContactInboxForConversation`,
-//! `deleteMessage`, `changeMessageAttributes` and `editMessage` (text and
-//! `removeAttachment` only). The caller publishes the returned envelope and
-//! adds the returned jobs.
+//! `deleteMessage`, `changeMessageAttributes` and `editMessage`. The caller
+//! publishes the returned envelope and adds the returned jobs.
 
 use chatbotx_db::Db;
 use chatbotx_db::repo::message::{
@@ -220,21 +219,47 @@ pub async fn change_attributes(
     Ok(chat_job("changeChannelMessageState", data))
 }
 
-/// `editMessage` without a new attachment: updates the text (and drops the
-/// attachments on `remove_attachment`), emits `messageUpdated` and queues
+/// The new attachment of an `editMessage` (an object already uploaded).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EditAttachment {
+    pub path: String,
+    pub public_url: Option<String>,
+    pub mime_type: Option<String>,
+    pub name: Option<String>,
+    pub size: Option<i64>,
+}
+
+/// `fileType` of an edit attachment by its MIME type.
+fn edit_file_type(mime_type: &str) -> &'static str {
+    if mime_type.starts_with("image/") {
+        "image"
+    } else if mime_type.starts_with("video/") {
+        "video"
+    } else if mime_type.starts_with("audio/") {
+        "audio"
+    } else {
+        "file"
+    }
+}
+
+/// `editMessage`: updates the text and, on `remove_attachment` or a new
+/// attachment, replaces the attachments (an image's dimensions are read from
+/// storage, `0` when unavailable); emits `messageUpdated` and queues
 /// `editChannelMessage`. Returns the response body.
+#[allow(clippy::too_many_arguments)]
 pub async fn edit_message(
     db: &Db,
+    uploader: Option<&chatbotx_files::Uploader>,
     conversation: &Conversation,
     id: i64,
     created_at: i64,
     new_text: String,
+    new_attachment: Option<EditAttachment>,
     remove_attachment: bool,
 ) -> Result<(Value, Done)> {
     let conversation_id = conversation.id;
     let workspace_id = conversation.workspace_id;
-    let text = new_text.clone();
-    let (message, contact_inbox) = tx::write(db, move |conn| {
+    let (message, contact_inbox) = tx::read(db, move |conn| {
         let message = find_in(conn, workspace_id, id, created_at)?
             .filter(|m| m.message.conversation_id == conversation_id)
             .ok_or_else(|| system_error("Comment not found"))?;
@@ -244,33 +269,83 @@ pub async fn edit_message(
         }
         let contact_inbox = contact_inbox_in(conn, workspace_id, row.contact_inbox_id)?
             .ok_or_else(|| system_error("Inbox not found"))?;
-        repo_message::update_message_text(conn, row.id, workspace_id, &text, row.created_at)?
-            .ok_or_else(|| system_error("Message not found"))?;
-        if remove_attachment {
-            repo_message::delete_attachments_by_message_id(
-                conn,
-                row.id,
-                workspace_id,
-                row.created_at,
-            )?;
-        }
         Ok((message, contact_inbox))
     })
     .await?;
+
+    let (mut width, mut height) = (0_i64, 0_i64);
+    let mut attachments = Vec::new();
+    if let Some(attachment) = &new_attachment {
+        let mime_type = attachment
+            .mime_type
+            .clone()
+            .unwrap_or_else(|| "application/octet-stream".into());
+        let file_type = edit_file_type(&mime_type);
+        if file_type == "image"
+            && let Some(uploader) = uploader
+            && let Ok(bytes) = uploader.get_object(&attachment.path).await
+        {
+            let dims = chatbotx_files::get_image_dimensions(&mime_type, &bytes);
+            width = dims.width.map_or(0, i64::from);
+            height = dims.height.map_or(0, i64::from);
+        }
+        attachments.push(repo_message::CreateAttachmentInput {
+            workspace_id,
+            conversation_id,
+            message_id: message.message.id,
+            message_created_at: message.message.created_at,
+            file_type: file_type.into(),
+            mime_type,
+            origin_path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            size: attachment.size,
+            width: Some(width),
+            height: Some(height),
+            ..repo_message::CreateAttachmentInput::default()
+        });
+    }
+    let replace = remove_attachment || new_attachment.is_some();
+    let (row_id, row_created_at) = (message.message.id, message.message.created_at);
+    let text = new_text.clone();
+    tx::write(db, move |conn| {
+        repo_message::update_message_text(conn, row_id, workspace_id, &text, row_created_at)?
+            .ok_or_else(|| system_error("Message not found"))?;
+        if replace {
+            repo_message::delete_attachments_by_message_id(
+                conn,
+                row_id,
+                workspace_id,
+                row_created_at,
+            )?;
+            repo_message::bulk_create_attachments(conn, &attachments)?;
+        }
+        Ok(())
+    })
+    .await?;
+    let public_url = new_attachment.as_ref().and_then(|a| a.public_url.clone());
     let body = json!({
         "success": true,
         "messageId": id.to_string(),
         "newText": new_text,
-        "newAttachmentPath": null,
-        "newAttachmentPublicUrl": null,
-        "newAttachmentMimeType": null,
-        "newAttachmentWidth": 0,
-        "newAttachmentHeight": 0,
+        "newAttachmentPath": new_attachment.as_ref().map(|a| a.path.clone()),
+        "newAttachmentPublicUrl": public_url,
+        "newAttachmentMimeType": new_attachment.as_ref().and_then(|a| a.mime_type.clone()),
+        "newAttachmentWidth": width,
+        "newAttachmentHeight": height,
         "removedAttachment": remove_attachment,
     });
     let mut event_data = body.clone();
     if let Some(map) = event_data.as_object_mut() {
         map.remove("success");
+    }
+    let mut job = json!({
+        "conversation": conversation_json(conversation),
+        "contactInbox": contact_inbox_json(&contact_inbox),
+        "message": message_ref(&message),
+        "newText": new_text,
+    });
+    if let Some(url) = public_url {
+        job["newAttachmentUrl"] = json!(url);
     }
     let done = Done {
         event: Some(Envelope::routed(
@@ -278,15 +353,7 @@ pub async fn edit_message(
             event_data,
             route(conversation),
         )),
-        job: Some(chat_job(
-            "editChannelMessage",
-            json!({
-                "conversation": conversation_json(conversation),
-                "contactInbox": contact_inbox_json(&contact_inbox),
-                "message": message_ref(&message),
-                "newText": new_text,
-            }),
-        )),
+        job: Some(chat_job("editChannelMessage", job)),
     };
     Ok((body, done))
 }
