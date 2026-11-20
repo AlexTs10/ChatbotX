@@ -392,16 +392,28 @@ async fn save(
 /// `markTokenRefreshError`: the message on the row; revoked →
 /// `markUnhealthyByIdentifier`, else `markDegradedByIdentifier`
 /// (`refresh_failed`). A missing row is a warning.
+/// A satellite table: its name, its `Connection.sourceId` column and its
+/// `Connection.provider` (SQL).
+#[derive(Debug, Clone, Copy)]
+pub struct SatelliteTable {
+    pub table: &'static str,
+    pub identifier_column: &'static str,
+    pub provider_sql: &'static str,
+}
+
 pub async fn mark_token_refresh_error(
     db: &Db,
-    table: &'static str,
-    identifier_column: &'static str,
-    provider_sql: &'static str,
+    satellite: SatelliteTable,
     workspace_id: i64,
     id: i64,
     message: &str,
     revoked: bool,
 ) -> Result<()> {
+    let SatelliteTable {
+        table,
+        identifier_column,
+        provider_sql,
+    } = satellite;
     let text = message.to_owned();
     let row = tx::write(db, move |tx| {
         let row: Option<(String, i64, String)> = tx
@@ -520,9 +532,11 @@ async fn refresh_row(
     );
     if let Err(error) = mark_token_refresh_error(
         deps.db,
-        channel.table(),
-        channel.identifier(),
-        channel.provider_sql(),
+        SatelliteTable {
+            table: channel.table(),
+            identifier_column: channel.identifier(),
+            provider_sql: channel.provider_sql(),
+        },
         workspace_id,
         id,
         &failure.message,
@@ -942,9 +956,11 @@ async fn refresh_threads(deps: RefreshDeps<'_>) -> Result<()> {
                 tracing::error!(status = ?failure.status, code = ?failure.code, integration_id = id, workspace_id, "refreshThreadsTokens: integration refresh failed");
                 mark_token_refresh_error(
                     deps.db,
-                    "IntegrationThreads",
-                    "threadsUserId",
-                    "'threads'",
+                    SatelliteTable {
+                        table: "IntegrationThreads",
+                        identifier_column: "threadsUserId",
+                        provider_sql: "'threads'",
+                    },
                     workspace_id,
                     id,
                     &failure.message,
