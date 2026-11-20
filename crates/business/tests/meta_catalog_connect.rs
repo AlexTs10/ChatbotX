@@ -73,7 +73,7 @@ async fn seeded() -> common::TestDb {
             params![value],
         )?;
         tx.execute(
-            r#"INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role", "permissions") VALUES (5002, ?1, ?2, 'member', '{}')"#,
+            r#"INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role", "permissions") VALUES (5002, ?1, ?2, 'agent', '{}')"#,
             params![WS, USER],
         )?;
         Ok(())
