@@ -565,7 +565,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/messenger-templates-public-api.test.ts` | C | tbd | todo | Template marketplace (install/share/sync); builder server code |
 | `apps/builder/__tests__/meta-capi-callback-wiring.test.ts` | B | - | todo | Meta Conversions API (CAPI); builder jsdom |
 | `apps/builder/__tests__/meta-capi-event-dialog.test.tsx` | B | - | todo | Meta Conversions API (CAPI); builder jsdom |
-| `apps/builder/__tests__/meta-capi-oauth-callback.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
+| `apps/builder/__tests__/meta-capi-oauth-callback.test.ts` | C | `crates/business/tests/meta_capi_connect.rs` | ported | Meta Conversions API (CAPI); builder server code; Q.P6-U2 (signed connect session in place of the state + nonce cookie) |
 | `apps/builder/__tests__/meta-catalog-operations.test.ts` | C | tbd | todo | Meta Catalog; builder server code |
 | `apps/builder/__tests__/mini-app-contact-variables.test.ts` | C | `crates/core/tests/mini_app_display_text.rs`, `crates/business/src/mini_app_whatsapp.rs` (unit), `crates/api/tests/mini_apps_whatsapp_public_api.rs` | todo | Mini-apps; Q.D1m; escape and WhatsApp publish cases ported; the `resolveContactVariables` cases are covered by parity `50-mini-apps` |
 | `apps/builder/__tests__/mini-app-editor-store.test.ts` | B | - | todo | Mini-apps; builder jsdom |
@@ -767,7 +767,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/social-login-community.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
 | `apps/builder/__tests__/spreadsheets-public-api.test.ts` | C | `crates/api/tests/spreadsheets_public_api.rs` | ported | Google Sheets integration; builder server code; Q.D13 + Q.D13a (stale row) |
 | `apps/builder/__tests__/spreadsheets-url-validation.test.ts` | B | - | todo | Google Sheets integration; builder jsdom |
-| `apps/builder/__tests__/start-meta-capi-oauth.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
+| `apps/builder/__tests__/start-meta-capi-oauth.test.ts` | C | `crates/business/tests/meta_capi_connect.rs` | ported | Meta Conversions API (CAPI); builder server code; Q.P6-U2 (signed connect session in place of the state + nonce cookie) |
 | `apps/builder/__tests__/start-product-import.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/status-text-contrast.test.ts` | B | - | todo | Builder app shell and shared components; builder node-env, client logic |
 | `apps/builder/__tests__/stop-broadcast-dialog.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |

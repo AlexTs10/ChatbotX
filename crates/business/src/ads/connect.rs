@@ -45,7 +45,22 @@ pub const META_CATALOG: &str = "metaCatalog";
 /// `META_CATALOG_SCOPES`.
 const META_CATALOG_SCOPES: &[&str] = &["catalog_management"];
 /// The connect-session purposes of these flows.
-pub const PURPOSES: &[&str] = &[LEAD_ADS, MARKETING_MESSAGES, MESSAGING_ADS, META_CATALOG];
+pub const PURPOSES: &[&str] = &[
+    LEAD_ADS,
+    MARKETING_MESSAGES,
+    MESSAGING_ADS,
+    META_CATALOG,
+    META_CAPI,
+];
+/// The dedicated Conversions API connect (`flow: "metaCapi"`).
+pub const META_CAPI: &str = "metaCapi";
+/// `MESSENGER_CAPI_SCOPES` / `INSTAGRAM_CAPI_SCOPES`.
+const MESSENGER_CAPI_SCOPES: &[&str] = &["page_events", "pages_show_list"];
+const INSTAGRAM_CAPI_SCOPES: &[&str] = &[
+    "instagram_manage_events",
+    "instagram_basic",
+    "pages_show_list",
+];
 const AUTHORIZED: &[&str] = &["authorized"];
 
 /// One connect flow (`stateParams.flow`).
@@ -58,15 +73,30 @@ pub enum Flow {
         integration_id: i64,
     },
     MetaCatalog,
+    /// `channel` is `messenger` or `instagram` (`CAPI_OAUTH_CHANNELS`).
+    MetaCapi {
+        channel: String,
+        integration_id: i64,
+    },
 }
 
 impl Flow {
+    /// The session provider and credential type: the Instagram connect runs
+    /// on the Instagram-with-Facebook app and its callback.
+    pub fn provider(&self) -> &'static str {
+        match self {
+            Flow::MetaCapi { channel, .. } if channel == "instagram" => "instagramFacebook",
+            _ => "messenger",
+        }
+    }
+
     fn purpose(&self) -> &'static str {
         match self {
             Flow::LeadAds => LEAD_ADS,
             Flow::MarketingMessages => MARKETING_MESSAGES,
             Flow::MessagingAds { .. } => MESSAGING_ADS,
             Flow::MetaCatalog => META_CATALOG,
+            Flow::MetaCapi { .. } => META_CAPI,
         }
     }
 
@@ -76,6 +106,11 @@ impl Flow {
         match self {
             Flow::MetaCatalog => BusinessError::exception(
                 "Meta app settings are not configured.",
+                "systemError",
+                400,
+            ),
+            Flow::MetaCapi { .. } => BusinessError::exception(
+                "The Meta app for this channel is not configured yet.",
                 "systemError",
                 400,
             ),
@@ -163,6 +198,22 @@ pub fn auth_url(flow: &Flow, credential: &OAuthCredential, state: &str) -> Resul
             ("response_type", "code".into()),
             ("state", state.into()),
         ],
+        // `generateCapiAuthUrl` (Messenger / Instagram with Facebook).
+        Flow::MetaCapi { channel, .. } => vec![
+            ("auth_type", "rerequest".into()),
+            ("client_id", client_id.into()),
+            ("redirect_uri", redirect.into()),
+            (
+                "scope",
+                scope(if channel == "instagram" {
+                    INSTAGRAM_CAPI_SCOPES
+                } else {
+                    MESSENGER_CAPI_SCOPES
+                }),
+            ),
+            ("response_type", "code".into()),
+            ("state", state.into()),
+        ],
     };
     let query = url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(pairs)
@@ -190,7 +241,8 @@ pub async fn start(
 ) -> Result<String> {
     let owner =
         crate::tenant::resolve_credential_owner_id_for_workspace(db, workspace_id, None).await?;
-    let credential = oauth::resolve_credential(db, encryption, app_url, "messenger", Some(owner))
+    let provider = flow.provider();
+    let credential = oauth::resolve_credential(db, encryption, app_url, provider, Some(owner))
         .await?
         .filter(|c| !text(&c.config, "clientId").is_empty())
         .ok_or_else(|| flow.invalid_app_settings())?;
@@ -200,9 +252,9 @@ pub async fn start(
     tx::write(db, move |conn| {
         conn.execute(
             r#"UPDATE "ConnectSession" SET "status" = 'cancelled', "updatedAt" = ?3
-               WHERE "workspaceId" = ?1 AND "provider" = 'messenger' AND "purpose" = ?2
+               WHERE "workspaceId" = ?1 AND "provider" = ?4 AND "purpose" = ?2
                  AND "status" = 'pending'"#,
-            params![workspace_id, purpose, now_ms()],
+            params![workspace_id, purpose, now_ms(), provider],
         )?;
         Ok(())
     })
@@ -218,7 +270,7 @@ pub async fn start(
         db,
         NewSession {
             workspace_id,
-            provider: "messenger".into(),
+            provider: provider.into(),
             purpose: purpose.into(),
             actor_user_id: Some(user_id),
             platform_owner_id: Some(owner.to_string()),
@@ -231,6 +283,10 @@ pub async fn start(
                 .unwrap_or_default();
             let mut action = json!({ "type": "open_url", "url": url });
             if let Flow::MessagingAds {
+                channel,
+                integration_id,
+            }
+            | Flow::MetaCapi {
                 channel,
                 integration_id,
             } = &flow_for_action
@@ -253,8 +309,17 @@ pub async fn start(
 
 /// The flow a session was started for (`None` = not an ads session).
 pub fn flow_of(session: &SessionRow) -> Option<Flow> {
-    if session.provider != "messenger" {
+    let capi = session.purpose == META_CAPI;
+    if !(session.provider == "messenger" || (capi && session.provider == "instagramFacebook")) {
         return None;
+    }
+    if capi {
+        let action = session.next_action.as_ref()?;
+        let flow = Flow::MetaCapi {
+            channel: action["channel"].as_str()?.to_string(),
+            integration_id: action["integrationId"].as_str()?.parse().ok()?,
+        };
+        return (flow.provider() == session.provider).then_some(flow);
     }
     match session.purpose.as_str() {
         LEAD_ADS => Some(Flow::LeadAds),
@@ -382,7 +447,7 @@ pub async fn complete(
     caller: Caller,
     code: &str,
 ) -> Result<bool> {
-    let Some(flow) = flow_of(session) else {
+    let Some(flow) = flow_of(session).filter(|f| !matches!(f, Flow::MetaCapi { .. })) else {
         return Ok(false);
     };
     let flow = &flow;
@@ -547,7 +612,8 @@ async fn store(
             })
             .await
         }
-        Flow::LeadAds => Ok(()),
+        // Not stored here (`complete_meta_capi`).
+        Flow::LeadAds | Flow::MetaCapi { .. } => Ok(()),
     }
 }
 
@@ -619,5 +685,222 @@ mod tests {
             messaging_ads_scopes("messenger"),
             FACEBOOK_ADS_SCOPES.to_vec()
         );
+    }
+}
+
+// ---- metaCapi (`callback-meta-capi.ts`) -----------------------------------------
+
+/// `CapiConnectResult` (or the original's `notFound()`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CapiOutcome {
+    NotFound,
+    Success,
+    /// A `CapiConnectErrorReason`.
+    Error(&'static str),
+}
+
+/// `completeMetaCapiConnect`: the session must be the caller's (a member)
+/// and still pending (else `sessionExpired`), the caller a super admin; the
+/// dedicated token is stored by the channel connector. The session is
+/// completed or failed with the outcome.
+pub async fn complete_meta_capi(
+    db: &Db,
+    encryption: &Encryption,
+    app_url: &str,
+    upstream: &impl Upstream,
+    session: &SessionRow,
+    caller: Caller,
+    code: &str,
+) -> Result<CapiOutcome> {
+    let Some(Flow::MetaCapi {
+        channel,
+        integration_id,
+    }) = flow_of(session)
+    else {
+        return Ok(CapiOutcome::NotFound);
+    };
+    let bound = caller.user_id.is_some() && caller.user_id == session.actor_user_id;
+    if !(bound && caller.is_member) {
+        return Ok(CapiOutcome::NotFound);
+    }
+    if session.status != "pending" {
+        return Ok(CapiOutcome::Error("sessionExpired"));
+    }
+    if !caller.super_admin {
+        return Ok(CapiOutcome::NotFound);
+    }
+    let ws = session.workspace_id;
+    connect_session::claim_authorization(db, session.id, ws).await?;
+    let owner = session
+        .platform_owner_id
+        .as_deref()
+        .and_then(|id| id.parse::<i64>().ok());
+    let credential =
+        oauth::resolve_credential(db, encryption, app_url, session.provider.as_str(), owner)
+            .await?;
+    let outcome = match credential {
+        Some(credential) => {
+            match connect_capi(
+                db,
+                upstream,
+                &credential,
+                &channel,
+                ws,
+                integration_id,
+                code,
+            )
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    tracing::error!(%error, ws, %channel, integration_id, "Meta CAPI connect failed unexpectedly");
+                    CapiOutcome::Error("failed")
+                }
+            }
+        }
+        None => CapiOutcome::Error("failed"),
+    };
+    if outcome == CapiOutcome::Success {
+        let row = session.clone();
+        tx::write(db, move |conn| {
+            connect_session::complete_authorized(conn, &row, json!({ "ok": true }), None, now_ms())
+                .map(|_| ())
+        })
+        .await?;
+    } else {
+        connect_session::fail(db, session, "exchange_failed", Some(AUTHORIZED)).await;
+    }
+    Ok(outcome)
+}
+
+/// `connectMessengerCapi` / `connectInstagramCapi`: the page (Messenger:
+/// matched by the stored `pageId` among `/me/accounts`; Instagram: the stored
+/// page whose Instagram account is the stored `igId`) gives the token.
+async fn connect_capi(
+    db: &Db,
+    upstream: &impl Upstream,
+    credential: &OAuthCredential,
+    channel: &str,
+    ws: i64,
+    id: i64,
+    code: &str,
+) -> std::result::Result<CapiOutcome, String> {
+    let instagram = channel == "instagram";
+    let row: Option<(String, Option<String>, Option<String>)> = tx::read(db, move |conn| {
+        let sql = if instagram {
+            r#"SELECT "pageId", "igId", "type" FROM "IntegrationInstagram" WHERE "id" = ?1 AND "workspaceId" = ?2"#
+        } else {
+            r#"SELECT "pageId", NULL, 'facebook' FROM "IntegrationMessenger" WHERE "id" = ?1 AND "workspaceId" = ?2"#
+        };
+        Ok(conn
+            .query_row(sql, params![id, ws], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .optional()?)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    // Instagram Business Login accounts have no Conversions API.
+    let Some((page_id, ig_id, _)) = row.filter(|(_, _, kind)| kind.as_deref() == Some("facebook"))
+    else {
+        return Ok(CapiOutcome::Error("notFound"));
+    };
+    let config = &credential.config;
+    let version = version(config).to_string();
+    let token = if instagram {
+        // `exchangeCodeForToken` (+ long-lived) and `getPageInstagramAccess`.
+        let (user_token, _) = exchange(upstream, credential, code).await?;
+        let page = graph_get(
+            upstream,
+            query_url(
+                &format!("{version}/{page_id}"),
+                &[
+                    ("fields", "access_token,instagram_business_account"),
+                    ("access_token", &user_token),
+                ],
+            ),
+        )
+        .await?;
+        let page_token = text(&page, "access_token");
+        let linked = page["instagram_business_account"]["id"].as_str();
+        if page_token.is_empty() || linked.is_none() || linked != ig_id.as_deref() {
+            return Ok(CapiOutcome::Error("accountNotFound"));
+        }
+        page_token.to_string()
+    } else {
+        let endpoint = format!("{version}/oauth/access_token");
+        let short = graph_get(
+            upstream,
+            query_url(
+                &endpoint,
+                &[
+                    ("client_id", text(config, "clientId")),
+                    ("client_secret", text(config, "clientSecret")),
+                    ("redirect_uri", &credential.callback_url),
+                    ("code", code),
+                ],
+            ),
+        )
+        .await?;
+        let short = text(&short, "access_token").to_string();
+        let long_lived = |token: String| {
+            let endpoint = endpoint.clone();
+            async move {
+                graph_get(
+                    upstream,
+                    query_url(
+                        &endpoint,
+                        &[
+                            ("grant_type", "fb_exchange_token"),
+                            ("client_id", text(config, "clientId")),
+                            ("client_secret", text(config, "clientSecret")),
+                            ("fb_exchange_token", &token),
+                        ],
+                    ),
+                )
+                .await
+                .map(|body| text(&body, "access_token").to_string())
+            }
+        };
+        // A failed long-lived exchange keeps the short-lived user token.
+        let user_token = match long_lived(short.clone()).await {
+            Ok(token) if !token.is_empty() => token,
+            _ => short,
+        };
+        let pages = graph_get(
+            upstream,
+            query_url(
+                &format!("{version}/me/accounts"),
+                &[
+                    ("fields", "id,name,access_token,category,tasks"),
+                    ("access_token", &user_token),
+                    ("limit", "100"),
+                ],
+            ),
+        )
+        .await?;
+        // ponytail: the first page of `/me/accounts` (100 pages); the
+        // original follows the paging cursor.
+        let page_token = pages["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|p| text(p, "id") == page_id && !text(p, "access_token").is_empty())
+            .map(|p| text(p, "access_token").to_string());
+        let Some(page_token) = page_token else {
+            return Ok(CapiOutcome::Error("pageNotFound"));
+        };
+        long_lived(page_token).await?
+    };
+    let capi_channel = if instagram {
+        crate::meta_capi::CapiChannel::Instagram
+    } else {
+        crate::meta_capi::CapiChannel::Messenger
+    };
+    match crate::meta_capi::connect_with_token(db, upstream, capi_channel, ws, id, &token).await {
+        Ok(true) => Ok(CapiOutcome::Success),
+        Ok(false) => Ok(CapiOutcome::Error("notFound")),
+        Err(error) => {
+            tracing::warn!(%error, channel, integration_id = id, "Meta CAPI dataset could not be created with the dedicated token");
+            Ok(CapiOutcome::Error("datasetFailed"))
+        }
     }
 }

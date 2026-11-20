@@ -11,7 +11,7 @@ use chatbotx_business::connection::credentials::HttpUpstream;
 use chatbotx_business::marketing_messages::{self as mm, campaigns};
 use chatbotx_business::{BusinessError, google_ads_setup, tx};
 use chatbotx_db::repo::iso;
-use chatbotx_db::rusqlite::params;
+use chatbotx_db::rusqlite::{OptionalExtension as _, params};
 use serde_json::{Map, Value, json};
 
 use super::{Ctx, In, Outcome, action_fail, arg, fail, public, query_of, schema_errors};
@@ -46,6 +46,8 @@ pub(super) const ACTIONS: &[&str] = &[
     "connectMarketingMessagesAction",
     "connectMessagingAdsAction",
     "connectMetaCatalogAction",
+    "connectMessengerCapiAction",
+    "connectInstagramCapiAction",
     "createFacebookLeadAdAutomationAction",
     "updateFacebookLeadAdAutomationAction",
     "deleteFacebookLeadAdAutomationsAction",
@@ -401,6 +403,56 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
             let path = format!("/space/{}/products", ctx.workspace_id);
             connect(ctx, connect::Flow::MetaCatalog, path).await
         }
+        // `startMetaCapiOAuth` (super admin; the channel row in the workspace).
+        "connectMessengerCapiAction" | "connectInstagramCapiAction" => async {
+            let instagram = name == "connectInstagramCapiAction";
+            let id = bound()?;
+            super_admin(ctx).map_err(action_fail)?;
+            let integration_id: i64 = id.parse().unwrap_or_default();
+            let (table, missing) = if instagram {
+                ("IntegrationInstagram", "Instagram integration not found.")
+            } else {
+                ("IntegrationMessenger", "Messenger integration not found.")
+            };
+            let ws = ctx.workspace_id;
+            let kind: Option<Option<String>> = chatbotx_business::tx::read(&ctx.api.db, move |conn| {
+                let column = if instagram { r#""type""# } else { "'facebook'" };
+                Ok(conn
+                    .query_row(
+                        &format!(r#"SELECT {column} FROM "{table}" WHERE "id" = ?1 AND "workspaceId" = ?2"#),
+                        chatbotx_db::rusqlite::params![integration_id, ws],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(chatbotx_db::repo::Error::from)?)
+            })
+            .await
+            .map_err(fail)?;
+            match kind {
+                None => Err(action_fail(BusinessError::exception(missing, "systemError", 400))),
+                Some(kind) if kind.as_deref() != Some("facebook") => Err(action_fail(
+                    BusinessError::exception(
+                        "Instagram CAPI requires connecting via Facebook.",
+                        "systemError",
+                        400,
+                    ),
+                )),
+                Some(_) => {
+                    let (channel, segment) = if instagram {
+                        ("instagram", "instagrams")
+                    } else {
+                        ("messenger", "messengers")
+                    };
+                    let path = format!("/space/{ws}/{segment}/{integration_id}/ads");
+                    let flow = connect::Flow::MetaCapi {
+                        channel: channel.to_owned(),
+                        integration_id,
+                    };
+                    connect(ctx, flow, path).await
+                }
+            }
+        }
+        .await,
         "connectMessagingAdsAction" => match (bound(), super_admin(ctx)) {
             (Ok(id), Ok(())) => match channel_of(arg(args, 2)).as_str() {
                 channel @ ("whatsapp" | "messenger" | "instagram") => {
