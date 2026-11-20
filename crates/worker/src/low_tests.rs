@@ -78,15 +78,11 @@ fn matching_rules_follow_the_original() {
 #[test]
 fn mentions_and_hide_rules() {
     assert_eq!(
-        mention_count(
-            "instagram",
-            Some("hi @Ann and @ann, @bob_1. mail a@b.c"),
-            &Value::Null
-        ),
-        2
+        text_mentions(Some("hi @Ann and @ann, @bob_1. mail a@b.c")),
+        vec!["ann".to_owned(), "bob_1".to_owned()]
     );
     let tags = json!([{"id": "1"}, {"id": "1"}, {"id": "2"}]);
-    assert_eq!(mention_count("messenger", Some("@x"), &tags), 2);
+    assert_eq!(tag_ids(&tags), vec!["1".to_owned(), "2".to_owned()]);
     let none = Attachments::default();
     let hide = json!({"hasPhoneNumber": true, "hasEmoji": true, "hasKeywords": true, "keywords": ["SALE"]});
     assert_eq!(
@@ -474,4 +470,50 @@ async fn ai_moderation_holds_the_reply_and_hides_a_flagged_comment() {
         jobs.0.lock().unwrap()[3].1.job_id.as_deref(),
         Some("moderate-comment-9-55_9")
     );
+}
+
+/// `trackCommentTags` (`comment-automation` handler): a tracked comment adds
+/// its distinct tags (and the ones not yet known in the inbox) to the
+/// commenter's lifetime counters once; a redelivered run counts nothing.
+#[tokio::test]
+async fn tag_tracking_counts_a_comment_once() {
+    let (mut deps, _jobs) = setup().await;
+    let channel = RecordingChannel::new();
+    deps.channels =
+        crate::Channels::builtin().with("messenger", channel.clone() as Arc<dyn Channel>);
+    add_automation(
+        &deps,
+        r#"INSERT INTO "CommentAutomation" ("id", "name", "workspaceId", "type", "post", "options")
+           VALUES (7, 'A', 2, 'messenger', '{"type":"all","value":[]}', '{"trackUserTags":true}')"#,
+    )
+    .await;
+    let mut data = comment(Some("7"));
+    data["commentData"]["tags"] = json!([{ "id": "u8" }, { "id": "u7" }, { "id": "u8" }]);
+    let graph = Graph(Default::default(), json!({}));
+    for _ in 0..2 {
+        replay_missed_comment(&deps, &graph, &data).await.unwrap();
+    }
+    assert!(
+        graph.0.lock().unwrap().is_empty(),
+        "the webhook tags are used"
+    );
+    let (total, fresh, claimed): (i64, i64, String) = deps
+        .db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT k."totalTagged", k."totalNewTagged", m."contentAttributes"
+                   FROM "Contact" k JOIN "ContactInbox" ci ON ci."contactId" = k."id"
+                   JOIN "Message" m ON m."sourceId" = '55_9'
+                   WHERE ci."sourceId" = 'u7'"#,
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    // u7 (the commenter) is known in the inbox, u8 is not.
+    assert_eq!((total, fresh), (2, 1));
+    let claimed: Value = serde_json::from_str(&claimed).unwrap();
+    assert_eq!(claimed["totalTagged"], 2);
+    assert_eq!(claimed["totalNewTagged"], 1);
 }
