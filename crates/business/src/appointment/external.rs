@@ -75,11 +75,13 @@ pub(crate) async fn read_json(response: reqwest::Response) -> std::result::Resul
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
+/// `handleError`: an `SdkException` (default status 400), which the public
+/// API answers as an undeclared `BAD_REQUEST` (`toKnownOrpcError`).
 pub(crate) fn sdk_error(message: impl std::fmt::Display) -> BusinessError {
     BusinessError::exception(
         format!("Google Calendar API error: {message}"),
-        "sdkException",
-        500,
+        "BAD_REQUEST",
+        400,
     )
 }
 
@@ -587,17 +589,12 @@ impl ExternalCalendars {
         .await
     }
 
-    /// `disconnect` (`revokeToken(accessToken)`).
+    /// `disconnect` (`revokeToken(accessToken)`: `POST /revoke?token=…`).
     pub async fn revoke(&self, row: &IntegrationGoogleCalendar) -> Result<()> {
         let auth = open_auth(self.encryption()?, row)?;
         let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
         self.http
-            .post(&self.endpoints.revoke_url)
-            .header(
-                reqwest::header::CONTENT_TYPE,
-                "application/x-www-form-urlencoded",
-            )
-            .body(form(&[("token", token)]))
+            .post(revoke_url(&self.endpoints.revoke_url, token))
             .timeout(Duration::from_secs(30))
             .send()
             .await
@@ -627,6 +624,11 @@ pub(crate) fn google_message(data: &Value, status: u16) -> String {
     }
 }
 
+/// google-auth-library `getRevokeTokenURL`: the token is a query parameter.
+fn revoke_url(base: &str, token: &str) -> String {
+    format!("{base}?{}", form(&[("token", token)]))
+}
+
 pub(crate) fn urlencode(text: &str) -> String {
     url::form_urlencoded::byte_serialize(text.as_bytes())
         .collect::<String>()
@@ -652,6 +654,14 @@ mod tests {
         let empty = json!({ "start": "2026-11-17T10:00:00Z", "end": "2026-11-17T10:00:00Z" });
         assert!(busy_interval(&empty).is_none());
         assert!(busy_interval(&json!({ "start": "x", "end": "y" })).is_none());
+    }
+
+    #[test]
+    fn revoke_sends_the_token_in_the_query() {
+        assert_eq!(
+            revoke_url("https://oauth2.googleapis.com/revoke", "ya29.a/b+c"),
+            "https://oauth2.googleapis.com/revoke?token=ya29.a%2Fb%2Bc"
+        );
     }
 
     #[test]

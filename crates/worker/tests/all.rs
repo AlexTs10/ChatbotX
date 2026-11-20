@@ -4,6 +4,8 @@
 
 #[path = "analytics_events.rs"]
 mod analytics_events;
+#[path = "appointment_google_event.rs"]
+mod appointment_google_event;
 #[path = "inbound_webhook_worker.rs"]
 mod inbound_webhook_worker;
 #[path = "schedule_broadcast.rs"]

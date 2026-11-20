@@ -207,15 +207,13 @@ async fn run_sync(
         };
         let rendered = render_templates(deps, loaded, contact_inbox).await?;
         let event_id = deterministic_event_id(id);
-        let event = json!({
-            "id": event_id,
-            "summary": rendered.0,
-            "description": rendered.1,
-            "location": a.location_detail,
-            "start": { "dateTime": chatbotx_db::repo::iso(a.start_at), "timeZone": loaded.calendar.timezone },
-            "end": { "dateTime": chatbotx_db::repo::iso(a.end_at), "timeZone": loaded.calendar.timezone },
-            "attendees": rendered.2,
-        });
+        let event = google_event(
+            &event_id,
+            rendered,
+            a.location_detail.as_deref(),
+            (a.start_at, a.end_at),
+            &loaded.calendar.timezone,
+        );
         external
             .create_event(&deps.db, ws, integration_id, &provider_calendar_id, &event)
             .await?;
@@ -315,6 +313,30 @@ async fn resolve_destination(
 }
 
 /// `renderAppointmentExternalCalendarEventTemplate`: (summary, description, attendees).
+/// The `events.insert` request body (`createEvent`): an absent description,
+/// location or attendee list is left out (`undefined` in the original).
+pub fn google_event(
+    event_id: &str,
+    (summary, description, attendees): (String, Option<String>, Option<Vec<Value>>),
+    location: Option<&str>,
+    (start_at, end_at): (i64, i64),
+    time_zone: &str,
+) -> Value {
+    let mut event = json!({
+        "id": event_id,
+        "summary": summary,
+        "description": description,
+        "location": location,
+        "start": { "dateTime": chatbotx_db::repo::iso(start_at), "timeZone": time_zone },
+        "end": { "dateTime": chatbotx_db::repo::iso(end_at), "timeZone": time_zone },
+        "attendees": attendees,
+    });
+    if let Some(fields) = event.as_object_mut() {
+        fields.retain(|_, value| !value.is_null());
+    }
+    event
+}
+
 async fn render_templates(
     deps: &Deps,
     loaded: &Loaded,

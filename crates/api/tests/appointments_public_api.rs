@@ -188,6 +188,66 @@ async fn update_requires_max_per_day_when_the_daily_limit_is_on() {
 }
 
 #[tokio::test]
+async fn a_new_calendar_keeps_its_empty_window_config_and_bad_configs_name_the_key() {
+    let f = setup().await;
+    let calendar = new_calendar(&f, "Window").await;
+    let params = [("id", calendar.as_str())];
+    let get = || call(&f, "appointmentCalendars.get", WS, &params, None, None);
+    let (status, body) = get().await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["scheduleWindowConfig"], json!({}), "{body}");
+    assert_eq!(body["scheduleWindowType"], json!("rollingDays"));
+
+    for (config, path) in [
+        (
+            json!({ "scheduleWindowType": "dateRange", "startDate": "2030-01-08", "endDate": "2030-01-07" }),
+            json!(["scheduleWindowConfig", "endDate"]),
+        ),
+        (
+            json!({ "scheduleWindowType": "rollingDays", "rollingDays": 366 }),
+            json!(["scheduleWindowConfig", "rollingDays"]),
+        ),
+    ] {
+        let update = open_calendar(json!({ "scheduleWindowConfig": config }));
+        let (status, body) = call(
+            &f,
+            "appointmentCalendars.update",
+            WS,
+            &[("id", &calendar)],
+            None,
+            Some(update),
+        )
+        .await;
+        assert_eq!(status, 422, "{body}");
+        let paths: Vec<Value> = body["data"]["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|issue| issue["path"].clone())
+            .collect();
+        assert!(paths.contains(&path), "{path}: {body}");
+    }
+
+    // A saved config is returned with its type and defaults.
+    let update = open_calendar(json!({}));
+    let (status, body) = call(
+        &f,
+        "appointmentCalendars.update",
+        WS,
+        &[("id", &calendar)],
+        None,
+        Some(update),
+    )
+    .await;
+    assert_eq!(status, 204, "{body}");
+    let (_, body) = get().await;
+    assert_eq!(
+        body["scheduleWindowConfig"],
+        json!({ "scheduleWindowType": "rollingDays", "rollingDays": 30, "minAdvanceDays": 0 })
+    );
+}
+
+#[tokio::test]
 async fn update_rejects_an_invalid_duration_and_overlapping_end() {
     let f = setup().await;
     let calendar = new_calendar(&f, "Bad").await;

@@ -16,6 +16,7 @@ pub mod broadcasts;
 pub mod capabilities;
 pub mod capi;
 pub mod channel_integrations;
+pub mod channel_posts;
 pub mod channel_settings;
 pub mod channels;
 pub mod comment_automations;
@@ -739,6 +740,8 @@ async fn route(
         webchats::handle(state, route_id, call).await
     } else if channel_integrations::ROUTES.contains(&route_id) {
         channel_integrations::handle(state, route_id, call).await
+    } else if channel_posts::ROUTES.contains(&route_id) {
+        channel_posts::handle(state, route_id, call).await
     } else if places::ROUTES.contains(&route_id) {
         places::handle(state, route_id, call).await
     } else if open_hours::ROUTES.contains(&route_id) {
