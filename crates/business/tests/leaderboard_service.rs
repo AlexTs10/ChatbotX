@@ -408,3 +408,31 @@ async fn the_export_adds_phone_and_email_only_with_contact_info() {
         .expect("csv");
     assert!(!without.contains("\"Phone\""));
 }
+
+// Parity `52-leaderboards-export-rewards`: `ContactInbox` has no workspace
+// column; the winner's channel identity is found through its contact.
+#[tokio::test]
+async fn rewards_queue_the_flow_for_a_winner_with_a_conversation() {
+    let db = board_db(
+        "finished",
+        enabled_rules(),
+        json!({ "flowId": "77", "topN": 2 }),
+    )
+    .await;
+    setup(&db, |tx| {
+        common::inbox(tx, 10, WS, "messenger")?;
+        common::contact_inbox(tx, 4201, CONTACT, 10, "messenger", "psid-1")?;
+        common::conversation(tx, 5201, WS, CONTACT)?;
+        participant(tx, CONTACT, 30, false)
+    })
+    .await;
+    let jobs = RecordingEnqueuer::new();
+    let out = service::trigger_rewards(&deps(&db, Some(jobs.clone())), WS, BOARD, false)
+        .await
+        .expect("rewards");
+    assert_eq!(out["sent"], 1, "{out}");
+    assert_eq!(out["failed"], json!([]));
+    let calls = jobs.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].data["data"]["contactInboxId"], "4201");
+}

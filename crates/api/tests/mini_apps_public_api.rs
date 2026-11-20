@@ -302,3 +302,57 @@ async fn duplicate_copies_the_mini_app_within_the_tokens_workspace() {
     .await;
     assert_eq!(status, 404);
 }
+
+// Parity `50-mini-apps`: `enabled` is applied by update and kept by duplicate.
+#[tokio::test]
+async fn update_disables_and_a_duplicate_stays_disabled() {
+    let f = fixture().await;
+    let id = id_of(&create(&f, WS, "Toggle").await);
+    let params = [("id", id.as_str())];
+    let body = json!({ "enabled": false });
+    let (status, updated) = call(&f, "miniApps.update", WS, &params, None, Some(body)).await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["enabled"], false);
+    let (status, copy) = call(&f, "miniApps.duplicate", WS, &params, None, Some(json!({}))).await;
+    assert_eq!(status, 201, "{copy}");
+    assert_eq!(copy["enabled"], false);
+    // `possibleErrorsOnMutatingResource`: an unknown id is a defined 404.
+    let unknown = [("id", "999999")];
+    let (status, error) = call(
+        &f,
+        "miniApps.duplicate",
+        WS,
+        &unknown,
+        None,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, 404, "{error}");
+    assert_eq!(error["defined"], true);
+}
+
+// Parity `50-mini-apps`: a bad Flow JSON names the failing field.
+#[tokio::test]
+async fn a_bad_flow_json_reports_the_field_path() {
+    let f = fixture().await;
+    for (flow, path) in [
+        (
+            json!({ "version": "7.2", "screens": [] }),
+            json!(["flowJson", "screens"]),
+        ),
+        (json!({ "screens": [] }), json!(["flowJson", "version"])),
+        (json!("x"), json!(["flowJson"])),
+    ] {
+        let body = json!({ "name": "Bad", "flowJson": flow });
+        let (status, error) = call(&f, "miniApps.create", WS, &[], None, Some(body)).await;
+        assert_eq!(status, 422, "{error}");
+        let paths: Vec<&Value> = error["data"]["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|issue| &issue["path"])
+            .collect();
+        assert!(paths.contains(&&path), "{error}");
+    }
+    assert_eq!(count(&f, WS).await, 0);
+}
