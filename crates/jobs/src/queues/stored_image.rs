@@ -113,7 +113,7 @@ fn is_literal_segment(segment: &str) -> bool {
 
 /// The workspace id sits where the key layouts put it: segment 2, or
 /// segment 4 under [`LEGACY_AVATAR_PREFIX`].
-fn is_workspace_storage_key(key: &str, workspace_id: &str) -> bool {
+pub fn is_workspace_storage_key(key: &str, workspace_id: &str) -> bool {
     if workspace_id.is_empty() {
         return false;
     }
