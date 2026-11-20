@@ -12,12 +12,15 @@
 //! An action with its own server route (`/rpc/actions/<name>`) counts as
 //! ported. A SPA stub that nothing imports is still listed (COVERAGE.md
 //! marks it).
-//! Each call gets a fresh database; 8 run at once. A panic, a 30 s
+//! Each call gets a fresh copy of one migrated, seeded template database
+//! file; 8 run at once. A panic, a 30 s
 //! time-out or a 401 / 403 is not listed (printed).
 
 mod rpc_common;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
@@ -28,9 +31,11 @@ use chatbotx_api::handlers::channels::{self, ChannelCall};
 use chatbotx_api::handlers::{Call, me};
 use chatbotx_api::routes::{PUBLIC_ROUTES, PublicRoute, RouteAuth, public_api_router_with};
 use chatbotx_api::rpc::RPC_PROCEDURES;
+use chatbotx_business::keys::Edition;
+use chatbotx_db::Db;
 use chatbotx_db::rusqlite::params;
 use chatbotx_kv::{Kv, KvConfig, SystemClock};
-use rpc_common::{Fixture, OWNER, OWNER_TOKEN, WS, fixture};
+use rpc_common::{Fixture, OWNER, OWNER_TOKEN, WS};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
@@ -133,10 +138,9 @@ impl Tally {
 }
 
 /// The owner's full, unrestricted workspace token.
-async fn seed_token(fx: &Fixture) {
+async fn seed_token(db: &Db) {
     let hash = hash_token(TOKEN);
-    fx.db()
-        .write(move |tx| {
+    db.write(move |tx| {
             tx.execute(
                 r#"INSERT INTO "WorkspaceApiToken" ("id", "workspaceId", "name", "permission", "tokenHash")
                    VALUES (9001, ?1, 'coverage', 'full', ?2)"#,
@@ -181,10 +185,71 @@ fn concrete_path(template: &str) -> String {
 /// must not change the next call's answer): the answer body.
 type Probe = std::pin::Pin<Box<dyn Future<Output = String> + Send>>;
 
-/// Calls at once (each has its own in-memory database).
-// ponytail: one migrated database per call (~11 min on the Dell for 1,765
-// calls); copy a migrated template file per call if the run time matters.
+/// Calls at once (each has its own database file).
 const PARALLEL: usize = 8;
+
+/// A migrated, seeded database file (`with_token`: and [`seed_token`]) in a
+/// new directory; [`Template::fixture`] gives each call its own copy.
+struct Template {
+    file: PathBuf,
+}
+
+impl Template {
+    async fn new(name: &str, with_token: bool) -> Template {
+        let dir = std::env::temp_dir().join(format!(
+            "chatbotx-route-coverage-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("template dir");
+        let file = dir.join("template.db");
+        let db = Db::open(&file).expect("open template");
+        db.migrate().await.expect("migrate");
+        rpc_common::seed(&db).await;
+        if with_token {
+            seed_token(&db).await;
+        }
+        // Closing the last connection checkpoints the WAL into the file.
+        drop(db);
+        assert!(
+            !sidecar(&file, "-wal").exists(),
+            "template WAL not checkpointed"
+        );
+        Template { file }
+    }
+
+    /// A fresh copy of the template, opened; the copy is removed by [`done`].
+    fn fixture(&self) -> (Fixture, PathBuf) {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path = self.file.with_file_name(format!("call-{n}.db"));
+        std::fs::copy(&self.file, &path).expect("copy template");
+        let db = Db::open(&path).expect("open copy");
+        (rpc_common::fixture_on(db, Edition::Community), path)
+    }
+}
+
+impl Drop for Template {
+    fn drop(&mut self) {
+        if let Some(dir) = self.file.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// Closes a call's database and removes its file.
+fn done(fx: Fixture, path: &Path) {
+    drop(fx);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(sidecar(path, suffix));
+    }
+}
 
 /// Runs every probe, [`PARALLEL`] at a time.
 async fn measure_all(probes: Vec<(String, Probe)>) -> Tally {
@@ -207,13 +272,13 @@ async fn measure_all(probes: Vec<(String, Probe)>) -> Tally {
     tally
 }
 
-fn public_probe(route: &'static PublicRoute) -> Probe {
+fn public_probe(route: &'static PublicRoute, template: &Arc<Template>) -> Probe {
+    let template = Arc::clone(template);
     Box::pin(async move {
-        let fx = fixture().await;
-        seed_token(&fx).await;
+        let (fx, path) = template.fixture();
         let api = Arc::clone(&fx.api);
         let id = route.id;
-        match route.auth {
+        let text = match route.auth {
             RouteAuth::WorkspaceToken(_) => {
                 let has_body = !matches!(route.method, "GET" | "DELETE");
                 let request = Request::builder()
@@ -264,15 +329,19 @@ fn public_probe(route: &'static PublicRoute) -> Probe {
                 let reply = me::handle(&api, id, call, &user, &HeaderMap::new()).await;
                 body_text(reply.unwrap_or_else(IntoResponse::into_response)).await
             }
-        }
+        };
+        drop(api);
+        done(fx, &path);
+        text
     })
 }
 
 #[tokio::test]
 async fn public_routes_not_ported() {
+    let template = Arc::new(Template::new("public", true).await);
     let probes = PUBLIC_ROUTES
         .iter()
-        .map(|route| (route.id.to_string(), public_probe(route)))
+        .map(|route| (route.id.to_string(), public_probe(route, &template)))
         .collect();
     measure_all(probes).await.check(
         "public routes",
@@ -389,16 +458,19 @@ fn call_name<'a>(text: &'a str, at: usize, kind: &str) -> Option<(String, &'a st
 }
 
 /// One `/rpc` call with the owner session.
-fn rpc_probe(method: &'static str, url: String, input: Value) -> Probe {
+fn rpc_probe(template: &Arc<Template>, method: &'static str, url: String, input: Value) -> Probe {
+    let template = Arc::clone(template);
     Box::pin(async move {
-        let fx = fixture().await;
+        let (fx, path) = template.fixture();
         let (_, body) = rpc_common::call(&fx, method, &url, Some(OWNER_TOKEN), input).await;
+        done(fx, &path);
         body.to_string()
     })
 }
 
 #[tokio::test]
 async fn rpc_procedures_and_actions_not_ported() {
+    let template = Arc::new(Template::new("rpc", false).await);
     let mut probes = Vec::new();
     for procedure in RPC_PROCEDURES {
         let mut input = json!({});
@@ -417,7 +489,10 @@ async fn rpc_procedures_and_actions_not_ported() {
         }
         let method = procedure.method.unwrap_or("POST");
         let url = format!("/rpc/{}", procedure.path.replace('.', "/"));
-        probes.push((procedure.path.to_string(), rpc_probe(method, url, input)));
+        probes.push((
+            procedure.path.to_string(),
+            rpc_probe(&template, method, url, input),
+        ));
     }
     let own_route = own_route_actions();
     let mut own_route_count = 0;
@@ -427,7 +502,10 @@ async fn rpc_procedures_and_actions_not_ported() {
             continue;
         }
         let url = format!("/rpc/actions/{name}");
-        probes.push((format!("actions.{name}"), rpc_probe("POST", url, input)));
+        probes.push((
+            format!("actions.{name}"),
+            rpc_probe(&template, "POST", url, input),
+        ));
     }
     let mut tally = measure_all(probes).await;
     tally.ported += own_route_count;

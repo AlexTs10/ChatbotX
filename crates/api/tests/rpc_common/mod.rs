@@ -58,6 +58,12 @@ pub async fn fixture() -> Fixture {
 pub async fn fixture_as(edition: Edition) -> Fixture {
     let db = Db::open_in_memory().expect("open db");
     db.migrate().await.expect("migrate");
+    seed(&db).await;
+    fixture_on(db, edition)
+}
+
+/// The users, sessions, workspace and members of [`fixture`].
+pub async fn seed(db: &Db) {
     db.write(|tx| {
         for (id, email, name) in [
             (OWNER, "owner@rpc.test", "Owner"),
@@ -97,6 +103,10 @@ pub async fn fixture_as(edition: Edition) -> Fixture {
     })
     .await
     .expect("seed");
+}
+
+/// The fixture state on a migrated, [`seed`]ed database.
+pub fn fixture_on(db: Db, edition: Edition) -> Fixture {
     let db = Arc::new(db);
     let auth = Arc::new(AuthState {
         db: Arc::clone(&db),

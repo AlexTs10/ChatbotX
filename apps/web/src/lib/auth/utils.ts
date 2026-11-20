@@ -4,14 +4,6 @@ import { serverFunction } from "@/lib/server-action"
 
 // biome-ignore lint/suspicious/noExplicitAny: server type, not ported
 export type SessionUser = any
-export const getCurrentUserId = serverFunction("getCurrentUserId")
-export const getCurrentUser = serverFunction("getCurrentUser")
 export const assertCurrentUserCanAccessChatbot = serverFunction(
   "assertCurrentUserCanAccessChatbot",
-)
-export const getCurrentUserAndAllLinkedWorkspaces = serverFunction(
-  "getCurrentUserAndAllLinkedWorkspaces",
-)
-export const getCurrentUserAndTargetWorkspace = serverFunction(
-  "getCurrentUserAndTargetWorkspace",
 )
