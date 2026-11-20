@@ -764,15 +764,9 @@ pub async fn handle(
             input.finish()?;
             filters.page = Some(page);
             filters.per_page = Some(per_page);
-            let mut out = service::list_participants(db, ws, id, filters)
+            let out = service::list_participants(db, ws, id, filters)
                 .await
                 .map_err(|e| business_error(e, FINDING))?;
-            // `leaderboardParticipantResource` has no `rank`.
-            for row in out["data"].as_array_mut().into_iter().flatten() {
-                if let Some(map) = row.as_object_mut() {
-                    map.remove("rank");
-                }
-            }
             Ok(json(200, out))
         }
         "leaderboards.participants.adjust" => {

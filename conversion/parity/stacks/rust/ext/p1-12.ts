@@ -17,6 +17,8 @@ import type {
   P112MinigamePlayInput,
   P112PollVoteInput,
   P112QuestionnaireSubmissionInput,
+  P112WhatsappChannel,
+  P112WhatsappChannelInput,
 } from "../../../src/fixtures/ext/p1-12.ts"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -95,7 +97,70 @@ class SqliteP112Fixtures implements P112Fixtures {
     return this.db
   }
 
-  createWhatsappChannel = notPorted("createWhatsappChannel")
+  // Same rows as `stacks/original/ext/p1-12.ts` (and `stacks/rust/ext/p1-11.ts`).
+  async createWhatsappChannel(input: P112WhatsappChannelInput): Promise<P112WhatsappChannel> {
+    const accessToken = `wa-token-${input.phoneNumberId}`
+    const wabaId = `waba-${input.phoneNumberId}`
+    const businessId = `biz-${input.phoneNumberId}`
+    const displayPhoneNumber = "+1 555 0100"
+    const inboxId = createId()
+    const integrationId = createId()
+    const now = Date.now()
+    const auth = {
+      authType: "oauth2",
+      clientId: "parity-client",
+      clientSecret: "parity-secret",
+      redirectUrl: "http://app/integrations/callback",
+      version: "v23.0",
+      tokens: { accessToken },
+      metadata: {
+        wabaId,
+        businessId,
+        webhookUrl: "http://app/api/hooks/whatsapp",
+        phoneNumber: {
+          id: input.phoneNumberId,
+          verified_name: input.name,
+          code_verification_status: "VERIFIED",
+          display_phone_number: displayPhoneNumber,
+          quality_rating: "GREEN",
+          platform_type: "CLOUD_API",
+          throughput: { level: "STANDARD" },
+          webhook_configuration: {},
+        },
+      },
+    }
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO "Inbox" ("id", "createdAt", "updatedAt", "name", "channel", "sourceId", "workspaceId", "status")
+         VALUES (?, ?, ?, ?, 'whatsapp', ?, ?, 'connected')`,
+      ).run(inboxId, now, now, input.name, input.phoneNumberId, BigInt(input.workspaceId))
+      db.prepare(
+        `INSERT INTO "IntegrationWhatsapp"
+           ("id", "createdAt", "updatedAt", "auth", "phoneNumberId", "wabaId", "businessId", "name",
+            "displayPhoneNumber", "workspaceId", "inboxId")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        integrationId,
+        now,
+        now,
+        JSON.stringify(auth),
+        input.phoneNumberId,
+        wabaId,
+        businessId,
+        input.name,
+        displayPhoneNumber,
+        BigInt(input.workspaceId),
+        inboxId,
+      )
+      db.prepare(
+        `INSERT INTO "Connection"
+           ("id", "createdAt", "updatedAt", "workspaceId", "provider", "kind", "channel", "inboxId", "sourceId",
+            "displayName", "status", "connectedAt")
+         VALUES (?, ?, ?, ?, 'whatsapp', 'channel', 'whatsapp', ?, ?, ?, 'connected', ?)`,
+      ).run(createId(), now, now, BigInt(input.workspaceId), inboxId, input.phoneNumberId, input.name, now)
+    })
+    return { integrationId: integrationId.toString(), inboxId: inboxId.toString(), accessToken, wabaId }
+  }
 
   private transaction<T>(run: (db: DatabaseSync) => T): T {
     const db = this.open()

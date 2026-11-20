@@ -142,29 +142,113 @@ pub fn detail_json(app_url: &str, row: &MiniApp, publications: &[MiniAppPublicat
     Value::Object(out)
 }
 
-/// `flowJsonSchema` on `name` (an issue when it is not a Flow JSON).
+/// `flowJsonSchema` on `name`: one issue per bad field, at its path (e.g.
+/// `flowJson.screens` for an empty screen list).
 fn flow_json(input: &mut Input, name: &str, required: bool) -> Option<Value> {
     let value = input.get(name).cloned();
-    match value {
-        None if !required => None,
-        Some(v) if app::serialize::is_flow_json(&v) => Some(v),
-        other => {
-            let message = if other.is_none() {
-                "Invalid input: expected object, received undefined"
-            } else {
-                "Invalid input"
-            };
+    if value.is_none() && !required {
+        return None;
+    }
+    let before = input.issue_count();
+    flow_json_issues(input, &key(name), value.as_ref());
+    (input.issue_count() == before).then(|| value.unwrap_or_default())
+}
+
+/// An object at `path` (`invalid_type` otherwise).
+fn object_at<'v>(
+    input: &mut Input,
+    path: &[Seg],
+    value: Option<&'v Value>,
+) -> Option<&'v Map<String, Value>> {
+    if let Some(Value::Object(map)) = value {
+        return Some(map);
+    }
+    let received = super::input::type_name(value);
+    input.issue(
+        path,
+        "invalid_type",
+        &format!("Invalid input: expected object, received {received}"),
+    );
+    None
+}
+
+/// An array at `path` (`invalid_type` otherwise).
+fn array_at<'v>(input: &mut Input, path: &[Seg], value: Option<&'v Value>) -> Option<&'v [Value]> {
+    if let Some(Value::Array(items)) = value {
+        return Some(items);
+    }
+    let received = super::input::type_name(value);
+    input.issue(
+        path,
+        "invalid_type",
+        &format!("Invalid input: expected array, received {received}"),
+    );
+    None
+}
+
+fn index(path: &[Seg], i: usize) -> Vec<Seg> {
+    let mut next = path.to_vec();
+    next.push(Seg::Index(i));
+    next
+}
+
+/// The checks of `flowJsonSchema` (same shape as `is_flow_json`).
+fn flow_json_issues(input: &mut Input, path: &[Seg], value: Option<&Value>) {
+    use super::input::child;
+    let Some(root) = object_at(input, path, value) else {
+        return;
+    };
+    let any = Str::default();
+    input.string_at(&child(path, "version"), root.get("version"), any, true);
+    let screens_path = child(path, "screens");
+    let Some(screens) = array_at(input, &screens_path, root.get("screens")) else {
+        return;
+    };
+    for (i, screen) in screens.iter().enumerate() {
+        let at = index(&screens_path, i);
+        let Some(screen) = object_at(input, &at, Some(screen)) else {
+            continue;
+        };
+        input.string_at(&child(&at, "id"), screen.get("id"), any, true);
+        input.string_at(&child(&at, "title"), screen.get("title"), any, false);
+        input.bool_at(&child(&at, "terminal"), screen.get("terminal"), false);
+        let layout_path = child(&at, "layout");
+        let Some(layout) = object_at(input, &layout_path, screen.get("layout")) else {
+            continue;
+        };
+        if layout.get("type").and_then(Value::as_str) != Some("SingleColumnLayout") {
             input.issue(
-                &key(name),
-                if other.is_none() {
-                    "invalid_type"
-                } else {
-                    "custom"
-                },
-                message,
+                &child(&layout_path, "type"),
+                "invalid_value",
+                "Invalid input: expected \"SingleColumnLayout\"",
             );
-            None
         }
+        let children_path = child(&layout_path, "children");
+        let Some(children) = array_at(input, &children_path, layout.get("children")) else {
+            continue;
+        };
+        for (j, component) in children.iter().enumerate() {
+            let at = index(&children_path, j);
+            if let Some(component) = object_at(input, &at, Some(component)) {
+                input.string_at(&child(&at, "type"), component.get("type"), any, true);
+            }
+        }
+    }
+    if screens.is_empty() {
+        input.issue(
+            &screens_path,
+            "too_small",
+            "Too small: expected array to have >=1 items",
+        );
+    } else if screens.len() > app::MAX_SCREENS {
+        input.issue(
+            &screens_path,
+            "too_big",
+            &format!(
+                "Too big: expected array to have <={} items",
+                app::MAX_SCREENS
+            ),
+        );
     }
 }
 
@@ -288,13 +372,14 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             input.finish()?;
             let copy = service::duplicate(db, ws, app_id.unwrap_or_default())
                 .await
-                .map_err(|e| business_error(e, super::CREATING))?;
+                .map_err(|e| business_error(e, super::MUTATING))?;
             Ok(json(201, detail_json(app_url, &copy, &[])))
         }
         "miniApps.update" => {
             let mut input = Input::from_body(call.params, call.body);
             let app_id = input.id("id").unwrap_or_default();
             let name = input.opt_string("name", NAME);
+            let enabled = input.opt_bool("enabled");
             let flow = flow_json(&mut input, "flowJson", false);
             let custom_field_mappings = mappings(&mut input);
             input.finish()?;
@@ -303,7 +388,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 flow_json: flow,
                 custom_field_mappings,
             };
-            service::update(db, ws, app_id, name, None, data)
+            service::update(db, ws, app_id, name, enabled, data)
                 .await
                 .map_err(|e| business_error(e, super::MUTATING))?;
             let found = service::find_or_fail(db, ws, app_id)

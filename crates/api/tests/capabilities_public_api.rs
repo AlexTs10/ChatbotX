@@ -6,7 +6,7 @@
 mod handlers_common;
 
 use chatbotx_api::routes::{RouteAuth, route_by_id};
-use handlers_common::{WS, call, fixture};
+use handlers_common::{WS, call, call_as, fixture};
 use serde_json::json;
 
 #[test]
@@ -114,4 +114,26 @@ async fn returns_a_json_schema_object_describing_the_flow_spec_dsl() {
     let text = body.to_string();
     assert!(text.contains("formatVersion"));
     assert!(text.contains("steps"));
+}
+
+// `features/token/api/public.ts`: `GET /v1/token` reports the calling token.
+#[tokio::test]
+async fn token_get_reports_the_workspace_permission_and_scopes() {
+    let fx = fixture().await;
+    assert!(matches!(
+        route_by_id("token.get").expect("route").auth,
+        RouteAuth::WorkspaceToken(&["contacts"])
+    ));
+    let (status, body) = call_as(&fx, "token.get", WS, None, &[], None, None)
+        .await
+        .expect("handled");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body,
+        json!({ "workspaceId": WS.to_string(), "permission": "full", "scopes": null })
+    );
+    let (_, body) = call_as(&fx, "token.get", WS, Some(&["contacts"]), &[], None, None)
+        .await
+        .expect("handled");
+    assert_eq!(body["scopes"], json!(["contacts"]));
 }

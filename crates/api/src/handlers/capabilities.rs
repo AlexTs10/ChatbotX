@@ -1,5 +1,6 @@
 //! `features/capabilities/api/public.ts` (Q.D11 slice 5, scope `contacts`):
-//! `GET /v1/capabilities` and `GET /v1/schemas/flow-spec`.
+//! `GET /v1/capabilities` and `GET /v1/schemas/flow-spec`; also
+//! `features/token/api/public.ts` (`GET /v1/token`, same scope).
 
 use std::sync::LazyLock;
 
@@ -10,10 +11,10 @@ use chatbotx_core::utils::channel::ChannelType;
 use serde_json::Value;
 
 use super::input::{Input, Seg, key};
-use super::{ApiState, Call, Reply, json};
+use super::{ApiState, Call, Principal, Reply, json};
 
 /// The routes of this module.
-pub const ROUTES: &[&str] = &["capabilities.get", "schemas.flowSpec"];
+pub const ROUTES: &[&str] = &["capabilities.get", "schemas.flowSpec", "token.get"];
 
 /// `includeQueryParam`: a comma list (trimmed, blanks dropped; none =
 /// absent) of `CAPABILITIES_INCLUDES` values.
@@ -49,7 +50,12 @@ fn flow_spec_json_schema() -> &'static Value {
 }
 
 /// Runs one of [`ROUTES`].
-pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
+pub async fn handle(
+    state: &ApiState,
+    route_id: &str,
+    call: Call<'_>,
+    principal: &Principal,
+) -> Reply {
     let mut input = Input::from_query(call.params, call.query);
     match route_id {
         "capabilities.get" => {
@@ -75,6 +81,16 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             input.finish()?;
             Ok(json(200, flow_spec_json_schema().clone()))
         }
+        // `tokenPublicRouter.get`: the calling token's workspace, permission
+        // and scopes (`null` = unrestricted).
+        "token.get" => Ok(json(
+            200,
+            serde_json::json!({
+                "workspaceId": call.workspace_id.to_string(),
+                "permission": if principal.read_only { "read_only" } else { "full" },
+                "scopes": principal.scopes,
+            }),
+        )),
         _ => Err(crate::routes::not_ported_error()),
     }
 }

@@ -679,8 +679,10 @@ fn contact_inbox_for(
 ) -> Result<Option<i64>> {
     Ok(conn
         .query_row(
-            r#"SELECT "id" FROM "ContactInbox" WHERE "workspaceId" = ?1 AND "contactId" = ?2
-               ORDER BY ("inboxId" IS ?3) DESC, "createdAt" ASC LIMIT 1"#,
+            // `ContactInbox` has no `workspaceId`: scoped through its contact.
+            r#"SELECT ci."id" FROM "ContactInbox" ci JOIN "Contact" c ON c."id" = ci."contactId"
+               WHERE c."workspaceId" = ?1 AND ci."contactId" = ?2
+               ORDER BY (ci."inboxId" IS ?3) DESC, ci."createdAt" ASC LIMIT 1"#,
             params![ws, contact, inbox],
             |r| r.get(0),
         )

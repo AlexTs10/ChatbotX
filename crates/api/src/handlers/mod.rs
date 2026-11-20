@@ -800,7 +800,7 @@ async fn route(
     } else if inbox_teams::ROUTES.contains(&route_id) {
         inbox_teams::handle(state, route_id, call).await
     } else if capabilities::ROUTES.contains(&route_id) {
-        capabilities::handle(state, route_id, call).await
+        capabilities::handle(state, route_id, call, principal).await
     } else if messenger_menus::ROUTES.contains(&route_id) {
         messenger_menus::handle(state, route_id, call).await
     } else if messenger_templates::ROUTES.contains(&route_id) {
