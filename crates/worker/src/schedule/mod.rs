@@ -63,6 +63,14 @@ pub const BROADCAST_JOBS: &[&str] = &[
 ];
 
 /// The `createQueueWorker(schedule, ..)` switch.
+/// Proves `Send` at a concrete lifetime (works around the rustc
+/// "`Send` is not general enough" error of the large `handle` future).
+fn send<'a, T>(
+    f: impl std::future::Future<Output = T> + Send + 'a,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>> {
+    Box::pin(f)
+}
+
 pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     let kind = str_of(&job.data, "type").unwrap_or("").to_owned();
     let data = job.data["data"].clone();
@@ -71,8 +79,14 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     };
     let out = match kind.as_str() {
         "enqueueBroadcast" => broadcast::enqueue_broadcast(&deps).await?,
-        "prepareBroadcast" => broadcast::prepare_broadcast(&deps, id("broadcastId")?).await?,
-        "sendBroadcast" => broadcast::process_broadcast_contacts(&deps, id("broadcastId")?).await?,
+        "prepareBroadcast" => send(broadcast::prepare_broadcast(&deps, id("broadcastId")?)).await?,
+        "sendBroadcast" => {
+            send(broadcast::process_broadcast_contacts(
+                &deps,
+                id("broadcastId")?,
+            ))
+            .await?
+        }
         "reconcileBroadcasts" => broadcast::reconcile_broadcasts(&deps).await?,
         "finalizeBroadcasts" => broadcast::finalize_broadcasts(&deps).await?,
         "purgeBroadcasts" => broadcast::purge_broadcasts(&deps).await?,
@@ -189,7 +203,7 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::google_ads_housekeeping::sync_setups(&deps).await?;
             Value::Null
         }
-        "scanAbandonedCarts" => scan_abandoned_carts(&deps).await?,
+        "scanAbandonedCarts" => send(scan_abandoned_carts(&deps)).await?,
         "purgeWorkspaces" => {
             purge_workspaces(&deps).await?;
             Value::Null
@@ -290,9 +304,23 @@ async fn purge_workspaces(deps: &Deps) -> Result<(), JobError> {
         teardown_payment_providers: Some(teardown),
         ..PurgeOptions::default()
     };
-    let outcome = purge_due_scheduled(&deps.db, options).await;
+    // `purge_due_scheduled` is not `Send`: it runs on its own thread and
+    // runtime.
+    let db = Arc::clone(&deps.db);
+    let outcome = tokio::task::spawn_blocking(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?
+            .block_on(purge_due_scheduled(&db, options))
+            .map_err(|e| e.to_string())
+    })
+    .await;
     RUNNING.store(false, Ordering::SeqCst);
-    let deleted = outcome.map_err(|e| JobError::retryable(e.to_string()))?;
+    let deleted = outcome
+        .map_err(|e| e.to_string())
+        .and_then(|r| r)
+        .map_err(JobError::retryable)?;
     if deleted > 0 {
         tracing::info!(deleted, "purgeWorkspaces: workspaces purged");
     }

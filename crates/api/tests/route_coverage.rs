@@ -13,7 +13,9 @@
 //! ported. A SPA stub that nothing imports is still listed (COVERAGE.md
 //! marks it).
 //! Each call gets a fresh copy of one migrated, seeded template database
-//! file; 8 run at once. A panic, a 30 s
+//! file; 8 run at once (on 8 runtime threads). The api and auth state
+//! (its HTTP clients are slow to build) is built once and cloned with the
+//! copy's database. A panic, a 30 s
 //! time-out or a 401 / 403 is not listed (printed).
 
 mod rpc_common;
@@ -28,9 +30,10 @@ use axum::http::{HeaderMap, Request, header};
 use axum::response::{IntoResponse, Response};
 use chatbotx_api::auth::{LiveAuthDeps, MobileUser, hash_token};
 use chatbotx_api::handlers::channels::{self, ChannelCall};
-use chatbotx_api::handlers::{Call, me};
+use chatbotx_api::handlers::{ApiState, Call, me};
 use chatbotx_api::routes::{PUBLIC_ROUTES, PublicRoute, RouteAuth, public_api_router_with};
 use chatbotx_api::rpc::RPC_PROCEDURES;
+use chatbotx_api::session::AuthState;
 use chatbotx_business::keys::Edition;
 use chatbotx_db::Db;
 use chatbotx_db::rusqlite::params;
@@ -92,6 +95,8 @@ struct Tally {
     denied: Vec<String>,
     panicked: Vec<String>,
     timed_out: Vec<String>,
+    /// `(time, id)` of each call (the slowest are printed).
+    times: Vec<(Duration, String)>,
 }
 
 impl Tally {
@@ -109,6 +114,13 @@ impl Tally {
     fn check(mut self, what: &str, list: &str) {
         self.not_ported.sort();
         self.not_ported.dedup();
+        self.times.sort_by(|a, b| b.cmp(a));
+        let total: Duration = self.times.iter().map(|(t, _)| *t).sum();
+        println!(
+            "{what}: {} calls, {total:?} in all, slowest {:?}",
+            self.times.len(),
+            &self.times[..self.times.len().min(5)]
+        );
         println!(
             "{what}: {} not ported, {} ported, {} denied {:?}, {} panicked {:?}, {} timed out {:?}",
             self.not_ported.len(),
@@ -192,6 +204,8 @@ const PARALLEL: usize = 8;
 /// new directory; [`Template::fixture`] gives each call its own copy.
 struct Template {
     file: PathBuf,
+    /// The state each call clones (its database is replaced).
+    proto: Fixture,
 }
 
 impl Template {
@@ -215,7 +229,9 @@ impl Template {
             !sidecar(&file, "-wal").exists(),
             "template WAL not checkpointed"
         );
-        Template { file }
+        let proto =
+            rpc_common::fixture_on(Db::open_in_memory().expect("proto db"), Edition::Community);
+        Template { file, proto }
     }
 
     /// A fresh copy of the template, opened; the copy is removed by [`done`].
@@ -224,8 +240,23 @@ impl Template {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let path = self.file.with_file_name(format!("call-{n}.db"));
         std::fs::copy(&self.file, &path).expect("copy template");
-        let db = Db::open(&path).expect("open copy");
-        (rpc_common::fixture_on(db, Edition::Community), path)
+        // One reader: each connection parses the whole schema (most of a
+        // call's time).
+        let db = Arc::new(Db::open_with_readers(&path, 1).expect("open copy"));
+        let proto = &self.proto;
+        let auth = Arc::new(AuthState {
+            db: Arc::clone(&db),
+            settings: proto.auth.settings.clone(),
+            mailer: Arc::clone(&proto.auth.mailer),
+            now_ms: proto.auth.now_ms,
+        });
+        let api = Arc::new(ApiState {
+            db: Arc::clone(&db),
+            // Audit rows are written inline, as in `rpc_common::fixture_on`.
+            audit: chatbotx_business::audit::AuditService::direct(db, true),
+            ..ApiState::clone(&proto.api)
+        });
+        (Fixture { auth, api }, path)
     }
 }
 
@@ -261,12 +292,17 @@ async fn measure_all(probes: Vec<(String, Probe)>) -> Tally {
             let Some((id, probe)) = probes.next() else {
                 break;
             };
-            running.spawn(async move { (id, measure(probe).await) });
+            running.spawn(async move {
+                let start = std::time::Instant::now();
+                let outcome = measure(probe).await;
+                (id, outcome, start.elapsed())
+            });
         }
         let Some(joined) = running.join_next().await else {
             break;
         };
-        let (id, outcome) = joined.expect("measure catches panics");
+        let (id, outcome, time) = joined.expect("measure catches panics");
+        tally.times.push((time, id.clone()));
         tally.add(id, outcome);
     }
     tally
@@ -336,7 +372,7 @@ fn public_probe(route: &'static PublicRoute, template: &Arc<Template>) -> Probe 
     })
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn public_routes_not_ported() {
     let template = Arc::new(Template::new("public", true).await);
     let probes = PUBLIC_ROUTES
@@ -468,7 +504,7 @@ fn rpc_probe(template: &Arc<Template>, method: &'static str, url: String, input:
     })
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn rpc_procedures_and_actions_not_ported() {
     let template = Arc::new(Template::new("rpc", false).await);
     let mut probes = Vec::new();

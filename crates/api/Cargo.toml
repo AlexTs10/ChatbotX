@@ -56,7 +56,7 @@ url.workspace = true
 # Q.D13b dynamic image tests: solid PNG sources and decoded renders.
 image = { workspace = true }
 serde_json.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 tower.workspace = true
 
 [lints]
