@@ -442,6 +442,9 @@ fn is_iso_millis(text: &str) -> bool {
 /// `mustChangePassword` gate, like the action on the base `actionClient`.
 pub const FORCE_CHANGE_PASSWORD_PATH: &str = "authActions/forceChangePassword";
 
+/// The SPA stub path of `forceChangePasswordAction` (`{ args: [input] }`).
+const FORCE_CHANGE_PASSWORD_SPA_PATH: &str = "actions/forceChangePasswordAction";
+
 /// `submitOAuthConsentAction` and the consent page data (Q.A1): served as
 /// `authActions/submitOAuthConsent` and `authActions/oauthConsentPage`.
 async fn oauth_consent_action(
@@ -474,12 +477,9 @@ async fn oauth_consent_action(
 
 async fn force_change_password_action(
     state: &RpcState,
-    method: &Method,
-    uri: &Uri,
     headers: &HeaderMap,
-    body: &Bytes,
+    input: Value,
 ) -> Response {
-    let input = rpc_input(method, uri, body);
     match crate::session::force_change_password(&state.auth, headers, &input).await {
         Ok(cookie) => {
             let mut response = rpc_output(json!({ "ok": true }));
@@ -506,8 +506,16 @@ async fn handle(
 ) -> Response {
     let request_issued_at_ms = (state.auth.now_ms)();
     let rest = uri.path().strip_prefix("/rpc/").unwrap_or_default();
-    if rest.trim_end_matches('/') == FORCE_CHANGE_PASSWORD_PATH {
-        return force_change_password_action(&state, &method, &uri, &headers, &body).await;
+    match rest.trim_end_matches('/') {
+        FORCE_CHANGE_PASSWORD_PATH => {
+            let input = rpc_input(&method, &uri, &body);
+            return force_change_password_action(&state, &headers, input).await;
+        }
+        FORCE_CHANGE_PASSWORD_SPA_PATH => {
+            let input = actions::spa_input(&rpc_input(&method, &uri, &body));
+            return force_change_password_action(&state, &headers, input).await;
+        }
+        _ => {}
     }
     if let Some(response) = oauth_consent_action(&state, rest, &method, &uri, &headers, &body).await
     {

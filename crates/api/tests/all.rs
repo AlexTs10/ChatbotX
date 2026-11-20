@@ -214,6 +214,8 @@ mod rpc_leaderboard_actions;
 mod rpc_platform_credentials;
 #[path = "rpc_procedures.rs"]
 mod rpc_procedures;
+#[path = "rpc_products_picker_and_access.rs"]
+mod rpc_products_picker_and_access;
 #[path = "rpc_screen_actions.rs"]
 mod rpc_screen_actions;
 #[path = "rpc_session_auth.rs"]

@@ -1,11 +1,9 @@
 # /rpc procedures and SPA server actions that answer "not ported" (Q.P6-audit).
-actions.assertCurrentUserCanAccessChatbot
 actions.changeMessageAttributes
 actions.connectMetaCatalogAction
 actions.connectTelegramAction
 actions.deleteMessage
 actions.editMessage
-actions.forceChangePasswordAction
 actions.reconnectWhatsappAction
 actions.refreshAllChannelTokensAction
 actions.refreshContactProfileAction
@@ -71,5 +69,4 @@ messagesAPI.editMessageAuthenticatedAPI
 messagesAPI.findMessageAuthenticatedAPI
 messagesAPI.getWhatsappFlowResponseAuthenticatedAPI
 messengerMessageTemplateAPIs.listMessengerMessageTemplatesInternalAPI
-productsAPI.listProductsAuthorizedAPI
 refLinksAPI.getRefLinksAuthenticatedAPI
