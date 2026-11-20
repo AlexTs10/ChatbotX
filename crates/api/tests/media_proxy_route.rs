@@ -155,9 +155,8 @@ async fn returns_404_when_an_avatar_token_is_used_on_the_attachment_route() {
         ref_id: "10".into(),
         message_created_at: None,
     };
-    let avatar = chatbotx_business::contact::avatar::signer()
-        .sign_media_token(&claims, MEDIA_TOKEN_TTL_MS)
-        .expect("sign");
+    let avatar =
+        chatbotx_business::media_url::sign_media_token(&claims, MEDIA_TOKEN_TTL_MS).expect("sign");
     let (status, ..) = get(&f, &format!("/media/attachment/{avatar}"), &[]).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }

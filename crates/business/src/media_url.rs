@@ -62,13 +62,18 @@ pub fn attachment_proxy_url(app_url: &str, r: &AttachmentRef<'_>, ttl_ms: i64) -
         ref_id: r.attachment_id.to_string(),
         message_created_at: r.message_created_at,
     };
-    let token = crate::contact::avatar::signer()
-        .sign_media_token(&claims, ttl_ms)
-        .ok()?;
+    let token = sign_media_token(&claims, ttl_ms)?;
     Some(format!(
         "{}/media/attachment/{token}",
         app_url.trim_end_matches('/')
     ))
+}
+
+/// `signMediaToken` with the process signer (`None` = it could not sign).
+pub fn sign_media_token(claims: &MediaTokenClaims, ttl_ms: i64) -> Option<String> {
+    crate::contact::avatar::signer()
+        .sign_media_token(claims, ttl_ms)
+        .ok()
 }
 
 /// `verifyMediaToken` with the process signer (`None` = invalid or expired).
