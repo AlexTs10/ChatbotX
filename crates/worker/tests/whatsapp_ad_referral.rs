@@ -54,14 +54,14 @@ fn referral(r: &Received) -> &Value {
 fn decodes_a_gclid_run_at_the_start_and_cleans_the_text() {
     let r = parse(&format!("{}Hello there", gclid_run()), None, None);
     assert_eq!(text(&r), Some("Hello there"));
-    let referral = referral(&r);
-    assert_eq!(referral["gclid"], GCLID);
-    assert_eq!(referral["gbraid"], Value::Null);
-    assert_eq!(referral["googleCampaignId"], "123");
-    assert_eq!(referral["googleAdGroupId"], "456");
-    assert_eq!(referral["googleAdId"], "789");
+    let got = referral(&r);
+    assert_eq!(got["gclid"], GCLID);
+    assert_eq!(got["gbraid"], Value::Null);
+    assert_eq!(got["googleCampaignId"], "123");
+    assert_eq!(got["googleAdGroupId"], "456");
+    assert_eq!(got["googleAdId"], "789");
     // An ISO string with ms: the clock fallback, close to now.
-    let stamp = referral["googleClickReceivedAt"].as_str().unwrap();
+    let stamp = got["googleClickReceivedAt"].as_str().unwrap();
     let at = chrono::DateTime::parse_from_rfc3339(stamp).unwrap();
     assert!(stamp.ends_with('Z') && stamp.len() == 24, "{stamp}");
     assert!((chrono::Utc::now().timestamp_millis() - at.timestamp_millis()).abs() < 60_000);
@@ -89,11 +89,11 @@ fn decodes_a_run_in_the_middle_and_a_gbraid_click() {
     let run = encode_invisible(r#"{"gbraid":"ZYXWVUTSRQ0987654321"}"#);
     let r = parse(&format!("Hi{run}"), None, None);
     assert_eq!(text(&r), Some("Hi"));
-    let referral = referral(&r);
-    assert_eq!(referral["gclid"], Value::Null);
-    assert_eq!(referral["gbraid"], GBRAID);
+    let got = referral(&r);
+    assert_eq!(got["gclid"], Value::Null);
+    assert_eq!(got["gbraid"], GBRAID);
     for key in ["googleCampaignId", "googleAdGroupId", "googleAdId"] {
-        assert_eq!(referral[key], Value::Null, "{key}");
+        assert_eq!(got[key], Value::Null, "{key}");
     }
 }
 
@@ -115,15 +115,15 @@ fn merges_a_meta_ctwa_referral_with_the_google_click() {
     let ad = json!({ "source_url": "https://fb.me/3cr4Wqqkv", "source_id": "ad-1",
         "source_type": "ad", "ctwa_clid": "ctwa-1" });
     let r = parse(&format!("{}Hello", gclid_run()), Some(ad), None);
-    let referral = referral(&r);
-    assert_eq!(referral["adId"], "ad-1");
-    assert_eq!(referral["ctwaClid"], "ctwa-1");
-    assert_eq!(referral["sourcePlatform"], "facebook");
-    assert_eq!(referral["gclid"], GCLID);
-    assert_eq!(referral["googleCampaignId"], "123");
+    let got = referral(&r);
+    assert_eq!(got["adId"], "ad-1");
+    assert_eq!(got["ctwaClid"], "ctwa-1");
+    assert_eq!(got["sourcePlatform"], "facebook");
+    assert_eq!(got["gclid"], GCLID);
+    assert_eq!(got["googleCampaignId"], "123");
     // `referral.raw carries no click id`.
-    assert!(referral["raw"].is_object());
-    assert!(!referral["raw"].to_string().contains(GCLID));
+    assert!(got["raw"].is_object());
+    assert!(!got["raw"].to_string().contains(GCLID));
 }
 
 #[test]
@@ -146,13 +146,13 @@ fn the_ctwa_referral_maps_the_ad_and_derives_the_platform() {
         ),
         None,
     );
-    let referral = referral(&r);
-    assert_eq!(referral["adId"], "ad-1");
-    assert_eq!(referral["sourceUrl"], "https://fb.me/3cr4Wqqkv");
-    assert_eq!(referral["sourcePlatform"], "facebook");
-    assert_eq!(referral["ctwaClid"], "ctwa-1");
-    assert_eq!(referral["adTitle"], "Summer sale");
-    assert_eq!(referral["adBody"], "Up to 50% off this week");
+    let got = referral(&r);
+    assert_eq!(got["adId"], "ad-1");
+    assert_eq!(got["sourceUrl"], "https://fb.me/3cr4Wqqkv");
+    assert_eq!(got["sourcePlatform"], "facebook");
+    assert_eq!(got["ctwaClid"], "ctwa-1");
+    assert_eq!(got["adTitle"], "Summer sale");
+    assert_eq!(got["adBody"], "Up to 50% off this week");
 
     let r = parse(
         "hello",
