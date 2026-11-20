@@ -1,5 +1,6 @@
 //! The inbox: `features/conversations/api/private.ts`,
-//! `features/messages/api/private.ts` and their server actions
+//! `features/messages/api/private.ts`, the comment-filter post options
+//! (`features/channel-posts/api.ts`) and their server actions
 //! (`features/conversations/actions`, `features/messages/actions`).
 //!
 //! Member scope as in the builder: any member of the workspace may list,
@@ -10,16 +11,16 @@
 use chatbotx_business::BusinessError;
 use chatbotx_business::conversation_actions as actions;
 use chatbotx_business::conversation_list as list;
-use chatbotx_business::message::{self, ListForConversation, message_json};
+use chatbotx_business::message::{self, ListForConversation};
 use chatbotx_business::message_actions;
 use serde_json::{Value, json};
 
-use super::{Ctx, In, Outcome, action_fail, arg, fail, invalid, public};
+use super::{Ctx, In, Outcome, action_fail, arg, fail, invalid, public, query_of};
 use crate::handlers::contact_messages::{decode_cursor, deliver, encode_cursor, outgoing_input};
 use crate::handlers::conversations::{
     conversation_json, encode_cursor as encode_conversation_cursor, list_input, queue_jobs,
 };
-use crate::handlers::input::Input;
+use crate::handlers::input::{Input, Str};
 use crate::orpc::OrpcError;
 
 /// The ported actions.
@@ -39,6 +40,11 @@ pub const ACTIONS: &[&str] = &[
     "changeMessageAttributesAction",
     "threadControlAction",
     "syncThreadOwnerAction",
+    "sendWhatsappTemplateAction",
+    // The plain `"use server"` exports (`fn({ workspaceId, conversationId, parsedInput })`).
+    "editMessage",
+    "deleteMessage",
+    "changeMessageAttributes",
 ];
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
@@ -55,8 +61,108 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
             Err(error) => Err(error),
         },
         "messagesAPI.listMessagesAuthenticatedAPI" => list_messages(ctx, input).await,
+        "messagesAPI.getWhatsappFlowResponseAuthenticatedAPI" => flow_response(ctx, input).await,
+        "conversationsAPI.getPostDetailsAuthenticatedAPI" => post_details(ctx, input).await,
+        "channelPostAPIs.privateListChannelPostOptionsAPI" => {
+            let mut query = query_of(input, &["limit", "search"]);
+            if let Some(cursor) = input.get("cursor").filter(|c| !c.is_null()) {
+                let pairs = [("id", &cursor["id"]), ("sortAt", &cursor["sortAt"])];
+                for (key, value) in pairs {
+                    let text = match value {
+                        Value::String(text) => text.clone(),
+                        Value::Null => continue,
+                        other => other.to_string(),
+                    };
+                    let pair = query_of(&json!({ "v": text }), &["v"]);
+                    query.push_str(&format!("&cursor%5B{key}%5D={}", &pair[2..]));
+                }
+            }
+            channel_posts(ctx, "channelPosts.list", query.trim_start_matches('&')).await
+        }
+        "channelPostAPIs.privateGetChannelPostOptionsByIdsAPI" => {
+            let mut query = String::new();
+            match input.get("ids") {
+                Some(Value::Array(ids)) => {
+                    for (index, id) in ids.iter().enumerate() {
+                        let text = id.as_str().map_or_else(|| id.to_string(), str::to_owned);
+                        let pair = query_of(&json!({ "v": text }), &["v"]);
+                        query.push_str(&format!("&ids%5B{index}%5D={}", &pair[2..]));
+                    }
+                }
+                // `ids` missing / not an array: the route's own issue.
+                Some(other) => query.push_str(&format!("&ids={}", other)),
+                None => {}
+            }
+            channel_posts(
+                ctx,
+                "channelPosts.listSelected",
+                query.trim_start_matches('&'),
+            )
+            .await
+        }
         _ => return None,
     })
+}
+
+/// A channel-post option route (an input error is oRPC's validation error).
+async fn channel_posts(ctx: &Ctx<'_>, route: &str, query: &str) -> Result<Value, OrpcError> {
+    public(ctx, route, &[], Some(query), None)
+        .await
+        .map_err(|error| match error.status {
+            422 => invalid(),
+            _ => error,
+        })
+}
+
+/// `z.coerce.date()`.
+fn coerce_date(value: Option<&Value>) -> Result<i64, OrpcError> {
+    match value {
+        Some(Value::String(text)) => chatbotx_core::js::parse_date(text).ok_or_else(invalid),
+        Some(Value::Number(n)) => n.as_f64().map(|n| n as i64).ok_or_else(invalid),
+        _ => Err(invalid()),
+    }
+}
+
+/// `getWhatsappFlowResponseView`: the message is looked up in the workspace,
+/// then must belong to `conversationId` ("Message not found").
+async fn flow_response(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let inp = In(input);
+    let conversation_id = inp.id("conversationId")?;
+    let message_id = inp.id("messageId")?;
+    let created_at = coerce_date(inp.get("createdAt"))?;
+    let found = message_actions::find_by_id_with_urls(
+        &ctx.api.db,
+        ctx.workspace_id,
+        message_id,
+        created_at,
+    )
+    .await
+    .map_err(fail)?;
+    if found.message.conversation_id != conversation_id {
+        return Err(fail(BusinessError::not_found("Message not found")));
+    }
+    crate::handlers::messages::flow_response(ctx.api, ctx.workspace_id, &found).await
+}
+
+/// `getPostDetailsQuery` (`channel` is a `channelTypes` value).
+async fn post_details(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let inp = In(input);
+    let inbox_id = inp.opt_str("inboxId")?.ok_or_else(invalid)?;
+    let post_id = inp.opt_str("postId")?.ok_or_else(invalid)?;
+    let channel = inp.opt_str("channel")?.ok_or_else(invalid)?;
+    if !chatbotx_business::connection::providers::CHANNEL_TYPES.contains(&channel.as_str()) {
+        return Err(invalid());
+    }
+    chatbotx_business::post_details::get_post_details(
+        &ctx.api.db,
+        &chatbotx_business::connection::credentials::HttpUpstream,
+        ctx.workspace_id,
+        &inbox_id,
+        &post_id,
+        &channel,
+    )
+    .await
+    .map_err(fail)
 }
 
 /// `listConversations(input, { includeEmailAndPhone })`.
@@ -98,8 +204,12 @@ async fn list_messages(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError>
     )
     .await
     .map_err(fail)?;
+    let data =
+        crate::handlers::contact_messages::messages_json(ctx.api, ctx.workspace_id, &page.data)
+            .await
+            .map_err(fail)?;
     Ok(json!({
-        "data": page.data.iter().map(message_json).collect::<Vec<_>>(),
+        "data": data,
         "nextCursor": page.next_cursor.as_ref().map(encode_cursor),
         "prevCursor": Value::Null,
     }))
@@ -167,6 +277,10 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                     Ok(Value::Null)
                 }
                 "createMessageAction" => create_message(ctx, args).await,
+                "sendWhatsappTemplateAction" => send_template(ctx, args).await,
+                "editMessage" | "deleteMessage" | "changeMessageAttributes" => {
+                    plain_message_function(ctx, name, args).await
+                }
                 "threadControlAction" | "syncThreadOwnerAction" => {
                     thread_control(ctx, name, args).await
                 }
@@ -309,7 +423,7 @@ async fn assign(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
 async fn create_message(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcError> {
     let id = conversation_id(args)?;
     let object = arg(args, 2).as_object().cloned().ok_or_else(invalid)?;
-    let outgoing = outgoing_input(Input::from_object(object), &[])?;
+    let outgoing = outgoing_input(Input::from_object(object)).map_err(super::schema_errors)?;
     let db = &ctx.api.db;
     let conversation = list::find_or_fail(db, ctx.workspace_id, id)
         .await
@@ -332,6 +446,59 @@ async fn create_message(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcErro
     .map_err(action_fail)?;
     deliver(ctx.api, &conversation, sent).await;
     Ok(body)
+}
+
+/// `sendWhatsappTemplateAction` (`[workspaceId, conversationId]` +
+/// `sendWhatsappTemplateRequest`): queues the template send as the member.
+async fn send_template(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcError> {
+    let id = conversation_id(args)?;
+    let object = arg(args, 2).as_object().cloned().ok_or_else(invalid)?;
+    let mut input = Input::from_object(object);
+    let template_id = input.string("templateId", Str::trimmed(1, usize::MAX));
+    let data = crate::handlers::messages::template_data(&mut input);
+    let inbox_id = if input.has("inboxId") {
+        input.digits_id("inboxId")
+    } else {
+        None
+    };
+    input.finish().map_err(super::schema_errors)?;
+    let db = &ctx.api.db;
+    let conversation = list::find_or_fail(db, ctx.workspace_id, id)
+        .await
+        .map_err(action_fail)?;
+    let job = chatbotx_business::whatsapp::send_template_to_conversation(
+        db,
+        &conversation,
+        &template_id.unwrap_or_default(),
+        data,
+        inbox_id,
+        Some(ctx.user_id),
+    )
+    .await
+    .map_err(action_fail)?;
+    crate::handlers::contact_messages::queue_outgoing_jobs(ctx.api, vec![job]).await;
+    Ok(Value::Null)
+}
+
+/// The plain `editMessage` / `deleteMessage` / `changeMessageAttributes`
+/// exports: one `{ workspaceId, conversationId, parsedInput }` argument. The
+/// `/rpc` membership check ran for the call's `workspaceId`; the props must
+/// name the same workspace.
+async fn plain_message_function(
+    ctx: &Ctx<'_>,
+    name: &str,
+    args: &[Value],
+) -> Result<Value, OrpcError> {
+    let props = arg(args, 0);
+    if props["workspaceId"].as_str() != Some(ctx.workspace_id.to_string().as_str()) {
+        return Err(fail(BusinessError::not_found("Workspace not found")));
+    }
+    let bound = [
+        props["workspaceId"].clone(),
+        props["conversationId"].clone(),
+        props["parsedInput"].clone(),
+    ];
+    message_route(ctx, &format!("{name}Action"), &bound).await
 }
 
 /// `editMessageAction` / `deleteMessageAction` / `changeMessageAttributesAction`:

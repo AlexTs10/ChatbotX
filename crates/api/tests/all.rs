@@ -134,6 +134,8 @@ mod magic_link_redirect;
 mod magic_links_public_api;
 #[path = "media_library_public_api.rs"]
 mod media_library_public_api;
+#[path = "media_proxy_route.rs"]
+mod media_proxy_route;
 #[path = "messages_public_api.rs"]
 mod messages_public_api;
 #[path = "messenger_menus_public_api.rs"]
@@ -200,6 +202,8 @@ mod routes_public_scope;
 mod rpc_automation_pages;
 #[path = "rpc_channel_connect.rs"]
 mod rpc_channel_connect;
+#[path = "rpc_channel_post_options.rs"]
+mod rpc_channel_post_options;
 #[path = "rpc_channels.rs"]
 mod rpc_channels;
 #[path = "rpc_google_ads_settings.rs"]

@@ -13,7 +13,7 @@ use axum::routing::{options, post};
 use chatbotx_api::handlers::ApiState;
 use chatbotx_api::reflink_widget::{check_guest_rate_limit, guest_client_ip};
 use chatbotx_business::integration_webchat as webchat;
-use chatbotx_business::message::{ListForConversation, list_for_conversation, message_json};
+use chatbotx_business::message::{ListForConversation, list_for_conversation};
 use chatbotx_db::repo::now_ms;
 use chatbotx_worker::webchat_guest::{
     self as guest, GuestError, GuestInput, GuestMessage, find_guest_contact_inbox,
@@ -404,12 +404,22 @@ async fn list(State(state): State<GuestState>, headers: HeaderMap, uri: Uri) -> 
         },
     )
     .await;
+    let page = match page {
+        Ok(page) => chatbotx_api::handlers::contact_messages::messages_json(
+            &state.api,
+            conversation.workspace_id,
+            &page.data,
+        )
+        .await
+        .map(|data| (page, data)),
+        Err(e) => Err(e),
+    };
     match page {
-        Ok(page) => json_reply(
+        Ok((page, data)) => json_reply(
             StatusCode::OK,
             out,
             json!({
-                "data": page.data.iter().map(message_json).collect::<Vec<_>>(),
+                "data": data,
                 "nextCursor": page.next_cursor.as_ref().map(chatbotx_api::handlers::contact_messages::encode_cursor),
                 "prevCursor": null,
             }),

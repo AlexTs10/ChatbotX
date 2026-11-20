@@ -554,12 +554,15 @@ fn jsonb_order<'a>(keys: impl Iterator<Item = &'a String>) -> Vec<&'a String> {
 
 /// `getWhatsappFlowResponseView` + `buildWhatsappFlowResponseFields`.
 ///
+/// `url_by_media_id`: the message's attachment URLs by provider media id.
+///
 /// ponytail: the Flow labels (`resolveSentWhatsappFlow` + the Flow JSON on
 /// Meta, `getFlowResponseFields`) are not ported: every response reads with
 /// humanized keys (`labelSource: fallback`), the original's answer whenever
 /// the Flow cannot be identified.
 pub fn flow_response_view(
     message: &chatbotx_db::repo::message::MessageWithAttachments,
+    url_by_media_id: &[(String, String)],
 ) -> Result<Value> {
     let attrs = message.message.content_attributes.as_ref().map(|j| &j.0);
     let entity = whatsapp_flow_response(attrs)
@@ -568,9 +571,12 @@ pub fn flow_response_view(
         .as_object()
         .cloned()
         .unwrap_or_default();
-    // ponytail: attachments carry no URL yet (`resolveMediaUrl`), so a kept
-    // file reads as `unprocessed`.
-    let url_of = |_: &str| None;
+    let url_of = |id: &str| {
+        url_by_media_id
+            .iter()
+            .find(|(media_id, _)| media_id == id)
+            .map(|(_, url)| url.clone())
+    };
     let fields: Vec<Value> = jsonb_order(response.keys())
         .into_iter()
         .filter(|k| k.as_str() != "flow_token")

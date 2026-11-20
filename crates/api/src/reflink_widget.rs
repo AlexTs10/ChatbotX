@@ -104,7 +104,7 @@ pub fn check_guest_ip_limit(
     check_guest_rate_limit_with(state, webchat_id, client_ip, None, ip_limit, now_ms)
 }
 
-fn check_guest_rate_limit_with(
+pub(crate) fn check_guest_rate_limit_with(
     state: &ApiState,
     webchat_id: &str,
     client_ip: &str,
@@ -330,7 +330,7 @@ pub fn options(headers: &HeaderMap) -> Response {
     empty(StatusCode::NO_CONTENT, origin_of(headers))
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))

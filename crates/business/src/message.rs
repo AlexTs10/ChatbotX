@@ -1,15 +1,15 @@
 //! `message/list-for-conversation.ts` (`listForConversation`,
 //! `findForContact`) and a reduced `message/create-outgoing.ts`
-//! (`createOutgoing`: text, flow, media library files, image limits and the
-//! product-message refusals; no device files, private replies or agent-reply
-//! metric).
+//! (`createOutgoing`: text, flow, products, device files, media library
+//! files and image limits; no private replies or agent-reply metric).
 //!
 //! The service does not enqueue or publish: [`Outgoing`] carries the jobs
 //! (`sendChannelMessage` on `chat`, `sendFlow` on `integration`) and the
 //! realtime `messageCreated` payload for the caller (`ApiState`).
-//! Attachment URLs are not presigned (no `resolveMediaUrl` port yet):
-//! `url` / `fallbackUrl` are `null`, except on the message a send creates
-//! (`getPublicFileUrl(originPath, storageUrl)`, [`message_json_with_urls`]).
+//! [`message_json`] leaves the attachment `url` / `fallbackUrl` `null`; the
+//! read paths resolve them with `crate::media_url` (`withResolvedAttachmentUrls`)
+//! and the message a send creates uses `getPublicFileUrl(originPath,
+//! storageUrl)` ([`message_json_with_urls`]).
 
 use chatbotx_core::utils::channel::ChannelType;
 use chatbotx_core::utils::inbox_image_support::{
@@ -117,7 +117,7 @@ fn attachment_json(attachment: &Attachment) -> Value {
         "originPath": attachment.origin_path,
         "name": attachment.name,
         "keepOriginal": attachment.keep_original,
-        // ponytail: no presigning yet (`resolveMediaUrl` not ported).
+        // Resolved by `crate::media_url` on the read paths.
         "url": Value::Null,
         "fallbackUrl": Value::Null,
     })
@@ -278,6 +278,8 @@ pub struct OutgoingInput {
     pub media_file_path: Option<String>,
     /// `mediaFileId` / `mediaFileIds` (in send order).
     pub media_file_ids: Vec<i64>,
+    /// `files`: device uploads (win over media library picks).
+    pub files: Vec<chatbotx_files::InputFile>,
 }
 
 /// Where media library files are copied and how their URLs are built.
@@ -377,10 +379,19 @@ fn assert_channel_accepts_images(
     };
     let kind =
         resolve_inbox_reply_kind(input.reply_to_message_id.is_some(), input.is_private_reply);
-    let images = files
-        .iter()
-        .filter(|f| is_image_mime_type(&f.mime_type))
-        .count();
+    // `countImages`: device files when there are any, else the library picks.
+    let images = if input.files.is_empty() {
+        files
+            .iter()
+            .filter(|f| is_image_mime_type(&f.mime_type))
+            .count()
+    } else {
+        input
+            .files
+            .iter()
+            .filter(|f| is_image_mime_type(&f.mime_type))
+            .count()
+    };
     let (reason, max, message) = match check_inbox_images(channel_type, kind, images) {
         InboxImageCheckResult::Ok => return Ok(()),
         InboxImageCheckResult::ImagesNotSupported { max } => (
@@ -462,35 +473,75 @@ pub async fn create_outgoing_with_media(
         });
     }
 
-    if input.products.is_some() {
-        if input.reply_to_message_id.is_some() || input.is_private_reply {
-            return Err(BusinessError::validation(
-                "products",
-                "Products can't be sent as a comment reply",
-            ));
+    // A product message is a standalone DM; resolved before any row exists,
+    // and a message missing some of the asked products is refused.
+    let product_message = match &input.products {
+        Some(products) => {
+            if input.reply_to_message_id.is_some() || input.is_private_reply {
+                return Err(BusinessError::validation(
+                    "products",
+                    "Products can't be sent as a comment reply",
+                ));
+            }
+            Some(
+                crate::product_message::service::prepare_outgoing(
+                    db,
+                    conversation.workspace_id,
+                    &contact_inbox.channel,
+                    products,
+                    true,
+                )
+                .await?,
+            )
         }
-        // `prepareOutgoing`: only WhatsApp has a catalog source; the Meta
-        // catalog resolution is not ported yet.
-        if contact_inbox.channel != "whatsapp" {
-            return Err(product_unresolvable("channelUnsupported"));
-        }
-        return Err(BusinessError::exception(
-            "Product messages are not ported yet",
-            "notPorted",
-            501,
-        ));
-    }
+        None => None,
+    };
 
-    // Resolved and checked before any row or object exists.
-    let media_files = resolve_media_library_files(db, conversation.workspace_id, &input).await?;
+    // Resolved and checked before any row or object exists. Device files win
+    // over media library ids, which are then never looked up.
+    let media_files = if input.files.is_empty() {
+        resolve_media_library_files(db, conversation.workspace_id, &input).await?
+    } else {
+        Vec::new()
+    };
     assert_channel_accepts_images(&contact_inbox.channel, &input, &media_files)?;
-    let mut attachments = Vec::with_capacity(media_files.len());
-    if !media_files.is_empty() {
-        let uploader = media.uploader.ok_or_else(|| {
+    let mut attachments = Vec::with_capacity(media_files.len().max(input.files.len()));
+    let storage = || {
+        media.uploader.ok_or_else(|| {
             BusinessError::Repo(chatbotx_db::repo::Error::Message(
                 "File storage is not configured".into(),
             ))
-        })?;
+        })
+    };
+    if !input.files.is_empty() {
+        let prefix = format!(
+            "public/space/{}/conversations/{}",
+            conversation.workspace_id, conversation.id
+        );
+        let uploaded = chatbotx_files::upload_multiple_files(
+            storage()?,
+            &input.files,
+            &prefix,
+            chatbotx_files::DEFAULT_ACL,
+        )
+        .await
+        .map_err(|e| BusinessError::Repo(chatbotx_db::repo::Error::Message(e.to_string())))?;
+        for file in uploaded {
+            attachments.push(CreateAttachmentInput {
+                workspace_id: conversation.workspace_id,
+                conversation_id: conversation.id,
+                file_type: file.file_type.as_str().into(),
+                mime_type: file.mime_type,
+                origin_path: file.origin_path,
+                name: Some(file.name),
+                size: Some(file.size as i64),
+                width: file.width.map(i64::from),
+                height: file.height.map(i64::from),
+                ..CreateAttachmentInput::default()
+            });
+        }
+    } else if !media_files.is_empty() {
+        let uploader = storage()?;
         for file in &media_files {
             let origin_path = format!(
                 "public/space/{}/conversations/{}/{}",
@@ -520,11 +571,15 @@ pub async fn create_outgoing_with_media(
     }
 
     let is_comment = input.reply_to_message_id.is_some();
-    let content_attributes = input.content_attributes.clone().or_else(|| {
-        input
-            .is_private_reply
-            .then(|| json!({ "isPrivateReply": true }))
-    });
+    let content_attributes = product_message
+        .as_ref()
+        .map(|p| p.content_attributes.clone())
+        .or_else(|| input.content_attributes.clone())
+        .or_else(|| {
+            input
+                .is_private_reply
+                .then(|| json!({ "isPrivateReply": true }))
+        });
     let message_input = CreateMessageInput {
         contact_inbox_id: contact_inbox.id,
         conversation_id: conversation.id,
@@ -535,7 +590,10 @@ pub async fn create_outgoing_with_media(
         sender_type: if user_id.is_some() { "user" } else { "api" }.into(),
         sender_id: user_id,
         parent_id: input.reply_to_message_id.clone(),
-        text: input.text.clone(),
+        text: match &product_message {
+            Some(p) => p.text.clone(),
+            None => input.text.clone(),
+        },
         r#type: Some(if is_comment { "comment" } else { "message" }.into()),
         created_at: Some(now_ms()),
         ..CreateMessageInput::default()
@@ -592,6 +650,7 @@ pub async fn create_outgoing_with_media(
         attempts: (contact_inbox.channel == "threads" && is_comment).then_some(1),
     }];
     if user_id.is_some()
+        && product_message.is_none()
         && let Some(text) = stored.message.text.as_deref().filter(|t| !t.is_empty())
     {
         jobs.push(OutgoingJob {
@@ -613,17 +672,6 @@ pub async fn create_outgoing_with_media(
         realtime: Some(realtime),
         jobs,
     })
-}
-
-/// `ProductMessageUnresolvableError(reason)`.
-fn product_unresolvable(reason: &str) -> BusinessError {
-    BusinessError::Exception {
-        message: format!("Product message cannot be sent: {reason}"),
-        code: "productMessageUnresolvable".into(),
-        status: 422,
-        field: None,
-        data: Some(json!({ "reason": reason })),
-    }
 }
 
 /// `messageResourceWithRelations` / the `MessageWithPresignedAttachments`

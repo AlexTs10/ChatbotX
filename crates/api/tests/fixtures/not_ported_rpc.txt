@@ -1,12 +1,9 @@
 # /rpc procedures and SPA server actions that answer "not ported" (Q.P6-audit).
 actions.assertCurrentUserCanAccessChatbot
-actions.changeMessageAttributes
 actions.connectMetaCatalogAction
 actions.connectTelegramAction
 actions.createProduct
 actions.deleteContactCustomFields
-actions.deleteMessage
-actions.editMessage
 actions.enableAutomatedResponse
 actions.forceChangePasswordAction
 actions.getCurrentUser
@@ -19,7 +16,6 @@ actions.refreshAllChannelTokensAction
 actions.refreshContactProfileAction
 actions.resetBotFields
 actions.resetContactCustomFields
-actions.sendWhatsappTemplateAction
 actions.submitAvailabilityRange
 actions.submitBooking
 actions.testExternalRequestAction
@@ -31,8 +27,6 @@ analyticsRoutes.getBroadcastStatsAnalyticsAPI
 analyticsRoutes.getFlowAnalytics
 analyticsRoutes.getSequenceStepStatsAnalyticsAPI
 analyticsRoutes.resetFlowAnalytics
-channelPostAPIs.privateGetChannelPostOptionsByIdsAPI
-channelPostAPIs.privateListChannelPostOptionsAPI
 connectSessionsAPI.cancelConnectSessionAPI
 connectSessionsAPI.connectSessionTargetsAPI
 connectionsAPI.createConnectionAPI
@@ -49,7 +43,6 @@ conversationsAPI.assignConversationsAuthenticatedAPI
 conversationsAPI.disableBotAuthenticatedAPI
 conversationsAPI.enableBotAuthenticatedAPI
 conversationsAPI.followConversationAuthenticatedAPI
-conversationsAPI.getPostDetailsAuthenticatedAPI
 conversationsAPI.readConversationAuthenticatedAPI
 conversationsAPI.unarchiveConversationsAuthenticatedAPI
 conversationsAPI.unfollowConversationAuthenticatedAPI
@@ -85,7 +78,6 @@ messagesAPI.createMessageAuthenticatedAPI
 messagesAPI.deleteMessageAuthenticatedAPI
 messagesAPI.editMessageAuthenticatedAPI
 messagesAPI.findMessageAuthenticatedAPI
-messagesAPI.getWhatsappFlowResponseAuthenticatedAPI
 messengerMessageTemplateAPIs.listMessengerMessageTemplatesInternalAPI
 productsAPI.listProductsAuthorizedAPI
 refLinksAPI.getRefLinksAuthenticatedAPI

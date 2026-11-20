@@ -1,7 +1,8 @@
 //! `features/contacts/api/public/messages.ts` (`contactsMessagesPublicRouter`)
 //! and the builder `listMessages` query. No member scope
 //! (`assertMemberMayStartFlow`, `resolveSenderForCaller`): the token API
-//! sends as `api`. Media library / device files answer 501 `notPorted`.
+//! sends as `api`. Device files come as `multipart/form-data` (the public
+//! routes, within the 2 MiB body limit) or as oRPC `FormData` blobs (`/rpc`).
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -10,7 +11,6 @@ use chatbotx_business::conversation::{
 };
 use chatbotx_business::message::{
     self, ListForConversation, Outgoing, OutgoingInput, find_for_contact, list_for_conversation,
-    message_json,
 };
 use chatbotx_business::{BusinessError, automated_response};
 use chatbotx_core::flow_config::steps::send_products_content_schema;
@@ -52,9 +52,65 @@ fn text() -> z::Schema {
     z::string().trim().min(1).max(1000)
 }
 
+/// The JSON stand-in of an uploaded `File` (`$file`: name, type, base64 bytes).
+pub fn file_value(name: &str, mime_type: &str, bytes: &[u8]) -> Value {
+    json!({ "$file": { "name": name, "type": mime_type, "data": STANDARD.encode(bytes) } })
+}
+
+/// A [`file_value`] as the file to upload.
+fn input_file(value: &Value) -> Option<chatbotx_files::InputFile> {
+    let file = value.get("$file")?;
+    Some(chatbotx_files::InputFile {
+        name: file["name"].as_str()?.to_owned(),
+        mime_type: file["type"].as_str()?.to_owned(),
+        bytes: STANDARD.decode(file["data"].as_str()?).ok()?.into(),
+    })
+}
+
+/// `MAX_FILE_SIZE` (5 MB).
+const MAX_FILE_SIZE: usize = 5 * 1000 * 1000;
+
 fn files() -> z::Schema {
-    // `z.instanceof(File)`: a JSON body never carries a File.
-    z::array(z::custom(|_| false, Some("Input not instance of File"))).min(1)
+    // `z.instanceof(File)`; the size refine runs after the union.
+    z::array(z::custom(
+        |v| input_file(v).is_some(),
+        Some("Input not instance of File"),
+    ))
+    .min(1)
+}
+
+/// A `multipart/form-data` body as the input object: text parts by name,
+/// file parts (`files`, `files[]`, `files[<n>]`) into `files`.
+pub(crate) fn body_input(params: &[(&'static str, String)], body: &[u8]) -> Input {
+    let Some(parts) = super::ai_files::parse_multipart(body) else {
+        return Input::from_body(params, body);
+    };
+    let mut obj = serde_json::Map::new();
+    let mut uploads = Vec::new();
+    for part in parts {
+        match &part.filename {
+            Some(filename) if part.name == "files" || part.name.starts_with("files[") => {
+                uploads.push(file_value(
+                    filename,
+                    part.content_type.as_deref().unwrap_or_default(),
+                    &part.data,
+                ));
+            }
+            _ => {
+                obj.insert(
+                    part.name,
+                    Value::String(String::from_utf8_lossy(&part.data).into_owned()),
+                );
+            }
+        }
+    }
+    if !uploads.is_empty() {
+        obj.insert("files".into(), Value::Array(uploads));
+    }
+    for (name, value) in params {
+        obj.insert((*name).to_string(), Value::String(value.clone()));
+    }
+    Input::from_object(obj)
 }
 
 fn media_file() -> z::Schema {
@@ -90,10 +146,6 @@ fn create_message_request() -> z::Schema {
     )
 }
 
-fn not_ported(what: &str) -> BusinessError {
-    BusinessError::exception(format!("{what} are not ported yet"), "notPorted", 501)
-}
-
 fn parse_id(value: Option<&Value>) -> Option<i64> {
     value.and_then(Value::as_str).and_then(|s| s.parse().ok())
 }
@@ -125,6 +177,41 @@ pub(crate) async fn create_outgoing(
         message::message_json_with_urls(m, &storage_url)
     });
     Ok((sent, body))
+}
+
+/// `withResolvedAttachmentUrls` for each message (presigned storage URLs,
+/// media proxy URLs for pending channel media).
+pub async fn messages_json(
+    state: &ApiState,
+    workspace_id: i64,
+    messages: &[chatbotx_db::repo::message::MessageWithAttachments],
+) -> chatbotx_business::Result<Vec<Value>> {
+    let app_url = super::contacts::tenant_urls(state).app_url;
+    let urls = chatbotx_business::media_url::MediaUrls {
+        uploader: state.files.as_deref(),
+        app_url: &app_url,
+    };
+    chatbotx_business::media_url::messages_json_with_resolved_urls(
+        &state.db,
+        workspace_id,
+        messages,
+        urls,
+    )
+    .await
+}
+
+/// [`messages_json`] of one message.
+pub(crate) async fn message_json_resolved(
+    state: &ApiState,
+    workspace_id: i64,
+    message: &chatbotx_db::repo::message::MessageWithAttachments,
+) -> chatbotx_business::Result<Value> {
+    Ok(
+        messages_json(state, workspace_id, std::slice::from_ref(message))
+            .await?
+            .pop()
+            .unwrap_or(Value::Null),
+    )
 }
 
 /// Adds the jobs and publishes the realtime `messageCreated` event.
@@ -191,18 +278,14 @@ async fn send(
 }
 
 async fn send_message(state: &ApiState, call: Call<'_>) -> Reply {
-    let input = Input::from_body(call.params, call.body);
-    let outgoing = outgoing_input(input, SENDING)?;
+    let input = body_input(call.params, call.body);
+    let outgoing = outgoing_input(input)?;
     send(state, &call, outgoing.inbox_id, outgoing, SENDING).await
 }
 
 /// Validates a `createMessageRequest` body (the other `input` checks are
-/// already queued) and maps it to the ported part of `createOutgoing`.
-/// Device files: 501 `notPorted`.
-pub(crate) fn outgoing_input(
-    input: Input,
-    errors: ErrorMap,
-) -> Result<OutgoingInput, crate::orpc::OrpcError> {
+/// already queued) and maps it to `createOutgoing`.
+pub(crate) fn outgoing_input(input: Input) -> Result<OutgoingInput, crate::orpc::OrpcError> {
     let body = Value::Object(input.obj.clone());
     let parsed = create_message_request().safe_parse(&body);
     let mut input = input;
@@ -225,9 +308,26 @@ pub(crate) fn outgoing_input(
         Some(Value::Array(ids)) => ids.iter().filter_map(|id| parse_id(Some(id))).collect(),
         _ => parse_id(data.get("mediaFileId")).into_iter().collect(),
     };
-    let has_media = media_file_path.is_some() || !media_file_ids.is_empty();
-    if !has("products") && !has("flowId") && !has("text") && !has_media || has("files") {
-        return Err(business_error(not_ported("Device files"), errors));
+    let files: Vec<chatbotx_files::InputFile> = data
+        .get("files")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(input_file)
+        .collect();
+    // `.refine((file) => file.size <= MAX_FILE_SIZE, "Max image size is 5MB.")`.
+    let oversized: Vec<Value> = files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| file.bytes.len() > MAX_FILE_SIZE)
+        .map(|(index, _)| {
+            json!({ "code": "custom", "path": ["files", index], "message": "Max image size is 5MB." })
+        })
+        .collect();
+    if !oversized.is_empty() {
+        input = Input::default();
+        input.extend_issues(oversized);
+        input.finish()?;
     }
     Ok(OutgoingInput {
         flow_id: parse_id(data.get("flowId")),
@@ -257,6 +357,7 @@ pub(crate) fn outgoing_input(
             .unwrap_or(false),
         media_file_path,
         media_file_ids,
+        files,
         ..OutgoingInput::default()
     })
 }
@@ -340,7 +441,9 @@ async fn list_messages(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, FINDING))?;
-    let data: Vec<Value> = page.data.iter().map(message_json).collect();
+    let data = messages_json(state, call.workspace_id, &page.data)
+        .await
+        .map_err(|e| business_error(e, FINDING))?;
     Ok(json(
         200,
         json!({
@@ -364,7 +467,10 @@ async fn get_message(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, FINDING))?;
-    Ok(json(200, message_json(&found)))
+    let body = message_json_resolved(state, call.workspace_id, &found)
+        .await
+        .map_err(|e| business_error(e, FINDING))?;
+    Ok(json(200, body))
 }
 
 async fn trigger_auto_reply(state: &ApiState, call: Call<'_>) -> Reply {

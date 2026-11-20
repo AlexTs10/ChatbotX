@@ -1,12 +1,12 @@
 //! `apps/builder/src/features/messages/api/public.ts` (`messagesPublicRouter`,
 //! `/v1/conversations/{conversationId}/messages`, scope `inbox`). Workspace
-//! tokens only (no member scope): a send is unattributed (`api`). Not ported
-//! (501 `notPorted`): device files, a new attachment on edit. The WhatsApp routes (Flow response view, template send, call
-//! permission) call `chatbotx_business::whatsapp`.
+//! tokens only (no member scope): a send is unattributed (`api`). The
+//! WhatsApp routes (Flow response view, template send, call permission) call
+//! `chatbotx_business::whatsapp`.
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::conversation_list as list;
-use chatbotx_business::message::{self, ListForConversation, message_json};
+use chatbotx_business::message::{self, ListForConversation};
 use chatbotx_business::message_actions as actions;
 use chatbotx_business::whatsapp;
 use chatbotx_core::flow_config::steps::{TemplateParameterValues, wa_template_params_schema};
@@ -14,7 +14,8 @@ use chatbotx_db::repo::models::Conversation;
 use serde_json::{Value, json};
 
 use super::contact_messages::{
-    create_outgoing, decode_cursor, deliver, encode_cursor, outgoing_input, queue_outgoing_jobs,
+    create_outgoing, decode_cursor, deliver, encode_cursor, message_json_resolved, messages_json,
+    outgoing_input, queue_outgoing_jobs,
 };
 use super::conversations::queue_jobs;
 use super::input::{Input, Num, Seg, Str, key};
@@ -42,13 +43,6 @@ const CREATING: ErrorMap = &[
     ("productMessageUnresolvable", 422),
     ("imagesNotSupportedOnChannel", 422),
 ];
-
-fn not_ported(what: &str, errors: ErrorMap) -> crate::orpc::OrpcError {
-    business_error(
-        BusinessError::exception(format!("{what} not ported yet"), "notPorted", 501),
-        errors,
-    )
-}
 
 /// A required `z.coerce.date()` key (`new Date(value)` must be valid).
 fn created_at(input: &mut Input) -> Option<i64> {
@@ -122,7 +116,9 @@ async fn list_messages(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, FINDING))?;
-    let data: Vec<Value> = page.data.iter().map(message_json).collect();
+    let data = messages_json(state, call.workspace_id, &page.data)
+        .await
+        .map_err(|e| business_error(e, FINDING))?;
     Ok(json(
         200,
         json!({
@@ -156,9 +152,9 @@ async fn find_message(
 }
 
 async fn create(state: &ApiState, call: Call<'_>) -> Reply {
-    let mut input = Input::from_body(call.params, call.body);
+    let mut input = super::contact_messages::body_input(call.params, call.body);
     let conversation_id = input.digits_id("conversationId");
-    let outgoing = outgoing_input(input, CREATING)?;
+    let outgoing = outgoing_input(input)?;
     let found = conversation(state, &call, conversation_id, CREATING).await?;
     let contact_inbox =
         actions::resolve_contact_inbox_for_conversation(&state.db, &found, outgoing.inbox_id)
@@ -184,27 +180,43 @@ async fn update(state: &ApiState, call: Call<'_>) -> Reply {
     let mut input = Input::from_body(call.params, call.body);
     let t = target(&mut input);
     let new_text = input.string("newText", Str::trimmed(1, 2000));
-    let new_attachment = input.opt_string("newAttachmentPath", Str::default());
-    for name in [
-        "newAttachmentPublicUrl",
-        "newAttachmentMimeType",
-        "newAttachmentName",
-    ] {
-        input.opt_string(name, Str::default());
-    }
-    input.opt_number("newAttachmentSize", Num::default());
+    let path = input.opt_string("newAttachmentPath", Str::default());
+    let public_url = input.opt_string("newAttachmentPublicUrl", Str::default());
+    let mime_type = input.opt_string("newAttachmentMimeType", Str::default());
+    let name = input.opt_string("newAttachmentName", Str::default());
+    let size = input.opt_number("newAttachmentSize", Num::default());
     let remove_attachment = input.opt_bool("removeAttachment").unwrap_or(false);
     input.finish()?;
     let found = conversation(state, &call, t.conversation, MUTATING).await?;
-    if new_attachment.is_some() {
-        return Err(not_ported("A new attachment on edit is", MUTATING));
+    // The new attachment must be an object of this workspace (the original
+    // trusts the client's path; a foreign key would leak another tenant's
+    // file). Same prefixes as `mediaLibrary.createFile`.
+    let ws = call.workspace_id;
+    if let Some(path) = &path
+        && (path.contains("..")
+            || !(path.starts_with(&format!("workspaces/{ws}/"))
+                || path.starts_with(&format!("public/space/{ws}/"))))
+    {
+        return Err(business_error(
+            BusinessError::exception("Invalid attachment path", "systemError", 400),
+            MUTATING,
+        ));
     }
+    let new_attachment = path.map(|path| actions::EditAttachment {
+        path,
+        public_url,
+        mime_type,
+        name,
+        size: size.map(|n| n as i64),
+    });
     let (body, done) = actions::edit_message(
         &state.db,
+        state.files.as_deref(),
         &found,
         t.message,
         t.created_at,
         new_text.unwrap_or_default(),
+        new_attachment,
         remove_attachment,
     )
     .await
@@ -308,7 +320,7 @@ fn template_params(input: &mut Input) -> Option<TemplateParameterValues> {
 }
 
 /// `templateData`: `waTemplateParamsSchema.optional()`.
-fn template_data(input: &mut Input) -> Option<Value> {
+pub(crate) fn template_data(input: &mut Input) -> Option<Value> {
     let value = input.get("templateData")?.clone();
     let parsed = wa_template_params_schema().safe_parse(&value);
     if let Some(error) = parsed.error {
@@ -376,16 +388,42 @@ async fn send_template(state: &ApiState, call: Call<'_>) -> Reply {
     Ok(json(202, json!({ "queued": true })))
 }
 
+/// `getWhatsappFlowResponseView` of a found message: kept files link to the
+/// resolved attachment URLs (`urlByMediaId`).
+pub(crate) async fn flow_response(
+    state: &ApiState,
+    workspace_id: i64,
+    found: &chatbotx_db::repo::message::MessageWithAttachments,
+) -> Result<Value, crate::orpc::OrpcError> {
+    let resolved = message_json_resolved(state, workspace_id, found)
+        .await
+        .map_err(|e| business_error(e, FINDING))?;
+    let urls: Vec<(String, String)> = resolved["attachments"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| Some((a["sourceId"].as_str()?.into(), a["url"].as_str()?.into())))
+        .collect();
+    whatsapp::flow_response_view(found, &urls).map_err(|e| business_error(e, FINDING))
+}
+
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     match route_id {
         "messages.list" => list_messages(state, call).await,
-        "messages.get" => Ok(json(200, message_json(&find_message(state, &call).await?))),
+        "messages.get" => {
+            let found = find_message(state, &call).await?;
+            let body = message_json_resolved(state, call.workspace_id, &found)
+                .await
+                .map_err(|e| business_error(e, FINDING))?;
+            Ok(json(200, body))
+        }
         "messages.getFlowResponse" => {
             let found = find_message(state, &call).await?;
-            let view =
-                whatsapp::flow_response_view(&found).map_err(|e| business_error(e, FINDING))?;
-            Ok(json(200, view))
+            Ok(json(
+                200,
+                flow_response(state, call.workspace_id, &found).await?,
+            ))
         }
         "messages.create" => create(state, call).await,
         "messages.update" => update(state, call).await,
