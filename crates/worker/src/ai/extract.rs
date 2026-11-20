@@ -34,6 +34,28 @@ const PPTX: &[&str] =
 /// Default `maxTextChars` (`MAX_EXTRACTED_TEXT_CHARS`).
 pub const MAX_TEXT_CHARS: usize = 5_000_000;
 
+/// The document types of the heavy `extractTextFromFile` reader
+/// (`supportedDocumentMimeTypes`).
+pub fn is_document_mime(mime: &str) -> bool {
+    [
+        PDF,
+        DOCX,
+        SPREADSHEET,
+        CSV,
+        HTML,
+        MARKDOWN,
+        RTF,
+        XML,
+        EMAIL,
+        EPUB,
+        PPT,
+        PPTX,
+        &["text/vtt", "text/x-java-properties"],
+    ]
+    .iter()
+    .any(|set| set.contains(&mime))
+}
+
 /// `extractKnowledgeDocument` options.
 #[derive(Debug, Clone)]
 pub struct Options {

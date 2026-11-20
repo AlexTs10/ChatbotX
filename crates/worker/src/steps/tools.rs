@@ -1,7 +1,7 @@
 //! The tool steps of `tool-handler.ts`: `countCharacters`, `formatDate`,
 //! `generateCode`, `getDataFromJSON`. A field slot holds a custom field id
 //! or a `bot_field:<id>` Account Field reference (`parseFieldReference`).
-//! `callApi` waits for the external-request service (not in Rust yet).
+//! `callApi` is `external_request.rs`.
 
 use chatbotx_business::contact_custom_field::{
     self, SetValueByKeyInput, SetValuesInput, SourceTimezoneResolver,

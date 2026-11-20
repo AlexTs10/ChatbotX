@@ -230,6 +230,8 @@ mod rpc_spa_procedures;
 mod rpc_template_actions;
 #[path = "rpc_template_pages.rs"]
 mod rpc_template_pages;
+#[path = "rpc_test_external_request_action.rs"]
+mod rpc_test_external_request_action;
 #[path = "rpc_workspace.rs"]
 mod rpc_workspace;
 #[path = "rpc_workspace_members.rs"]

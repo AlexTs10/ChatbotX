@@ -56,6 +56,7 @@ pub mod email_topic;
 pub mod error_log;
 pub mod errors;
 pub mod events;
+pub mod external_request;
 pub mod external_store;
 pub mod external_webhook;
 pub mod facebook_lead_ads;
