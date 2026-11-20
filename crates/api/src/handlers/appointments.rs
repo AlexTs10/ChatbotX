@@ -135,11 +135,16 @@ pub(crate) fn calendar_json(c: &AppointmentCalendar, app_url: &str) -> Map<Strin
         Value::Object(map) => map.clone(),
         _ => Map::new(),
     };
-    config.insert("scheduleWindowType".into(), json!(c.schedule_window_type));
-    let config = parse_appointment_schedule_window_config(&Value::Object(config.clone()))
-        .ok()
-        .and_then(|parsed| serde_json::to_value(parsed).ok())
-        .unwrap_or(Value::Object(config));
+    // The stored jsonb as is: a new calendar's `{}` stays `{}`.
+    let config = if config.is_empty() {
+        Value::Object(config)
+    } else {
+        config.insert("scheduleWindowType".into(), json!(c.schedule_window_type));
+        parse_appointment_schedule_window_config(&Value::Object(config.clone()))
+            .ok()
+            .and_then(|parsed| serde_json::to_value(parsed).ok())
+            .unwrap_or(Value::Object(config))
+    };
     let Value::Object(out) = json!({
         "id": id(c.id),
         "name": c.name,
@@ -375,7 +380,17 @@ pub(crate) fn update_request(input: &mut Input, workspace_id: i64, id: i64) -> U
                 (kind, config)
             }
             Err(error) => {
-                input.issue(&key("scheduleWindowConfig"), "custom", &error.message());
+                // `field: message` names the failing key of the config.
+                let message = error.message();
+                let (path, text) = match message.split_once(": ") {
+                    Some((field, text))
+                        if !field.is_empty() && field.bytes().all(|b| b.is_ascii_alphabetic()) =>
+                    {
+                        (child(&key("scheduleWindowConfig"), field), text.to_string())
+                    }
+                    _ => (key("scheduleWindowConfig"), message.clone()),
+                };
+                input.issue(&path, "custom", &text);
                 (String::new(), Value::Null)
             }
         },

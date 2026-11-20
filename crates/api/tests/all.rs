@@ -46,6 +46,8 @@ mod broadcasts_recurrence_public_api;
 mod capabilities_public_api;
 #[path = "channel_integrations_public_api.rs"]
 mod channel_integrations_public_api;
+#[path = "channel_posts_public_api.rs"]
+mod channel_posts_public_api;
 #[path = "connections_public_api.rs"]
 mod connections_public_api;
 #[path = "contact_notes_public_api.rs"]

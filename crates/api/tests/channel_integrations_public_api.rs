@@ -213,3 +213,60 @@ async fn disconnect_refuses_unknown_or_foreign_channels() {
     let (status, _) = run(&fx, "messengerChannels.get", WS, "3", None).await;
     assert_eq!(status, 200);
 }
+
+/// `channelIntegrations.list` (parity p1-04 `09`): every channel in the
+/// original's order, a `channel` filter, and the enum check.
+#[tokio::test]
+async fn channel_integrations_list_merges_the_channels() {
+    let fx = seeded().await;
+    fx.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                r#"INSERT INTO "Inbox" ("id", "workspaceId", "name", "channel", "sourceId") VALUES (32, ?1, 'OA', 'zalo', 'oa-1')"#,
+                chatbotx_db::rusqlite::params![WS],
+            )?;
+            tx.execute(
+                r#"INSERT INTO "IntegrationZalo" ("id", "auth", "oaId", "name", "workspaceId", "inboxId")
+                   VALUES (5, '{"secretText":"zalo-secret"}', 'oa-1', 'OA', ?1, 32)"#,
+                chatbotx_db::rusqlite::params![WS],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let (status, out) = call(&fx, "channelIntegrations.list", WS, &[], None, None).await;
+    assert_eq!(status, 200, "{out}");
+    let channels: Vec<&str> = out
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["channel"].as_str().unwrap())
+        .collect();
+    assert_eq!(channels, ["messenger", "instagram", "zalo"]);
+    assert!(!out.to_string().contains("secret"), "{out}");
+    assert_eq!(out[2]["externalId"], json!("oa-1"));
+    assert_eq!(out[2]["adsEligible"], json!(false));
+
+    let (_, zalo) = call(
+        &fx,
+        "channelIntegrations.list",
+        WS,
+        &[],
+        Some("channel=zalo"),
+        None,
+    )
+    .await;
+    assert_eq!(zalo, json!([out[2].clone()]));
+    let (status, other) = call(&fx, "channelIntegrations.list", OTHER_WS, &[], None, None).await;
+    assert_eq!((status, other), (200, json!([])));
+    for bad in ["channel=webchat", "channel=fax"] {
+        let (status, out) = call(&fx, "channelIntegrations.list", WS, &[], Some(bad), None).await;
+        assert_eq!(status, 422, "{out}");
+        assert_eq!(
+            out["data"]["issues"][0]["path"],
+            json!(["channel"]),
+            "{out}"
+        );
+    }
+}

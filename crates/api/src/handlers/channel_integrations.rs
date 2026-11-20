@@ -12,7 +12,7 @@
 use chatbotx_business::channel_integration::{self, TIKTOK_BUSINESS_API_URL};
 use chatbotx_business::connection::credentials::HttpUpstream;
 use chatbotx_business::{BusinessError, tx};
-use chatbotx_db::repo::models::{IntegrationInstagram, IntegrationMessenger};
+use chatbotx_db::repo::models::{IntegrationInstagram, IntegrationMessenger, IntegrationWhatsapp};
 use chatbotx_db::repo::{find_many, find_one, integration_messenger, now_ms};
 use chatbotx_db::rusqlite::params;
 use serde_json::{Value, json};
@@ -52,7 +52,52 @@ pub const ROUTES: &[&str] = &[
     "zaloChannels.list",
     "zaloChannels.get",
     "zaloChannels.updateTagSync",
+    "channelIntegrations.list",
 ];
+
+/// `channelIntegrationChannels`, in the order `channelIntegrationService.list`
+/// concatenates them (`channelFetchers` keys).
+const CHANNELS: &[&str] = &["whatsapp", "messenger", "instagram", "zalo", "tiktok"];
+
+/// `channelIntegrations.list`: every connected channel, or only `channel`.
+async fn list_all(state: &ApiState, call: Call<'_>) -> Reply {
+    let mut input = Input::from_query(call.params, call.query);
+    let value = input.get("channel").cloned();
+    let only = input.enum_at(&key("channel"), value.as_ref(), CHANNELS, false);
+    input.finish()?;
+    let (db, ws) = (&state.db, call.workspace_id);
+    let wanted = |only: Option<&str>, channel: &str| only.is_none_or(|o| o == channel);
+    let filter = only.clone();
+    let mut out: Vec<Value> = tx::read(db, move |conn| {
+        let wanted = |channel: &str| wanted(filter.as_deref(), channel);
+        let mut out = Vec::new();
+        let scope = r#"WHERE "workspaceId" = ?1"#;
+        if wanted("whatsapp") {
+            let rows = find_many::<IntegrationWhatsapp>(conn, scope, &[&ws])?;
+            out.extend(rows.iter().map(super::whatsapp_channels::summary));
+        }
+        if wanted("messenger") {
+            let rows = find_many::<IntegrationMessenger>(conn, scope, &[&ws])?;
+            out.extend(rows.iter().map(messenger_summary));
+        }
+        if wanted("instagram") {
+            let rows = find_many::<IntegrationInstagram>(conn, scope, &[&ws])?;
+            out.extend(rows.iter().map(instagram_summary));
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| business_error(e, LISTING))?;
+    for channel in ["zalo", "tiktok"] {
+        if wanted(only.as_deref(), channel) {
+            let rows = channel_integration::list(db, channel, ws, None)
+                .await
+                .map_err(|e| business_error(e, LISTING))?;
+            out.extend(rows.unwrap_or_default());
+        }
+    }
+    Ok(json(200, Value::Array(out)))
+}
 
 /// `resolveCapiConnection(...) === "connected"`; Messenger and Instagram
 /// need the CAPI scope unless a dedicated token is stored.
@@ -198,6 +243,9 @@ pub async fn find_instagram(
 
 /// Runs one of [`ROUTES`].
 pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
+    if route_id == "channelIntegrations.list" {
+        return list_all(state, call).await;
+    }
     if route_id.starts_with("tiktokChannels.") || route_id.starts_with("zaloChannels.") {
         return handle_tiktok_zalo(state, route_id, call).await;
     }
