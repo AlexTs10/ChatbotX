@@ -1391,7 +1391,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/messenger-template-handler.test.ts` | C | tbd | todo | Messenger channel |
 | `apps/worker/__tests__/messenger-thread-control-rejection.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `apps/worker/__tests__/meta-catalog-import.test.ts` | C | tbd | todo | Meta Catalog |
-| `apps/worker/__tests__/meta-catalog-reconciler.test.ts` | C | tbd | todo | Meta Catalog |
+| `apps/worker/__tests__/meta-catalog-reconciler.test.ts` | C | `crates/worker/tests/meta_catalog_reconciler.rs` | ported | Meta Catalog; Q.P6-U2 |
 | `apps/worker/__tests__/meta-catalog-sync.test.ts` | C | tbd | todo | Meta Catalog |
 | `apps/worker/__tests__/mini-app-buttons.test.ts` | C | `crates/worker/src/mini_app_buttons.rs` (unit) | ported | Mini-apps; Q.D1m; the Messenger template resume suffix too (`apply_template_resume`) |
 | `apps/worker/__tests__/moosend-handler.test.ts` | C | tbd | todo | Moosend integration |
@@ -1771,7 +1771,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/messenger/__tests__/webhook-label-enqueue.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/webhook-marketing-messages.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/welcome-message-flows-api.test.ts` | C | tbd | todo | Messenger channel |
-| `integrations/meta-catalog/__tests__/auth.test.ts` | C | tbd | todo | Meta Catalog |
+| `integrations/meta-catalog/__tests__/auth.test.ts` | C | `crates/business/src/ads/connect.rs` (unit test) | ported | Meta Catalog; Q.P6-U2 |
 | `integrations/meta-catalog/__tests__/catalogs.test.ts` | C | tbd | todo | Meta Catalog |
 | `integrations/meta-catalog/__tests__/exception.test.ts` | C | tbd | todo | Meta Catalog |
 | `integrations/meta-catalog/__tests__/http-client.test.ts` | C | tbd | todo | Meta Catalog |

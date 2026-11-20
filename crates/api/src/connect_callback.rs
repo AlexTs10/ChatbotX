@@ -2,7 +2,7 @@
 //! (`handleConnectSessionCallback` / `runConnectSessionCallback` of
 //! `apps/builder/src/app/integrations/[...integration]/callback.ts`). The
 //! legacy JSON-state flows of that route answer 404; the Meta ads flows
-//! (`facebookLeadAds`, `facebookMarketingMessages`, `messagingAds`) are
+//! (`facebookLeadAds`, `facebookMarketingMessages`, `messagingAds`, `metaCatalog`) are
 //! connect sessions too (`ads::connect`). No relay to `originHost`: a session only stores the app's own
 //! host (`toSessionReturn`), so the relay is always a no-op here.
 
@@ -590,6 +590,10 @@ async fn ads_callback(
     )
     .await
     {
+        // `storeMetaCatalogConnection`: the products page opens its setup.
+        Ok(true) if connect::flow_of(session) == Some(connect::Flow::MetaCatalog) => {
+            redirect(&append_param(&return_to, "metaCatalog", "setup"))
+        }
         Ok(true) => redirect(&return_to),
         Ok(false) => not_found(),
         Err(error) => {

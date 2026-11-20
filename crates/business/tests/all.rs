@@ -224,6 +224,8 @@ mod media_library_service;
 mod message_outgoing_and_list;
 #[path = "message_outgoing_media.rs"]
 mod message_outgoing_media;
+#[path = "meta_catalog_connect.rs"]
+mod meta_catalog_connect;
 #[path = "meta_catalog_service.rs"]
 mod meta_catalog_service;
 #[path = "mini_app_definition.rs"]

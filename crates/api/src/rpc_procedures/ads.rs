@@ -45,6 +45,7 @@ pub(super) const ACTIONS: &[&str] = &[
     "connectLeadAdsAction",
     "connectMarketingMessagesAction",
     "connectMessagingAdsAction",
+    "connectMetaCatalogAction",
     "createFacebookLeadAdAutomationAction",
     "updateFacebookLeadAdAutomationAction",
     "deleteFacebookLeadAdAutomationsAction",
@@ -394,6 +395,11 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
         "connectMarketingMessagesAction" => {
             let path = format!("/space/{}/fb-marketing-messages", ctx.workspace_id);
             connect(ctx, connect::Flow::MarketingMessages, path).await
+        }
+        // `features/products/actions/meta-catalog.action.ts` (any member).
+        "connectMetaCatalogAction" => {
+            let path = format!("/space/{}/products", ctx.workspace_id);
+            connect(ctx, connect::Flow::MetaCatalog, path).await
         }
         "connectMessagingAdsAction" => match (bound(), super_admin(ctx)) {
             (Ok(id), Ok(())) => match channel_of(arg(args, 2)).as_str() {

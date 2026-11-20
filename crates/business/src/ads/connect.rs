@@ -1,5 +1,7 @@
 //! The Meta ads OAuth connects: `connectLeadAdsAction`,
-//! `connectMarketingMessagesAction`, `connectMessagingAdsAction` and their
+//! `connectMarketingMessagesAction`, `connectMessagingAdsAction`,
+//! `connectMetaCatalogAction` (`generateCatalogAuthUrl`,
+//! `storeMetaCatalogConnection`) and their
 //! `flow` branches of `app/integrations/[...integration]/callback.ts`
 //! (`callback-stores.ts`). The original's unsigned base64 JSON `state` is a
 //! signed connect session here (`{sessionId}.{nonce}`, provider `messenger`,
@@ -39,8 +41,11 @@ const FACEBOOK_ADS_SCOPES: &[&str] = &[
 pub const LEAD_ADS: &str = "facebookLeadAds";
 pub const MARKETING_MESSAGES: &str = "facebookMarketingMessages";
 pub const MESSAGING_ADS: &str = "messagingAds";
+pub const META_CATALOG: &str = "metaCatalog";
+/// `META_CATALOG_SCOPES`.
+const META_CATALOG_SCOPES: &[&str] = &["catalog_management"];
 /// The connect-session purposes of these flows.
-pub const PURPOSES: &[&str] = &[LEAD_ADS, MARKETING_MESSAGES, MESSAGING_ADS];
+pub const PURPOSES: &[&str] = &[LEAD_ADS, MARKETING_MESSAGES, MESSAGING_ADS, META_CATALOG];
 const AUTHORIZED: &[&str] = &["authorized"];
 
 /// One connect flow (`stateParams.flow`).
@@ -52,6 +57,7 @@ pub enum Flow {
         channel: String,
         integration_id: i64,
     },
+    MetaCatalog,
 }
 
 impl Flow {
@@ -60,6 +66,20 @@ impl Flow {
             Flow::LeadAds => LEAD_ADS,
             Flow::MarketingMessages => MARKETING_MESSAGES,
             Flow::MessagingAds { .. } => MESSAGING_ADS,
+            Flow::MetaCatalog => META_CATALOG,
+        }
+    }
+
+    /// The "no app credential" error (`metaCatalog.errors.invalidAppSettings`
+    /// for the catalog, else `facebookAds.errors.invalidAppSettings`; en).
+    fn invalid_app_settings(&self) -> BusinessError {
+        match self {
+            Flow::MetaCatalog => BusinessError::exception(
+                "Meta app settings are not configured.",
+                "systemError",
+                400,
+            ),
+            _ => invalid_app_settings(),
         }
     }
 }
@@ -133,14 +153,28 @@ pub fn auth_url(flow: &Flow, credential: &OAuthCredential, state: &str) -> Resul
             ("response_type", "code".into()),
             ("state", state.into()),
         ],
+        // `auth_type=rerequest`: Facebook otherwise skips a permission the
+        // user declined before and the token misses `catalog_management`.
+        Flow::MetaCatalog => vec![
+            ("client_id", client_id.into()),
+            ("redirect_uri", redirect.into()),
+            ("auth_type", "rerequest".into()),
+            ("scope", scope(META_CATALOG_SCOPES)),
+            ("response_type", "code".into()),
+            ("state", state.into()),
+        ],
     };
     let query = url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(pairs)
         .finish();
-    Ok(format!(
-        "{FACEBOOK}/{}/dialog/oauth?{query}",
-        version(config)
-    ))
+    let version = match flow {
+        Flow::MetaCatalog => config["version"]
+            .as_str()
+            .filter(|v| !v.is_empty())
+            .unwrap_or(crate::meta_catalog::DEFAULT_API_VERSION),
+        _ => version(config),
+    };
+    Ok(format!("{FACEBOOK}/{version}/dialog/oauth?{query}"))
 }
 
 /// The connect action: a fresh `pending` session (older pending ones of the
@@ -159,7 +193,7 @@ pub async fn start(
     let credential = oauth::resolve_credential(db, encryption, app_url, "messenger", Some(owner))
         .await?
         .filter(|c| !text(&c.config, "clientId").is_empty())
-        .ok_or_else(invalid_app_settings)?;
+        .ok_or_else(|| flow.invalid_app_settings())?;
     // Fails before a session exists when the flow is not configured.
     auth_url(&flow, &credential, "")?;
     let purpose = flow.purpose();
@@ -225,6 +259,7 @@ pub fn flow_of(session: &SessionRow) -> Option<Flow> {
     match session.purpose.as_str() {
         LEAD_ADS => Some(Flow::LeadAds),
         MARKETING_MESSAGES => Some(Flow::MarketingMessages),
+        META_CATALOG => Some(Flow::MetaCatalog),
         MESSAGING_ADS => {
             let action = session.next_action.as_ref()?;
             Some(Flow::MessagingAds {
@@ -418,6 +453,12 @@ async fn store(
     if let Some(v) = credential.config["version"].as_str() {
         auth["version"] = json!(v);
     }
+    // `MetaCatalogAuthValue` carries no `authType`.
+    if *flow == Flow::MetaCatalog
+        && let Some(map) = auth.as_object_mut()
+    {
+        map.remove("authType");
+    }
     let sealed = serde_json::to_value(
         process_encryption()
             .encrypt_object(&auth, None)
@@ -500,6 +541,12 @@ async fn store(
             super::graph::invalidate(ws, &channel, integration_id);
             Ok(())
         }
+        Flow::MetaCatalog => {
+            tx::write(db, move |conn| {
+                crate::meta_catalog::upsert(conn, ws, &sealed, expires_at).map(|_| ())
+            })
+            .await
+        }
         Flow::LeadAds => Ok(()),
     }
 }
@@ -537,6 +584,21 @@ mod tests {
         };
         let ads = auth_url(&ads, &c, "1.n").unwrap();
         assert!(ads.contains("whatsapp_business_management") && !ads.contains("auth_type"));
+    }
+
+    /// `integrations/meta-catalog/__tests__/auth.test.ts`.
+    #[test]
+    fn meta_catalog_asks_facebook_to_rerequest_previously_declined_permissions() {
+        let c = credential(json!({ "clientId": "client-id" }));
+        let url = url::Url::parse(&auth_url(&Flow::MetaCatalog, &c, "1.n").unwrap()).unwrap();
+        let get = |k: &str| {
+            url.query_pairs()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.into_owned())
+        };
+        assert_eq!(get("auth_type").as_deref(), Some("rerequest"));
+        assert!(get("scope").unwrap().contains("catalog_management"));
+        assert!(url.path().starts_with("/v24.0/"));
     }
 
     #[test]

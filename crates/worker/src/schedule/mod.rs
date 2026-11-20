@@ -44,6 +44,7 @@ pub const PORTED: &[&str] = &[
     "sweepStaleWhatsappCalls",
     "purgeExpiredCallRecordings",
     "finishOverdueLeaderboards",
+    "reconcileMetaCatalogSyncs",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -178,6 +179,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
                 id("broadcastId")?,
             )
             .await?
+        }
+        "reconcileMetaCatalogSyncs" => {
+            crate::meta_catalog::sync::reconcile(&deps, chatbotx_db::repo::now_ms()).await?
         }
         "googleAdsHousekeeping" => {
             crate::google_ads_housekeeping::housekeeping(&deps).await?;

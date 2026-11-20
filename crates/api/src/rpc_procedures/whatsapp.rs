@@ -2,9 +2,14 @@
 //! `whatsappMessageTemplateAPIs` / `whatsappFlowAPIs`
 //! (`features/integration-whatsapp/{message-templates,flows}/api/private.ts`) and
 //! `syncMessageTemplateAction` / `syncWhatsappFlowsAction`; the coexist
-//! switch `integrationWhatsappAPIs.setCoexistWhatsappAPI`.
+//! switch `integrationWhatsappAPIs.setCoexistWhatsappAPI`; the channel list
+//! `integrationWhatsappAPIs.listIntegrationWhatsappInternalAPI` and the
+//! Messenger template list of the flow editor
+//! (`messengerMessageTemplateAPIs.listMessengerMessageTemplatesInternalAPI`,
+//! the same service and output as `/v1 messengerTemplates.list`).
 
 use chatbotx_business::tx;
+use chatbotx_db::repo::integration_whatsapp::IntegrationWhatsappClientResource;
 use serde_json::{Value, json};
 
 use super::{Ctx, In, Outcome, arg, fail, invalid, public, query_of};
@@ -67,6 +72,25 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
                 .map_err(fail),
             Err(error) => Err(error),
         },
+        "integrationWhatsappAPIs.listIntegrationWhatsappInternalAPI" => tx::read(db, move |conn| {
+            Ok(
+                chatbotx_db::repo::integration_whatsapp::list_client_resources_by_workspace_id(
+                    conn, ws,
+                )?,
+            )
+        })
+        .await
+        .map(|rows| Value::Array(rows.iter().map(whatsapp_resource).collect()))
+        .map_err(fail),
+        "messengerMessageTemplateAPIs.listMessengerMessageTemplatesInternalAPI" => {
+            let query = query_of(input, &["inboxId", "integrationMessengerId", "status"]);
+            public(ctx, "messengerTemplates.list", &[], Some(&query), None)
+                .await
+                .map_err(|error| match error.status {
+                    422 => invalid(),
+                    _ => error,
+                })
+        }
         "integrationWhatsappAPIs.setCoexistWhatsappAPI" => {
             let run = async {
                 let integration_id = inp.id("integrationId")?;
@@ -87,6 +111,22 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
             run.await
         }
         _ => return None,
+    })
+}
+
+/// `integrationWhatsappResource` (the zod output keeps these keys only).
+fn whatsapp_resource(row: &IntegrationWhatsappClientResource) -> Value {
+    json!({
+        "id": row.id.to_string(),
+        "name": row.name,
+        "inboxId": row.inbox_id.to_string(),
+        "displayPhoneNumber": row.display_phone_number,
+        "tokenRefreshError": row.token_refresh_error,
+        "phoneNumberId": row.phone_number_id,
+        "wabaId": row.waba_id,
+        "hasCapiScope": row.has_capi_scope,
+        "capiScopeCheckedAt": row.capi_scope_checked_at.map(chatbotx_db::repo::iso),
+        "datasetId": row.dataset_id,
     })
 }
 
