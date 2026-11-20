@@ -102,7 +102,7 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
 
 /// The given workspace (the caller must be a member: 404 "Workspace not
 /// found") or a new one owned by the caller: `(id, created)`.
-async fn resolve_workspace(
+pub(super) async fn resolve_workspace(
     ctx: &Ctx<'_>,
     workspace_id: Option<i64>,
     name: &str,

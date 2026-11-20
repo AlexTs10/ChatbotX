@@ -1,7 +1,6 @@
 # /rpc procedures and SPA server actions that answer "not ported" (Q.P6-audit).
 actions.assertCurrentUserCanAccessChatbot
 actions.changeMessageAttributes
-actions.connectTelegramAction
 actions.createProduct
 actions.deleteContactCustomFields
 actions.deleteMessage

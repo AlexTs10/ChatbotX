@@ -43,6 +43,16 @@ impl Enqueuer for Queue {
     }
 }
 
+/// (workspace, run, lease, status, direction, updatedAt)
+type Run = (
+    i64,
+    i64,
+    Option<&'static str>,
+    &'static str,
+    &'static str,
+    i64,
+);
+
 async fn fixture() -> (Arc<Queue>, Deps) {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -59,8 +69,7 @@ async fn fixture() -> (Arc<Queue>, Deps) {
             r#"INSERT INTO "User" ("id", "email") VALUES (1, 'owner@example.test')"#,
             [],
         )?;
-        // (workspace, run, lease, status, direction, updatedAt)
-        let rows: [(i64, i64, Option<&str>, &str, &str, i64); 5] = [
+        let rows: [Run; 5] = [
             (1, 11, Some("lease-1"), "running", "push", NOW - 3 * 60_000),
             (2, 12, None, "running", "push", NOW - 3 * 60_000),
             // Touched within the last 2 minutes: still live.

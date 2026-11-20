@@ -969,6 +969,33 @@ async fn telegram_call(
     }
 }
 
+/// `getMe(auth).username` (the `connect` action of the Telegram
+/// integration); `None` when Telegram does not accept the token.
+pub async fn telegram_bot_username(upstream: &impl Upstream, token: &str) -> Option<String> {
+    let reply = upstream
+        .send(UpstreamRequest {
+            method: "GET",
+            url: telegram_url(token, "getMe"),
+            headers: Vec::new(),
+            body: None,
+        })
+        .await;
+    match reply {
+        Ok((status, body)) if (200..300).contains(&status) => {
+            let parsed: Value = serde_json::from_str(&body).ok()?;
+            parsed["result"]["username"].as_str().map(str::to_string)
+        }
+        Ok((status, _)) => {
+            tracing::error!(status, "Telegram API call failed: getMe");
+            None
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "Telegram API call failed: getMe");
+            None
+        }
+    }
+}
+
 /// `describe(auth)`: the bot id before the `:` of the token.
 fn telegram_bot_id(token: &str) -> Option<&str> {
     let (bot_id, _) = token.split_once(':')?;

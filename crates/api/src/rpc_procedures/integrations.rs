@@ -85,70 +85,122 @@ fn ai_provider(name: &str) -> Option<&'static str> {
     })
 }
 
-/// `connectTelegramAction` (an `authActionClient` action). Only the
-/// settings path (an existing workspace) is ported; without `workspaceId`
-/// (a new workspace named after the bot) it is "not ported".
+/// `connectTelegramAction` (an `authActionClient` action): into the given
+/// workspace (the caller must be a member), or without `workspaceId` into a
+/// new workspace named after the bot (`getMe`), owned by the caller.
 pub(super) async fn auth_action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
     if name != "connectTelegramAction" {
         return None;
     }
     let input = In(arg(args, 0));
-    let workspace_id = match input.opt_id("workspaceId") {
-        Ok(Some(id)) => id,
-        Ok(None) => return None,
-        Err(error) => return Some(Err(error)),
-    };
     Some(
         async {
             let bot_token = input.str("botToken", true, 1, usize::MAX)?;
-            if !super::workspaces::is_member(ctx, workspace_id).await? {
-                return Err(action_fail(BusinessError::exception(
-                    "Workspace not found",
-                    "notFound",
-                    404,
-                )));
+            match input.opt_id("workspaceId")? {
+                Some(workspace_id) => {
+                    if !super::workspaces::is_member(ctx, workspace_id).await? {
+                        return Err(action_fail(BusinessError::exception(
+                            "Workspace not found",
+                            "notFound",
+                            404,
+                        )));
+                    }
+                    connect_telegram(ctx, workspace_id, bot_token).await?;
+                    Ok(json!({ "workspaceId": workspace_id.to_string() }))
+                }
+                None => connect_telegram_new_workspace(ctx, bot_token).await,
             }
-            let mut config = Map::new();
-            config.insert("secretText".into(), Value::String(bot_token));
-            let row = credentials::connect_telegram(
-                &ctx.api.db,
-                &HttpUpstream,
-                workspace_id,
-                &config,
-                Some(ctx.user_id),
-            )
-            .await
-            .map_err(action_fail)?;
-            // `onConnected`: the webhook secret and `setWebhook`.
-            if let Some(inbox_id) = row.inbox_id {
-                let broker = std::env::var("NEXT_PUBLIC_BROKER_URL")
-                    .ok()
-                    .filter(|u| !u.is_empty())
-                    .unwrap_or_else(|| ctx.api.app_url.clone());
-                credentials::register_telegram_webhook(
-                    &ctx.api.db,
-                    &HttpUpstream,
-                    workspace_id,
-                    inbox_id,
-                    &broker,
-                )
-                .await
-                .map_err(action_fail)?;
-            }
-            if row.created_at == row.updated_at {
-                let telegram_id = telegram_id_of_inbox(ctx, workspace_id, row.inbox_id).await?;
-                audit(
-                    ctx,
-                    workspace_id,
-                    "connect",
-                    format!("connected a new Telegram channel (#{telegram_id})"),
-                )
-                .await;
-            }
-            Ok(json!({ "workspaceId": workspace_id.to_string() }))
         }
         .await,
     )
+}
+
+/// The no-`workspaceId` branch. The original runs the workspace insert and
+/// the connect in one transaction; here a failed connect deletes the new
+/// workspace again.
+async fn connect_telegram_new_workspace(
+    ctx: &Ctx<'_>,
+    bot_token: String,
+) -> Result<Value, OrpcError> {
+    // A token Telegram refuses is not a `ChatbotXException` in the original.
+    let username = credentials::telegram_bot_username(&HttpUpstream, &bot_token)
+        .await
+        .ok_or_else(|| {
+            action_fail(BusinessError::exception(
+                "Failed to connect Telegram. Please check the bot token and try again.",
+                "systemError",
+                400,
+            ))
+        })?;
+    let (workspace_id, _) = super::workspaces::resolve_workspace(ctx, None, &username).await?;
+    if let Err(error) = connect_telegram(ctx, workspace_id, bot_token).await {
+        let deleted = ctx
+            .api
+            .db
+            .write(move |tx| {
+                tx.execute(r#"DELETE FROM "Workspace" WHERE "id" = ?1"#, [workspace_id])?;
+                Ok(())
+            })
+            .await;
+        if let Err(cleanup) = deleted {
+            tracing::error!(%cleanup, workspace_id, "telegram connect: new workspace not removed");
+        }
+        return Err(error);
+    }
+    audit(
+        ctx,
+        workspace_id,
+        "create",
+        format!("created the workspace (#{workspace_id})"),
+    )
+    .await;
+    Ok(json!({ "workspaceId": workspace_id.to_string() }))
+}
+
+/// `telegramIntegrationService.connect` + `onConnected` (the webhook secret
+/// and `setWebhook`) + the `connect` audit of a first connect.
+async fn connect_telegram(
+    ctx: &Ctx<'_>,
+    workspace_id: i64,
+    bot_token: String,
+) -> Result<(), OrpcError> {
+    let mut config = Map::new();
+    config.insert("secretText".into(), Value::String(bot_token));
+    let row = credentials::connect_telegram(
+        &ctx.api.db,
+        &HttpUpstream,
+        workspace_id,
+        &config,
+        Some(ctx.user_id),
+    )
+    .await
+    .map_err(action_fail)?;
+    if let Some(inbox_id) = row.inbox_id {
+        let broker = std::env::var("NEXT_PUBLIC_BROKER_URL")
+            .ok()
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(|| ctx.api.app_url.clone());
+        credentials::register_telegram_webhook(
+            &ctx.api.db,
+            &HttpUpstream,
+            workspace_id,
+            inbox_id,
+            &broker,
+        )
+        .await
+        .map_err(action_fail)?;
+    }
+    if row.created_at == row.updated_at {
+        let telegram_id = telegram_id_of_inbox(ctx, workspace_id, row.inbox_id).await?;
+        audit(
+            ctx,
+            workspace_id,
+            "connect",
+            format!("connected a new Telegram channel (#{telegram_id})"),
+        )
+        .await;
+    }
+    Ok(())
 }
 
 pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
