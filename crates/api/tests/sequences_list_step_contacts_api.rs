@@ -23,7 +23,7 @@ async fn seeded() -> Fixture {
                 params![WS],
             )?;
             tx.execute(
-                r#"INSERT INTO "Contact" ("id", "firstName", "lastName", "fullName", "workspaceId") VALUES (101, 'Ada', 'Lovelace', 'Ada Lovelace', ?1)"#,
+                r#"INSERT INTO "Contact" ("id", "firstName", "lastName", "workspaceId") VALUES (101, 'Ada', 'Lovelace', ?1)"#,
                 params![WS],
             )?;
             tx.execute(

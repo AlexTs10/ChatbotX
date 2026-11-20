@@ -142,6 +142,8 @@ mod ecommerce_open_hours_is_open;
 mod ecommerce_open_hours_service;
 #[path = "ecommerce_settings_service.rs"]
 mod ecommerce_settings_service;
+#[path = "email_tracking.rs"]
+mod email_tracking;
 #[path = "error_log_service.rs"]
 mod error_log_service;
 #[path = "events_commerce_events.rs"]

@@ -10,7 +10,7 @@ mod contact;
 mod conversation;
 mod decision;
 pub mod delay;
-mod email_marketing;
+pub(crate) mod email_marketing;
 mod make;
 mod messenger;
 mod pipeline;

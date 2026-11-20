@@ -51,6 +51,7 @@ pub mod ecommerce_open_hours;
 pub mod ecommerce_settings;
 pub mod email_marketing;
 pub mod email_topic;
+pub mod email_tracking;
 pub mod error_log;
 pub mod errors;
 pub mod events;

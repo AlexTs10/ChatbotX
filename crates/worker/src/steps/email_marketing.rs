@@ -9,6 +9,7 @@ use chatbotx_business::email_marketing::{
     self as em, Http, Outcome, ProviderError, active_campaign, drip, get_response, klaviyo,
     mailchimp, mailer_lite, moosend, sendgrid,
 };
+use chatbotx_business::email_tracking as tracking;
 use chatbotx_jobs::JobError;
 use serde_json::json;
 
@@ -92,12 +93,10 @@ struct SmtpRow {
 }
 
 /// `sendEmail` (`send-email.ts`): opt-in check, SMTP row, variables, the
-/// resolved elements and one SMTP send. Always `success` (the original
-/// returns `void`, also when the send fails).
-///
-/// ponytail: the email-topic tracking (`createRecipient`, open pixel,
-/// signed click URLs, `markFailed` / `delivered`) belongs to Q.D5; until
-/// then buttons link straight to their URL.
+/// tracking recipient (its token: open pixel, signed click URLs), the
+/// resolved elements and one SMTP send, then `failed` / `delivered`. Always
+/// `success` (the original returns `void`, also when the send fails); a
+/// recipient that can not be created fails the job before the send.
 pub(super) async fn send_email(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobError> {
     use chatbotx_business::email_marketing::smtp::{
         self, Mail, MailElement, SmtpAuth, UNSUBSCRIBE_PLACEHOLDER,
@@ -172,6 +171,21 @@ pub(super) async fn send_email(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobE
     };
     let app_url = run.deps.app_url.as_str();
     let unsubscribe = smtp::unsubscribe_url(app_url, contact_id, ws).unwrap_or_default();
+    let to = text("to");
+    // Every email gets a recipient row ("No Topic" when the topic is empty).
+    let token = tracking::create_recipient(
+        &run.deps.db,
+        tracking::NewRecipient {
+            topic_id: ctx.str("topicId").and_then(|id| id.parse().ok()),
+            workspace_id: ws,
+            email: to.clone(),
+            contact_id: Some(contact_id),
+            conversation_id: Some(run.conversation.id),
+            contact_inbox_id: Some(run.contact_inbox.id),
+        },
+    )
+    .await
+    .map_err(|err| JobError::retryable(err.to_string()))?;
     let elements: Vec<MailElement> = step
         .get("elements")
         .and_then(serde_json::Value::as_array)
@@ -197,18 +211,27 @@ pub(super) async fn send_email(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobE
                 "spacing" => MailElement::Spacing,
                 "button" => MailElement::Button {
                     label: s("label"),
-                    url: button_url(app_url, el, inbox.as_ref(), run.flow_version.flow_id),
+                    url: button_url(app_url, el, inbox.as_ref(), run.flow_version.flow_id).map(
+                        |url| match tracking::sign_click_url(&url, ws) {
+                            Ok(signed) => {
+                                format!("{app_url}/email-topic/click?r={token}&u={signed}")
+                            }
+                            Err(_) => url,
+                        },
+                    ),
                 },
                 _ => return None,
             })
         })
+        .chain([MailElement::Image(Some(format!(
+            "{app_url}/email-topic/open?r={token}"
+        )))])
         .collect();
     let subject = text("subject");
     let html = smtp::render_email_html(&subject, &text("preheader"), &elements);
     let from = Some(text("from"))
         .filter(|f| !f.is_empty())
         .unwrap_or(row.from_address);
-    let to = text("to");
     let _brand = workspace_name.unwrap_or(row.name);
     let mail = Mail {
         from: &from,
@@ -218,8 +241,51 @@ pub(super) async fn send_email(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobE
     };
     if let Err(err) = smtp::send_mail(&auth, &mail).await {
         tracing::error!(integration_smtp_id = smtp_id, workspace_id = ws, err = %err, "handleSendEmail: SMTP send failed");
+        if let Err(err) = tracking::mark_failed(&run.deps.db, &token).await {
+            tracing::error!(err = %err, "handleSendEmail: markFailed failed");
+        }
+        return Ok(StepStatus::Success);
     }
+    // The mail is accepted: a tracking failure goes to the repair job.
+    tracking::record_transition_or_enqueue_repair(
+        &run.deps.db,
+        Some(run.deps.jobs.as_ref()),
+        tracking::Phase::Delivered,
+        &token,
+        Some(ws),
+        None,
+    )
+    .await;
     Ok(StepStatus::Success)
+}
+
+/// `recordEmailTrackingTransition` (the repair job): only the tracking
+/// transaction, never SMTP; then the leaderboard award of an open / click
+/// (best effort, so a retry never counts the raw counters twice).
+pub async fn record_email_tracking_transition(
+    deps: &crate::Deps,
+    data: &serde_json::Value,
+) -> Result<(), JobError> {
+    let phase = data["phase"].as_str().and_then(tracking::Phase::parse);
+    let (Some(phase), Some(token)) = (phase, data["token"].as_str()) else {
+        return Err(JobError::unrecoverable(
+            "recordEmailTrackingTransition: bad job data",
+        ));
+    };
+    tracking::record_transition(&deps.db, phase, token)
+        .await
+        .map_err(|err| JobError::retryable(err.to_string()))?;
+    if phase != tracking::Phase::Delivered {
+        tracking::award_leaderboard_engagement(
+            &deps.db,
+            Some(deps.jobs.as_ref()),
+            token,
+            phase == tracking::Phase::Opened,
+            data["link"].as_str(),
+        )
+        .await;
+    }
+    Ok(())
 }
 
 /// `resolveButtonUrl` (`lib/convert-button.ts`).

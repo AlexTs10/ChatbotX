@@ -331,6 +331,14 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             },
         ))
         .merge(auth_routes)
+        .merge(chatbotx_api::downloads::router(
+            chatbotx_api::downloads::DownloadState {
+                auth: Arc::clone(&sessions),
+                api: Arc::clone(&api),
+            },
+        ))
+        .merge(chatbotx_api::public_spec::router(Arc::clone(&api)))
+        .merge(chatbotx_api::email_topic_routes::router(Arc::clone(&api)))
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
         .merge(chatbotx_api::store_webhooks::router(Arc::clone(&api)))
         .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)))

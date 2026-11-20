@@ -84,10 +84,14 @@ mod coupons_discount_codes_long_ids;
 mod custom_fields_public_api;
 #[path = "decisions_public_api.rs"]
 mod decisions_public_api;
+#[path = "downloads_routes.rs"]
+mod downloads_routes;
 #[path = "dynamic_images_public_api.rs"]
 mod dynamic_images_public_api;
 #[path = "ecommerce_open_hours_public_api.rs"]
 mod ecommerce_open_hours_public_api;
+#[path = "email_topic_routes.rs"]
+mod email_topic_routes;
 #[path = "email_topics_public_api.rs"]
 mod email_topics_public_api;
 #[path = "error_logs_public_api.rs"]

@@ -281,6 +281,13 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::coexist_instagram::JOB => {
             crate::coexist_instagram::run(&deps, &job.data["data"]).await?
         }
+        "recordEmailTrackingTransition" => {
+            crate::steps::email_marketing::record_email_tracking_transition(
+                &deps,
+                &job.data["data"],
+            )
+            .await?
+        }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }

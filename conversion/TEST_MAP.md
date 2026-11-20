@@ -21,7 +21,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/admin-workspaces-queries.test.ts` | C | tbd | todo | Workspaces; builder server code |
 | `apps/builder/__tests__/ads-account-filter.test.tsx` | B | - | todo | Ads campaigns (Meta messaging ads); builder jsdom |
 | `apps/builder/__tests__/ads-account-switcher.test.tsx` | B | - | todo | Ads campaigns (Meta messaging ads); builder jsdom |
-| `apps/builder/__tests__/ads-analytics-export-route.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking; builder server code |
+| `apps/builder/__tests__/ads-analytics-export-route.test.ts` | C | `crates/api/tests/downloads_routes.rs` | ported | Ads analytics and CTWA tracking; builder server code |
 | `apps/builder/__tests__/ads-analytics-view-retarget.test.tsx` | B | - | todo | Ads analytics and CTWA tracking; builder jsdom |
 | `apps/builder/__tests__/ads-analytics-view-revenue-delivery.test.tsx` | B | - | todo | Ads analytics and CTWA tracking; builder jsdom |
 | `apps/builder/__tests__/ads-api.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads); builder server code |
@@ -332,8 +332,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/ecommerce-settings-legacy-keys.test.ts` | B | - | todo | Ecommerce: settings, open hours, analytics; builder jsdom |
 | `apps/builder/__tests__/edge-instrumentation-graph.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/edit-message-action.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
-| `apps/builder/__tests__/email-topic-click-route.test.ts` | C | tbd | todo | Email topics and tracking; builder server code |
-| `apps/builder/__tests__/email-topic-open-route.test.ts` | C | tbd | todo | Email topics and tracking; builder server code |
+| `apps/builder/__tests__/email-topic-click-route.test.ts` | C | `crates/api/tests/email_topic_routes.rs` | ported | Email topics and tracking; builder server code |
+| `apps/builder/__tests__/email-topic-open-route.test.ts` | C | `crates/api/tests/email_topic_routes.rs` | ported | Email topics and tracking; builder server code |
 | `apps/builder/__tests__/email-topics-columns.test.ts` | B | - | todo | Email topics and tracking; builder node-env, client logic |
 | `apps/builder/__tests__/email-topics-public-api.test.ts` | C | `crates/api/tests/email_topics_public_api.rs` | ported | Email topics and tracking; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
 | `apps/builder/__tests__/email-topics-public-scope.test.ts` | C | `crates/api/tests/email_topics_public_api.rs` | ported | Email topics and tracking; builder server code; Q.D5 (see specs/Q.D5-test-map.tsv) |
@@ -357,7 +357,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/find-qr-code-query.test.ts` | C | tbd | todo | Public links (open-link, QR codes, reflinks); builder server code |
 | `apps/builder/__tests__/fix-whatsapp-calls-subscription-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/flow-button-edge-read-only.test.tsx` | B | - | todo | Flow builder and execution; builder jsdom |
-| `apps/builder/__tests__/flow-export-route.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
+| `apps/builder/__tests__/flow-export-route.test.ts` | C | `crates/api/tests/downloads_routes.rs` | ported | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/flow-node-toolbar-read-only.test.tsx` | B | - | todo | Flow builder and execution; builder jsdom |
 | `apps/builder/__tests__/flow-publish-schema.test.ts` | B | - | todo | Flow builder and execution; builder jsdom |
 | `apps/builder/__tests__/flow-validation-message.test.ts` | B | - | todo | Flow builder and execution; builder jsdom |
@@ -521,7 +521,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/mcp-oauth-connect-snippets.test.ts` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
 | `apps/builder/__tests__/mcp-oauth-grants-table.test.tsx` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
 | `apps/builder/__tests__/mcp-oauth-revoke-action.test.ts` | C | `crates/api/tests/rpc_workspace.rs` | ported | Channel connection and OAuth connect flow; builder server code; Q.A1 |
-| `apps/builder/__tests__/me-extension-download-route.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
+| `apps/builder/__tests__/me-extension-download-route.test.ts` | C | `crates/api/tests/downloads_routes.rs` | ported | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/media-library-actions.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/media-library-public-api.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/media-proxy-route.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
@@ -686,7 +686,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/public-list-queries-no-session.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
 | `apps/builder/__tests__/public-router-boundary.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/public-scheduled-deletion-routes.test.tsx` | C | tbd | todo | Scheduler and scheduled jobs; builder server code |
-| `apps/builder/__tests__/public-spec-json-route.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
+| `apps/builder/__tests__/public-spec-json-route.test.ts` | C | `crates/api/tests/downloads_routes.rs` | ported | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/public-spec-mcp.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
 | `apps/builder/__tests__/public-spec-operations.test.ts` | C | tbd | baseline-fail | Workspace API tokens and public API; builder server code; P0.3: beforeAll hook timeout 120 s (imports whole public router; Dell under memory pressure) — recheck in P0.7 |
 | `apps/builder/__tests__/public-spec-options.test.ts` | C | tbd | todo | Workspace API tokens and public API; builder server code |
@@ -1954,7 +1954,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/analytics/__tests__/contact-analytics.service.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/contact-stats.repository.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/contacts-by-dimension-schema.test.ts` | C | tbd | todo | Analytics dashboards |
-| `packages/analytics/__tests__/email-topic-stats.repository.test.ts` | C | tbd | todo | Analytics dashboards |
+| `packages/analytics/__tests__/email-topic-stats.repository.test.ts` | C | `crates/business/tests/email_tracking.rs` | ported | Analytics dashboards |
 | `packages/analytics/__tests__/event-bus-idempotency.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/event-filter.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/filtered-stats.repository.test.ts` | C | tbd | todo | Analytics dashboards |
@@ -2144,8 +2144,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/device-token-service.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
 | `packages/business/__tests__/dynamic-image-avatar-user.test.ts` | C | `crates/api/tests/dynamic_images_public_api.rs` | ported | Contacts (profiles, notes, activity); Q.D13b; adapted: the avatar is the stored contact avatar (DECISIONS 2026-11-19) |
 | `packages/business/__tests__/edge-safe-import-graph.test.ts` | C | tbd | todo | Builder app shell and shared components |
-| `packages/business/__tests__/email-topic-click-url.test.ts` | C | tbd | todo | Email topics and tracking |
-| `packages/business/__tests__/email-tracking.service.test.ts` | C | tbd | todo | Email topics and tracking |
+| `packages/business/__tests__/email-topic-click-url.test.ts` | C | `crates/business/tests/email_tracking.rs` | ported | Email topics and tracking |
+| `packages/business/__tests__/email-tracking.service.test.ts` | C | `crates/business/tests/email_tracking.rs` | ported | Email topics and tracking |
 | `packages/business/__tests__/entitlements.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/error-log.list.test.ts` | C | tbd | todo | Error logs |
 | `packages/business/__tests__/error-log.service.test.ts` | C | tbd | todo | Error logs |
