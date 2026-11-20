@@ -331,6 +331,7 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
             },
         ))
         .merge(auth_routes)
+        .merge(chatbotx_api::avatar_proxy::router(Arc::clone(&api)))
         .merge(chatbotx_api::reflink_widget::router(Arc::clone(&api)))
         .merge(chatbotx_api::store_webhooks::router(Arc::clone(&api)))
         .merge(chatbotx_api::connect_callback::router(Arc::clone(&api)))

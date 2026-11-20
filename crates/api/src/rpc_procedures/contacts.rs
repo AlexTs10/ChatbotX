@@ -47,6 +47,7 @@ pub const ACTIONS: &[&str] = &[
     "updateContactSequenceAction",
     "resetContactCustomFieldsAction",
     "createCustomFieldAction",
+    "refreshContactProfileAction",
 ];
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
@@ -601,6 +602,7 @@ async fn detail_action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
         "updateContactTagAction",
         "updateContactSequenceAction",
         "resetContactCustomFieldsAction",
+        "refreshContactProfileAction",
     ];
     if !DETAIL.contains(&name) {
         return None;
@@ -661,6 +663,20 @@ async fn detail_action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
                         }
                     };
                     note.map(|row| note_json(&row)).map_err(action_fail)
+                }
+                // `refreshContactProfileAction` (`{ contactInboxId }`): the
+                // public `contacts.refreshProfile` under the contact scope.
+                "refreshContactProfileAction" => {
+                    let contact_inbox_id = In(arg(args, 2)).id("contactInboxId")?;
+                    let body = json!({ "contactInboxId": contact_inbox_id.to_string() });
+                    contact_call(
+                        ctx,
+                        scope,
+                        bound_id()?,
+                        "contacts.refreshProfile",
+                        Some(&body),
+                    )
+                    .await
                 }
                 "blockContactAction" | "unblockContactAction" => {
                     let route = if name == "blockContactAction" {

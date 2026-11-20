@@ -15,8 +15,6 @@ actions.getCurrentUserAndTargetWorkspace
 actions.getCurrentUserId
 actions.persistReconnectAuthAndResubscribe
 actions.reconnectWhatsappAction
-actions.refreshAllChannelTokensAction
-actions.refreshContactProfileAction
 actions.resetBotFields
 actions.resetContactCustomFields
 actions.sendWhatsappTemplateAction

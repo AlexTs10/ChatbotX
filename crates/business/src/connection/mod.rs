@@ -360,7 +360,7 @@ pub async fn verify(db: &Db, id: i64, workspace_id: i64) -> Result<ConnectionRow
     .await
 }
 
-fn not_configured(provider: &str) -> BusinessError {
+pub(crate) fn not_configured(provider: &str) -> BusinessError {
     BusinessError::exception(
         format!("Connection provider \"{provider}\" is not configured."),
         "connectionNotConfigured",
@@ -388,8 +388,23 @@ pub async fn refresh(db: &Db, id: i64, workspace_id: i64) -> Result<ConnectionRo
             400,
         ));
     }
-    // The OAuth token refresh of the other providers is not ported yet.
-    Err(not_configured(&current.provider))
+    let http = crate::channel_api::LiveChannelHttp;
+    refresh_with(db, &http, current).await
+}
+
+/// [`refresh`] past the status checks, over `http`: the channel OAuth
+/// providers refresh; the others are `connectionNotConfigured`.
+pub async fn refresh_with(
+    db: &Db,
+    http: &dyn crate::channel_api::ChannelHttp,
+    current: ConnectionRow,
+) -> Result<ConnectionRow> {
+    if !crate::channel_token_refresh::refresh_connection(db, http, &current).await? {
+        // ponytail: googleAds / googleCalendar `refreshAuth` is not ported.
+        return Err(not_configured(&current.provider));
+    }
+    let (id, workspace_id) = (current.id, current.workspace_id);
+    tx::read(db, move |conn| find_or_fail(conn, id, workspace_id)).await
 }
 
 /// `startReconnect` up to the OAuth part: a provider that is not OAuth (or

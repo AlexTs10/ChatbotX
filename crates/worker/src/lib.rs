@@ -22,6 +22,7 @@ pub(crate) mod coexist_throttle;
 pub mod coexist_whatsapp;
 pub mod coexist_whatsapp_payload;
 pub mod condition;
+pub mod contact_profile;
 pub mod contact_scan;
 pub mod datetime_sweep;
 pub mod default_queue;
@@ -312,6 +313,12 @@ pub fn start(runtime: &Runtime, deps: &Deps) -> Result<(), JobsError> {
     runtime.spawn_worker(
         spec_of(QueueName::WhatsappVoipSignaling),
         handler(deps, |deps, job| Box::pin(whatsapp_voip::handle(deps, job))),
+    )?;
+    runtime.spawn_worker(
+        spec_of(QueueName::ProfileSnapshot),
+        handler(deps, |deps, job| {
+            Box::pin(contact_profile::handle_profile_snapshot(deps, job))
+        }),
     )?;
     runtime.spawn_worker(
         spec_of(QueueName::Schedule),

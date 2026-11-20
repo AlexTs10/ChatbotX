@@ -957,3 +957,146 @@ async fn refresh_threads(deps: RefreshDeps<'_>) -> Result<()> {
     }
     Ok(())
 }
+
+/// `connectionService.refresh` for the OAuth channel providers (Zalo,
+/// TikTok, Messenger, both Instagram logins, Threads): under
+/// `auth:refresh:connection:<id>` (10 s), a forced `refreshAuth` of the
+/// satellite row's auth (3 attempts, 250 ms backoff; a revoked token marks
+/// the connection `needs_reauth`), then the save + `recordAuthSaved`.
+/// `Ok(false)` = the provider has no channel refresh here.
+pub async fn refresh_connection(
+    db: &Db,
+    http: &dyn ChannelHttp,
+    connection: &crate::connection::ConnectionRow,
+) -> Result<bool> {
+    let channel = match connection.provider.as_str() {
+        "zalo" => Some(RefreshChannel::Zalo),
+        "tiktok" => Some(RefreshChannel::Tiktok),
+        "instagram" => Some(RefreshChannel::Instagram),
+        "instagramFacebook" => Some(RefreshChannel::InstagramFacebook),
+        "messenger" => Some(RefreshChannel::Messenger),
+        "threads" => None,
+        _ => return Ok(false),
+    };
+    let table = channel.map_or("IntegrationThreads", RefreshChannel::table);
+    let Some(integration_id) = connection.integration_id else {
+        return Err(crate::connection::not_configured(&connection.provider));
+    };
+    let _guard = refresh_locks()
+        .acquire(
+            &format!("auth:refresh:connection:{}", connection.id),
+            LockOpts {
+                ttl_secs: 10,
+                retry_secs: None,
+            },
+        )
+        .await
+        .map_err(|e| BusinessError::exception(e.to_string(), "lockFailed", 500))?;
+    let workspace_id = connection.workspace_id;
+    let sql = format!(r#"SELECT "auth" FROM "{table}" WHERE "id" = ?1 AND "workspaceId" = ?2"#);
+    let auth: Option<Option<String>> = tx::read(db, move |conn| {
+        conn.query_row(&sql, params![integration_id, workspace_id], |r| r.get(0))
+            .optional()
+            .map_err(repo_err)
+    })
+    .await?;
+    let Some(auth) = auth
+        .flatten()
+        .and_then(|a| serde_json::from_str::<Value>(&a).ok())
+    else {
+        return Err(crate::connection::not_configured(&connection.provider));
+    };
+    if auth["authType"] != "oauth2" {
+        return Ok(true);
+    }
+    let mut attempts = 0;
+    let outcome = loop {
+        attempts += 1;
+        let result = match channel {
+            Some(channel) => refreshed_auth(http, channel, auth.clone()).await,
+            None => refresh_threads_auth(http, auth.clone()).await,
+        };
+        let failure = match result {
+            Ok(done) => break Ok(done),
+            Err(failure) => failure,
+        };
+        let revoked =
+            channel.map_or_else(|| failure.is_graph_revoked(), |c| is_revoked(c, &failure));
+        if revoked || attempts == 3 {
+            break Err((failure, revoked));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250 << (attempts - 1))).await;
+    };
+    let new_auth = match outcome {
+        Ok(Some(auth)) => auth,
+        Ok(None) => return Ok(true),
+        Err((failure, revoked)) => {
+            if revoked {
+                if let Err(error) = crate::connection::mark_unhealthy_by_identifier(
+                    db,
+                    &connection.provider,
+                    &connection.source_id,
+                    workspace_id,
+                    connection.inbox_id.unwrap_or_default(),
+                )
+                .await
+                {
+                    tracing::error!(%error, connection_id = connection.id, "Failed to mark integration auth offline");
+                }
+            }
+            tracing::warn!(err = %failure, connection_id = connection.id, "connection refresh failed");
+            return Err(BusinessError::exception(
+                format!(
+                    "Integration \"{}\" auth refresh failed after {attempts} attempt(s).",
+                    connection.provider
+                ),
+                "unknownError",
+                401,
+            ));
+        }
+    };
+    let (id, provider, source_id) = (
+        integration_id,
+        connection.provider.clone(),
+        connection.source_id.clone(),
+    );
+    tx::write(db, move |tx| {
+        let saved = tx
+            .execute(
+                &format!(
+                    r#"UPDATE "{table}" SET "auth" = ?3, "tokenRefreshError" = NULL, "updatedAt" = ?4
+                       WHERE "id" = ?1 AND "workspaceId" = ?2"#
+                ),
+                params![id, workspace_id, new_auth.to_string(), repo::now_ms()],
+            )
+            .map_err(repo_err)?;
+        if saved == 0 {
+            return Err(BusinessError::exception(
+                "Connection auth persistence did not match a satellite row",
+                "systemError",
+                500,
+            ));
+        }
+        record_refreshed_auth(tx, workspace_id, &provider, &source_id, &new_auth).map_err(repo_err)?;
+        Ok(())
+    })
+    .await?;
+    Ok(true)
+}
+
+/// Threads `refreshAuth`.
+async fn refresh_threads_auth(
+    http: &dyn ChannelHttp,
+    mut auth: Value,
+) -> std::result::Result<Option<Value>, ApiFailure> {
+    let token = str_of(&auth["tokens"], "accessToken").to_owned();
+    if token.is_empty() {
+        return Err(ApiFailure::new("Threads access token not available"));
+    }
+    let (new_token, expires_in) = api::refresh_threads_token(http, &token).await?;
+    set_token(&mut auth, "accessToken", json!(new_token));
+    if let Some(expires_in) = expires_in {
+        set_token(&mut auth, "expiresAt", now_iso_plus(expires_in));
+    }
+    Ok(Some(auth))
+}

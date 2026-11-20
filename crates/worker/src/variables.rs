@@ -583,29 +583,73 @@ impl VariableSources for DbSources {
         Ok(None)
     }
 
+    /// The integration of the contact inbox, as the ids the snapshot fetch
+    /// resolves it from.
     async fn resolve_integration_context(
         &self,
-        _workspace_id: &str,
-        _contact_inbox: &ContactInboxModel,
+        workspace_id: &str,
+        contact_inbox: &ContactInboxModel,
     ) -> SourceResult<Value> {
-        Ok(Value::Null)
+        Ok(json!({
+            "workspaceId": id(workspace_id)?,
+            "channel": contact_inbox.channel,
+            "inboxId": id(&contact_inbox.inbox_id)?,
+        }))
     }
 
+    /// `runChannelHandler("contact", "getProfileSnapshot")`.
     async fn run_get_profile_snapshot(
         &self,
-        _ctx: &Value,
-        _source_id: &str,
+        ctx: &Value,
+        source_id: &str,
     ) -> SourceResult<ContactProfileSnapshot> {
-        Err(SourceError::new("getProfileSnapshot is not ported"))
+        let channel = ctx["channel"].as_str().unwrap_or("");
+        let fetched = chatbotx_business::contact::channel_profile::fetch_profile_snapshot(
+            &self.db,
+            &chatbotx_business::channel_api::LiveChannelHttp,
+            ctx["workspaceId"].as_i64().unwrap_or(0),
+            channel,
+            ctx["inboxId"].as_i64().unwrap_or(0),
+            source_id,
+        )
+        .await
+        .map_err(|e| SourceError::new(e.to_string()))?
+        .ok_or_else(|| {
+            SourceError::new(format!(
+                "Channel \"{channel}\" has no contact.getProfileSnapshot handler"
+            ))
+        })?;
+        Ok(ContactProfileSnapshot {
+            follows_business: fetched.follows_business,
+            business_follows_contact: fetched.business_follows_contact,
+            account_verified: fetched.account_verified,
+            follower_count: fetched.follower_count,
+            username: fetched.username,
+        })
     }
 
+    /// `contactInboxService.refreshProfileSnapshot`.
     async fn refresh_profile_snapshot(
         &self,
-        _contact_inbox_id: &str,
-        _inbox_id: &str,
-        _snapshot: &ContactProfileSnapshot,
+        contact_inbox_id: &str,
+        inbox_id: &str,
+        snapshot: &ContactProfileSnapshot,
     ) -> SourceResult<()> {
-        Ok(())
+        let snapshot = chatbotx_business::contact::channel_profile::ProfileSnapshot {
+            follows_business: snapshot.follows_business,
+            business_follows_contact: snapshot.business_follows_contact,
+            account_verified: snapshot.account_verified,
+            follower_count: snapshot.follower_count,
+            username: snapshot.username.clone(),
+        };
+        chatbotx_business::contact::profile_snapshot::refresh_profile_snapshot(
+            &self.db,
+            id(contact_inbox_id)?,
+            id(inbox_id)?,
+            &snapshot,
+        )
+        .await
+        .map_err(|e| SourceError::new(e.to_string()))
     }
 
     async fn messenger_user_inbox_link(

@@ -564,7 +564,8 @@ pub async fn fetch_profile_snapshot(
 }
 
 /// A contact inbox row: `(contactId, channel, inboxId, sourceId)`.
-async fn contact_inbox(
+/// A contact inbox (`contactId`, `channel`, `inboxId`, `sourceId`).
+pub async fn contact_inbox(
     db: &Db,
     contact_inbox_id: i64,
 ) -> Result<Option<(i64, String, i64, String)>> {
@@ -580,7 +581,8 @@ async fn contact_inbox(
     .await
 }
 
-async fn contact_avatar(
+/// The contact `avatar` in its workspace; `None` when the contact is missing.
+pub async fn contact_avatar(
     db: &Db,
     workspace_id: i64,
     contact_id: i64,

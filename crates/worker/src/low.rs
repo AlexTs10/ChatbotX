@@ -64,6 +64,11 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
                 .map(|()| Value::Null),
         };
     }
+    if kind == crate::contact_profile::UPDATE_CONTACT_AVATAR {
+        return crate::contact_profile::update_contact_avatar(&deps, data)
+            .await
+            .map(|()| Value::Null);
+    }
     if kind != "replayMissedComment" {
         return Err(JobError::unrecoverable(format!(
             "Unhandled low job type: {kind}"

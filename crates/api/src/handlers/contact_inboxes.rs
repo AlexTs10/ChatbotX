@@ -196,7 +196,7 @@ async fn refresh_profile(state: &ApiState, call: Call<'_>) -> Reply {
     let contact_id = super::contacts::resolve(state, &call, MUTATING).await?;
     let services = RefreshServices {
         kv: state.kv.as_deref().map(|kv| &kv.mem),
-        uploader: None,
+        uploader: state.files.as_deref(),
     };
     let outcome = refresh_contact_profile(
         &state.db,
