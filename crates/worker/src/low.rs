@@ -7,9 +7,8 @@
 //!
 //! AI moderation and AI-agent replies run on the AI queue (`comment_ai`).
 //!
-//! ponytail: not ported (specs/Q.D10.md "Left"): the deferred TikTok private
-//! reply, live-comment pacing, the leaderboard award, post
-//! tracking, commenter avatars, comment attachments and user-tag tracking.
+//! ponytail: not ported (specs/Q.D10.md "Left"): post tracking, commenter
+//! avatars, comment attachments and Messenger live detection.
 //! The other low actions (`contactMarkAsRead`, `messageStatus`, echoes,
 //! avatars) fail unrecoverable until their channels exist.
 
@@ -782,24 +781,109 @@ static MENTION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:^|[^\w@.])@([a-z0-9_](?:[a-z0-9_.]{0,28}[a-z0-9_])?)").expect("regex")
 });
 
-/// `countMentions(resolveMentions())`: Messenger's tagged ids, else the
-/// `@handles` of the text (`extractInstagramMentions`).
-///
-/// ponytail: no Graph fallback for a Messenger comment without `tags`.
-fn mention_count(channel_type: &str, message: Option<&str>, tags: &Value) -> usize {
-    let mut seen = std::collections::HashSet::new();
-    if channel_type == "messenger" {
-        for tag in tags.as_array().into_iter().flatten() {
-            if let Some(id) = tag["id"].as_str().filter(|id| !id.is_empty()) {
-                seen.insert(id.to_owned());
-            }
-        }
-    } else {
-        for capture in MENTION_RE.captures_iter(message.unwrap_or("")) {
-            seen.insert(capture[1].to_lowercase());
+/// `CommentMentions`: tagged user ids (Facebook) and lowercased `@handles`
+/// (every other channel), deduplicated.
+type Mentions = (Vec<String>, Vec<String>);
+
+fn push_unique(list: &mut Vec<String>, value: String) {
+    if !list.contains(&value) {
+        list.push(value);
+    }
+}
+
+/// `uniqueTagIds`.
+fn tag_ids(tags: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    for tag in tags.as_array().into_iter().flatten() {
+        if let Some(id) = tag["id"].as_str().filter(|id| !id.is_empty()) {
+            push_unique(&mut ids, id.to_owned());
         }
     }
-    seen.len()
+    ids
+}
+
+/// `extractInstagramMentions`.
+fn text_mentions(message: Option<&str>) -> Vec<String> {
+    let mut handles = Vec::new();
+    for capture in MENTION_RE.captures_iter(message.unwrap_or("")) {
+        push_unique(&mut handles, capture[1].to_lowercase());
+    }
+    handles
+}
+
+/// `getCommentMessageTags`: the Graph `message_tags` of a Messenger
+/// comment; a failed lookup is no tags.
+async fn graph_message_tags(upstream: &impl Upstream, auth: &Value, comment_id: &str) -> Value {
+    let plain = !comment_id.is_empty()
+        && comment_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');
+    if !plain {
+        return Value::Null;
+    }
+    let version = auth["version"]
+        .as_str()
+        .filter(|v| v.starts_with('v') && v[1..].chars().all(|c| c.is_ascii_digit() || c == '.'))
+        .unwrap_or(crate::channels::messenger::DEFAULT_API_VERSION);
+    let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
+    let reply = upstream
+        .send(UpstreamRequest {
+            method: "GET",
+            url: format!(
+                "{}/{version}/{comment_id}?fields=message_tags",
+                crate::channels::messenger::API_URL
+            ),
+            headers: vec![("Authorization".to_owned(), format!("Bearer {token}"))],
+            body: None,
+        })
+        .await;
+    match reply {
+        Ok((status, text)) if (200..300).contains(&status) => {
+            serde_json::from_str::<Value>(&text).unwrap_or(Value::Null)["message_tags"].take()
+        }
+        _ => Value::Null,
+    }
+}
+
+/// `countExistingTaggedIdentities`: how many of the mentions are already
+/// contacts of the inbox (Threads keys contacts by the lowercased username).
+fn count_known_identities(
+    conn: &chatbotx_db::rusqlite::Connection,
+    inbox_id: i64,
+    (ids, usernames): &Mentions,
+    username_is_source_id: bool,
+) -> chatbotx_db::rusqlite::Result<usize> {
+    let mut stmt = conn.prepare_cached(
+        r#"SELECT "sourceId", "sourceUsername" FROM "ContactInbox" WHERE "inboxId" = ?1
+           AND ("sourceId" IN (SELECT value FROM json_each(?2)) OR "sourceUsername" IN (SELECT value FROM json_each(?3))
+                OR (?4 AND "sourceId" IN (SELECT value FROM json_each(?3))))"#,
+    )?;
+    let rows = stmt
+        .query_map(
+            params![
+                inbox_id,
+                json!(ids).to_string(),
+                json!(usernames).to_string(),
+                username_is_source_id
+            ],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    let source_ids: std::collections::HashSet<&str> =
+        rows.iter().map(|(s, _)| s.as_str()).collect();
+    let names: std::collections::HashSet<&str> =
+        rows.iter().filter_map(|(_, u)| u.as_deref()).collect();
+    Ok(ids
+        .iter()
+        .filter(|id| source_ids.contains(id.as_str()))
+        .count()
+        + usernames
+            .iter()
+            .filter(|u| {
+                names.contains(u.as_str())
+                    || (username_is_source_id && source_ids.contains(u.as_str()))
+            })
+            .count())
 }
 
 /// `isCommentReply`.
@@ -1162,9 +1246,15 @@ async fn process_comment_automation(
         comment,
         comment_message,
         attachments: None,
+        mentions: None,
         data: data.clone(),
     };
     let deferred = data.get("deferred").filter(|d| d.is_object());
+    // Tag tracking counts a comment ONCE (lifetime totals on the contact),
+    // before any reply renders `{{total_tagged}}`.
+    if deferred.is_none() && automations.iter().any(|a| run.tracks_tags(a, &tz)) {
+        run.track_comment_tags().await;
+    }
     for mut automation in automations {
         automation.limit_live(&run.channel_type);
         if let Some(deferred) = deferred {
@@ -1223,6 +1313,7 @@ struct Run<'a, U> {
     comment: Comment,
     comment_message: Option<Message>,
     attachments: Option<Attachments>,
+    mentions: Option<Mentions>,
     /// The `processCommentAutomation` payload.
     data: Value,
 }
@@ -1241,6 +1332,114 @@ impl<U: Upstream> Run<'_, U> {
         .await;
         self.attachments = Some(found);
         found
+    }
+
+    /// `resolveMentions` (memoized): Messenger's tagged ids, one Graph
+    /// lookup when the webhook carried none; else the `@handles` of the text.
+    async fn mentions(&mut self) -> Mentions {
+        if let Some(found) = &self.mentions {
+            return found.clone();
+        }
+        let found = if self.channel_type == "messenger" {
+            let mut ids = tag_ids(&self.comment.tags);
+            if ids.is_empty() {
+                ids = tag_ids(
+                    &graph_message_tags(self.upstream, &self.ctx.auth, &self.comment.id).await,
+                );
+            }
+            (ids, Vec::new())
+        } else {
+            (Vec::new(), text_mentions(self.comment.message.as_deref()))
+        };
+        self.mentions = Some(found.clone());
+        found
+    }
+
+    /// `tracksTagsForComment`: the option, the schedule, the post, the reply
+    /// and keyword filters (not the per-user dedup).
+    fn tracks_tags(&self, a: &Automation, tz: &str) -> bool {
+        a.option("trackUserTags") == Some(true)
+            && within_schedule(a.start_time.as_deref(), a.end_time.as_deref(), tz)
+            && match_post(&a.post, &self.comment.post_id, self.comment.is_live)
+            && !(a.option("ignoreCommentReplies").unwrap_or(true) && self.is_reply())
+            && match_keywords(
+                &a.include_keywords,
+                &a.exclude_keywords,
+                self.comment.message.as_deref(),
+                &a.exclude_keywords_type,
+            )
+    }
+
+    /// `trackCommentTags`: the counts are claimed onto the comment row
+    /// (only while `totalTagged` is absent) before the contact's counters
+    /// grow, so a comment is counted at most once. Never fails.
+    async fn track_comment_tags(&mut self) {
+        let Some(message) = self.comment_message.clone() else {
+            tracing::warn!(
+                comment_id = self.comment.id,
+                "Comment automation: incoming comment message row not found, skipping tag tracking"
+            );
+            return;
+        };
+        if message
+            .content_attributes
+            .as_ref()
+            .is_some_and(|a| a.0["totalTagged"].is_number())
+        {
+            return;
+        }
+        let mentions = self.mentions().await;
+        let total = mentions.0.len() + mentions.1.len();
+        let (ws, inbox_id, contact_id) = (
+            self.ws,
+            self.contact_inbox.inbox_id,
+            self.contact_inbox.contact_id,
+        );
+        let threads = self.channel_type == "threads";
+        let result = self
+            .deps
+            .db
+            .write(move |tx| {
+                let known = if total == 0 {
+                    0
+                } else {
+                    count_known_identities(tx, inbox_id, &mentions, threads)?
+                };
+                let fresh = total - known;
+                let claimed = tx.execute(
+                    r#"UPDATE "Message" SET "contentAttributes" = json_patch(COALESCE("contentAttributes", '{}'), ?1)
+                       WHERE "id" = ?2 AND "workspaceId" = ?3
+                         AND json_type(COALESCE("contentAttributes", '{}'), '$.totalTagged') IS NULL"#,
+                    params![
+                        json!({ "totalTagged": total, "totalNewTagged": fresh }).to_string(),
+                        message.id,
+                        ws
+                    ],
+                )?;
+                if claimed == 0 {
+                    return Ok(false);
+                }
+                if total > 0 {
+                    tx.execute(
+                        r#"UPDATE "Contact" SET "totalTagged" = "totalTagged" + ?1,
+                             "totalNewTagged" = "totalNewTagged" + ?2, "updatedAt" = ?3
+                           WHERE "id" = ?4 AND "workspaceId" = ?5"#,
+                        params![total as i64, fresh as i64, now_ms(), contact_id, ws],
+                    )?;
+                }
+                Ok(true)
+            })
+            .await;
+        match result {
+            Ok(true) => {}
+            Ok(false) => tracing::warn!(
+                comment_id = self.comment.id,
+                "Comment automation: tag counts not claimed (already counted or update failed), skipping counter increment"
+            ),
+            Err(err) => {
+                tracing::error!(err = %err, comment_id = self.comment.id, "Failed to track user tags for comment")
+            }
+        }
     }
 
     fn is_reply(&self) -> bool {
@@ -1289,7 +1488,10 @@ impl<U: Upstream> Run<'_, U> {
             return Ok(Some("keywordsNotMatched"));
         }
         if a.include_keywords["type"] == "mentions" {
-            let count = mention_count(ct, self.comment.message.as_deref(), &self.comment.tags);
+            let count = {
+                let (ids, handles) = self.mentions().await;
+                ids.len() + handles.len()
+            };
             let wanted = a.include_keywords["mentionCount"].as_u64().unwrap_or(1);
             if (count as u64) < wanted {
                 return Ok(Some("mentionCountNotMatched"));

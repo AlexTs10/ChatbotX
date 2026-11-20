@@ -24,6 +24,7 @@ use crate::order::{self, Actor, ContactRef, Deps, PlaceInput, PlaceItem, Quote};
 use crate::store_source::{is_external_store_source, resolve_store_source};
 use crate::{cart, ecommerce_settings, order_payment, tx};
 
+pub mod collection;
 mod external_checkout;
 
 /// Most distinct lines (product and variant pairs) one cart may hold.
@@ -1357,125 +1358,6 @@ pub async fn build_inbound_cart_reply(
     })))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn line(product_id: i64, variant_id: Option<i64>, quantity: i64) -> PlaceItem {
-        PlaceItem {
-            product_id,
-            variant_id,
-            quantity,
-        }
-    }
-
-    #[test]
-    fn change_line_adds_sets_caps_and_removes() {
-        let cart = vec![line(1, None, 2), line(2, Some(5), 1)];
-        assert_eq!(
-            change_line(&cart, &line(1, None, 3), Mode::Add),
-            vec![line(1, None, 5), line(2, Some(5), 1)]
-        );
-        assert_eq!(
-            change_line(&cart, &line(2, Some(5), 0), Mode::Set),
-            vec![line(1, None, 2)]
-        );
-        assert_eq!(
-            change_line(&cart, &line(3, None, 20_000), Mode::Add)[2],
-            line(3, None, 10_000)
-        );
-        // A different variant is another line.
-        assert_eq!(change_line(&cart, &line(2, None, 1), Mode::Add).len(), 3);
-    }
-
-    #[test]
-    fn subtract_keeps_lines_added_meanwhile() {
-        let cart = vec![line(1, None, 3), line(2, None, 1)];
-        assert_eq!(
-            subtract_ordered_lines(&cart, &[line(1, None, 2)]),
-            Some(vec![line(1, None, 1), line(2, None, 1)])
-        );
-        assert_eq!(
-            subtract_ordered_lines(&cart, &[line(2, None, 1)]),
-            Some(vec![line(1, None, 3)])
-        );
-        // A second submit: the cart no longer holds the order.
-        assert_eq!(subtract_ordered_lines(&cart, &[line(1, None, 4)]), None);
-    }
-
-    #[test]
-    fn hidden_parent_hides_its_children() {
-        let rows = vec![
-            (1, None, true),
-            (2, Some(1), true),
-            (3, None, false),
-            (4, Some(3), true),
-        ];
-        let shown = visible_shop_categories(rows, |c| *c);
-        assert_eq!(shown, vec![(1, None, true), (2, Some(1), true)]);
-    }
-
-    #[test]
-    fn checkout_form_rules() {
-        let settings = json!({
-            "checkout": { "requireName": true, "requireZip": true },
-            "shipping": { "shippingType": "delivery", "shippingCountries": ["DE"] },
-        });
-        let mut form = CheckoutForm::default();
-        let field = |r: Result<()>| match r {
-            Err(BusinessError::Exception { field, .. }) => field,
-            _ => None,
-        };
-        assert_eq!(
-            field(assert_checkout_form(&settings, &form)).as_deref(),
-            Some("customerName")
-        );
-        form.customer_name = Some("Ann".into());
-        form.shipping_address = Some(json!({ "line1": "Main 1", "zip": "1", "country": "fr" }));
-        assert_eq!(
-            field(assert_checkout_form(&settings, &form)).as_deref(),
-            Some("shippingAddress.country")
-        );
-        form.shipping_address = Some(json!({ "line1": "Main 1", "zip": "1", "country": "de" }));
-        assert!(assert_checkout_form(&settings, &form).is_ok());
-        // Pickup needs no address.
-        form.shipping_address = None;
-        form.shipping_type = Some("pickup".into());
-        assert!(assert_checkout_form(&settings, &form).is_ok());
-    }
-
-    #[test]
-    fn inbound_cart_keeps_linked_items() {
-        let cart = json!({ "items": [
-            { "product": { "productId": "5" }, "quantity": 2 },
-            { "product": null, "quantity": 1 },
-            { "product": { "productId": "5" }, "quantity": 1 },
-        ] });
-        let (lines, skipped) = inbound_cart_lines(&cart);
-        assert_eq!(lines, vec![line(5, None, 3)]);
-        assert_eq!(skipped, 1);
-    }
-
-    #[test]
-    fn closed_reason_data() {
-        let BusinessError::Exception {
-            code,
-            data,
-            message,
-            ..
-        } = closed("outsideOpenHours", Some("Bakery"))
-        else {
-            panic!("exception");
-        };
-        assert_eq!(code, "webshopClosed");
-        assert_eq!(message, "\"Bakery\" is closed right now.");
-        assert_eq!(
-            data,
-            Some(json!({ "reason": "outsideOpenHours", "vendorName": "Bakery" }))
-        );
-    }
-}
-
 // ---- abandoned carts (Q.P6-U5, `scanAbandonedCarts`) -----------------------------
 
 /// One claimed abandoned cart.
@@ -1674,4 +1556,123 @@ pub async fn remind_abandoned_cart(
         .map_err(|e| BusinessError::exception(e.to_string(), "internalServerError", 500))?;
     }
     Ok(Reminder::Reminded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line(product_id: i64, variant_id: Option<i64>, quantity: i64) -> PlaceItem {
+        PlaceItem {
+            product_id,
+            variant_id,
+            quantity,
+        }
+    }
+
+    #[test]
+    fn change_line_adds_sets_caps_and_removes() {
+        let cart = vec![line(1, None, 2), line(2, Some(5), 1)];
+        assert_eq!(
+            change_line(&cart, &line(1, None, 3), Mode::Add),
+            vec![line(1, None, 5), line(2, Some(5), 1)]
+        );
+        assert_eq!(
+            change_line(&cart, &line(2, Some(5), 0), Mode::Set),
+            vec![line(1, None, 2)]
+        );
+        assert_eq!(
+            change_line(&cart, &line(3, None, 20_000), Mode::Add)[2],
+            line(3, None, 10_000)
+        );
+        // A different variant is another line.
+        assert_eq!(change_line(&cart, &line(2, None, 1), Mode::Add).len(), 3);
+    }
+
+    #[test]
+    fn subtract_keeps_lines_added_meanwhile() {
+        let cart = vec![line(1, None, 3), line(2, None, 1)];
+        assert_eq!(
+            subtract_ordered_lines(&cart, &[line(1, None, 2)]),
+            Some(vec![line(1, None, 1), line(2, None, 1)])
+        );
+        assert_eq!(
+            subtract_ordered_lines(&cart, &[line(2, None, 1)]),
+            Some(vec![line(1, None, 3)])
+        );
+        // A second submit: the cart no longer holds the order.
+        assert_eq!(subtract_ordered_lines(&cart, &[line(1, None, 4)]), None);
+    }
+
+    #[test]
+    fn hidden_parent_hides_its_children() {
+        let rows = vec![
+            (1, None, true),
+            (2, Some(1), true),
+            (3, None, false),
+            (4, Some(3), true),
+        ];
+        let shown = visible_shop_categories(rows, |c| *c);
+        assert_eq!(shown, vec![(1, None, true), (2, Some(1), true)]);
+    }
+
+    #[test]
+    fn checkout_form_rules() {
+        let settings = json!({
+            "checkout": { "requireName": true, "requireZip": true },
+            "shipping": { "shippingType": "delivery", "shippingCountries": ["DE"] },
+        });
+        let mut form = CheckoutForm::default();
+        let field = |r: Result<()>| match r {
+            Err(BusinessError::Exception { field, .. }) => field,
+            _ => None,
+        };
+        assert_eq!(
+            field(assert_checkout_form(&settings, &form)).as_deref(),
+            Some("customerName")
+        );
+        form.customer_name = Some("Ann".into());
+        form.shipping_address = Some(json!({ "line1": "Main 1", "zip": "1", "country": "fr" }));
+        assert_eq!(
+            field(assert_checkout_form(&settings, &form)).as_deref(),
+            Some("shippingAddress.country")
+        );
+        form.shipping_address = Some(json!({ "line1": "Main 1", "zip": "1", "country": "de" }));
+        assert!(assert_checkout_form(&settings, &form).is_ok());
+        // Pickup needs no address.
+        form.shipping_address = None;
+        form.shipping_type = Some("pickup".into());
+        assert!(assert_checkout_form(&settings, &form).is_ok());
+    }
+
+    #[test]
+    fn inbound_cart_keeps_linked_items() {
+        let cart = json!({ "items": [
+            { "product": { "productId": "5" }, "quantity": 2 },
+            { "product": null, "quantity": 1 },
+            { "product": { "productId": "5" }, "quantity": 1 },
+        ] });
+        let (lines, skipped) = inbound_cart_lines(&cart);
+        assert_eq!(lines, vec![line(5, None, 3)]);
+        assert_eq!(skipped, 1);
+    }
+
+    #[test]
+    fn closed_reason_data() {
+        let BusinessError::Exception {
+            code,
+            data,
+            message,
+            ..
+        } = closed("outsideOpenHours", Some("Bakery"))
+        else {
+            panic!("exception");
+        };
+        assert_eq!(code, "webshopClosed");
+        assert_eq!(message, "\"Bakery\" is closed right now.");
+        assert_eq!(
+            data,
+            Some(json!({ "reason": "outsideOpenHours", "vendorName": "Bakery" }))
+        );
+    }
 }

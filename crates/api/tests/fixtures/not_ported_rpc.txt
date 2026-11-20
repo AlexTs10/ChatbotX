@@ -8,7 +8,6 @@ actions.reconnectWhatsappAction
 actions.refreshAllChannelTokensAction
 actions.refreshContactProfileAction
 actions.sendWhatsappTemplateAction
-actions.testExternalRequestAction
 analyticsRoutes.getFlowAnalytics
 analyticsRoutes.resetFlowAnalytics
 channelPostAPIs.privateGetChannelPostOptionsByIdsAPI

@@ -60,17 +60,29 @@ pub(crate) async fn inbound_rules(
     deps: &Deps,
     workspace_id: i64,
 ) -> Result<Vec<(AutomatedResponse, KeywordRule)>, JobError> {
+    rules_of_type(deps, workspace_id, "inbound").await
+}
+
+/// The active rules of one `type` (`inbound` / `outbound`), oldest first.
+async fn rules_of_type(
+    deps: &Deps,
+    workspace_id: i64,
+    rule_type: &'static str,
+) -> Result<Vec<(AutomatedResponse, KeywordRule)>, JobError> {
     // ponytail: no 24 h rule cache; one indexed read per message.
     let rows = deps
         .db
         .read(move |conn| {
             let mut stmt = conn.prepare(&format!(
-                r#"{} WHERE "workspaceId" = ?1 AND "status" = 1 AND "type" = 'inbound'
+                r#"{} WHERE "workspaceId" = ?1 AND "status" = 1 AND "type" = ?2
                    ORDER BY "createdAt" ASC, "id" ASC"#,
                 AutomatedResponse::select_sql()
             ))?;
             let rows = stmt
-                .query_map(params![workspace_id], AutomatedResponse::from_row)?
+                .query_map(
+                    params![workspace_id, rule_type],
+                    AutomatedResponse::from_row,
+                )?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows)
         })
@@ -114,6 +126,43 @@ pub(crate) async fn process_automated_response(deps: &Deps, data: &Value) -> Res
     Ok(())
 }
 
+/// `checkOutboundAutomatedResponse` (`replyByOutboundAutomatedResponse`): an
+/// agent's message text against the workspace's outbound (Page) rules.
+pub(crate) async fn check_outbound_automated_response(
+    deps: &Deps,
+    data: &Value,
+) -> Result<(), JobError> {
+    let text = str_of(&data["message"], "text").unwrap_or("").to_owned();
+    let message_id = data["message"].get("id").and_then(id_of);
+    let (Some(message_id), false) = (message_id, text.is_empty()) else {
+        return Ok(());
+    };
+    let conversation_id = data["conversation"].get("id").and_then(id_of);
+    let contact_inbox_id = data["contactInbox"].get("id").and_then(id_of);
+    let (Some(conversation_id), Some(contact_inbox_id)) = (conversation_id, contact_inbox_id)
+    else {
+        return Err(JobError::unrecoverable(
+            "checkOutboundAutomatedResponse: no conversation or contact inbox",
+        ));
+    };
+    let Some(conversation) = load_conversation(&deps.db, conversation_id).await? else {
+        return Err(fail("Conversation not found"));
+    };
+    let Some(contact_inbox) =
+        load_contact_inbox(&deps.db, contact_inbox_id, conversation.contact_id).await?
+    else {
+        return Err(fail("Contact inbox not found"));
+    };
+    let rules = rules_of_type(deps, conversation.workspace_id, "outbound").await?;
+    let message = MessageTextWithFileTypes {
+        id: message_id,
+        text: Some(text),
+        attachment_file_types: Vec::new(),
+    };
+    dispatch_reply(deps, &conversation, &contact_inbox, &message, &rules, false).await?;
+    Ok(())
+}
+
 /// `processPendingMessages`: read the pending list, try the rules, clear it.
 async fn process_pending_messages(
     deps: &Deps,
@@ -152,7 +201,7 @@ async fn process_pending_messages(
         if !messages.is_empty() {
             let rules = inbound_rules(deps, conversation.workspace_id).await?;
             for message in &messages {
-                if dispatch_reply(deps, conversation, contact_inbox, message, &rules).await? {
+                if dispatch_reply(deps, conversation, contact_inbox, message, &rules, true).await? {
                     handled = true;
                     break;
                 }
@@ -163,14 +212,16 @@ async fn process_pending_messages(
     Ok(handled)
 }
 
-/// `dispatchAutomatedResponseReply` for an inbound contact message: the
-/// first matching rule with a published flow or a text reply wins.
+/// `dispatchAutomatedResponseReply`: the first matching rule with a
+/// published flow or a text reply wins. `inbound` = a contact's message
+/// (`contact_message_in`), else an agent's (`agent_message_out`).
 async fn dispatch_reply(
     deps: &Deps,
     conversation: &Conversation,
     contact_inbox: &ContactInbox,
     message: &MessageTextWithFileTypes,
     rules: &[(AutomatedResponse, KeywordRule)],
+    inbound: bool,
 ) -> Result<bool, JobError> {
     let text = message.text.clone().unwrap_or_default();
     let input = MatchInput {
@@ -181,37 +232,44 @@ async fn dispatch_reply(
         if !rule_matches_message(rule, &input) {
             continue;
         }
-        // ponytail: the keyword leaderboard award and the CTWA ads
-        // `keywordMatched` evaluation are not ported.
+        // ponytail: the keyword leaderboard award is not ported. The CTWA ads
+        // `keywordMatched` evaluation waits for its consumer
+        // (`evaluateConversionTrigger` / `sendConversionEvent`, not ported):
+        // a job with no handler fails unrecoverable (DECISIONS 2026-11-20).
         let tracking = json!({
             "aiProvider": "none",
             "messageId": message.id.to_string(),
             "conversationId": conversation.id.to_string(),
             "responseType": "automated_response",
             "startTime": now_ms(),
-            "triggerType": "contact_message_in",
+            "triggerType": if inbound { "contact_message_in" } else { "agent_message_out" },
             "workspaceId": conversation.workspace_id.to_string(),
         });
         if let Some(flow_id) = row.flow_id {
             if !flow_is_published(deps, flow_id).await? {
                 continue;
             }
-            record_keyword_match(deps, conversation, contact_inbox, message.id, row.id, &text)
-                .await?;
+            if row.r#type == "inbound" {
+                record_keyword_match(deps, conversation, contact_inbox, message.id, row.id, &text)
+                    .await?;
+            }
+            let mut data = json!({
+                "conversationId": conversation.id.to_string(),
+                "contactInboxId": contact_inbox.id.to_string(),
+                "flowId": flow_id.to_string(),
+                "trackingContext": tracking,
+                // `webhookChannelOrigin()`: the job runs inside the
+                // inbound (webhook) context.
+                "origin": "channel",
+            });
+            if inbound {
+                data["startedByContactMessage"] = Value::Bool(true);
+            }
             deps.jobs
                 .add(
                     QueueName::Integration,
                     "sendFlow",
-                    json!({ "type": "sendFlow", "data": {
-                        "conversationId": conversation.id.to_string(),
-                        "contactInboxId": contact_inbox.id.to_string(),
-                        "flowId": flow_id.to_string(),
-                        "startedByContactMessage": true,
-                        "trackingContext": tracking,
-                        // `webhookChannelOrigin()`: the job runs inside the
-                        // inbound (webhook) context.
-                        "origin": "channel",
-                    }}),
+                    json!({ "type": "sendFlow", "data": data }),
                     JobOptions::default(),
                 )
                 .await
@@ -221,7 +279,10 @@ async fn dispatch_reply(
         let Some(reply) = row.text.as_deref().filter(|t| !t.is_empty()) else {
             continue;
         };
-        record_keyword_match(deps, conversation, contact_inbox, message.id, row.id, &text).await?;
+        if row.r#type == "inbound" {
+            record_keyword_match(deps, conversation, contact_inbox, message.id, row.id, &text)
+                .await?;
+        }
         // Spun before the variable pass: the rule text is author copy.
         let spun = chatbotx_core::utils::spintax::apply_spintax(reply);
         // ponytail: `resolve_step` spins again after the substitution; contact

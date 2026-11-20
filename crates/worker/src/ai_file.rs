@@ -94,9 +94,29 @@ pub async fn handle_heavy(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     if crate::heavy::action_of(kind).is_some() {
         return crate::heavy::handle_step_job(&deps, &job).await;
     }
+    if kind == "extractTextFromFile" {
+        return crate::heavy_reader::extract_text_from_file(&deps, &job.data["data"]).await;
+    }
+    if kind == "optimizeStoredImage" {
+        // One info line per job: the outcome and the bytes before/after.
+        let started = std::time::Instant::now();
+        let data = &job.data["data"];
+        let result = crate::stored_image::optimize(&deps, data).await?;
+        tracing::info!(
+            job_id = %job.job_id,
+            kind = data["kind"].as_str(),
+            workspace_id = data["workspaceId"].as_str(),
+            outcome = result["outcome"].as_str(),
+            bytes_before = result["bytesBefore"].as_u64(),
+            bytes_after = result["bytesAfter"].as_u64(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "Stored image optimization finished"
+        );
+        return Ok(Value::Null);
+    }
     if kind != "processAIFile" {
-        // ponytail: speech to text, extract-text and analyze-image heavy
-        // jobs are not ported (Q.W2 spec).
+        // ponytail: `analyzeImage` needs a vision reply model (no image part
+        // in `crate::ai` yet); speech to text is a flow-step job.
         return Err(JobError::unrecoverable(format!(
             "Heavy job action is not available: {kind}"
         )));
