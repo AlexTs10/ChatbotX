@@ -371,9 +371,11 @@ async fn graph_get(url: String, bearer: Option<String>) -> Result<Value> {
             let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
             let message = chatbotx_core::utils::graph_error::format_graph_error(body.get("error"))
                 .unwrap_or_else(|| "Meta Graph request failed".to_owned());
+            // A `MessengerAPIException` (SdkException): `toKnownOrpcError`
+            // answers `BAD_REQUEST` with the Graph status.
             Err(BusinessError::exception(
                 message,
-                "businessError",
+                "BAD_REQUEST",
                 status.clamp(400, 599),
             ))
         }
@@ -485,7 +487,32 @@ pub async fn list_forms(db: &Db, workspace_id: i64, page_id: String) -> Result<V
         None,
     )
     .await?;
-    Ok(body["data"].as_array().cloned().unwrap_or_default())
+    // `listFacebookLeadAdsFormsPublicResponse` strips unknown keys.
+    let forms = body["data"].as_array().cloned().unwrap_or_default();
+    Ok(forms.into_iter().map(public_form).collect())
+}
+
+/// One form as the public schema: `{ id, name, status, questions? }`, each
+/// question `{ key, label, type, id }`.
+pub fn public_form(form: Value) -> Value {
+    let pick = |value: &Value, keys: &[&str]| {
+        let mut out = serde_json::Map::new();
+        for k in keys {
+            if let Some(v) = value.get(*k) {
+                out.insert((*k).to_owned(), v.clone());
+            }
+        }
+        out
+    };
+    let mut out = pick(&form, &["id", "name", "status"]);
+    if let Some(Value::Array(questions)) = form.get("questions") {
+        let questions = questions
+            .iter()
+            .map(|q| Value::Object(pick(q, &["key", "label", "type", "id"])))
+            .collect();
+        out.insert("questions".into(), Value::Array(questions));
+    }
+    Value::Object(out)
 }
 
 /// `getLead`: the lead's `field_data`.

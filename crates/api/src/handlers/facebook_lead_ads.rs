@@ -4,9 +4,8 @@
 use chatbotx_business::facebook_lead_ads::{self as service, CreateInput};
 use serde_json::{Map, Value, json};
 
-use super::contacts::sort_items;
-use super::input::{Input, Str, key};
-use super::qr_codes::public_paging;
+use super::input::{Input, Seg, Str, child, key, type_name};
+use super::qr_codes::{public_paging, sort_query};
 use super::{
     ApiState, CREATING, Call, FINDING, LISTING, MUTATING, Reply, business_error, json, no_content,
 };
@@ -33,23 +32,33 @@ fn field_mapping(input: &mut Input, value: &Value) -> Option<Value> {
         );
         return None;
     };
+    let before = input.issue_count();
     let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let valid = ["key", "label", "type"]
-            .iter()
-            .all(|k| item.get(k).is_some_and(Value::is_string))
-            && item
-                .get("target")
-                .is_some_and(|t| t.is_string() || t.is_null());
-        if !valid {
-            input.issue(&key("fieldMapping"), "invalid_type", "Invalid input");
-            return None;
-        }
+    for (index, item) in items.iter().enumerate() {
+        let path = vec![Seg::Key("fieldMapping".into()), Seg::Index(index)];
+        let Value::Object(item) = item else {
+            let message = format!(
+                "Invalid input: expected object, received {}",
+                type_name(Some(item))
+            );
+            input.issue(&path, "invalid_type", &message);
+            continue;
+        };
         let mut entry = Map::new();
         for k in ["key", "label", "type", "target"] {
-            entry.insert(k.to_owned(), item[k].clone());
+            let value = item.get(k);
+            if k == "target" && value.is_some_and(Value::is_null) {
+                entry.insert(k.to_owned(), Value::Null);
+            } else if let Some(text) =
+                input.string_at(&child(&path, k), value, Str::default(), true)
+            {
+                entry.insert(k.to_owned(), Value::String(text));
+            }
         }
         out.push(Value::Object(entry));
+    }
+    if input.issue_count() > before {
+        return None;
     }
     Some(Value::Array(out))
 }
@@ -63,7 +72,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let mut input = Input::from_query(call.params, call.query);
             let (page, per_page) = public_paging(&mut input);
             let keyword = input.opt_string("keyword", Str::default());
-            let sort = sort_items(input.get("sort"));
+            let sort = sort_query(&mut input, None);
             input.finish()?;
             let (rows, page_count) = service::list(db, ws, page, per_page, keyword, sort)
                 .await

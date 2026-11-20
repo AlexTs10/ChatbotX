@@ -155,7 +155,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
     let ws = call.workspace_id;
     let mut input = match route_id {
         "facebookMarketingMessages.campaigns.create"
-        | "facebookMarketingMessages.campaigns.update" => Input::from_body(call.params, call.body),
+        | "facebookMarketingMessages.campaigns.update"
+        | "facebookMarketingMessages.audiences.create"
+        | "facebookMarketingMessages.audiences.uploadMore" => {
+            Input::from_body(call.params, call.body)
+        }
         _ => Input::from_query(call.params, call.query),
     };
     let campaign =

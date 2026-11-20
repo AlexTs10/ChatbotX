@@ -510,9 +510,10 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "ads.listChannelAdAccounts" => {
             let mut input = Input::from_query(call.params, call.query);
-            let (channel, integration_id) = integration_identity(&mut input);
+            let channel = enum_field(&mut input, "channel", MESSAGING_CHANNELS, true);
+            let integration_id = opt_id(&mut input, "integrationId");
             input.finish()?;
-            graph::channel_ad_accounts(db, ws, &channel, Some(integration_id))
+            graph::channel_ad_accounts(db, ws, &channel.unwrap_or_default(), integration_id)
                 .await
                 .map(|accounts| {
                     let data: Vec<Value> = accounts.into_iter().map(|a| a.account).collect();

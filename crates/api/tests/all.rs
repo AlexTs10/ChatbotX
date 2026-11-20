@@ -42,6 +42,8 @@ mod bot_simulator_public_api;
 mod broadcasts_public_api;
 #[path = "broadcasts_recurrence_public_api.rs"]
 mod broadcasts_recurrence_public_api;
+#[path = "business_error_defined.rs"]
+mod business_error_defined;
 #[path = "capabilities_public_api.rs"]
 mod capabilities_public_api;
 #[path = "channel_integrations_public_api.rs"]
@@ -106,6 +108,8 @@ mod health;
 mod idempotency;
 #[path = "import_upload_url_public_api.rs"]
 mod import_upload_url_public_api;
+#[path = "inbound_webhook_intake_drain.rs"]
+mod inbound_webhook_intake_drain;
 #[path = "inbound_webhooks_public_api.rs"]
 mod inbound_webhooks_public_api;
 #[path = "inbox_teams_public_api.rs"]
@@ -144,6 +148,8 @@ mod minigames_public_api;
 mod mobile_member_scope;
 #[path = "orpc_default_error_code.rs"]
 mod orpc_default_error_code;
+#[path = "p5_fixd_public_api.rs"]
+mod p5_fixd_public_api;
 #[path = "pipelines_activity_public_api.rs"]
 mod pipelines_activity_public_api;
 #[path = "pipelines_items_public_api.rs"]

@@ -529,9 +529,15 @@ pub fn business_error(error: BusinessError, errors: ErrorMap) -> OrpcError {
         } => {
             let message = display_message(&message, &code, data.as_ref());
             let mut out = OrpcError::new(&code, Some(status), Some(&message));
-            out.defined = errors.iter().any(|(c, s)| *c == code && *s == status)
+            let declared = errors.iter().any(|(c, s)| *c == code && *s == status)
                 || common_api_error(&code).is_some_and(|d| d.status == status);
-            out.data = if out.defined { data } else { None };
+            // oRPC `validateORPCError`: a declared code whose data fails its
+            // schema (`invalidRequestData` needs `issues`) is sent undefined,
+            // its data kept.
+            out.defined = declared
+                && (code != "invalidRequestData"
+                    || data.as_ref().is_some_and(|d| d["issues"].is_array()));
+            out.data = if declared { data } else { None };
             out
         }
         BusinessError::Repo(error) => internal_error(&error.message()),
@@ -572,7 +578,12 @@ fn display_message(message: &str, code: &str, data: Option<&Value>) -> String {
     if code == "invalidRequestData" || map.is_empty() {
         return message.to_string();
     }
-    let params = map
+    // ponytail: serde_json maps sort their keys; the only multi-key data
+    // (`validation.maxItemsReached`) is written `{ max, feature }`, so `max`
+    // goes first. Enable `preserve_order` if another shape needs its order.
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by_key(|(key, _)| *key != "max");
+    let params = entries
         .iter()
         .map(|(key, value)| format!("{key}={}", js_string(value)))
         .collect::<Vec<_>>()

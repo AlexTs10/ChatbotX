@@ -11,6 +11,7 @@ import { DatabaseSync } from "node:sqlite"
 import { fileURLToPath } from "node:url"
 import type {
   CreatedMessengerChannel,
+  ErrorLogRow,
   FolderType,
   MmAudienceInput,
   MmCampaignInput,
@@ -294,6 +295,72 @@ class SqliteP108Fixtures {
         )
       }
     })
+  }
+
+  async insertErrorLogs(input: { workspaceId: string; rows: ErrorLogRow[] }): Promise<{ ids: string[] }> {
+    return this.transaction((db) => {
+      const insert = db.prepare(
+        `INSERT INTO "ErrorLog"
+           ("id", "action", "detail", "httpCode", "workspaceId", "contactId", "sourceId", "stackTrace", "createdAt", "updatedAt")
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+      )
+      const ids: string[] = []
+      for (const row of input.rows) {
+        const id = createId()
+        ids.push(String(id))
+        const at = row.createdAt.getTime()
+        insert.run(
+          id,
+          row.action,
+          row.detail,
+          row.httpCode,
+          BigInt(input.workspaceId),
+          row.sourceId ?? null,
+          row.stackTrace ?? null,
+          at,
+          at,
+        )
+      }
+      return { ids }
+    })
+  }
+
+  async createContact(input: {
+    workspaceId: string
+    inboxId: string
+    channel: string
+    sourceId: string
+    firstName: string
+  }): Promise<{ contactId: string; contactInboxId: string; conversationId: string }> {
+    const contactId = createId()
+    const contactInboxId = createId()
+    const conversationId = createId()
+    const now = Date.now()
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO "Contact" ("id", "createdAt", "updatedAt", "workspaceId", "firstName") VALUES (?, ?, ?, ?, ?)`,
+      ).run(contactId, now, now, BigInt(input.workspaceId), input.firstName)
+      db.prepare(
+        `INSERT INTO "ContactInbox"
+           ("id", "createdAt", "updatedAt", "originalContactId", "contactId", "inboxId", "channel", "source", "sourceId")
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'direct', ?)`,
+      ).run(contactInboxId, now, now, contactId, contactId, BigInt(input.inboxId), input.channel, input.sourceId)
+      db.prepare(
+        `INSERT INTO "Conversation" ("id", "createdAt", "updatedAt", "workspaceId", "contactId") VALUES (?, ?, ?, ?, ?)`,
+      ).run(conversationId, now, now, BigInt(input.workspaceId), contactId)
+    })
+    return { contactId: String(contactId), contactInboxId: String(contactInboxId), conversationId: String(conversationId) }
+  }
+
+  async setCustomFieldValue(input: { contactId: string; customFieldId: string; value: string }): Promise<void> {
+    this.open()
+      .prepare(
+        `INSERT INTO "ContactCustomField" ("id", "contactId", "customFieldId", "value")
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT ("contactId", "customFieldId") DO UPDATE SET "value" = excluded."value",
+           "updatedAt" = CAST(unixepoch('subsec') * 1000 AS INTEGER)`,
+      )
+      .run(createId(), BigInt(input.contactId), BigInt(input.customFieldId), input.value)
   }
 
   async close(): Promise<void> {

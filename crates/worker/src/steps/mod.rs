@@ -11,6 +11,7 @@ mod conversation;
 mod decision;
 pub mod delay;
 mod email_marketing;
+mod make;
 mod messenger;
 mod pipeline;
 mod places;
@@ -181,6 +182,7 @@ pub(crate) async fn run(
         );
     }
     match step_type {
+        "make" | "triggerN8n" => make::handle(&ctx).await,
         "condition" => condition::handle(&ctx).await,
         "pipeline" => pipeline::handle(&ctx).await,
         "findPlacesNearMe" => places::handle(&ctx).await,
