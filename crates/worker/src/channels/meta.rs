@@ -153,6 +153,7 @@ pub fn pending_attachment(url: &str, kind: &str) -> Option<IncomingAttachment> {
         height: None,
         name: None,
         is_photo_message: kind == "image",
+        optimized: false,
     })
 }
 

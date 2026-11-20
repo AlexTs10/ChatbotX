@@ -777,6 +777,7 @@ fn attachments_of(m: &Value) -> Vec<IncomingAttachment> {
             height: dims.and_then(|d| d["height"].as_i64()),
             name: raw["name"].as_str().map(str::to_owned),
             is_photo_message: image.is_some(),
+            optimized: false,
         });
     }
     out

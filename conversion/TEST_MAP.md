@@ -1437,7 +1437,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/quick-reply-resume.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/quick-reply-settings.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/read-receipts.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `apps/worker/__tests__/received-message.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
+| `apps/worker/__tests__/received-message.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); Q.P6-U6 (E10): the `message:received` / notification cases in `crates/worker/src/inbound.rs` (unit tests), the rest todo |
 | `apps/worker/__tests__/reconcile-broadcasts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/reconcile-tenants.test.ts` | C | tbd | todo | Workspaces |
 | `apps/worker/__tests__/reconcile.test.ts` | C | `crates/jobs/tests/reconcile.rs` | passing | Scheduler and scheduled jobs |

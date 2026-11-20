@@ -336,7 +336,16 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
             )
             .await?;
         }
-        let row = broadcast_saved(deps, &inbox, &conversation, &stored, is_new, None).await;
+        let row = broadcast_saved(
+            deps,
+            &inbox,
+            &contact_inbox,
+            &conversation,
+            (&stored, received.message.as_ref()),
+            is_new,
+            None,
+        )
+        .await;
         // Also on a redelivery: the job is deduplicated and the challenge
         // claim settles it once.
         if let Some(challenge_id) = &skip_challenge_id
@@ -853,7 +862,16 @@ pub(crate) async fn save_message(
         .await
         .map_err(db_fail)?;
     Ok((
-        broadcast_saved(deps, inbox, conversation, &stored, is_new, client_id).await,
+        broadcast_saved(
+            deps,
+            inbox,
+            contact_inbox,
+            conversation,
+            (&stored, Some(incoming)),
+            is_new,
+            client_id,
+        )
+        .await,
         is_new,
     ))
 }
@@ -1019,29 +1037,134 @@ fn save_message_tx(
 async fn broadcast_saved(
     deps: &Deps,
     inbox: &InboundInbox,
+    contact_inbox: &ContactInbox,
     conversation: &Conversation,
-    stored: &repo_message::MessageWithAttachments,
+    (stored, incoming): (
+        &repo_message::MessageWithAttachments,
+        Option<&IncomingMessage>,
+    ),
     is_new: bool,
     client_id: Option<&str>,
 ) -> Value {
     let row = message_json(stored);
-    if is_new {
-        let mut event = row.clone();
-        if let Some(client_id) = client_id {
-            event["clientId"] = json!(client_id);
-        }
-        crate::chat::queue_event(
-            deps,
-            conversation,
-            inbox.inbox_id,
-            EventType::MessageCreated,
-            event,
-        )
-        .await;
-        // ponytail: the incoming notification job, the `message:received`
-        // event (flow triggers, Q.W2) and the photo re-encode are not ported.
+    if !is_new {
+        return row;
     }
+    let message = &stored.message;
+    let inbound = message.message_type != "outgoing";
+    if let Some(incoming) = incoming {
+        enqueue_photo_optimizations(deps, inbox.workspace_id, incoming, stored).await;
+    }
+    let mut event = row.clone();
+    if let Some(client_id) = client_id {
+        event["clientId"] = json!(client_id);
+    }
+    crate::chat::queue_event(
+        deps,
+        conversation,
+        inbox.inbox_id,
+        EventType::MessageCreated,
+        event,
+    )
+    .await;
+    if inbound {
+        // `enqueueIncomingNotification` (best effort).
+        let added = deps
+            .jobs
+            .add(
+                QueueName::Notification,
+                "notifyIncomingMessage",
+                json!({ "type": "notifyIncomingMessage", "data": {
+                    "workspaceId": inbox.workspace_id.to_string(),
+                    "conversationId": conversation.id.to_string(),
+                    "messageId": message.id.to_string(),
+                    "messageText": message.text.as_deref().map(|t| t.chars().take(140).collect::<String>()),
+                    "contentType": message.content_type,
+                    "attachmentCount": stored.attachments.len(),
+                }}),
+                JobOptions {
+                    job_id: Some(format!("notify-incoming-{}", message.id)),
+                    ..JobOptions::default()
+                },
+            )
+            .await;
+        if let Err(err) = added {
+            tracing::warn!(err = %err, "Unable to enqueue incoming message notification");
+        }
+    }
+    // `emitMessageReceived`: `isFirstIncomingMessage` reads the snapshot taken
+    // before this message's tracking update.
+    let mut payload = json!({
+        "workspaceId": inbox.workspace_id.to_string(),
+        "contactId": contact_inbox.contact_id.to_string(),
+        "contactInboxId": contact_inbox.id.to_string(),
+        "channel": inbox.channel,
+        "inboxId": inbox.inbox_id.to_string(),
+        "occurredAt": chatbotx_db::repo::iso(message.created_at),
+        "messageId": message.id.to_string(),
+        "isFirstIncomingMessage": inbound && contact_inbox.last_incoming_message_at.is_none(),
+    });
+    if let Some(source_id) = &message.source_id {
+        payload["sourceId"] = json!(source_id);
+    }
+    if inbound {
+        payload["origin"] = json!("inbound");
+    }
+    emit_received(deps, payload).await;
     row
+}
+
+/// Emits `message:received`; a bus failure is logged, never raised.
+pub(crate) async fn emit_received(deps: &Deps, payload: Value) {
+    let Some(buses) = deps.events.as_ref() else {
+        return;
+    };
+    if let Some(future) = chatbotx_jobs::events::emit(buses, "message:received", payload)
+        && let Err(err) = future.await
+    {
+        tracing::warn!(err = %err, "message:received emit failed");
+    }
+}
+
+/// `enqueuePhotoOptimizations`: the background re-encode of a new message's
+/// photos that the channel did not encode before the first write.
+async fn enqueue_photo_optimizations(
+    deps: &Deps,
+    workspace_id: i64,
+    incoming: &IncomingMessage,
+    stored: &repo_message::MessageWithAttachments,
+) {
+    use chatbotx_jobs::queues::stored_image::{
+        StoredImageJob, StoredImageOptimizationConfig, enqueue_stored_image_optimizations,
+    };
+    let photos: std::collections::HashSet<&str> = incoming
+        .attachments
+        .iter()
+        .filter(|a| a.is_photo_message && !a.optimized)
+        .map(|a| a.origin_path.as_str())
+        .collect();
+    if photos.is_empty() {
+        return;
+    }
+    let jobs = stored
+        .attachments
+        .iter()
+        .filter(|a| photos.contains(a.origin_path.as_str()))
+        .map(|a| StoredImageJob::Attachment {
+            workspace_id: workspace_id.to_string(),
+            object_key: a.origin_path.clone(),
+            attachment_id: a.id.to_string(),
+            attachment_created_at: chatbotx_db::repo::iso(a.created_at),
+            message_created_at: chatbotx_db::repo::iso(a.message_created_at),
+        })
+        .collect();
+    let config = StoredImageOptimizationConfig {
+        enabled:
+            chatbotx_core::utils::image_optimize_settings::is_stored_image_optimization_enabled(
+                &chatbotx_core::env::ProcessEnv,
+            ),
+    };
+    enqueue_stored_image_optimizations(deps.jobs.as_ref(), &config, jobs).await;
 }
 
 /// `processIncomingMessage`: route a new contact message to its automation.
@@ -1433,7 +1556,7 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
     // `message:delivered` / `message:failed` with the send's metadata (the
     // broadcast-ops listener). ponytail: `message:seen` and
     // `message:received` feed analytics only (Q.D13).
-    if matches!(status.status.as_str(), "delivered" | "failed")
+    if matches!(status.status.as_str(), "delivered" | "failed" | "read")
         && let Some(contact_inbox) =
             crate::load_contact_inbox(&deps.db, contact_inbox_id, conversation.contact_id).await?
     {
@@ -1457,6 +1580,11 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
         let event_type = if status.status == "delivered" {
             extra["providerOccurredAt"] = json!(chatbotx_db::repo::iso(at));
             "message:delivered"
+        } else if status.status == "read" {
+            // `markReadByContact` first, then `message:seen` at the read time.
+            mark_read_by_contact(deps, &conversation, &contact_inbox, at).await?;
+            extra["occurredAt"] = json!(chatbotx_db::repo::iso(at));
+            "message:seen"
         } else {
             extra["errorData"] = status
                 .error
@@ -1474,6 +1602,21 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
             extra,
         )
         .await;
+        if status.status == "delivered" {
+            emit_received(
+                deps,
+                json!({
+                    "workspaceId": workspace_id.to_string(),
+                    "contactId": contact_inbox.contact_id.to_string(),
+                    "contactInboxId": contact_inbox.id.to_string(),
+                    "channel": inbox.channel,
+                    "inboxId": inbox.inbox_id.to_string(),
+                    "occurredAt": chatbotx_db::repo::iso(created_at),
+                    "sourceId": status.message_id,
+                }),
+            )
+            .await;
+        }
     }
     match status.status.as_str() {
         "failed" => {
@@ -1488,8 +1631,6 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
             .await;
         }
         "delivered" | "read" => {
-            // ponytail: the message delivery / read state and `markReadByContact`
-            // are not ported; the "Last Delivered" field is.
             let at = status.timestamp.unwrap_or_else(now_ms);
             let contact_id = conversation.contact_id;
             let result = deps
@@ -1511,6 +1652,34 @@ pub async fn message_status(deps: &Deps, data: &Value) -> Result<(), JobError> {
         _ => {}
     }
     Ok(())
+}
+
+/// `conversationService.markReadByContact`: the advance-only read mark of
+/// the conversation and the contact inbox.
+async fn mark_read_by_contact(
+    deps: &Deps,
+    conversation: &Conversation,
+    contact_inbox: &ContactInbox,
+    seen_at: i64,
+) -> Result<(), JobError> {
+    let (workspace_id, conversation_id) = (conversation.workspace_id, conversation.id);
+    let (contact_inbox_id, contact_id) = (contact_inbox.id, contact_inbox.contact_id);
+    deps.db
+        .write(move |tx| {
+            tx.execute(
+                r#"UPDATE "Conversation" SET "contactLastReadAt" = MAX(COALESCE("contactLastReadAt", ?1), ?1)
+                   WHERE "id" = ?2 AND "workspaceId" = ?3"#,
+                params![seen_at, conversation_id, workspace_id],
+            )?;
+            tx.execute(
+                r#"UPDATE "ContactInbox" SET "contactLastReadAt" = MAX(COALESCE("contactLastReadAt", ?1), ?1), "updatedAt" = ?2
+                   WHERE "id" = ?3 AND "contactId" = ?4"#,
+                params![seen_at, now_ms(), contact_inbox_id, contact_id],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(db_fail)
 }
 
 #[cfg(test)]
@@ -1598,6 +1767,62 @@ pub(crate) mod tests {
         (deps, jobs)
     }
 
+    #[derive(Default)]
+    struct Emitted(Mutex<Vec<(String, Value)>>);
+
+    impl chatbotx_jobs::events::EventEmitter for Emitted {
+        fn emit<'a>(
+            &'a self,
+            event_type: &'a str,
+            payload: Value,
+        ) -> Result<
+            chatbotx_jobs::BoxFuture<'a, Result<String, chatbotx_jobs::events::EventBusError>>,
+            chatbotx_jobs::events::EventBusError,
+        > {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event_type.to_owned(), payload));
+            Ok(Box::pin(async { Ok("1-0".to_owned()) }))
+        }
+    }
+
+    /// `emits message:received with origin: 'inbound' and
+    /// isFirstIncomingMessage` (`received-message.test.ts`): true for the
+    /// contact's first inbound message, false after; none on a redelivery.
+    #[tokio::test]
+    async fn a_new_inbound_message_emits_message_received_once() {
+        let (mut deps, _) = setup().await;
+        let emitted = Arc::new(Emitted::default());
+        deps.events = Some(chatbotx_jobs::events::EventBuses {
+            message: emitted.clone(),
+            flow: emitted.clone(),
+            dashboard: emitted.clone(),
+            error_log: emitted.clone(),
+        });
+        let mut second = payload();
+        second["payload"]["message"]["sourceId"] = json!("m-2");
+        for data in [payload(), payload(), second] {
+            incoming_message(&deps, &data).await.unwrap();
+        }
+        let received: Vec<Value> = emitted
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(t, _)| t == "message:received")
+            .map(|(_, p)| p.clone())
+            .collect();
+        assert_eq!(received.len(), 2, "{received:?}");
+        assert_eq!(received[0]["origin"], "inbound");
+        assert_eq!(received[0]["channel"], "api");
+        assert_eq!(received[0]["inboxId"], "4");
+        assert_eq!(received[0]["sourceId"], "m-1");
+        assert_eq!(received[0]["isFirstIncomingMessage"], true);
+        assert_eq!(received[1]["isFirstIncomingMessage"], false);
+        assert!(received[0]["messageId"].is_string());
+    }
+
     fn payload() -> Value {
         json!({ "integrationType": "api", "integrationIdentifier": "4", "payload": {
             "contact": { "sourceId": "c-1", "firstName": "Ada" },
@@ -1642,7 +1867,24 @@ pub(crate) mod tests {
             .await,
             1
         );
-        let queued: Vec<_> = jobs.0.lock().unwrap().drain(..).collect();
+        let (notify, queued): (Vec<_>, Vec<_>) = jobs
+            .0
+            .lock()
+            .unwrap()
+            .drain(..)
+            .partition(|(queue, ..)| *queue == QueueName::Notification);
+        // `enqueueIncomingNotification` of the new inbound row only.
+        assert_eq!(notify.len(), 1, "{notify:?}");
+        assert_eq!(notify[0].1, "notifyIncomingMessage");
+        assert_eq!(notify[0].2["data"]["messageText"], "hello");
+        assert_eq!(notify[0].2["data"]["attachmentCount"], 0);
+        assert_eq!(
+            notify[0].3.job_id,
+            Some(format!(
+                "notify-incoming-{}",
+                notify[0].2["data"]["messageId"].as_str().unwrap()
+            ))
+        );
         assert_eq!(queued.len(), 1, "a redelivery queues nothing");
         let (queue, name, data, opts) = &queued[0];
         assert_eq!(

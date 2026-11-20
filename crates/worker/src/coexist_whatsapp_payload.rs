@@ -145,6 +145,7 @@ fn attachment_from_json(v: &Value) -> Option<IncomingAttachment> {
         height: v["height"].as_i64(),
         name: v["name"].as_str().map(str::to_owned),
         is_photo_message: v["isPhotoMessage"].as_bool().unwrap_or(false),
+        optimized: false,
     })
 }
 
@@ -266,6 +267,7 @@ fn media_of(message: &Value) -> Option<IncomingAttachment> {
         height: None,
         name: s(media, "caption").map(str::to_owned),
         is_photo_message: key == "image",
+        optimized: false,
     })
 }
 

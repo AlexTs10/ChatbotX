@@ -216,6 +216,8 @@ pub struct IncomingAttachment {
     pub name: Option<String>,
     /// A photo message (re-encoded in the background; files keep their bytes).
     pub is_photo_message: bool,
+    /// Already encoded by the channel before its first write (no re-encode).
+    pub optimized: bool,
 }
 
 /// `IncomingMessage`.

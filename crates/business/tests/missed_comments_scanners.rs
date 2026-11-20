@@ -11,9 +11,11 @@ use chatbotx_business::connection::credentials::{Upstream, UpstreamReply, Upstre
 use common::{fresh_db, setup};
 use serde_json::{Value, json};
 
+type Replies = VecDeque<(u16, Value)>;
+
 /// Answers the scripted replies in order (the last one repeats); records
 /// `url` and headers.
-struct Script(Mutex<(VecDeque<(u16, Value)>, Vec<UpstreamRequest>)>);
+struct Script(Mutex<(Replies, Vec<UpstreamRequest>)>);
 
 impl Script {
     fn new(replies: Vec<(u16, Value)>) -> Self {
