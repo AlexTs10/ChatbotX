@@ -6,45 +6,11 @@ mod rpc_common;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
-use base64::Engine;
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use chatbotx_business::keys::Edition;
-use chatbotx_business::license::LICENSE_ISSUER;
-use ring::rand::SystemRandom;
-use ring::signature::{Ed25519KeyPair, KeyPair};
-use rpc_common::{AGENT, AGENT_TOKEN, OWNER, OWNER_TOKEN, WS, action, call, fixture_as, scalar};
+use rpc_common::{
+    AGENT, AGENT_TOKEN, OWNER, OWNER_TOKEN, WS, action, call, fixture_as, license, scalar,
+};
 use serde_json::{Value, json};
-
-const KID: &str = "test-license-key";
-
-/// A fresh Ed25519 key, its SPKI PEM and a valid `tier` license.
-fn license(tier: &str) -> (String, &'static [(&'static str, &'static str)]) {
-    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-    let pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
-    let mut der = vec![
-        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
-    ];
-    der.extend_from_slice(pair.public_key().as_ref());
-    let pem = format!(
-        "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
-        STANDARD.encode(der)
-    );
-    let now = chatbotx_core::js::now_ms() / 1000;
-    let claims = json!({
-        "customerName": "Acme Corp", "tier": tier, "features": [],
-        "limits": { "maxWorkspaces": null, "maxSeats": null, "maxChannels": null },
-        "licenseId": "lic_settings", "iss": LICENSE_ISSUER, "sub": "customer_1",
-        "iat": now - 60, "exp": now + 86_400,
-    });
-    let head =
-        URL_SAFE_NO_PAD.encode(json!({ "alg": "EdDSA", "kid": KID, "typ": "JWT" }).to_string());
-    let body = URL_SAFE_NO_PAD.encode(claims.to_string());
-    let message = format!("{head}.{body}");
-    let signature = URL_SAFE_NO_PAD.encode(pair.sign(message.as_bytes()).as_ref());
-    let keys: &'static [(&'static str, &'static str)] =
-        Box::leak(vec![(KID, &*Box::leak(pem.into_boxed_str()))].into_boxed_slice());
-    (format!("{message}.{signature}"), keys)
-}
 
 /// `OWNER` is a super admin; the edition is licensed unless `licensed` is false.
 async fn fixture(edition: Edition, licensed: bool) -> rpc_common::Fixture {

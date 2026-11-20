@@ -26,6 +26,7 @@ pub enum IntegrationJobAction {
     ContactMarkAsRead,
     IncomingMessageEcho,
     IncomingMessage,
+    RecordEmailTrackingTransition,
 }
 
 impl IntegrationJobAction {
@@ -42,6 +43,7 @@ impl IntegrationJobAction {
             IntegrationJobAction::ContactMarkAsRead => "contactMarkAsRead",
             IntegrationJobAction::IncomingMessageEcho => "incomingMessageEcho",
             IntegrationJobAction::IncomingMessage => "incomingMessage",
+            IntegrationJobAction::RecordEmailTrackingTransition => "recordEmailTrackingTransition",
         }
     }
 }
@@ -59,7 +61,8 @@ pub fn job_options_by_action(action: IntegrationJobAction) -> JobOptions {
         IntegrationJobAction::EvaluateTemplateSent
         | IntegrationJobAction::EvaluateConversionTrigger
         | IntegrationJobAction::SyncRetargetAudience
-        | IntegrationJobAction::SendGoogleAdsConversion => ads_conversion_retry_options(),
+        | IntegrationJobAction::SendGoogleAdsConversion
+        | IntegrationJobAction::RecordEmailTrackingTransition => ads_conversion_retry_options(),
         IntegrationJobAction::SendConversionEvent => JobOptions {
             priority: Some(CAPI_EVENT_PRIORITY),
             ..ads_conversion_retry_options()

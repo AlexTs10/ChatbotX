@@ -52,8 +52,10 @@ pub(super) const ACTIONS: &[&str] = &[
     "getWebshopLinksAction",
 ];
 
-pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, _input: &Value) -> Outcome {
+pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
     Some(match path {
+        // `productService.list` (the product picker).
+        "productsAPI.listProductsAuthorizedAPI" => list_products(ctx, input).await,
         // `productService.listFormOptions`.
         "productsAPI.listProductFormOptionsAPI" => {
             let ws = ctx.workspace_id;
@@ -354,6 +356,48 @@ async fn categories(ctx: &Ctx<'_>) -> Result<Vec<Value>, OrpcError> {
 
 /// `products/page.tsx`: products, categories, imports, Meta catalog state,
 /// external store links (`null`: Shopify / WooCommerce are not ported).
+/// A `productResource` list row.
+fn list_row_json(row: &product_repo::ProductListRow) -> Value {
+    let mut out = row.product.to_json();
+    out["category"] = json!(row.category);
+    out["subcategory"] = json!(row.subcategory);
+    out["vendor"] = json!(row.vendor);
+    out["variantCount"] = json!(row.variant_count);
+    out["variantInventoryTotal"] = json!(row.variant_inventory_total);
+    out
+}
+
+/// `listProductsAuthorizedAPI`: `listProductsRequest` + `ids` (1..=50).
+async fn list_products(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
+    let input_in = In(input);
+    let ids = match input_in.get("ids") {
+        None => None,
+        Some(_) => {
+            let ids = input_in.ids("ids")?;
+            if ids.is_empty() || ids.len() > PRODUCT_IDS_FILTER_MAX {
+                return Err(invalid());
+            }
+            Some(ids)
+        }
+    };
+    let list = ProductListInput {
+        workspace_id: ctx.workspace_id,
+        name: input_in.opt_str("name")?,
+        category_id: input_in.opt_id("categoryId")?,
+        ids,
+        page: input_in.opt_positive("page")?,
+        per_page: input_in.opt_positive("perPage")?,
+        sort: input_in.sort(),
+        ..ProductListInput::default()
+    };
+    let products = product::list(&ctx.api.db, list).await.map_err(fail)?;
+    let data: Vec<Value> = products.data.iter().map(list_row_json).collect();
+    Ok(json!({ "data": data, "pageCount": products.page_count }))
+}
+
+/// `PRODUCT_IDS_FILTER_MAX`: a picker never holds more products than this.
+const PRODUCT_IDS_FILTER_MAX: usize = 50;
+
 async fn products_page(ctx: &Ctx<'_>, search: &Value) -> Result<Value, OrpcError> {
     require_ecommerce(ctx)?;
     let search_in = In(search);
@@ -367,19 +411,7 @@ async fn products_page(ctx: &Ctx<'_>, search: &Value) -> Result<Value, OrpcError
         ..ProductListInput::default()
     };
     let products = product::list(&ctx.api.db, input).await.map_err(fail)?;
-    let data: Vec<Value> = products
-        .data
-        .iter()
-        .map(|row| {
-            let mut out = row.product.to_json();
-            out["category"] = json!(row.category);
-            out["subcategory"] = json!(row.subcategory);
-            out["vendor"] = json!(row.vendor);
-            out["variantCount"] = json!(row.variant_count);
-            out["variantInventoryTotal"] = json!(row.variant_inventory_total);
-            out
-        })
-        .collect();
+    let data: Vec<Value> = products.data.iter().map(list_row_json).collect();
     let imports = public(
         ctx,
         "products.listImports",

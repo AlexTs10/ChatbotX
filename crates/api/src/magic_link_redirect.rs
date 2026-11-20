@@ -55,7 +55,7 @@ fn redirect(destination: &str) -> Response {
 }
 
 /// `loadServableWorkspace(...).servable`: it exists and no deletion is scheduled.
-async fn servable(api: &ApiState, workspace_id: i64) -> bool {
+pub(crate) async fn servable(api: &ApiState, workspace_id: i64) -> bool {
     tx::read(&api.db, move |c| {
         Ok(c.query_row(
             r#"SELECT count(*) FROM "Workspace" WHERE "id" = ?1 AND "scheduledDeletionAt" IS NULL"#,

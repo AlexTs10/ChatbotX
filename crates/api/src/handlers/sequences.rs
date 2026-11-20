@@ -1,5 +1,5 @@
 //! `features/sequences/api/public.ts` (P3.6-D2 `sequences.create`; Q.D5 the
-//! rest). `sequences.listStepContacts` needs the sequence analytics (Q.D11).
+//! rest; Q.P6-U5 `sequences.listStepContacts`).
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::folder;
@@ -29,6 +29,18 @@ pub const ROUTES: &[&str] = &[
     "sequences.createFolder",
     "sequences.updateFolder",
     "sequences.deleteFolder",
+    "sequences.listStepContacts",
+];
+
+/// `sequenceStepEventTypes` (message + flow event types).
+pub(crate) const STEP_EVENT_TYPES: &[&str] = &[
+    "message:sent",
+    "message:delivered",
+    "message:seen",
+    "message:failed",
+    "message:received",
+    "flow:clicked",
+    "flow:ref",
 ];
 
 /// `possibleErrorsOnCreatingInFolder`.
@@ -379,6 +391,31 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 .await
                 .map_err(|e| business_error(e, MUTATING))?;
             Ok(no_content())
+        }
+        "sequences.listStepContacts" => {
+            let mut input = Input::from_query(call.params, call.query);
+            let id = input.digits_id("id").unwrap_or_default();
+            let step_id = input.digits_id("stepId").unwrap_or_default();
+            let value = input.get("eventType").cloned();
+            let event_type =
+                input.enum_at(&key("eventType"), value.as_ref(), STEP_EVENT_TYPES, true);
+            let (page, per_page) = public_paging(&mut input);
+            input.finish()?;
+            service::assert_owned(db, ws, id)
+                .await
+                .map_err(|e| business_error(e, FINDING))?;
+            service::list_step_contacts_page(
+                db,
+                ws,
+                id,
+                step_id,
+                event_type.unwrap_or_default(),
+                page,
+                per_page,
+            )
+            .await
+            .map(|page| json(200, page))
+            .map_err(|e| business_error(e, FINDING))
         }
         _ => Err(crate::routes::not_ported_error()),
     }

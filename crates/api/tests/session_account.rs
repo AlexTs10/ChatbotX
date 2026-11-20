@@ -388,6 +388,26 @@ async fn force_change_password_clears_the_gate_and_rotates_the_session() {
 }
 
 #[tokio::test]
+async fn force_change_password_answers_on_the_spa_stub_path() {
+    let state = state().await;
+    let response = rpc_post(
+        &state,
+        "/rpc/actions/forceChangePasswordAction",
+        "tok9",
+        json!({ "args": [{
+            "currentPassword": "Old#password1",
+            "newPassword": "New#password2",
+            "passwordConfirmation": "New#password2"
+        }] }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(set_cookie_token(&response).is_some());
+    assert_eq!(json_body(response).await, json!({ "json": { "ok": true } }));
+    assert!(!user_row(&state, 9).await.2);
+}
+
+#[tokio::test]
 async fn force_change_password_errors() {
     let state = state().await;
     let rpc_error = |code: &str, status: u16, message: &str| {

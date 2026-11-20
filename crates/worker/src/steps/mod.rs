@@ -11,7 +11,7 @@ mod conversation;
 mod coupon;
 mod decision;
 pub mod delay;
-mod email_marketing;
+pub(crate) mod email_marketing;
 mod external_request;
 mod facebook_audience;
 mod make;

@@ -48,6 +48,8 @@ pub const PORTED: &[&str] = &[
     "refreshShortLivedChannelTokens",
     "dispatchProfileSnapshots",
     "reconcileMetaCatalogSyncs",
+    "scanAbandonedCarts",
+    "purgeWorkspaces",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -65,6 +67,14 @@ pub const BROADCAST_JOBS: &[&str] = &[
 ];
 
 /// The `createQueueWorker(schedule, ..)` switch.
+/// Proves `Send` at a concrete lifetime (works around the rustc
+/// "`Send` is not general enough" error of the large `handle` future).
+fn send<'a, T>(
+    f: impl std::future::Future<Output = T> + Send + 'a,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>> {
+    Box::pin(f)
+}
+
 pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     let kind = str_of(&job.data, "type").unwrap_or("").to_owned();
     let data = job.data["data"].clone();
@@ -73,8 +83,14 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
     };
     let out = match kind.as_str() {
         "enqueueBroadcast" => broadcast::enqueue_broadcast(&deps).await?,
-        "prepareBroadcast" => broadcast::prepare_broadcast(&deps, id("broadcastId")?).await?,
-        "sendBroadcast" => broadcast::process_broadcast_contacts(&deps, id("broadcastId")?).await?,
+        "prepareBroadcast" => send(broadcast::prepare_broadcast(&deps, id("broadcastId")?)).await?,
+        "sendBroadcast" => {
+            send(broadcast::process_broadcast_contacts(
+                &deps,
+                id("broadcastId")?,
+            ))
+            .await?
+        }
         "reconcileBroadcasts" => broadcast::reconcile_broadcasts(&deps).await?,
         "finalizeBroadcasts" => broadcast::finalize_broadcasts(&deps).await?,
         "purgeBroadcasts" => broadcast::purge_broadcasts(&deps).await?,
@@ -202,6 +218,11 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::google_ads_housekeeping::sync_setups(&deps).await?;
             Value::Null
         }
+        "scanAbandonedCarts" => send(scan_abandoned_carts(&deps)).await?,
+        "purgeWorkspaces" => {
+            purge_workspaces(&deps).await?;
+            Value::Null
+        }
         other if crate::leaderboard::run_schedule(&deps, other).await => Value::Null,
         other => {
             tracing::warn!(job_type = other, "Unknown schedule job type");
@@ -228,6 +249,95 @@ pub async fn register(store: &dyn SchedulerStore) -> Result<(), JobsError> {
                 .upsert_job_scheduler(&def.id, &def.repeat, &def.template)
                 .await?;
         }
+    }
+    Ok(())
+}
+
+/// `scanAbandonedCarts` (every minute): claims the due carts in batches of
+/// 100 (at most 20 batches a run) and reminds each; a failed reminder is
+/// logged, not retried; a blocked owner's carts are claimed and skipped.
+/// ponytail: no distributed lock (one worker process runs the schedules).
+async fn scan_abandoned_carts(deps: &Deps) -> Result<Value, JobError> {
+    use chatbotx_business::webshop::{Reminder, claim_abandoned_carts, remind_abandoned_cart};
+    const BATCH_SIZE: i64 = 100;
+    const MAX_BATCHES_PER_RUN: usize = 20;
+    let bus = crate::order_payment::bus(deps);
+    let mut reminded = 0;
+    for _ in 0..MAX_BATCHES_PER_RUN {
+        let carts = claim_abandoned_carts(&deps.db, BATCH_SIZE, chatbotx_db::repo::now_ms())
+            .await
+            .map_err(|e| JobError::retryable(e.to_string()))?;
+        for cart in &carts {
+            if crate::is_blocked_workspace(&deps.db, &cart.workspace_id.to_string()).await? {
+                continue;
+            }
+            match remind_abandoned_cart(&deps.db, deps.jobs.as_ref(), &bus, *cart).await {
+                Ok(Reminder::Reminded) => reminded += 1,
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(err = %err, cart_id = cart.id, "Abandoned cart reminder failed");
+                }
+            }
+        }
+        if (carts.len() as i64) < BATCH_SIZE {
+            break;
+        }
+    }
+    if reminded > 0 {
+        tracing::info!(reminded, "Abandoned cart scanner reminded carts");
+    }
+    Ok(serde_json::json!({ "reminded": reminded }))
+}
+
+/// `purgeWorkspaces`: `purgeDueScheduled` with the payment-provider
+/// teardown; one run at a time in this process.
+/// ponytail: `allIntegrations` (provider disconnects) is not passed, as in
+/// `purge_due_scheduled` (its module doc).
+async fn purge_workspaces(deps: &Deps) -> Result<(), JobError> {
+    use chatbotx_business::workspace::purge::{PaymentTeardown, PurgeOptions, purge_due_scheduled};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        tracing::warn!("purgeWorkspaces: skipped because a local purge is still running");
+        return Ok(());
+    }
+    let db = Arc::clone(&deps.db);
+    let app_url = deps.app_url.clone();
+    let teardown: PaymentTeardown = Arc::new(move |workspace_id| {
+        let (db, app_url) = (Arc::clone(&db), app_url.clone());
+        Box::pin(async move {
+            let ctx = chatbotx_business::payment_provider::Ctx {
+                db: &db,
+                encryption: chatbotx_business::meta_catalog::process_encryption(),
+                app_url: &app_url,
+            };
+            chatbotx_business::payment_provider::teardown_for_purge(ctx, workspace_id).await
+        })
+    });
+    let options = PurgeOptions {
+        teardown_payment_providers: Some(teardown),
+        ..PurgeOptions::default()
+    };
+    // `purge_due_scheduled` is not `Send`: it runs on its own thread and
+    // runtime.
+    let db = Arc::clone(&deps.db);
+    let outcome = tokio::task::spawn_blocking(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?
+            .block_on(purge_due_scheduled(&db, options))
+            .map_err(|e| e.to_string())
+    })
+    .await;
+    RUNNING.store(false, Ordering::SeqCst);
+    let deleted = outcome
+        .map_err(|e| e.to_string())
+        .and_then(|r| r)
+        .map_err(JobError::retryable)?;
+    if deleted > 0 {
+        tracing::info!(deleted, "purgeWorkspaces: workspaces purged");
     }
     Ok(())
 }

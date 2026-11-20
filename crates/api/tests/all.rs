@@ -86,10 +86,14 @@ mod coupons_discount_codes_long_ids;
 mod custom_fields_public_api;
 #[path = "decisions_public_api.rs"]
 mod decisions_public_api;
+#[path = "downloads_routes.rs"]
+mod downloads_routes;
 #[path = "dynamic_images_public_api.rs"]
 mod dynamic_images_public_api;
 #[path = "ecommerce_open_hours_public_api.rs"]
 mod ecommerce_open_hours_public_api;
+#[path = "email_topic_routes.rs"]
+mod email_topic_routes;
 #[path = "email_topics_public_api.rs"]
 mod email_topics_public_api;
 #[path = "error_logs_public_api.rs"]
@@ -202,6 +206,8 @@ mod routes_channel_and_mobile_auth;
 mod routes_public_scope;
 #[path = "rpc_automation_pages.rs"]
 mod rpc_automation_pages;
+#[path = "rpc_campaign_stats.rs"]
+mod rpc_campaign_stats;
 #[path = "rpc_channel_connect.rs"]
 mod rpc_channel_connect;
 #[path = "rpc_channel_post_options.rs"]
@@ -222,6 +228,8 @@ mod rpc_leaderboard_actions;
 mod rpc_platform_credentials;
 #[path = "rpc_procedures.rs"]
 mod rpc_procedures;
+#[path = "rpc_products_picker_and_access.rs"]
+mod rpc_products_picker_and_access;
 #[path = "rpc_screen_actions.rs"]
 mod rpc_screen_actions;
 #[path = "rpc_session_auth.rs"]
@@ -244,6 +252,8 @@ mod rpc_workspace_members;
 mod saved_replies_sla_public_api;
 #[path = "sequences_create_public_api.rs"]
 mod sequences_create_public_api;
+#[path = "sequences_list_step_contacts_api.rs"]
+mod sequences_list_step_contacts_api;
 #[path = "sequences_public_api.rs"]
 mod sequences_public_api;
 #[path = "session_account.rs"]

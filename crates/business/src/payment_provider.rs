@@ -486,6 +486,36 @@ pub async fn disconnect(ctx: Ctx<'_>, workspace_id: i64, provider: &'static str)
     Ok(true)
 }
 
+/// `teardownForPurge`: lets go of every provider of a purged workspace on
+/// the provider side (best effort); the rows go with the workspace cascade.
+pub async fn teardown_for_purge(ctx: Ctx<'_>, workspace_id: i64) -> Result<()> {
+    let rows: Vec<EcommercePaymentProvider> = tx::read(ctx.db, move |conn| {
+        Ok(find_many(
+            conn,
+            r#"WHERE "workspaceId" = ?1 ORDER BY "provider" ASC"#,
+            &[&workspace_id],
+        )?)
+    })
+    .await?;
+    for row in &rows {
+        if is_stripe_key_row(row) {
+            let secret = stripe_secret(ctx.encryption, row);
+            let webhook = secret
+                .as_ref()
+                .map(|s| s.webhook_id.clone())
+                .or(row.webhook_endpoint_id.clone());
+            if let (Some(secret), Some(webhook)) = (&secret, webhook) {
+                remove_stripe_webhook_quietly(workspace_id, &[&secret.secret_key], &webhook).await;
+            }
+        } else if row.provider == "stripe" {
+            deauthorize_quietly(ctx, row).await;
+        } else {
+            remove_paypal_webhook_quietly(ctx.encryption, row).await;
+        }
+    }
+    Ok(())
+}
+
 async fn remove_connection(db: &Db, workspace_id: i64, provider: &'static str) -> Result<()> {
     tx::write(db, move |tx| {
         tx.execute(

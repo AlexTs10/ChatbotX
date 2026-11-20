@@ -686,6 +686,14 @@ async fn export(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, super::FINDING))?;
+    Ok(json(
+        200,
+        json!({ "fileName": out.file_name, "export": export_envelope(&out) }),
+    ))
+}
+
+/// The export document of [`flow::build_export`] (format version 2).
+pub fn export_envelope(out: &flow::FlowExport) -> Value {
     let fields = |rows: &[(i64, String, String)]| -> Map<String, Value> {
         rows.iter()
             .map(|(field_id, name, field_type)| {
@@ -696,7 +704,7 @@ async fn export(state: &ApiState, call: Call<'_>) -> Reply {
             })
             .collect()
     };
-    let envelope = json!({
+    json!({
         "formatVersion": FLOW_EXPORT_FORMAT_VERSION,
         "exportedAt": date(chatbotx_db::repo::now_ms()),
         "source": { "workspaceId": id(out.flow.workspace_id), "flowId": id(out.flow.id) },
@@ -710,11 +718,7 @@ async fn export(state: &ApiState, call: Call<'_>) -> Reply {
         }],
         "customFields": fields(&out.custom_fields),
         "botFields": fields(&out.bot_fields),
-    });
-    Ok(json(
-        200,
-        json!({ "fileName": out.file_name, "export": envelope }),
-    ))
+    })
 }
 
 /// `flows.import`: `startFlowImport` (`userId: null`), then the import job,

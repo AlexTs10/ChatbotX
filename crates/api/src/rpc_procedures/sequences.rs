@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 
 use super::{Ctx, In, Outcome, action_fail, arg, fail, invalid, page};
 use crate::handlers::input::Input;
+use crate::handlers::sequences::STEP_EVENT_TYPES;
 use crate::orpc::OrpcError;
 
 /// The ported actions.
@@ -20,17 +21,6 @@ pub const ACTIONS: &[&str] = &[
     "deleteSequenceStepAction",
     // The detail page query (`features/sequences/queries`).
     "getSequence",
-];
-
-/// `sequenceStepEventTypes` (message + flow event types).
-const STEP_EVENT_TYPES: &[&str] = &[
-    "message:sent",
-    "message:delivered",
-    "message:seen",
-    "message:failed",
-    "message:received",
-    "flow:clicked",
-    "flow:ref",
 ];
 
 /// `getSequence` → `findWithSteps`: the sequence, its steps by `order` with

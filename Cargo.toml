@@ -72,6 +72,11 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# The bundled SQLite at -O0 made each connection open (schema parse) the
+# main cost of the db tests (Q.P6-U5).
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = "fat"

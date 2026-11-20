@@ -162,6 +162,8 @@ mod ecommerce_open_hours_is_open;
 mod ecommerce_open_hours_service;
 #[path = "ecommerce_settings_service.rs"]
 mod ecommerce_settings_service;
+#[path = "email_tracking.rs"]
+mod email_tracking;
 #[path = "error_log_service.rs"]
 mod error_log_service;
 #[path = "events_commerce_events.rs"]
@@ -290,6 +292,8 @@ mod pipeline_item_assignees;
 mod pipeline_mutation_engine;
 #[path = "pipeline_naming.rs"]
 mod pipeline_naming;
+#[path = "pipeline_stage_bulk_job.rs"]
+mod pipeline_stage_bulk_job;
 #[path = "pipeline_template.rs"]
 mod pipeline_template;
 #[path = "pipeline_update_lock.rs"]

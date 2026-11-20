@@ -38,6 +38,27 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
     if name == "refreshAllChannelTokensAction" {
         return Some(refresh_all_channel_tokens(ctx).await);
     }
+    if name == "assertCurrentUserCanAccessChatbot" {
+        // `lib/auth/utils.ts` (a plain "use server" function, `args: [workspaceId]`);
+        // support sessions are not ported, so access = a real membership.
+        return Some(
+            async {
+                let workspace_id = arg(args, 0)
+                    .as_str()
+                    .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+                    .and_then(|id| id.parse::<i64>().ok());
+                match workspace_id {
+                    Some(id) if is_member(ctx, id).await? => Ok(Value::Null),
+                    _ => Err(action_fail(BusinessError::exception(
+                        "User is not associated with this workspace",
+                        "systemError",
+                        400,
+                    ))),
+                }
+            }
+            .await,
+        );
+    }
     if !matches!(name, "createWebchatAction" | "createApiAction") {
         return None;
     }

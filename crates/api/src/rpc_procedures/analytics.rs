@@ -23,7 +23,7 @@ fn route(path: &str) -> Option<String> {
     }
     let name = name.strip_suffix("AnalyticsAPI")?;
     if name.starts_with("get") {
-        return None; // broadcast / sequence stats: other inputs, not ported here.
+        return None; // broadcast / sequence stats: see `stats_route`.
     }
     let name = name.replace("AIProviders", "AiProviders");
     let id = format!("analytics.{name}");
@@ -32,7 +32,47 @@ fn route(path: &str) -> Option<String> {
         .then_some(id)
 }
 
+/// The broadcast / sequence step stats: path parameters, not a query.
+fn stats_route(path: &str, input: &Value) -> Option<(&'static str, Vec<(&'static str, String)>)> {
+    let text = |key: &str| match &input[key] {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    };
+    match path {
+        "analyticsRoutes.getBroadcastStatsAnalyticsAPI" => Some((
+            "analytics.broadcastStats",
+            vec![("broadcastId", text("broadcastId"))],
+        )),
+        "analyticsRoutes.getSequenceStepStatsAnalyticsAPI" => Some((
+            "analytics.sequenceStepStats",
+            vec![
+                ("sequenceId", text("sequenceId")),
+                ("stepId", text("stepId")),
+            ],
+        )),
+        _ => None,
+    }
+}
+
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
+    if let Some((route_id, params)) = stats_route(path, input) {
+        // The private schema: each id is a required numeric string (400).
+        if params
+            .iter()
+            .any(|(_, v)| v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()))
+        {
+            return Some(Err(super::invalid()));
+        }
+        return Some(
+            public(ctx, route_id, &params, Some(""), None)
+                .await
+                .map_err(|error| match error.status {
+                    422 => super::invalid(),
+                    _ => error,
+                }),
+        );
+    }
     let route_id = route(path)?;
     let query = query(input);
     // A schema failure is the private route's oRPC 400, not the public 422.

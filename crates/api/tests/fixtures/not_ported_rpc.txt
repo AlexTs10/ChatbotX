@@ -1,26 +1,6 @@
 # /rpc procedures and SPA server actions that answer "not ported" (Q.P6-audit).
-actions.assertCurrentUserCanAccessChatbot
-actions.createProduct
-actions.deleteContactCustomFields
-actions.enableAutomatedResponse
-actions.forceChangePasswordAction
-actions.getCurrentUser
-actions.getCurrentUserAndAllLinkedWorkspaces
-actions.getCurrentUserAndTargetWorkspace
-actions.getCurrentUserId
-actions.persistReconnectAuthAndResubscribe
 actions.reconnectWhatsappAction
-actions.resetBotFields
-actions.resetContactCustomFields
-actions.submitAvailabilityRange
-actions.submitBooking
-actions.updateAutomatedResponse
-actions.updateIntegrationOpenAI
-actions.updateMagicLink
-actions.updateProduct
-analyticsRoutes.getBroadcastStatsAnalyticsAPI
 analyticsRoutes.getFlowAnalytics
-analyticsRoutes.getSequenceStepStatsAnalyticsAPI
 analyticsRoutes.resetFlowAnalytics
 connectSessionsAPI.cancelConnectSessionAPI
 connectSessionsAPI.connectSessionTargetsAPI
@@ -71,5 +51,4 @@ messagesAPI.createMessageAuthenticatedAPI
 messagesAPI.deleteMessageAuthenticatedAPI
 messagesAPI.editMessageAuthenticatedAPI
 messagesAPI.findMessageAuthenticatedAPI
-productsAPI.listProductsAuthorizedAPI
 refLinksAPI.getRefLinksAuthenticatedAPI
