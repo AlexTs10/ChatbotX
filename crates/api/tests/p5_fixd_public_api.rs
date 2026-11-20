@@ -113,6 +113,17 @@ async fn channel_ad_accounts_need_no_integration_id() {
     .await;
     assert_eq!(status, 200, "{out}");
     assert_eq!(out, json!({ "data": [] }));
+    // `zodBigintAsString()` has no length cap: 19 digits are an unknown id.
+    let (status, out) = call(
+        &fx,
+        "ads.listChannelAdAccounts",
+        WS,
+        &[("channel", "messenger")],
+        Some("integrationId=1000000000000000001"),
+        None,
+    )
+    .await;
+    assert_eq!((status, out), (200, json!({ "data": [] })));
     let (status, out) = call(
         &fx,
         "ads.listChannelAdAccounts",

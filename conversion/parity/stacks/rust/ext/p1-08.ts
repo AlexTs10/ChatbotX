@@ -91,6 +91,12 @@ class SqliteP108Fixtures {
     if (!this.db) {
       const db = new DatabaseSync(this.path)
       db.exec("PRAGMA busy_timeout = 10000; PRAGMA foreign_keys = ON;")
+      // The app function of the `Contact` full-name index (crates/db section 3).
+      db.function("regexp_replace", { deterministic: true }, (text, pattern, replacement, flags) =>
+        text == null
+          ? null
+          : String(text).replace(new RegExp(String(pattern), String(flags ?? "")), String(replacement)),
+      )
       this.db = db
     }
     return this.db
