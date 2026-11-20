@@ -527,33 +527,6 @@ pub async fn send_test_event(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn graph_message_and_dataset_id() {
-        let body = json!({ "error": {
-            "message": "(#200) App does not have page_events permission",
-            "code": 200, "error_subcode": 2804079,
-        }});
-        assert_eq!(
-            graph_message(&body),
-            "(#200 - 2804079) App does not have page_events permission"
-        );
-        assert_eq!(
-            graph_message(&Value::Null),
-            "Meta Conversions API call failed"
-        );
-        assert_eq!(
-            read_dataset_id(&json!({ "data": { "id": " 7 " } })).ok(),
-            Some("7".into())
-        );
-        assert!(read_dataset_id(&json!({ "id": "  " })).is_err());
-        assert_eq!(segment("1/2 3"), "1%2F2%203");
-    }
-}
-
 // ---- dedicated token connect (OAuth) -------------------------------------------
 
 /// A Graph call of the dedicated connect through `upstream` (bearer token).
@@ -655,4 +628,31 @@ pub async fn connect_with_token(
         Ok(updated > 0)
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn graph_message_and_dataset_id() {
+        let body = json!({ "error": {
+            "message": "(#200) App does not have page_events permission",
+            "code": 200, "error_subcode": 2804079,
+        }});
+        assert_eq!(
+            graph_message(&body),
+            "(#200 - 2804079) App does not have page_events permission"
+        );
+        assert_eq!(
+            graph_message(&Value::Null),
+            "Meta Conversions API call failed"
+        );
+        assert_eq!(
+            read_dataset_id(&json!({ "data": { "id": " 7 " } })).ok(),
+            Some("7".into())
+        );
+        assert!(read_dataset_id(&json!({ "id": "  " })).is_err());
+        assert_eq!(segment("1/2 3"), "1%2F2%203");
+    }
 }
