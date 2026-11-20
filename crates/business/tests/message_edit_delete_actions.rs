@@ -33,8 +33,8 @@ fn message(
     Ok(())
 }
 
-/// Conversation 70 (contact inbox 50 on messenger inbox 5) and an empty
-/// conversation 71.
+/// Conversation 70 of contact 1 (contact inbox 50 on messenger inbox 5) and
+/// an empty conversation 71 of contact 2.
 async fn seeded(
     seed: impl FnOnce(&Connection) -> Result<(), chatbotx_db::DbError> + Send + 'static,
 ) -> common::TestDb {
@@ -42,11 +42,13 @@ async fn seeded(
     setup(&db, move |tx| {
         common::inbox(tx, 5, WS, "messenger")?;
         common::contact(tx, 1, WS)?;
+        common::contact(tx, 2, WS)?;
         common::contact_inbox(tx, 50, 1, 5, "messenger", "psid-1")?;
-        for id in [70, 71] {
+        // One DM conversation per contact.
+        for (id, contact) in [(70, 1), (71, 2)] {
             tx.execute(
-                r#"INSERT INTO "Conversation" ("id", "createdAt", "updatedAt", "workspaceId", "contactId") VALUES (?1, ?2, ?2, ?3, 1)"#,
-                params![id, AT, WS],
+                r#"INSERT INTO "Conversation" ("id", "createdAt", "updatedAt", "workspaceId", "contactId") VALUES (?1, ?2, ?2, ?3, ?4)"#,
+                params![id, AT, WS, contact],
             )?;
         }
         seed(tx)

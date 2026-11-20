@@ -248,8 +248,9 @@ async fn post_messages_sends_without_a_user_a_workspace_token_has_no_user() {
 }
 
 /// Adapted: the product message reaches `createOutgoing` on the requested
-/// (WhatsApp) contact inbox, where the Meta catalog step answers 501
-/// `notPorted` (the webchat inbox would answer 422 channelUnsupported).
+/// (WhatsApp) contact inbox, where the product service asks for the
+/// multi-product header (the webchat inbox would answer 422
+/// channelUnsupported).
 #[tokio::test]
 async fn post_messages_hands_a_product_message_to_createoutgoing_unchanged_on_the_requested_inbox()
 {
@@ -267,8 +268,11 @@ async fn post_messages_hands_a_product_message_to_createoutgoing_unchanged_on_th
         })),
     )
     .await;
-    assert_eq!(status, 501, "{body}");
-    assert_eq!(body["code"], json!("notPorted"));
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(
+        body["data"]["issues"],
+        json!("header: sendProductsFieldRequired")
+    );
 }
 
 #[tokio::test]
