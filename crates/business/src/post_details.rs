@@ -27,7 +27,10 @@ pub const CACHE_TTL: Duration = Duration::from_secs(60 * 60 * 24);
 pub const DEGRADED_CACHE_TTL: Duration = Duration::from_secs(60 * 5);
 const TIKTOK_BUSINESS_API_URL: &str = "https://business-api.tiktok.com/open_api/v1.3/";
 
-static CACHE: LazyLock<Mutex<HashMap<String, (Instant, Duration, Value)>>> =
+/// A cached answer: when it was stored, its TTL and the details.
+type Entry = (Instant, Duration, Value);
+
+static CACHE: LazyLock<Mutex<HashMap<String, Entry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// `getPostDetailsCacheKey`: the workspace is part of the key.
