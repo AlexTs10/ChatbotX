@@ -814,7 +814,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/templates-public-read-permissions.test.ts` | C | tbd | todo | Template marketplace (install/share/sync); builder server code |
 | `apps/builder/__tests__/templates-public-scope.test.ts` | C | tbd | todo | Template marketplace (install/share/sync); builder server code |
 | `apps/builder/__tests__/templates-table-installs.test.tsx` | B | - | todo | Template marketplace (install/share/sync); builder jsdom |
-| `apps/builder/__tests__/test-external-request-action.test.ts` | C | tbd | todo | Outbound webhooks; builder server code |
+| `apps/builder/__tests__/test-external-request-action.test.ts` | C | `crates/api/tests/rpc_test_external_request_action.rs` | ported | Outbound webhooks; builder server code; Q.P6-U4 |
 | `apps/builder/__tests__/test-query-helpers.test.ts` | B | - | todo | Builder app shell and shared components; builder jsdom |
 | `apps/builder/__tests__/theme-fonts.test.ts` | B | - | todo | Builder app shell and shared components; builder node-env, client logic |
 | `apps/builder/__tests__/thread-control-action.test.ts` | C | tbd | todo | Thread control (handover protocol); builder server code |
@@ -1281,7 +1281,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/convert-buttons-copy-text.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/copy-text-handler.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/count-characters-step.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
-| `apps/worker/__tests__/coupon-step-handler.test.ts` | C | tbd | todo | Coupons and discount codes |
+| `apps/worker/__tests__/coupon-step-handler.test.ts` | C | `crates/worker/src/steps/u4_tests.rs` | ported | Coupons and discount codes; Q.P6-U4 |
 | `apps/worker/__tests__/create-queue-worker.test.ts` | C | `crates/jobs/tests/create_queue_worker.rs` | passing | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/custom-field-value.test.ts` | C | tbd | todo | Custom fields |
 | `apps/worker/__tests__/datetime-calculator-timezone.test.ts` | C | tbd | todo | Triggers |
@@ -1309,11 +1309,11 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/export-contacts-where.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/export-coupons.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
 | `apps/worker/__tests__/export-leaderboard-participants.test.ts` | C | `crates/business/tests/leaderboard_service.rs` | ported | Leaderboards; Q.D13b (CSV body and columns; upload backpressure n-a: one put_object) |
-| `apps/worker/__tests__/external-request-handler.test.ts` | C | tbd | todo | Outbound webhooks |
-| `apps/worker/__tests__/external-request-step-registration.test.ts` | C | tbd | todo | Outbound webhooks |
+| `apps/worker/__tests__/external-request-handler.test.ts` | C | `crates/worker/src/steps/u4_tests.rs` | ported | Outbound webhooks; Q.P6-U4 |
+| `apps/worker/__tests__/external-request-step-registration.test.ts` | C | `crates/worker/src/steps/u4_tests.rs` | ported | Outbound webhooks; Q.P6-U4 |
 | `apps/worker/__tests__/extract-data.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
-| `apps/worker/__tests__/facebook-custom-audience-handler.test.ts` | C | tbd | todo | Facebook Ads integration |
-| `apps/worker/__tests__/facebook-custom-audience-step-registration.test.ts` | C | tbd | todo | Facebook Ads integration |
+| `apps/worker/__tests__/facebook-custom-audience-handler.test.ts` | C | `crates/worker/src/steps/u4_tests.rs` | ported | Facebook Ads integration; Q.P6-U4: Graph calls not mocked, only the log-and-continue case |
+| `apps/worker/__tests__/facebook-custom-audience-step-registration.test.ts` | C | `crates/worker/src/steps/u4_tests.rs` | ported | Facebook Ads integration; Q.P6-U4 |
 | `apps/worker/__tests__/fan-out-template-update.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/finalize-broadcasts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/find-places-near-me-step.test.ts` | C | `crates/worker/src/steps/tests.rs` | ported | Places near me; Q.D13b (stale row) |
@@ -1604,7 +1604,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/facebook-ads/__tests__/ads.test.ts` | C | tbd | todo | Facebook Ads integration |
 | `integrations/facebook-ads/__tests__/adsets.test.ts` | C | tbd | todo | Facebook Ads integration |
 | `integrations/facebook-ads/__tests__/advideos.test.ts` | C | tbd | todo | Facebook Ads integration |
-| `integrations/facebook-ads/__tests__/audience-users.test.ts` | C | tbd | todo | Facebook Ads integration |
+| `integrations/facebook-ads/__tests__/audience-users.test.ts` | C | `crates/business/tests/ads_audience_users.rs` | ported | Facebook Ads integration; Q.P6-U4: bulk sync and auth URL cases not in this unit |
 | `integrations/facebook-ads/__tests__/campaigns.test.ts` | C | tbd | todo | Facebook Ads integration |
 | `integrations/facebook-ads/__tests__/connection-oauth.test.ts` | C | tbd | todo | Facebook Ads integration |
 | `integrations/facebook-ads/__tests__/custom-audiences.test.ts` | C | tbd | todo | Facebook Ads integration |
@@ -1998,7 +1998,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/automated-response/__tests__/enqueue-message.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/automated-response/__tests__/keyword-match.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/automated-response/__tests__/process-messages.test.ts` | C | tbd | todo | Automated responses and keywords |
-| `packages/automated-response/__tests__/process-outbound-message.test.ts` | C | tbd | todo | Automated responses and keywords |
+| `packages/automated-response/__tests__/process-outbound-message.test.ts` | C | `crates/worker/src/steps/u4_tests.rs` | ported | Automated responses and keywords; Q.P6-U4 |
 | `packages/automated-response/__tests__/smart-delay.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/business/__tests__/ad-source-platform.test.ts` | C | tbd | todo | Ads analytics and CTWA tracking |
 | `packages/business/__tests__/admin-workspace-service.test.ts` | C | tbd | todo | Workspaces |
@@ -2150,8 +2150,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/error-log.list.test.ts` | C | tbd | todo | Error logs |
 | `packages/business/__tests__/error-log.service.test.ts` | C | tbd | todo | Error logs |
 | `packages/business/__tests__/errors.test.ts` | C | tbd | todo | Error logs |
-| `packages/business/__tests__/external-request-redirect.integration.test.ts` | C | tbd | todo | Outbound webhooks |
-| `packages/business/__tests__/external-request-service.test.ts` | C | tbd | todo | Outbound webhooks |
+| `packages/business/__tests__/external-request-redirect.integration.test.ts` | C | `crates/business/tests/external_request.rs` | ported | Outbound webhooks; Q.P6-U4 |
+| `packages/business/__tests__/external-request-service.test.ts` | C | `crates/business/tests/external_request.rs` | ported | Outbound webhooks; Q.P6-U4 |
 | `packages/business/__tests__/external-webhook.service.test.ts` | C | tbd | todo | Outbound webhooks |
 | `packages/business/__tests__/extract-contact.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/business/__tests__/facebook-ads-cached-queries.test.ts` | C | tbd | todo | Facebook Ads integration |
@@ -2633,7 +2633,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/shopify/__tests__/webhooks.test.ts` | C | tbd | todo | Shopify integration |
 | `packages/business/src/vendor/__tests__/vendor-service.test.ts` | C | tbd | todo | Ecommerce: products, categories, vendors |
 | `packages/business/src/webshop/__tests__/cart-lines.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |
-| `packages/business/src/webshop/__tests__/collection.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |
+| `packages/business/src/webshop/__tests__/collection.test.ts` | C | `crates/business/tests/webshop_collection.rs` | ported | Ecommerce: webshop storefront; Q.P6-U4 |
 | `packages/business/src/webshop/__tests__/link.test.ts` | C | crates/api/src/handlers/webshop.rs | ported | Ecommerce: webshop storefront; Q.D8 (unit test) |
 | `packages/business/src/webshop/__tests__/product-search.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |
 | `packages/business/src/webshop/__tests__/shop-categories.test.ts` | C | tbd | todo | Ecommerce: webshop storefront |

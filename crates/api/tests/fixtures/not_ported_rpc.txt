@@ -22,7 +22,6 @@ actions.resetContactCustomFields
 actions.sendWhatsappTemplateAction
 actions.submitAvailabilityRange
 actions.submitBooking
-actions.testExternalRequestAction
 actions.updateAutomatedResponse
 actions.updateIntegrationOpenAI
 actions.updateMagicLink
