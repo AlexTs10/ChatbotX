@@ -837,6 +837,15 @@ fn order_commerce(order: &Value) -> Option<Value> {
     )
 }
 
+/// `whatsappTimestampToDate`: Unix seconds; unusable -> `None` (the clock).
+fn whatsapp_timestamp_ms(timestamp: &Value) -> Option<i64> {
+    let seconds = match timestamp {
+        Value::String(t) => t.trim().parse::<f64>().ok()?,
+        other => other.as_f64()?,
+    };
+    (seconds.is_finite() && seconds > 0.0).then(|| (seconds * 1000.0) as i64)
+}
+
 /// `readReferredProductCommerce`: "Message business" on a catalog message.
 fn referred_product_commerce(referred: &Value) -> Option<Value> {
     Some(json!({
@@ -876,6 +885,7 @@ pub fn parse_incoming(payload: &Value) -> Received {
     };
     let mut received = Received::default();
     let kind = str_field(message, "type");
+    let mut google_click = None;
     let media = |key: &str, file_type: &str| {
         let m = &message[key];
         IncomingAttachment {
@@ -891,11 +901,19 @@ pub fn parse_incoming(payload: &Value) -> Received {
     };
     match kind {
         "text" => {
-            // ponytail: `extractInvisibleGoogleClick` is not ported.
-            let body = str_field(&message["text"], "body");
+            // Google's Click-to-Message ads hide the click id in invisible
+            // characters; only a run that decodes to a valid payload is stripped.
+            let received_at = whatsapp_timestamp_ms(&message["timestamp"]);
+            let extracted = chatbotx_core::utils::google_click::extract_invisible_google_click(
+                str_field(&message["text"], "body"),
+                received_at,
+                chatbotx_db::repo::now_ms(),
+            );
+            google_click = extracted.google_referral;
+            let body = extracted.text;
             match body.strip_prefix("/ref-") {
                 Some(r) => received.r#ref = Some(r.to_owned()),
-                None => incoming.text = Some(body.to_owned()),
+                None => incoming.text = Some(body),
             }
         }
         "location" => {
@@ -978,15 +996,24 @@ pub fn parse_incoming(payload: &Value) -> Received {
         received.referral = Some(json!({
             "ref": s(r, "source_id"), "source": s(r, "source_type"), "type": s(r, "source_type"),
             "adId": s(r, "source_id"), "adTitle": s(r, "headline"), "adBody": s(r, "body"),
-            "sourceUrl": s(r, "source_url"), "ctwaClid": s(r, "ctwa_clid"),
+            "sourceUrl": s(r, "source_url"),
+            "sourcePlatform": super::meta::derive_ad_source_platform(s(r, "source_url").as_deref()),
+            "ctwaClid": s(r, "ctwa_clid"),
             "photoUrl": s(r, "image_url").or_else(|| s(r, "thumbnail_url")),
             "videoUrl": s(r, "video_url"), "raw": r,
         }));
     }
+    // `{ ...metaReferral, ...googleClick }`.
+    if let Some(Value::Object(google)) = google_click.map(|g| json!(g)) {
+        let mut referral = received.referral.take().unwrap_or_else(|| json!({}));
+        if let Some(map) = referral.as_object_mut() {
+            map.extend(google);
+        }
+        received.referral = Some(referral);
+    }
     if kind == "text" {
         received.commerce = referred_product_commerce(&message["context"]["referred_product"]);
     }
-    // ponytail: the `deriveAdSourcePlatform` field is not ported.
     received.message = Some(incoming);
     received.contact = contact;
     received.thread_control = Some(info);

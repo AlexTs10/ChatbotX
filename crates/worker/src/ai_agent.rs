@@ -181,8 +181,10 @@ async fn dispatch_reply(
         if !rule_matches_message(rule, &input) {
             continue;
         }
-        // ponytail: the keyword leaderboard award and the CTWA ads
-        // `keywordMatched` evaluation are not ported.
+        // ponytail: the keyword leaderboard award is not ported. The CTWA ads
+        // `keywordMatched` evaluation waits for its consumer
+        // (`evaluateConversionTrigger` / `sendConversionEvent`, not ported):
+        // a job with no handler fails unrecoverable (DECISIONS 2026-11-20).
         let tracking = json!({
             "aiProvider": "none",
             "messageId": message.id.to_string(),

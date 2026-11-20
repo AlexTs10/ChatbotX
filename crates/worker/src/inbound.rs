@@ -172,7 +172,10 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
     // A cart or product question is named before the save, so the stored
     // message already carries it.
     crate::inbound_cart::enrich(deps, &inbox, &mut received).await;
-    let source = contact_source(received.referral_source.as_deref());
+    let source = contact_source(
+        received.referral.as_ref(),
+        received.referral_source.as_deref(),
+    );
     // Orchestrator decision (DECISIONS 2026-11-17): the contact lookup /
     // creation, the contact updates and the message insert are one write
     // transaction, so no reader sees a new contact without its message.
@@ -578,9 +581,12 @@ fn is_third_party_echo(received: &Received) -> bool {
         })
 }
 
-/// `resolveContactSource` without the Google click (not ported):
+/// `resolveContactSource`: a Google click makes an ad contact, else
 /// `metaReferralToContactSource(referralSource) ?? inboundMessage`.
-fn contact_source(referral_source: Option<&str>) -> &'static str {
+fn contact_source(referral: Option<&Value>, referral_source: Option<&str>) -> &'static str {
+    if chatbotx_core::utils::google_click::has_google_click(referral) {
+        return "ads";
+    }
     match referral_source {
         Some("ADS") => "ads",
         Some("SHORTLINK") => "botLink",

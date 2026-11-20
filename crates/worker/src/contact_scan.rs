@@ -987,11 +987,11 @@ pub(crate) mod tests {
             .write(move |tx| {
                 tx.execute_batch(
                     r#"INSERT INTO "Inbox" ("id", "workspaceId", "name", "channel", "sourceId") VALUES
-                         (6, 2, 'IG', 'instagram', 'ig-111'), (7, 2, 'IG2', 'instagram', 'ig-333');
+                         (6, 2, 'IG', 'instagram', 'ig-111'), (7, 2, 'IG2', 'instagram', 'ig-333'), (8, 2, 'IG3', 'instagram', 'ig-555');
                        INSERT INTO "IntegrationInstagram" ("id", "auth", "igId", "pageId", "name", "username", "conversationStarters", "persistentMenus", "workspaceId", "inboxId", "type") VALUES
                          (11, '{"tokens":{"accessToken":"tok"},"metadata":{"version":"v20.0"}}', 'ig-111', 'page-222', 'Shop', 'shop', '[]', '[]', 2, 6, 'facebook'),
                          (12, '{"tokens":{"accessToken":"tok"}}', 'ig-333', 'page-444', 'Native', 'native', '[]', '[]', 2, 7, 'instagram'),
-                         (13, '{"tokens":{}}', 'ig-555', 'page-666', 'Broken', 'broken', '[]', '[]', 2, 7, 'instagram');"#,
+                         (13, '{"tokens":{}}', 'ig-555', 'page-666', 'Broken', 'broken', '[]', '[]', 2, 8, 'instagram');"#,
                 )?;
                 for (id, integration) in [(19, 11), (20, 12), (21, 13)] {
                     tx.execute(
