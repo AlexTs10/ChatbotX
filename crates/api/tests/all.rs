@@ -74,6 +74,8 @@ mod contacts_refresh_profile_public_api;
 mod conversations_public_api;
 #[path = "conversations_thread_control_public_api.rs"]
 mod conversations_thread_control_public_api;
+#[path = "coupons_discount_codes_long_ids.rs"]
+mod coupons_discount_codes_long_ids;
 #[path = "custom_fields_public_api.rs"]
 mod custom_fields_public_api;
 #[path = "decisions_public_api.rs"]
