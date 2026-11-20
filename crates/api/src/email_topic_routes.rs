@@ -91,11 +91,7 @@ fn redirect(location: &str) -> Response {
 }
 
 fn gone() -> Response {
-    (
-        StatusCode::GONE,
-        axum::Json(json!({ "code": "workspaceScheduledDeletion" })),
-    )
-        .into_response()
+    crate::handlers::json(410, json!({ "code": "workspaceScheduledDeletion" }))
 }
 
 /// `new URL(request.url).origin` (behind the proxy: the public origin).
