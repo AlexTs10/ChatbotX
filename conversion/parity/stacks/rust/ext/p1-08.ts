@@ -2,7 +2,7 @@
 // (`src/fixtures/ext/p1-08.ts`): rows written with `node:sqlite` into the
 // shared `/rust-data` database, same columns as `stacks/original/ext/p1-08.ts`.
 // Methods are added as the ports need them (Q.D5 email topics, Q.D7 lead ads
-// and marketing messages); the others throw.
+// and marketing messages, Q.P5 orders); the others throw.
 
 import { createCipheriv, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
@@ -15,6 +15,7 @@ import type {
   MmAudienceInput,
   MmCampaignInput,
   MmRecipientInput,
+  OrderRow,
   P108Fixtures,
 } from "../../../src/fixtures/ext/p1-08.ts"
 
@@ -52,6 +53,9 @@ const encryptObject = (value: unknown, aad?: string) => {
     ...(aad !== undefined ? { aad } : {}),
   }
 }
+
+/** A money column of the Rust schema (`INTEGER` x 10,000). */
+const money = (value: number) => BigInt(Math.round(value * 10_000))
 
 const ms = (value: Date | null | undefined) => (value ? value.getTime() : null)
 
@@ -294,6 +298,59 @@ class SqliteP108Fixtures {
         )
       }
     })
+  }
+
+  async insertOrders(input: { workspaceId: string; orders: OrderRow[] }): Promise<{ ids: string[] }> {
+    const workspaceId = BigInt(input.workspaceId)
+    const ids = this.transaction((db) => {
+      const insertOrder = db.prepare(
+        `INSERT INTO "Order"
+           ("id", "createdAt", "updatedAt", "workspaceId", "number", "source", "status", "paymentMethod", "paymentStatus",
+            "currency", "subtotal", "discountTotal", "shippingTotal", "serviceFeeTotal", "taxTotal", "total", "cancelledAt")
+         VALUES (?, ?, ?, ?, ?, 'api', ?, 'cod', 'unpaid', ?, ?, 0, 0, 0, 0, ?, ?)`,
+      )
+      const insertItem = db.prepare(
+        `INSERT INTO "OrderItem"
+           ("id", "createdAt", "updatedAt", "orderId", "workspaceId", "productId", "name", "vendorName",
+            "unitPrice", "quantity", "discountPercent", "taxPercent", "discountTotal", "taxTotal", "lineTotal")
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, 0, 0, 0, ?)`,
+      )
+      const ids: string[] = []
+      for (const order of input.orders) {
+        const orderId = createId()
+        ids.push(orderId.toString())
+        const at = order.createdAt.getTime()
+        const total = money(order.total)
+        insertOrder.run(
+          orderId,
+          at,
+          at,
+          workspaceId,
+          order.number,
+          order.status,
+          order.currency,
+          total,
+          total,
+          order.status === "cancelled" ? at : null,
+        )
+        for (const item of order.items) {
+          insertItem.run(
+            createId(),
+            at,
+            at,
+            orderId,
+            workspaceId,
+            item.name,
+            item.vendorName,
+            money(item.unitPrice),
+            item.quantity,
+            money(item.lineTotal),
+          )
+        }
+      }
+      return ids
+    })
+    return { ids }
   }
 
   async close(): Promise<void> {

@@ -212,7 +212,9 @@ impl PresignMethod {
 }
 
 /// HMAC-SHA256 signer of app URLs for the local backend:
-/// `{base}/{key, each segment encodeURIComponent-ed}?expires={unix s}&signature={hex}`.
+/// `{base}/{key, each segment encodeURIComponent-ed}?X-Amz-Expires={s}&expires={unix s}&X-Amz-Signature={hex}`
+/// (the S3 names, so clients read the expiry and the signature as on S3;
+/// `X-Amz-Expires` is not signed).
 /// The signature covers `"{METHOD}\n{key}\n{expires}"`, so a download URL
 /// cannot be used to upload. The serving route calls [`LocalUrlSigner::verify`].
 #[derive(Clone)]
@@ -287,8 +289,9 @@ impl LocalUrlSigner {
             .collect::<Vec<_>>()
             .join("/");
         format!(
-            "{}/{encoded_key}?expires={expires}&signature={signature}",
-            self.base
+            "{}/{encoded_key}?X-Amz-Expires={}&expires={expires}&X-Amz-Signature={signature}",
+            self.base,
+            expires_in.as_secs()
         )
     }
 
@@ -1015,10 +1018,12 @@ mod tests {
             now,
         );
         assert!(
-            url.starts_with("https://app.test/files/public/a%20b.png?expires=1300&signature="),
+            url.starts_with(
+                "https://app.test/files/public/a%20b.png?X-Amz-Expires=300&expires=1300&X-Amz-Signature="
+            ),
             "{url}"
         );
-        let signature = url.rsplit("signature=").next().expect("signature");
+        let signature = url.rsplit("X-Amz-Signature=").next().expect("signature");
         assert_eq!(signature.len(), 64);
 
         let key = "public/a b.png";

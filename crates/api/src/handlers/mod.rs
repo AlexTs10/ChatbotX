@@ -572,8 +572,17 @@ fn display_message(message: &str, code: &str, data: Option<&Value>) -> String {
     if code == "invalidRequestData" || map.is_empty() {
         return message.to_string();
     }
-    let params = map
-        .iter()
+    // ponytail: `Map` sorts its keys and the original prints them in their
+    // insertion order; a code whose order differs lists it here (add a code
+    // when its message suffix is compared), the others print sorted.
+    let first: &[&str] = match code {
+        "paymentProviderInUse" => &["provider", "count"],
+        _ => &[],
+    };
+    let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+    entries.sort_by_key(|(key, _)| first.iter().position(|k| k == key).unwrap_or(first.len()));
+    let params = entries
+        .into_iter()
         .map(|(key, value)| format!("{key}={}", js_string(value)))
         .collect::<Vec<_>>()
         .join(", ");

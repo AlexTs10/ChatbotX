@@ -517,10 +517,20 @@ impl Input {
     /// id past `i64` reads as `-1` (no row has it: 404, as the TS lookup).
     pub fn digits_id(&mut self, name: &str) -> Option<i64> {
         let value = self.obj.get(name).cloned();
-        let text = self.string_at(&key(name), value.as_ref(), Str::default(), true)?;
+        self.digits_id_at(&key(name), value.as_ref(), true)
+    }
+
+    /// A `zodBigintAsString` at `path` (see [`digits_id`](Self::digits_id)).
+    pub fn digits_id_at(
+        &mut self,
+        path: &[Seg],
+        value: Option<&Value>,
+        required: bool,
+    ) -> Option<i64> {
+        let text = self.string_at(path, value, Str::default(), required)?;
         if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
             self.issue(
-                &key(name),
+                path,
                 "invalid_format",
                 "Invalid string: must match pattern /^\\d+$/",
             );

@@ -49,14 +49,14 @@ fn text(status: StatusCode, message: &str) -> Response {
         .into_response()
 }
 
-/// `expires` and `signature` of the query string.
+/// `expires` and `X-Amz-Signature` (or the older `signature`) of the query string.
 fn signed_params(query: Option<&str>) -> Option<(u64, String)> {
     let mut expires = None;
     let mut signature = None;
     for pair in query.unwrap_or_default().split('&') {
         match pair.split_once('=') {
             Some(("expires", value)) => expires = value.parse::<u64>().ok(),
-            Some(("signature", value)) => signature = Some(value.to_string()),
+            Some(("X-Amz-Signature" | "signature", value)) => signature = Some(value.to_string()),
             _ => {}
         }
     }

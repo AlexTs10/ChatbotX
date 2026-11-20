@@ -189,17 +189,12 @@ pub struct ImportUpload {
     pub path: String,
 }
 
-/// `uploader.getPresignedUpload(path)`; a local URL also carries
-/// `X-Amz-Expires=300` (not signed; clients read the expiry from it).
+/// `uploader.getPresignedUpload(path)` (`X-Amz-Expires=300`, local or S3).
 pub async fn presigned_upload_url(uploader: &Uploader, key: &str) -> Result<String> {
-    let url = uploader
+    uploader
         .get_presigned_upload(key)
         .await
-        .map_err(|e| files_err(&e))?;
-    if url.contains("X-Amz-Expires=") {
-        return Ok(url);
-    }
-    Ok(url.replacen('?', "?X-Amz-Expires=300&", 1))
+        .map_err(|e| files_err(&e))
 }
 
 /// `createImportUpload`: validates the declared file (400

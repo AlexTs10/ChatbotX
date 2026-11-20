@@ -72,7 +72,7 @@ fn opt_enum(input: &mut Input, name: &str, options: &[&str]) -> Option<String> {
 
 fn path_id(call: &Call<'_>, name: &str) -> Result<i64, OrpcError> {
     let mut input = Input::from_query(call.params, None);
-    let id = input.id(name);
+    let id = input.digits_id(name);
     input.finish()?;
     Ok(id.unwrap_or_default())
 }
@@ -125,8 +125,8 @@ fn undeclared(error: chatbotx_business::BusinessError, codes: &[&str]) -> OrpcEr
 /// `{ id, contactId }` of issue / mark-used.
 fn contact_target(call: &Call<'_>) -> Result<(i64, i64), OrpcError> {
     let mut input = Input::from_body(call.params, call.body);
-    let id = input.id("id");
-    let contact = input.id("contactId");
+    let id = input.digits_id("id");
+    let contact = input.digits_id("contactId");
     input.finish()?;
     Ok((id.unwrap_or_default(), contact.unwrap_or_default()))
 }
@@ -175,7 +175,7 @@ fn codes(input: &mut Input) -> Vec<String> {
 /// `publicListCouponsRequest`: the new names or their legacy aliases.
 fn coupon_filter(input: &mut Input) -> CouponFilter {
     let topic_id = if input.has("topicId") {
-        input.id("topicId")
+        input.digits_id("topicId")
     } else {
         None
     };
@@ -248,7 +248,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "coupons.updateTopic" => {
             let mut input = Input::from_body(call.params, call.body);
-            let id = input.id("id");
+            let id = input.digits_id("id");
             let (name, description, expires) = topic_input(&mut input);
             input.finish()?;
             let row =
@@ -364,8 +364,8 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "coupons.import" => {
             let mut input = Input::from_body(call.params, call.body);
-            let topic_id = input.id("topicId");
-            let file_id = input.id("fileId");
+            let topic_id = input.digits_id("topicId");
+            let file_id = input.digits_id("fileId");
             input.finish()?;
             let files = state
                 .files
@@ -391,7 +391,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         "coupons.export" => {
             let mut input = Input::from_body(call.params, call.body);
             let topic_id = if input.has("topicId") {
-                input.id("topicId")
+                input.digits_id("topicId")
             } else {
                 None
             };
@@ -419,7 +419,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         _ => {
             let mut input = Input::from_body(call.params, call.body);
-            let topic_id = input.id("topicId");
+            let topic_id = input.digits_id("topicId");
             let codes = codes(&mut input);
             input.finish()?;
             let result = coupon::import_batch(db, ws, topic_id.unwrap_or_default(), codes)

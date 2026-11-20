@@ -124,7 +124,10 @@ fn parse_write(input: &mut Input, partial: bool) -> Map<String, Value> {
     if sent(input, "categoryId") {
         out.insert(
             "categoryId".into(),
-            json!(input.nullish_id("categoryId").flatten()),
+            json!(match input.get("categoryId").cloned() {
+                None | Some(Value::Null) => None,
+                Some(value) => input.digits_id_at(&key("categoryId"), Some(&value), true),
+            }),
         );
     }
     if sent(input, "productIds") {
@@ -141,7 +144,7 @@ fn parse_write(input: &mut Input, partial: bool) -> Map<String, Value> {
                 }
                 for (index, item) in list.iter().enumerate() {
                     let path = vec![Seg::Key("productIds".into()), Seg::Index(index)];
-                    if let Some(id) = input.id_at(&path, Some(item), true) {
+                    if let Some(id) = input.digits_id_at(&path, Some(item), true) {
                         ids.push(id);
                     }
                 }
@@ -233,10 +236,10 @@ fn parse_validate(input: &mut Input) -> (String, Vec<PlaceItem>, Option<String>,
                     continue;
                 };
                 let product_id =
-                    input.id_at(&child(&path, "productId"), obj.get("productId"), true);
+                    input.digits_id_at(&child(&path, "productId"), obj.get("productId"), true);
                 let variant_id = match obj.get("variantId") {
                     None | Some(Value::Null) => None,
-                    Some(v) => input.id_at(&child(&path, "variantId"), Some(v), true),
+                    Some(v) => input.digits_id_at(&child(&path, "variantId"), Some(v), true),
                 };
                 let quantity = input.number_at(
                     &child(&path, "quantity"),
@@ -279,7 +282,7 @@ fn parse_validate(input: &mut Input) -> (String, Vec<PlaceItem>, Option<String>,
 
 fn code_id(call: &Call<'_>) -> Result<i64, crate::orpc::OrpcError> {
     let mut input = Input::from_query(call.params, None);
-    let id = input.id("id");
+    let id = input.digits_id("id");
     input.finish()?;
     Ok(id.unwrap_or_default())
 }
@@ -327,7 +330,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "discountCodes.update" => {
             let mut input = Input::from_body(call.params, call.body);
-            let id = input.id("id");
+            let id = input.digits_id("id");
             let data = parse_write(&mut input, true);
             input.finish()?;
             let row = discount_code::update(&state.db, ws, id.unwrap_or_default(), data)
@@ -337,7 +340,7 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "discountCodes.setActive" => {
             let mut input = Input::from_body(call.params, call.body);
-            let id = input.id("id");
+            let id = input.digits_id("id");
             let is_active = input.bool("isActive");
             input.finish()?;
             let row = discount_code::set_active(
