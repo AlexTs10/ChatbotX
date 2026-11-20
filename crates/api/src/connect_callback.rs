@@ -147,7 +147,9 @@ async fn handle(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    if let Some(kind) = kind {
+    // A builder session (a signed-in user) stores the grant at once; an API /
+    // MCP session (no user) takes the generic adapter flow below.
+    if let Some(kind) = kind.filter(|_| session.actor_user_id.is_some()) {
         return google_callback(&state, kind, &session, &query, &headers).await;
     }
     if chatbotx_business::ads::connect::flow_of(&session).is_some() {

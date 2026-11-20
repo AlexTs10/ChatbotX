@@ -1639,10 +1639,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/google-ads/__tests__/wire-data-manager.test.ts` | C | tbd | todo | Google Ads integration |
 | `integrations/google-ads/__tests__/wire-google-ads.test.ts` | C | tbd | todo | Google Ads integration |
 | `integrations/google-ads/__tests__/wire-legacy-upload.test.ts` | C | tbd | todo | Google Ads integration |
-| `integrations/google-calendar/__tests__/connection-oauth.test.ts` | C | tbd | todo | Google Calendar integration |
+| `integrations/google-calendar/__tests__/connection-oauth.test.ts` | C | `crates/business/tests/connection_oauth_google.rs` | ported | Google Calendar integration; Q.P6-U2 (authorizeUrl, exchangeCode, describe; refreshAuth / verify / legacy callback not in this file) |
 | `integrations/google-calendar/__tests__/connection-verify.test.ts` | C | tbd | todo | Google Calendar integration |
 | `integrations/google-calendar/__tests__/smoke.test.ts` | C | tbd | todo | Google Calendar integration |
-| `integrations/google-sheets/__tests__/connection-oauth.test.ts` | C | tbd | todo | Google Sheets integration |
+| `integrations/google-sheets/__tests__/connection-oauth.test.ts` | C | `crates/business/tests/connection_oauth_google.rs` | ported | Google Sheets integration; Q.P6-U2 (authorizeUrl, exchangeCode, describe; refreshAuth / verify / legacy callback not in this file) |
 | `integrations/google-sheets/__tests__/legacy-auth-url.test.ts` | C | tbd | todo | Google Sheets integration |
 | `integrations/google-sheets/__tests__/write-value-input.test.ts` | C | tbd | todo | Google Sheets integration |
 | `integrations/instagram-facebook/__tests__/auth-scopes.test.ts` | C | tbd | todo | Instagram channel |

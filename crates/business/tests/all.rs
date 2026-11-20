@@ -60,6 +60,8 @@ mod connection_credentials;
 mod connection_oauth_channels;
 #[path = "connection_oauth_facebook_ads.rs"]
 mod connection_oauth_facebook_ads;
+#[path = "connection_oauth_google.rs"]
+mod connection_oauth_google;
 #[path = "connection_oauth_google_ads.rs"]
 mod connection_oauth_google_ads;
 #[path = "connection_oauth_instagram.rs"]
