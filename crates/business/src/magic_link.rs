@@ -74,6 +74,12 @@ pub async fn update(
 ) -> Result<MagicLink> {
     tx::write(db, move |c| {
         let current = find_in(c, workspace_id, id)?;
+        if name.is_none() && url.is_none() {
+            // drizzle's `.set({})` throws (a 500 at the API); nothing changes.
+            return Err(BusinessError::Repo(repo::Error::Message(
+                "No values to set".into(),
+            )));
+        }
         c.execute(
             r#"UPDATE "MagicLink" SET "name" = ?3, "url" = ?4, "updatedAt" = ?5
                WHERE "id" = ?1 AND "workspaceId" = ?2"#,

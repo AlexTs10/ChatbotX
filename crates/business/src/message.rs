@@ -1,22 +1,34 @@
 //! `message/list-for-conversation.ts` (`listForConversation`,
 //! `findForContact`) and a reduced `message/create-outgoing.ts`
-//! (`createOutgoing`: text, flow and the product-message refusals; no files,
-//! media library files, private replies, image limits or agent-reply metric).
+//! (`createOutgoing`: text, flow, media library files, image limits and the
+//! product-message refusals; no device files, private replies or agent-reply
+//! metric).
 //!
 //! The service does not enqueue or publish: [`Outgoing`] carries the jobs
 //! (`sendChannelMessage` on `chat`, `sendFlow` on `integration`) and the
 //! realtime `messageCreated` payload for the caller (`ApiState`).
 //! Attachment URLs are not presigned (no `resolveMediaUrl` port yet):
-//! `url` / `fallbackUrl` are `null`.
+//! `url` / `fallbackUrl` are `null`, except on the message a send creates
+//! (`getPublicFileUrl(originPath, storageUrl)`, [`message_json_with_urls`]).
 
-use chatbotx_db::Db;
-use chatbotx_db::repo::message::{
-    self as repo_message, CreateMessageInput, FindTriggerMessageOptions, ListMessagesQuery,
-    MessageWithAttachments, Pagination, PaginationCursor, SinceTimeInput, get_safe_since_time,
+use chatbotx_core::utils::channel::ChannelType;
+use chatbotx_core::utils::inbox_image_support::{
+    InboxImageCheckResult, check_inbox_images, is_image_mime_type, resolve_inbox_reply_kind,
 };
+use chatbotx_core::utils::storage::get_public_file_url;
+use chatbotx_db::Db;
+use chatbotx_db::repo::media_library_file;
+use chatbotx_db::repo::message::{
+    self as repo_message, CreateAttachmentInput, CreateMessageInput, FindTriggerMessageOptions,
+    ListMessagesQuery, MessageWithAttachments, Pagination, PaginationCursor, SinceTimeInput,
+    get_safe_since_time,
+};
+use chatbotx_db::repo::models::MediaLibraryFile;
 use chatbotx_db::repo::models::{Attachment, ContactInbox, Conversation, Message};
-use chatbotx_db::repo::{Model, flow, iso, now_ms};
+use chatbotx_db::repo::{Model, flow, iso, new_id, now_ms};
 use chatbotx_db::rusqlite::{Connection, OptionalExtension as _, params};
+use chatbotx_files::Uploader;
+use chatbotx_files::mime::guess_file_type_from_mime_type;
 use chatbotx_jobs::QueueName;
 use serde_json::{Value, json};
 
@@ -262,6 +274,18 @@ pub struct OutgoingInput {
     pub is_private_reply: bool,
     pub content_attributes: Option<Value>,
     pub quick_replies: Option<Value>,
+    /// `mediaFile.path` (the legacy path-based media library pick).
+    pub media_file_path: Option<String>,
+    /// `mediaFileId` / `mediaFileIds` (in send order).
+    pub media_file_ids: Vec<i64>,
+}
+
+/// Where media library files are copied and how their URLs are built.
+#[derive(Clone, Copy, Default)]
+pub struct MediaStore<'a> {
+    pub uploader: Option<&'a Uploader>,
+    /// The tenant `storageUrl`.
+    pub storage_url: &'a str,
 }
 
 /// One job `createOutgoing` adds (`queue.add(name, data, opts)`).
@@ -284,9 +308,122 @@ pub struct Outgoing {
 }
 
 /// `createOutgoing`. `user_id` = the inbox user (`senderType` `user`); none
-/// = the token API (`api`).
+/// = the token API (`api`). No file storage: a media library pick fails.
 pub async fn create_outgoing(
     db: &Db,
+    conversation: &Conversation,
+    contact_inbox: &ContactInbox,
+    input: OutgoingInput,
+    user_id: Option<i64>,
+) -> Result<Outgoing> {
+    create_outgoing_with_media(
+        db,
+        MediaStore::default(),
+        conversation,
+        contact_inbox,
+        input,
+        user_id,
+    )
+    .await
+}
+
+fn media_file_not_found() -> BusinessError {
+    BusinessError::exception("Media library file not found", "systemError", 400)
+}
+
+/// `resolveMediaLibraryFiles`: the workspace's rows, in the caller's order.
+async fn resolve_media_library_files(
+    db: &Db,
+    workspace_id: i64,
+    input: &OutgoingInput,
+) -> Result<Vec<MediaLibraryFile>> {
+    if let Some(path) = input.media_file_path.clone() {
+        let file = tx::read(db, move |conn| {
+            Ok(media_library_file::find_by_path(conn, workspace_id, &path)?)
+        })
+        .await?;
+        return file.map(|f| vec![f]).ok_or_else(media_file_not_found);
+    }
+    if input.media_file_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids = input.media_file_ids.clone();
+    let files = tx::read(db, move |conn| {
+        Ok(media_library_file::find_by_ids(conn, workspace_id, &ids)?)
+    })
+    .await?;
+    input
+        .media_file_ids
+        .iter()
+        .map(|id| {
+            files
+                .iter()
+                .find(|f| f.id == *id)
+                .cloned()
+                .ok_or_else(media_file_not_found)
+        })
+        .collect()
+}
+
+/// `assertChannelAcceptsImages` (`ImagesNotSupportedOnChannelError`); a
+/// channel outside the enum has no known limits.
+fn assert_channel_accepts_images(
+    channel: &str,
+    input: &OutgoingInput,
+    files: &[MediaLibraryFile],
+) -> Result<()> {
+    let Some(channel_type) = ChannelType::parse(channel) else {
+        return Ok(());
+    };
+    let kind =
+        resolve_inbox_reply_kind(input.reply_to_message_id.is_some(), input.is_private_reply);
+    let images = files
+        .iter()
+        .filter(|f| is_image_mime_type(&f.mime_type))
+        .count();
+    let (reason, max, message) = match check_inbox_images(channel_type, kind, images) {
+        InboxImageCheckResult::Ok => return Ok(()),
+        InboxImageCheckResult::ImagesNotSupported { max } => (
+            "imagesNotSupported",
+            max,
+            format!("The {channel} channel can't send images here"),
+        ),
+        InboxImageCheckResult::TooManyImages { max } => (
+            "tooManyImages",
+            max,
+            format!("The {channel} channel can send at most {max} image(s) here"),
+        ),
+    };
+    Err(BusinessError::Exception {
+        message,
+        code: "imagesNotSupportedOnChannel".into(),
+        status: 422,
+        field: None,
+        data: Some(json!({ "reason": reason, "channel": channel, "max": max })),
+    })
+}
+
+/// [`message_json`] with each attachment `url` set to its public storage URL
+/// (`getPublicFileUrl(originPath, storageUrl)`).
+pub fn message_json_with_urls(message: &MessageWithAttachments, storage_url: &str) -> Value {
+    let mut out = message_json(message);
+    if let Some(Value::Array(attachments)) = out.get_mut("attachments") {
+        for attachment in attachments {
+            let path = attachment["originPath"].as_str().unwrap_or_default();
+            let url = get_public_file_url(path, storage_url)
+                .unwrap_or_else(|_| format!("{storage_url}{path}"));
+            attachment["url"] = Value::String(url);
+        }
+    }
+    out
+}
+
+/// [`create_outgoing`] with file storage: media library picks are copied to
+/// `public/space/<ws>/conversations/<conversation>/<id>` (the sent copy
+/// outlives the library file) and sent as attachments.
+pub async fn create_outgoing_with_media(
+    db: &Db,
+    media: MediaStore<'_>,
     conversation: &Conversation,
     contact_inbox: &ContactInbox,
     input: OutgoingInput,
@@ -344,6 +481,44 @@ pub async fn create_outgoing(
         ));
     }
 
+    // Resolved and checked before any row or object exists.
+    let media_files = resolve_media_library_files(db, conversation.workspace_id, &input).await?;
+    assert_channel_accepts_images(&contact_inbox.channel, &input, &media_files)?;
+    let mut attachments = Vec::with_capacity(media_files.len());
+    if !media_files.is_empty() {
+        let uploader = media.uploader.ok_or_else(|| {
+            BusinessError::Repo(chatbotx_db::repo::Error::Message(
+                "File storage is not configured".into(),
+            ))
+        })?;
+        for file in &media_files {
+            let origin_path = format!(
+                "public/space/{}/conversations/{}/{}",
+                conversation.workspace_id,
+                conversation.id,
+                new_id()
+            );
+            uploader
+                .copy_object(&file.path, &origin_path)
+                .await
+                .map_err(|e| {
+                    BusinessError::Repo(chatbotx_db::repo::Error::Message(e.to_string()))
+                })?;
+            attachments.push(CreateAttachmentInput {
+                workspace_id: conversation.workspace_id,
+                conversation_id: conversation.id,
+                file_type: guess_file_type_from_mime_type(&file.mime_type)
+                    .as_str()
+                    .into(),
+                mime_type: file.mime_type.clone(),
+                origin_path,
+                name: Some(file.name.clone()),
+                size: Some(file.size),
+                ..CreateAttachmentInput::default()
+            });
+        }
+    }
+
     let is_comment = input.reply_to_message_id.is_some();
     let content_attributes = input.content_attributes.clone().or_else(|| {
         input
@@ -369,7 +544,16 @@ pub async fn create_outgoing(
     let contact_id = contact_inbox.contact_id;
     let workspace_id = conversation.workspace_id;
     let stored = tx::write(db, move |conn| {
-        let message = repo_message::create(conn, &message_input)?;
+        let stored = if attachments.is_empty() {
+            MessageWithAttachments {
+                message: repo_message::create(conn, &message_input)?,
+                attachment_count: None,
+                attachments: Vec::new(),
+            }
+        } else {
+            repo_message::create_with_attachments(conn, &message_input, &attachments)?
+        };
+        let message = &stored.message;
         // `contactInboxService.updateTracking` (`firstInteractionAt` keeps
         // the earliest).
         conn.execute(
@@ -382,15 +566,11 @@ pub async fn create_outgoing(
             params![message.created_at, now_ms(), contact_inbox_id, contact_id, workspace_id],
         )
         .map_err(repo_err)?;
-        Ok(MessageWithAttachments {
-            message,
-            attachment_count: None,
-            attachments: Vec::new(),
-        })
+        Ok(stored)
     })
     .await?;
 
-    let mut realtime = message_json(&stored);
+    let mut realtime = message_json_with_urls(&stored, media.storage_url);
     if let Some(client_id) = &input.client_id {
         realtime["clientId"] = json!(client_id);
     }

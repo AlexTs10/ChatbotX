@@ -10,8 +10,8 @@
 //! reads at most 256 KiB in 2.5 s. One test per connection per 30 s.
 
 use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::net::IpAddr;
+use std::time::Instant;
 
 use chatbotx_db::Db;
 use chatbotx_db::repo::{iso, new_id, now_ms};
@@ -26,8 +26,6 @@ use crate::tx;
 
 pub const PROVIDER_KINDS: &[&str] = &["typesafe", "systemOneCompatible", "openrouterDecision"];
 const TEST_THROTTLE_SECONDS: u64 = 30;
-const REQUEST_TIMEOUT: Duration = Duration::from_millis(2500);
-const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const DIRECT_ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 const OPENROUTER_ENDPOINT: &str = "https://openrouter.ai/api/alpha/decisions";
 
@@ -424,39 +422,17 @@ impl<D: DohFetch + Send + Sync> DecisionTransport for HttpDecisionTransport<D> {
         else {
             return Err("Decision endpoint failed public-address validation".into());
         };
-        let url = url::Url::parse(endpoint).map_err(|e| e.to_string())?;
-        let host = url.host_str().ok_or("Decision endpoint has no host")?;
         let ip: IpAddr = resolved_ips
             .first()
             .and_then(|ip| ip.parse().ok())
             .ok_or("Decision endpoint failed public-address validation")?;
-        let port = url.port_or_known_default().unwrap_or(443);
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(REQUEST_TIMEOUT)
-            .resolve(host, SocketAddr::new(ip, port))
-            .build()
-            .map_err(|e| e.to_string())?;
-        let mut response = client
-            .post(endpoint)
-            .header("authorization", format!("Bearer {authorization}"))
-            .header("content-type", "application/json")
-            .body(body.to_string())
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        let status = response.status().as_u16();
-        if (300..400).contains(&status) {
-            return Err("Decision provider redirect was rejected".into());
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-            bytes.extend_from_slice(&chunk);
-            if bytes.len() > MAX_RESPONSE_BYTES {
-                return Err("Decision provider response exceeded size limit".into());
-            }
-        }
-        Ok((status, String::from_utf8_lossy(&bytes).into_owned()))
+        crate::decision::transport::send_pinned(
+            ip,
+            endpoint,
+            authorization,
+            body.to_string().into_bytes(),
+        )
+        .await
     }
 }
 

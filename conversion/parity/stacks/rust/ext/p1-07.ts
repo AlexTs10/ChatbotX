@@ -6,11 +6,15 @@
 
 import { randomBytes } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
-import type {
-  P107ContactInput,
-  P107CreatedContact,
-  P107Fixtures,
-  P107InboxInput,
+import {
+  P107_META_APP_ID,
+  type P107ChannelCreated,
+  type P107ContactInput,
+  type P107CreatedContact,
+  type P107Fixtures,
+  type P107InboxInput,
+  type P107MessengerChannelInput,
+  type P107WhatsappChannelInput,
 } from "../../../src/fixtures/ext/p1-07.ts"
 
 const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
@@ -52,9 +56,16 @@ const AGENT_PERMISSIONS = {
 const DEFAULT_MEMBER_NOTIFICATION_TYPES = { notifyAdmin: true, newMessageToHuman: true, newOrder: true }
 const DEFAULT_MEMBER_NOTIFICATION_CHANNELS = { messenger: true, email: true, telegram: true, browser: true }
 
-const notPorted = (name: string) => (): never => {
-  throw new Error(`p1-07 fixture ${name} is not ported to the Rust stack yet`)
-}
+/** The channel integration `auth` JSON (plain, as the original stack stores it). */
+const oauth2Auth = (accessToken: string, metadata: Record<string, unknown>) => ({
+  authType: "oauth2",
+  clientId: P107_META_APP_ID,
+  clientSecret: "parity-secret",
+  redirectUrl: "http://app/integrations/callback",
+  version: "v23.0",
+  tokens: { accessToken },
+  metadata,
+})
 
 class SqliteP107Fixtures implements P107Fixtures {
   private db: DatabaseSync | undefined
@@ -89,8 +100,113 @@ class SqliteP107Fixtures implements P107Fixtures {
     }
   }
 
-  createWhatsappChannel = notPorted("createWhatsappChannel")
-  createMessengerChannel = notPorted("createMessengerChannel")
+  private insertChannel(
+    db: DatabaseSync,
+    input: { workspaceId: string; name: string; channel: string; sourceId: string },
+  ): bigint {
+    const inboxId = createId()
+    const now = Date.now()
+    db.prepare(
+      `INSERT INTO "Inbox" ("id", "createdAt", "updatedAt", "name", "channel", "sourceId", "workspaceId", "status")
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'connected')`,
+    ).run(inboxId, now, now, input.name, input.channel, input.sourceId, BigInt(input.workspaceId))
+    db.prepare(
+      `INSERT INTO "Connection"
+         ("id", "createdAt", "updatedAt", "workspaceId", "provider", "kind", "channel", "inboxId", "sourceId",
+          "displayName", "status", "connectedAt")
+       VALUES (?, ?, ?, ?, ?, 'channel', ?, ?, ?, ?, 'connected', ?)`,
+    ).run(
+      createId(),
+      now,
+      now,
+      BigInt(input.workspaceId),
+      input.channel,
+      input.channel,
+      inboxId,
+      input.sourceId,
+      input.name,
+      now,
+    )
+    return inboxId
+  }
+
+  async createWhatsappChannel(input: P107WhatsappChannelInput): Promise<P107ChannelCreated> {
+    const accessToken = `wa-token-${input.phoneNumberId}`
+    const wabaId = input.wabaId ?? `waba-${input.phoneNumberId}`
+    const businessId = `biz-${input.phoneNumberId}`
+    const displayPhoneNumber = input.displayPhoneNumber ?? "+1 555 0100"
+    return this.transaction((db) => {
+      const inboxId = this.insertChannel(db, {
+        workspaceId: input.workspaceId,
+        name: input.name,
+        channel: "whatsapp",
+        sourceId: input.phoneNumberId,
+      })
+      const integrationId = createId()
+      const now = Date.now()
+      db.prepare(
+        `INSERT INTO "IntegrationWhatsapp"
+           ("id", "createdAt", "updatedAt", "auth", "phoneNumberId", "wabaId", "businessId", "name",
+            "displayPhoneNumber", "workspaceId", "inboxId")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        integrationId,
+        now,
+        now,
+        JSON.stringify(
+          oauth2Auth(accessToken, {
+            wabaId,
+            businessId,
+            webhookUrl: "http://app/api/hooks/whatsapp",
+            phoneNumber: {
+              id: input.phoneNumberId,
+              verified_name: input.name,
+              code_verification_status: "VERIFIED",
+              display_phone_number: displayPhoneNumber,
+              quality_rating: "GREEN",
+              platform_type: "CLOUD_API",
+              throughput: { level: "STANDARD" },
+              webhook_configuration: {},
+            },
+          }),
+        ),
+        input.phoneNumberId,
+        wabaId,
+        businessId,
+        input.name,
+        displayPhoneNumber,
+        BigInt(input.workspaceId),
+        inboxId,
+      )
+      return { inboxId: inboxId.toString(), integrationId: integrationId.toString(), accessToken }
+    })
+  }
+
+  async createMessengerChannel(input: P107MessengerChannelInput): Promise<P107ChannelCreated> {
+    const accessToken = `page-token-${input.pageId}`
+    return this.transaction((db) => {
+      const inboxId = this.insertChannel(db, {
+        workspaceId: input.workspaceId,
+        name: input.name,
+        channel: "messenger",
+        sourceId: input.pageId,
+      })
+      const integrationId = createId()
+      db.prepare(
+        `INSERT INTO "IntegrationMessenger"
+           ("id", "auth", "pageId", "name", "workspaceId", "inboxId", "conversationStarters", "persistentMenus", "personas")
+         VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', '[]')`,
+      ).run(
+        integrationId,
+        JSON.stringify(oauth2Auth(accessToken, { pageId: input.pageId, pageName: input.name })),
+        input.pageId,
+        input.name,
+        BigInt(input.workspaceId),
+        inboxId,
+      )
+      return { inboxId: inboxId.toString(), integrationId: integrationId.toString(), accessToken }
+    })
+  }
 
   async createInbox(input: P107InboxInput): Promise<{ inboxId: string }> {
     const inboxId = createId()

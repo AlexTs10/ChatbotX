@@ -321,8 +321,8 @@ async fn create_message(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcErro
     )
     .await
     .map_err(action_fail)?;
-    let sent = message::create_outgoing(
-        db,
+    let (sent, body) = crate::handlers::contact_messages::create_outgoing(
+        ctx.api,
         &conversation,
         &contact_inbox,
         outgoing,
@@ -330,7 +330,6 @@ async fn create_message(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcErro
     )
     .await
     .map_err(action_fail)?;
-    let body = sent.message.as_ref().map_or(Value::Null, message_json);
     deliver(ctx.api, &conversation, sent).await;
     Ok(body)
 }

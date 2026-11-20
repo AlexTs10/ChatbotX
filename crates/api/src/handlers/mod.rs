@@ -577,6 +577,7 @@ fn display_message(message: &str, code: &str, data: Option<&Value>) -> String {
     // when its message suffix is compared), the others print sorted.
     let first: &[&str] = match code {
         "paymentProviderInUse" => &["provider", "count"],
+        "imagesNotSupportedOnChannel" => &["reason", "channel", "max"],
         _ => &[],
     };
     let mut entries: Vec<(&String, &Value)> = map.iter().collect();

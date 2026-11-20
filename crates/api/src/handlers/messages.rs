@@ -1,8 +1,7 @@
 //! `apps/builder/src/features/messages/api/public.ts` (`messagesPublicRouter`,
 //! `/v1/conversations/{conversationId}/messages`, scope `inbox`). Workspace
 //! tokens only (no member scope): a send is unattributed (`api`). Not ported
-//! (501 `notPorted`): media library / device files, a new attachment on
-//! edit. The WhatsApp routes (Flow response view, template send, call
+//! (501 `notPorted`): device files, a new attachment on edit. The WhatsApp routes (Flow response view, template send, call
 //! permission) call `chatbotx_business::whatsapp`.
 
 use chatbotx_business::BusinessError;
@@ -15,7 +14,7 @@ use chatbotx_db::repo::models::Conversation;
 use serde_json::{Value, json};
 
 use super::contact_messages::{
-    decode_cursor, deliver, encode_cursor, outgoing_input, queue_outgoing_jobs,
+    create_outgoing, decode_cursor, deliver, encode_cursor, outgoing_input, queue_outgoing_jobs,
 };
 use super::conversations::queue_jobs;
 use super::input::{Input, Num, Seg, Str, key};
@@ -174,10 +173,9 @@ async fn create(state: &ApiState, call: Call<'_>) -> Reply {
     .await?;
     // `resolveSenderForCaller`: a member's message is attributed to them.
     let sender = super::member_scope::sender_for_caller();
-    let sent = message::create_outgoing(&state.db, &found, &contact_inbox, outgoing, sender)
+    let (sent, body) = create_outgoing(state, &found, &contact_inbox, outgoing, sender)
         .await
         .map_err(|e| business_error(e, CREATING))?;
-    let body = sent.message.as_ref().map_or(Value::Null, message_json);
     deliver(state, &found, sent).await;
     Ok(json(201, body))
 }

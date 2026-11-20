@@ -134,6 +134,8 @@ mod coupon_template_guards;
 mod custom_field_service_update;
 #[path = "decision_connection.rs"]
 mod decision_connection;
+#[path = "decision_transport_redirect.rs"]
+mod decision_transport_redirect;
 #[path = "ecommerce_open_hours_is_open.rs"]
 mod ecommerce_open_hours_is_open;
 #[path = "ecommerce_open_hours_service.rs"]
@@ -210,12 +212,16 @@ mod leaderboard_service;
 mod license_refresh;
 #[path = "license_service.rs"]
 mod license_service;
+#[path = "magic_link_update_empty.rs"]
+mod magic_link_update_empty;
 #[path = "mcp_oauth_service.rs"]
 mod mcp_oauth_service;
 #[path = "media_library_service.rs"]
 mod media_library_service;
 #[path = "message_outgoing_and_list.rs"]
 mod message_outgoing_and_list;
+#[path = "message_outgoing_media.rs"]
+mod message_outgoing_media;
 #[path = "meta_catalog_service.rs"]
 mod meta_catalog_service;
 #[path = "mini_app_definition.rs"]

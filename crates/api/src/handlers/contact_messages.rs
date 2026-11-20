@@ -98,6 +98,35 @@ fn parse_id(value: Option<&Value>) -> Option<i64> {
     value.and_then(Value::as_str).and_then(|s| s.parse().ok())
 }
 
+/// `createOutgoing` with the API's file storage (media library picks); also
+/// returns the created message JSON with its attachment URLs.
+pub(crate) async fn create_outgoing(
+    state: &ApiState,
+    conversation: &Conversation,
+    contact_inbox: &chatbotx_db::repo::models::ContactInbox,
+    input: OutgoingInput,
+    user_id: Option<i64>,
+) -> chatbotx_business::Result<(Outgoing, Value)> {
+    let storage_url = super::contacts::tenant_urls(state).storage_url;
+    let media = message::MediaStore {
+        uploader: state.files.as_deref(),
+        storage_url: &storage_url,
+    };
+    let sent = message::create_outgoing_with_media(
+        &state.db,
+        media,
+        conversation,
+        contact_inbox,
+        input,
+        user_id,
+    )
+    .await?;
+    let body = sent.message.as_ref().map_or(Value::Null, |m| {
+        message::message_json_with_urls(m, &storage_url)
+    });
+    Ok((sent, body))
+}
+
 /// Adds the jobs and publishes the realtime `messageCreated` event.
 pub(crate) async fn deliver(state: &ApiState, conversation: &Conversation, outgoing: Outgoing) {
     if let Some(payload) = outgoing.realtime {
@@ -154,15 +183,9 @@ async fn send(
     )
     .await?;
     let sender = super::member_scope::sender_for_caller();
-    let outgoing = message::create_outgoing(
-        &state.db,
-        &found.conversation,
-        &contact_inbox,
-        input,
-        sender,
-    )
-    .await
-    .map_err(|e| business_error(e, errors))?;
+    let (outgoing, _) = create_outgoing(state, &found.conversation, &contact_inbox, input, sender)
+        .await
+        .map_err(|e| business_error(e, errors))?;
     deliver(state, &found.conversation, outgoing).await;
     Ok(no_content())
 }
@@ -175,7 +198,7 @@ async fn send_message(state: &ApiState, call: Call<'_>) -> Reply {
 
 /// Validates a `createMessageRequest` body (the other `input` checks are
 /// already queued) and maps it to the ported part of `createOutgoing`.
-/// Media library / device files: 501 `notPorted`.
+/// Device files: 501 `notPorted`.
 pub(crate) fn outgoing_input(
     input: Input,
     errors: ErrorMap,
@@ -194,15 +217,17 @@ pub(crate) fn outgoing_input(
     input.finish()?;
     let data = parsed.data.unwrap_or(Value::Null);
     let has = |k: &str| data.get(k).is_some_and(|v| !v.is_null());
-    if !has("products") && !has("flowId") && !has("text")
-        || has("mediaFile")
-        || has("mediaFileId")
-        || has("mediaFileIds")
-    {
-        return Err(business_error(
-            not_ported("Media library and device files"),
-            errors,
-        ));
+    let media_file_path = data
+        .pointer("/mediaFile/path")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let media_file_ids: Vec<i64> = match data.get("mediaFileIds") {
+        Some(Value::Array(ids)) => ids.iter().filter_map(|id| parse_id(Some(id))).collect(),
+        _ => parse_id(data.get("mediaFileId")).into_iter().collect(),
+    };
+    let has_media = media_file_path.is_some() || !media_file_ids.is_empty();
+    if !has("products") && !has("flowId") && !has("text") && !has_media || has("files") {
+        return Err(business_error(not_ported("Device files"), errors));
     }
     Ok(OutgoingInput {
         flow_id: parse_id(data.get("flowId")),
@@ -230,6 +255,8 @@ pub(crate) fn outgoing_input(
             .get("isPrivateReply")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        media_file_path,
+        media_file_ids,
         ..OutgoingInput::default()
     })
 }
