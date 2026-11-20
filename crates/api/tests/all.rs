@@ -306,6 +306,8 @@ mod triggers_public_api;
 mod webchats_public_api;
 #[path = "webhooks_public_api.rs"]
 mod webhooks_public_api;
+#[path = "whatsapp_callback.rs"]
+mod whatsapp_callback;
 #[path = "whatsapp_calling_actions.rs"]
 mod whatsapp_calling_actions;
 #[path = "whatsapp_calling_public_api.rs"]

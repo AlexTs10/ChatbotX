@@ -72,6 +72,8 @@ mod connection_credentials;
 mod connection_oauth_channels;
 #[path = "connection_oauth_facebook_ads.rs"]
 mod connection_oauth_facebook_ads;
+#[path = "connection_oauth_google.rs"]
+mod connection_oauth_google;
 #[path = "connection_oauth_google_ads.rs"]
 mod connection_oauth_google_ads;
 #[path = "connection_oauth_instagram.rs"]
@@ -246,6 +248,12 @@ mod message_edit_delete_actions;
 mod message_outgoing_and_list;
 #[path = "message_outgoing_media.rs"]
 mod message_outgoing_media;
+#[path = "messenger_ads_json.rs"]
+mod messenger_ads_json;
+#[path = "meta_capi_connect.rs"]
+mod meta_capi_connect;
+#[path = "meta_catalog_connect.rs"]
+mod meta_catalog_connect;
 #[path = "meta_catalog_service.rs"]
 mod meta_catalog_service;
 #[path = "mini_app_definition.rs"]

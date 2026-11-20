@@ -483,6 +483,81 @@ fn has_active_run(conn: &Connection, workspace_id: i64) -> Result<bool> {
     .map_err(db_error)
 }
 
+/// `upsert`: stores the OAuth credential (`sealed` = `encryptObject` of
+/// `MetaCatalogAuthValue`) on the workspace connection, reviving a
+/// soft-deleted one, else creates the `Integration` + connection rows. A
+/// revived idle connection restarts its import state; an active run keeps
+/// it so its worker can finish. Returns the connection id.
+// ponytail: one SQLite writer, so no `FOR UPDATE` and no unique-violation retry.
+pub fn upsert(
+    conn: &Connection,
+    workspace_id: i64,
+    sealed: &Value,
+    token_expires_at: Option<i64>,
+) -> Result<i64> {
+    let sealed = sealed.to_string();
+    let now = now_ms();
+    let current: Option<(i64, Option<i64>)> = conn
+        .query_row(
+            r#"SELECT "id", "deletedAt" FROM "IntegrationMetaCatalog" WHERE "workspaceId" = ?1"#,
+            [workspace_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(db_error)?;
+    if let Some((id, deleted_at)) = current {
+        let reset_import = deleted_at.is_some() && !has_active_run(conn, workspace_id)?;
+        conn.execute(
+            r#"UPDATE "IntegrationMetaCatalog" SET "encryptedAuth" = ?2, "tokenExpiresAt" = ?3,
+                 "status" = 'active', "authMode" = 'oauth', "deletedAt" = NULL, "updatedAt" = ?4,
+                 "importStatus" = CASE WHEN ?5 THEN 'idle' ELSE "importStatus" END,
+                 "importError" = CASE WHEN ?5 THEN NULL ELSE "importError" END
+               WHERE "id" = ?1"#,
+            params![id, sealed, token_expires_at, now, reset_import],
+        )
+        .map_err(db_error)?;
+        return Ok(id);
+    }
+    let (integration_id, id) = (new_id(), new_id());
+    conn.execute(
+        r#"INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (?1, ?2, 'metaCatalog')"#,
+        params![integration_id, workspace_id],
+    )
+    .map_err(db_error)?;
+    conn.execute(
+        r#"INSERT INTO "IntegrationMetaCatalog" ("id", "createdAt", "updatedAt", "workspaceId", "integrationId",
+             "encryptedAuth", "tokenExpiresAt", "status", "authMode")
+           VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, 'active', 'oauth')"#,
+        params![id, now, workspace_id, integration_id, sealed, token_expires_at],
+    )
+    .map_err(db_error)?;
+    Ok(id)
+}
+
+/// One `listRecoverablePushRuns` row: `(id, workspaceId, submissionLeaseId)`.
+pub type RecoverableRun = (i64, i64, Option<String>);
+
+/// `listRecoverablePushRuns`: running push runs not touched since
+/// `stale_before` (ms), at most 100.
+pub fn list_recoverable_push_runs(
+    conn: &Connection,
+    stale_before: i64,
+) -> Result<Vec<RecoverableRun>> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT "id", "workspaceId", "submissionLeaseId" FROM "MetaCatalogSyncRun"
+               WHERE "direction" = 'push' AND "status" = 'running' AND "updatedAt" < ?1
+               ORDER BY "id" LIMIT 100"#,
+        )
+        .map_err(db_error)?;
+    let rows = stmt
+        .query_map([stale_before], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(db_error)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(db_error)?;
+    Ok(rows)
+}
+
 // ---- metaCatalogSyncRunService -----------------------------------------------
 
 /// `metaCatalogSyncScopes`.

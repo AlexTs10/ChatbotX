@@ -527,6 +527,109 @@ pub async fn send_test_event(
     Ok(())
 }
 
+// ---- dedicated token connect (OAuth) -------------------------------------------
+
+/// A Graph call of the dedicated connect through `upstream` (bearer token).
+async fn graph_via(
+    upstream: &impl crate::connection::credentials::Upstream,
+    method: &'static str,
+    path: &str,
+    token: &str,
+    body: Option<&Value>,
+) -> Result<Value> {
+    let reply = upstream
+        .send(crate::connection::credentials::UpstreamRequest {
+            method,
+            url: format!("{API_URL}/{API_VERSION}/{path}"),
+            headers: {
+                let mut headers = vec![("authorization".to_string(), format!("Bearer {token}"))];
+                if body.is_some() {
+                    headers.push(("content-type".into(), "application/json".into()));
+                }
+                headers
+            },
+            body: body.map(Value::to_string),
+        })
+        .await
+        .map_err(request_failed)?;
+    let (status, text) = reply;
+    let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if !(200..300).contains(&status) {
+        return Err(request_failed(graph_message(&body)));
+    }
+    Ok(body)
+}
+
+/// `metaConversionsService.connectCapiWithToken`: the stored dataset when the
+/// new token can read it, else a dataset created with that token; then the
+/// dataset id and the encrypted token are written together, the disconnect
+/// flag cleared. `Ok(false)` = the row is gone. Messenger / Instagram only.
+// ponytail: a stored dataset the token cannot read is replaced for any
+// error (the original only for Graph access errors), and the dataset is
+// created with the dedicated token (no agency System User first).
+pub async fn connect_with_token(
+    db: &Db,
+    upstream: &impl crate::connection::credentials::Upstream,
+    channel: CapiChannel,
+    workspace_id: i64,
+    id: i64,
+    access_token: &str,
+) -> Result<bool> {
+    if access_token.is_empty() {
+        return Err(request_failed("Meta CAPI access token is missing"));
+    }
+    let integration = require(db, channel, workspace_id, id).await?;
+    let readable = match &integration.dataset_id {
+        Some(dataset) => graph_via(
+            upstream,
+            "GET",
+            &format!("{}?fields=id", segment(dataset)),
+            access_token,
+            None,
+        )
+        .await
+        .ok()
+        .and_then(|body| read_dataset_id(&body).ok()),
+        None => None,
+    };
+    let dataset_id = match readable {
+        Some(id) => id,
+        None => {
+            let name = integration.name.trim();
+            let dataset_name = if name.is_empty() {
+                DATASET_NAME_SUFFIX.to_owned()
+            } else {
+                format!("{name} {DATASET_NAME_SUFFIX}")
+            };
+            let body = graph_via(
+                upstream,
+                "POST",
+                &format!("{}/dataset", segment(&integration.resource_id)),
+                access_token,
+                Some(&json!({ "dataset_name": dataset_name })),
+            )
+            .await?;
+            read_dataset_id(&body)?
+        }
+    };
+    let sealed = process_encryption()
+        .encrypt_object(&json!({ "accessToken": access_token }), None)
+        .map_err(|e| request_failed(e.to_string()))
+        .and_then(|blob| serde_json::to_string(&blob).map_err(|e| request_failed(e.to_string())))?;
+    tx::write(db, move |tx| {
+        let updated = tx.execute(
+            &format!(
+                "UPDATE \"{}\" SET \"datasetId\" = ?1, \"capiAccessToken\" = ?2, \"capiDisconnectedAt\" = NULL, \
+                 \"updatedAt\" = ?3 WHERE \"id\" = ?4 AND \"workspaceId\" = ?5",
+                channel.table()
+            ),
+            params![dataset_id, sealed, now_ms(), id, workspace_id],
+        )?;
+        Ok(updated > 0)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

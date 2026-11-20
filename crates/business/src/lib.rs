@@ -93,6 +93,7 @@ pub mod media_url;
 pub mod member_scope;
 pub mod message;
 pub mod message_actions;
+pub mod messenger_ads_json;
 pub mod messenger_menu;
 pub mod meta_capi;
 pub mod meta_catalog;

@@ -565,7 +565,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/messenger-templates-public-api.test.ts` | C | tbd | todo | Template marketplace (install/share/sync); builder server code |
 | `apps/builder/__tests__/meta-capi-callback-wiring.test.ts` | B | - | todo | Meta Conversions API (CAPI); builder jsdom |
 | `apps/builder/__tests__/meta-capi-event-dialog.test.tsx` | B | - | todo | Meta Conversions API (CAPI); builder jsdom |
-| `apps/builder/__tests__/meta-capi-oauth-callback.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
+| `apps/builder/__tests__/meta-capi-oauth-callback.test.ts` | C | `crates/business/tests/meta_capi_connect.rs` | ported | Meta Conversions API (CAPI); builder server code; Q.P6-U2 (signed connect session in place of the state + nonce cookie) |
 | `apps/builder/__tests__/meta-catalog-operations.test.ts` | C | tbd | todo | Meta Catalog; builder server code |
 | `apps/builder/__tests__/mini-app-contact-variables.test.ts` | C | `crates/core/tests/mini_app_display_text.rs`, `crates/business/src/mini_app_whatsapp.rs` (unit), `crates/api/tests/mini_apps_whatsapp_public_api.rs` | todo | Mini-apps; Q.D1m; escape and WhatsApp publish cases ported; the `resolveContactVariables` cases are covered by parity `50-mini-apps` |
 | `apps/builder/__tests__/mini-app-editor-store.test.ts` | B | - | todo | Mini-apps; builder jsdom |
@@ -767,7 +767,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/social-login-community.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links); builder server code |
 | `apps/builder/__tests__/spreadsheets-public-api.test.ts` | C | `crates/api/tests/spreadsheets_public_api.rs` | ported | Google Sheets integration; builder server code; Q.D13 + Q.D13a (stale row) |
 | `apps/builder/__tests__/spreadsheets-url-validation.test.ts` | B | - | todo | Google Sheets integration; builder jsdom |
-| `apps/builder/__tests__/start-meta-capi-oauth.test.ts` | C | tbd | todo | Meta Conversions API (CAPI); builder server code |
+| `apps/builder/__tests__/start-meta-capi-oauth.test.ts` | C | `crates/business/tests/meta_capi_connect.rs` | ported | Meta Conversions API (CAPI); builder server code; Q.P6-U2 (signed connect session in place of the state + nonce cookie) |
 | `apps/builder/__tests__/start-product-import.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows); builder server code |
 | `apps/builder/__tests__/status-text-contrast.test.ts` | B | - | todo | Builder app shell and shared components; builder node-env, client logic |
 | `apps/builder/__tests__/stop-broadcast-dialog.test.tsx` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
@@ -965,7 +965,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/whatsapp-initiate-outbound-voip-call-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-manual-webhook-route.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-meta-call-permission.test.ts` | C | `crates/business/tests/whatsapp_meta_call_permission.rs` | ported | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/whatsapp-oauth-callback-outcome.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
+| `apps/builder/__tests__/whatsapp-oauth-callback-outcome.test.ts` | B | `crates/api/tests/whatsapp_callback.rs` | ported | WhatsApp calling (VoIP); builder jsdom; Q.P6-U2 (the callback route logic) |
 | `apps/builder/__tests__/whatsapp-oauth-popup-cancel.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-oauth-relay.test.ts` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-onboarding-result-done.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
@@ -1391,7 +1391,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/messenger-template-handler.test.ts` | C | tbd | todo | Messenger channel |
 | `apps/worker/__tests__/messenger-thread-control-rejection.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `apps/worker/__tests__/meta-catalog-import.test.ts` | C | tbd | todo | Meta Catalog |
-| `apps/worker/__tests__/meta-catalog-reconciler.test.ts` | C | tbd | todo | Meta Catalog |
+| `apps/worker/__tests__/meta-catalog-reconciler.test.ts` | C | `crates/worker/tests/meta_catalog_reconciler.rs` | ported | Meta Catalog; Q.P6-U2 |
 | `apps/worker/__tests__/meta-catalog-sync.test.ts` | C | tbd | todo | Meta Catalog |
 | `apps/worker/__tests__/mini-app-buttons.test.ts` | C | `crates/worker/src/mini_app_buttons.rs` (unit) | ported | Mini-apps; Q.D1m; the Messenger template resume suffix too (`apply_template_resume`) |
 | `apps/worker/__tests__/moosend-handler.test.ts` | C | tbd | todo | Moosend integration |
@@ -1639,10 +1639,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/google-ads/__tests__/wire-data-manager.test.ts` | C | tbd | todo | Google Ads integration |
 | `integrations/google-ads/__tests__/wire-google-ads.test.ts` | C | tbd | todo | Google Ads integration |
 | `integrations/google-ads/__tests__/wire-legacy-upload.test.ts` | C | tbd | todo | Google Ads integration |
-| `integrations/google-calendar/__tests__/connection-oauth.test.ts` | C | tbd | todo | Google Calendar integration |
+| `integrations/google-calendar/__tests__/connection-oauth.test.ts` | C | `crates/business/tests/connection_oauth_google.rs` | ported | Google Calendar integration; Q.P6-U2 (authorizeUrl, exchangeCode, describe; refreshAuth / verify / legacy callback not in this file) |
 | `integrations/google-calendar/__tests__/connection-verify.test.ts` | C | tbd | todo | Google Calendar integration |
 | `integrations/google-calendar/__tests__/smoke.test.ts` | C | tbd | todo | Google Calendar integration |
-| `integrations/google-sheets/__tests__/connection-oauth.test.ts` | C | tbd | todo | Google Sheets integration |
+| `integrations/google-sheets/__tests__/connection-oauth.test.ts` | C | `crates/business/tests/connection_oauth_google.rs` | ported | Google Sheets integration; Q.P6-U2 (authorizeUrl, exchangeCode, describe; refreshAuth / verify / legacy callback not in this file) |
 | `integrations/google-sheets/__tests__/legacy-auth-url.test.ts` | C | tbd | todo | Google Sheets integration |
 | `integrations/google-sheets/__tests__/write-value-input.test.ts` | C | tbd | todo | Google Sheets integration |
 | `integrations/instagram-facebook/__tests__/auth-scopes.test.ts` | C | tbd | todo | Instagram channel |
@@ -1744,7 +1744,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/messenger/__tests__/list-reels-posts.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/marketing-messages-auth-url.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/message-templates-api.test.ts` | C | tbd | todo | Messenger channel |
-| `integrations/messenger/__tests__/messenger-ads-json.test.ts` | C | tbd | todo | Messenger channel |
+| `integrations/messenger/__tests__/messenger-ads-json.test.ts` | C | crates/business/tests/messenger_ads_json.rs | ported | Messenger channel; JSON key order is serde_json order |
 | `integrations/messenger/__tests__/messenger-welcome-profile.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/outgoing-message-ids.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/outgoing-message-policy.test.ts` | C | tbd | todo | Messenger channel |
@@ -1771,7 +1771,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/messenger/__tests__/webhook-label-enqueue.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/webhook-marketing-messages.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/welcome-message-flows-api.test.ts` | C | tbd | todo | Messenger channel |
-| `integrations/meta-catalog/__tests__/auth.test.ts` | C | tbd | todo | Meta Catalog |
+| `integrations/meta-catalog/__tests__/auth.test.ts` | C | `crates/business/src/ads/connect.rs` (unit test) | ported | Meta Catalog; Q.P6-U2 |
 | `integrations/meta-catalog/__tests__/catalogs.test.ts` | C | tbd | todo | Meta Catalog |
 | `integrations/meta-catalog/__tests__/exception.test.ts` | C | tbd | todo | Meta Catalog |
 | `integrations/meta-catalog/__tests__/http-client.test.ts` | C | tbd | todo | Meta Catalog |

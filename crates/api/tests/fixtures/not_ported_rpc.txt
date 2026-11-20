@@ -1,7 +1,5 @@
 # /rpc procedures and SPA server actions that answer "not ported" (Q.P6-audit).
 actions.assertCurrentUserCanAccessChatbot
-actions.connectMetaCatalogAction
-actions.connectTelegramAction
 actions.createProduct
 actions.deleteContactCustomFields
 actions.enableAutomatedResponse
@@ -50,7 +48,6 @@ fbCommentsAPI.createFbCommentAPI
 fbCommentsAPI.deleteFbCommentAPI
 fbCommentsAPI.listFbCommentsAPI
 fbCommentsAPI.updateFbCommentAPI
-flowsAPI.privateGetMessengerAdsJsonAPI
 igCommentsAPI.createIgCommentAPI
 igCommentsAPI.deleteIgCommentAPI
 igCommentsAPI.listIgCommentsAPI
@@ -62,7 +59,6 @@ igStoriesAPI.updateIgStoryAPI
 inboxesAPI.listInboxesAuthenticatedAPI
 integrationFacebookAdsAPI.getAdInsights
 integrationWhatsappAPIs.connectWhatsappNumberAPI
-integrationWhatsappAPIs.listIntegrationWhatsappInternalAPI
 integrationWhatsappAPIs.listWhatsappPhoneNumbersInternalAPI
 mediaLibraryAPI.createMediaLibraryFile
 mediaLibraryAPI.createMediaLibraryFolder
@@ -75,6 +71,5 @@ messagesAPI.createMessageAuthenticatedAPI
 messagesAPI.deleteMessageAuthenticatedAPI
 messagesAPI.editMessageAuthenticatedAPI
 messagesAPI.findMessageAuthenticatedAPI
-messengerMessageTemplateAPIs.listMessengerMessageTemplatesInternalAPI
 productsAPI.listProductsAuthorizedAPI
 refLinksAPI.getRefLinksAuthenticatedAPI

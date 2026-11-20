@@ -11,7 +11,7 @@ use chatbotx_db::repo::models::MetaCatalogSyncRun;
 use chatbotx_db::repo::product::{CatalogSyncProduct, list_for_catalog_sync};
 use chatbotx_db::repo::{self, now_ms};
 use chatbotx_db::rusqlite::{Connection, OptionalExtension as _, params};
-use chatbotx_jobs::{JobError, JobOptions, QueueName};
+use chatbotx_jobs::{JobError, JobOptions, NewJob, QueueName, Retention};
 use serde_json::{Value, json};
 
 use super::import::{job_err, to_db};
@@ -30,6 +30,7 @@ const RATE_LIMIT_REASON: &str = "Meta rate limit reached; retry this item later"
 const SUBMISSION_STALE_MS: i64 = 2 * 60 * 1000;
 const MAX_POLL_ATTEMPTS: i64 = 12;
 const CHECK_JOB: &str = "checkMetaCatalogSync";
+const SUBMIT_JOB: &str = "submitMetaCatalogSync";
 
 // ---- apis/items-batch.ts --------------------------------------------------------
 
@@ -417,6 +418,58 @@ impl From<McError> for Stop {
             indeterminate: false,
         }
     }
+}
+
+/// `STALE_AFTER_MS` of the reconciler.
+const RECONCILE_STALE_AFTER_MS: i64 = 2 * 60 * 1000;
+
+/// `reconcileMetaCatalogSyncs` (schedule): every running push run untouched
+/// for 2 minutes is re-driven: a held submission lease re-submits it
+/// (`recovery`), else its status check is queued again. One job per run and
+/// minute (the job id carries the minute).
+// ponytail: no distributed lock; the schedule has one in-process consumer.
+pub async fn reconcile(deps: &Deps, now: i64) -> Result<Value, JobError> {
+    let runs = tx::read(&deps.db, move |conn| {
+        chatbotx_business::meta_catalog::list_recoverable_push_runs(
+            conn,
+            now - RECONCILE_STALE_AFTER_MS,
+        )
+    })
+    .await
+    .map_err(db_fail)?;
+    let cycle = now / 60_000;
+    let jobs = runs
+        .iter()
+        .map(|(run_id, workspace_id, lease)| {
+            let (name, data, job_id) = match lease {
+                Some(_) => (
+                    SUBMIT_JOB,
+                    json!({ "workspaceId": workspace_id.to_string(), "runId": run_id.to_string(), "recovery": true }),
+                    format!("mc-recover-submit-{run_id}-{cycle}"),
+                ),
+                None => (
+                    CHECK_JOB,
+                    json!({ "workspaceId": workspace_id.to_string(), "runId": run_id.to_string(), "attempt": 0 }),
+                    format!("mc-recover-check-{run_id}-{cycle}"),
+                ),
+            };
+            NewJob {
+                name: name.to_owned(),
+                data: json!({ "type": name, "data": data }),
+                opts: JobOptions {
+                    job_id: Some(job_id),
+                    remove_on_complete: Some(Retention::Remove),
+                    remove_on_fail: Some(Retention::Remove),
+                    ..JobOptions::default()
+                },
+            }
+        })
+        .collect();
+    deps.jobs
+        .add_bulk(QueueName::Default, jobs)
+        .await
+        .map_err(db_fail)?;
+    Ok(json!({ "reconciled": runs.len() }))
 }
 
 /// `submitMetaCatalogSync`.

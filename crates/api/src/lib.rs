@@ -28,6 +28,7 @@ pub mod session;
 pub mod shop_public;
 pub mod spa;
 pub mod store_webhooks;
+pub mod whatsapp_callback;
 
 use axum::Router;
 use axum::http::header;

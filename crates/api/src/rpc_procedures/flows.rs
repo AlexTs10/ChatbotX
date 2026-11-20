@@ -29,6 +29,48 @@ pub const ACTIONS: &[&str] = &[
     "testExternalRequestAction",
 ];
 
+/// `privateGetMessengerAdsJsonAPI`: the strict Messenger Ads JSON of the
+/// published start node, with the flow's current Meta welcome message flows.
+async fn messenger_ads_json(ctx: &Ctx<'_>, flow_id: i64) -> Result<Value, OrpcError> {
+    use chatbotx_business::messenger_ads_json::{self as ads, Mode, StartNode};
+    let (db, ws) = (&ctx.api.db, ctx.workspace_id);
+    let welcome: Vec<Value> = flow::list_welcome_message_flows(db, ws, flow_id)
+        .await
+        .map_err(fail)?
+        .into_iter()
+        .map(|row| {
+            json!({
+                "integrationMessengerId": row.integration_messenger_id.to_string(),
+                "pageId": row.page_id,
+                "welcomeMessageFlowId": row.welcome_message_flow_id,
+            })
+        })
+        .collect();
+    let result = match ads::start_node(db, ws, flow_id).await.map_err(fail)? {
+        StartNode::NotPublished => Err("notPublished"),
+        StartNode::NoStartNode => Err("noStartNode"),
+        StartNode::Ok {
+            flow_version_id,
+            start_node,
+        } => ads::convert(
+            &start_node,
+            &flow_id.to_string(),
+            Some(&flow_version_id.to_string()),
+            Mode::Strict,
+        ),
+    };
+    Ok(match result {
+        Ok(messages) => json!({
+            "status": "ok",
+            "json": Value::Array(messages).to_string(),
+            "welcomeMessageFlows": welcome,
+        }),
+        Err(reason) => {
+            json!({ "status": "error", "reason": reason, "welcomeMessageFlows": welcome })
+        }
+    })
+}
+
 /// `flowWithVersionsResource`.
 pub(super) fn flow_json(flow: &FlowWithVersions) -> Value {
     let mut out = flow.flow.to_json();
@@ -63,6 +105,10 @@ pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outco
                 Err(error) => Err(error),
             }
         }
+        "flowsAPI.privateGetMessengerAdsJsonAPI" => match In(input).id("flowId") {
+            Ok(flow_id) => messenger_ads_json(ctx, flow_id).await,
+            Err(error) => Err(error),
+        },
         "foldersAPI.listFoldersAuthenticatedAPI" => list_folders(ctx, input).await,
         _ => return None,
     })

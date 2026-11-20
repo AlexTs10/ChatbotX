@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use super::credentials::{Upstream, UpstreamRequest};
 use super::{COLUMNS, ConnectionRow, find_or_fail, providers, repo_err, row};
-use super::{oauth_channels, oauth_google_ads, oauth_instagram};
+use super::{oauth_channels, oauth_google, oauth_google_ads, oauth_instagram};
 use crate::connect_session::{self, NewSession, SessionRow};
 use crate::{BusinessError, Result, tx};
 
@@ -136,6 +136,19 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
             slug: "google-ads",
             multi_account: true,
         }),
+        // `credentialTypeForProvider`: both use the `google` credential.
+        "googleCalendar" => Some(Adapter {
+            provider: "googleCalendar",
+            credential_type: "google",
+            slug: "google-calendar",
+            multi_account: false,
+        }),
+        "googleSheets" => Some(Adapter {
+            provider: "googleSheets",
+            credential_type: "google",
+            slug: "google-sheets",
+            multi_account: false,
+        }),
         _ => None,
     }
 }
@@ -145,6 +158,8 @@ pub fn adapter(provider: &str) -> Option<Adapter> {
 pub fn provider_for_slug(slug: &str) -> &str {
     match slug {
         "google-ads" => "googleAds",
+        "google-calendar" => "googleCalendar",
+        "google-sheets" => "googleSheets",
         "instagram-facebook" => "instagramFacebook",
         other => other,
     }
@@ -300,6 +315,9 @@ fn authorize_url(provider: &str, credential: &OAuthCredential, state: &str) -> S
     if provider == oauth_google_ads::PROVIDER {
         return oauth_google_ads::authorize_url(config, &credential.callback_url, state);
     }
+    if oauth_google::handles(provider) {
+        return oauth_google::authorize_url(provider, config, &credential.callback_url, state);
+    }
     if oauth_instagram::handles(provider) {
         return oauth_instagram::authorize_url(provider, config, &credential.callback_url, state);
     }
@@ -362,6 +380,16 @@ async fn exchange_code(
     if provider == oauth_google_ads::PROVIDER {
         return oauth_google_ads::exchange_code(upstream, config, &credential.callback_url, code)
             .await;
+    }
+    if oauth_google::handles(provider) {
+        return oauth_google::exchange_code(
+            upstream,
+            provider,
+            config,
+            &credential.callback_url,
+            code,
+        )
+        .await;
     }
     if oauth_instagram::handles(provider) {
         return oauth_instagram::exchange_code(
@@ -429,6 +457,11 @@ async fn list_candidates(
     }
     if provider == oauth_google_ads::PROVIDER {
         return oauth_google_ads::list_candidates(upstream, auth).await;
+    }
+    if oauth_google::handles(provider) {
+        return Ok(oauth_google::describe(provider, auth)
+            .map(|(id, name)| vec![candidate(&id, &name, auth.clone())])
+            .unwrap_or_default());
     }
     // Instagram login: the grant is its one account.
     if provider == "instagram" {
@@ -707,7 +740,7 @@ pub async fn complete_authorization(
         }
     };
     if session.purpose == "reconnect" && session.target_connection_id.is_some() {
-        return complete_reconnect(db, upstream, &session, &auth).await;
+        return complete_reconnect(db, encryption, upstream, &session, &auth).await;
     }
     let stored = match encrypt(encryption, &auth, &aad_authorization(session.id)) {
         Ok(text) => {
@@ -1098,6 +1131,7 @@ async fn subscribe_best_effort(
 /// page; its new token is saved and the connection is `connected` again.
 async fn complete_reconnect(
     db: &Db,
+    encryption: &Encryption,
     upstream: &impl Upstream,
     session: &SessionRow,
     auth: &Value,
@@ -1136,9 +1170,12 @@ async fn complete_reconnect(
         oauth_channels::describe(&provider, &page_auth)?
     } else if provider == oauth_google_ads::PROVIDER {
         oauth_google_ads::describe(&page_auth)?
+    } else if oauth_google::handles(&provider) {
+        oauth_google::describe(&provider, &page_auth)?
     } else {
         describe(&page_auth)?
     };
+    let sealer = encryption.clone();
     let table = oauth_channels::satellite(&provider).map_or("IntegrationMessenger", |(t, _)| t);
     let row = session.clone();
     let saved_auth = page_auth.clone();
@@ -1147,6 +1184,16 @@ async fn complete_reconnect(
         let updated = if provider == oauth_google_ads::PROVIDER {
             usize::from(oauth_google_ads::save_reconnect_auth(
                 conn,
+                connection.integration_id,
+                connection.workspace_id,
+                &saved_auth,
+                now,
+            )?)
+        } else if oauth_google::handles(&provider) {
+            usize::from(oauth_google::save_reconnect_auth(
+                conn,
+                &sealer,
+                &provider,
                 connection.integration_id,
                 connection.workspace_id,
                 &saved_auth,
@@ -1274,12 +1321,23 @@ pub async fn connect_targets(
         let auth = candidate["auth"].clone();
         let saved = auth.clone();
         let provider = session.provider.clone();
+        let sealer = encryption.clone();
         let persisted = tx::write(db, move |conn| {
             let now = repo::now_ms();
             if oauth_channels::handles(&provider) {
                 oauth_channels::persist(conn, &provider, workspace_id, &saved, actor_user_id, now)
             } else if provider == oauth_google_ads::PROVIDER {
                 oauth_google_ads::persist(conn, workspace_id, &saved, actor_user_id, now)
+            } else if oauth_google::handles(&provider) {
+                oauth_google::persist(
+                    conn,
+                    &sealer,
+                    &provider,
+                    workspace_id,
+                    &saved,
+                    actor_user_id,
+                    now,
+                )
             } else if oauth_instagram::handles(&provider) {
                 oauth_instagram::persist(conn, &provider, workspace_id, &saved, actor_user_id, now)
             } else {

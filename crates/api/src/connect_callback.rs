@@ -2,7 +2,7 @@
 //! (`handleConnectSessionCallback` / `runConnectSessionCallback` of
 //! `apps/builder/src/app/integrations/[...integration]/callback.ts`). The
 //! legacy JSON-state flows of that route answer 404; the Meta ads flows
-//! (`facebookLeadAds`, `facebookMarketingMessages`, `messagingAds`) are
+//! (`facebookLeadAds`, `facebookMarketingMessages`, `messagingAds`, `metaCatalog`) are
 //! connect sessions too (`ads::connect`). No relay to `originHost`: a session only stores the app's own
 //! host (`toSessionReturn`), so the relay is always a no-op here.
 
@@ -29,6 +29,12 @@ use crate::handlers::ApiState;
 /// The route.
 pub fn router(state: Arc<ApiState>) -> Router {
     Router::new()
+        // The WhatsApp embedded signup relay (a static path wins over the
+        // `{provider}` capture).
+        .route(
+            "/integrations/whatsapp/callback",
+            get(crate::whatsapp_callback::handle),
+        )
         .route("/integrations/{provider}/callback", get(handle))
         .with_state(state)
 }
@@ -141,7 +147,9 @@ async fn handle(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    if let Some(kind) = kind {
+    // A builder session (a signed-in user) stores the grant at once; an API /
+    // MCP session (no user) takes the generic adapter flow below.
+    if let Some(kind) = kind.filter(|_| session.actor_user_id.is_some()) {
         return google_callback(&state, kind, &session, &query, &headers).await;
     }
     if chatbotx_business::ads::connect::flow_of(&session).is_some() {
@@ -527,6 +535,76 @@ async fn stripe_refuse(
 /// The Meta ads flows: only the member who pressed Connect finishes the
 /// session (messaging ads: still a super admin, and the integration is the
 /// workspace's); then back to the page that started it.
+/// `buildCapiConnectRedirectUrl`: the Ads tab with the outcome.
+fn capi_redirect(return_to: &str, outcome: Result<(), &str>) -> String {
+    match outcome {
+        Ok(()) => append_param(return_to, "capiConnect", "success"),
+        Err(reason) => append_param(
+            &append_param(return_to, "capiConnect", "error"),
+            "capiReason",
+            reason,
+        ),
+    }
+}
+
+/// The `flow: "metaCapi"` branch (`completeMetaCapiConnect` +
+/// `redirectWithMetaCapiOutcome`).
+async fn meta_capi_callback(
+    state: &ApiState,
+    session: &SessionRow,
+    caller: chatbotx_business::ads::connect::Caller,
+    code: &str,
+    headers: &HeaderMap,
+    return_to: &str,
+) -> Response {
+    use chatbotx_business::ads::connect::{self, CapiOutcome};
+    let Some(encryption) = state.encryption.as_deref() else {
+        return not_found();
+    };
+    let user_id = caller.user_id;
+    let outcome = connect::complete_meta_capi(
+        &state.db,
+        encryption,
+        &state.app_url,
+        &HttpUpstream,
+        session,
+        caller,
+        code,
+    )
+    .await;
+    match outcome {
+        Ok(CapiOutcome::NotFound) => not_found(),
+        Ok(CapiOutcome::Success) => {
+            let channel = match connect::flow_of(session) {
+                Some(connect::Flow::MetaCapi { channel, .. }) => channel,
+                _ => String::new(),
+            };
+            state
+                .audit
+                .record(chatbotx_business::audit::AuditRecordInput {
+                    user_id: user_id.map(|id| id.to_string()),
+                    workspace_id: Some(session.workspace_id.to_string()),
+                    ip_address: Some(crate::auth::guest_client_ip(headers)),
+                    user_agent: headers
+                        .get(header::USER_AGENT)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string),
+                    ..chatbotx_business::audit::AuditRecordInput::new(
+                        "update",
+                        format!("connected the Conversions API for the {channel} channel"),
+                    )
+                })
+                .await;
+            redirect(&capi_redirect(return_to, Ok(())))
+        }
+        Ok(CapiOutcome::Error(reason)) => redirect(&capi_redirect(return_to, Err(reason))),
+        Err(error) => {
+            tracing::error!(%error, session_id = session.id, "Meta CAPI connect callback failed");
+            redirect(&capi_redirect(return_to, Err("failed")))
+        }
+    }
+}
+
 async fn ads_callback(
     state: &ApiState,
     session: &SessionRow,
@@ -535,8 +613,15 @@ async fn ads_callback(
 ) -> Response {
     use chatbotx_business::ads::connect;
     let return_to = return_url(session);
+    let capi = matches!(
+        connect::flow_of(session),
+        Some(connect::Flow::MetaCapi { .. })
+    );
     if query.contains_key("error") {
         connect_session::fail(&state.db, session, "provider_denied", Some(PENDING)).await;
+        if capi {
+            return redirect(&capi_redirect(&return_to, Err("cancelled")));
+        }
         return redirect(&return_to);
     }
     let user_id = match state.sessions.as_deref() {
@@ -579,6 +664,9 @@ async fn ads_callback(
         is_member,
         super_admin,
     };
+    if capi {
+        return meta_capi_callback(state, session, caller, code, headers, &return_to).await;
+    }
     match connect::complete(
         &state.db,
         encryption,
@@ -590,6 +678,10 @@ async fn ads_callback(
     )
     .await
     {
+        // `storeMetaCatalogConnection`: the products page opens its setup.
+        Ok(true) if connect::flow_of(session) == Some(connect::Flow::MetaCatalog) => {
+            redirect(&append_param(&return_to, "metaCatalog", "setup"))
+        }
         Ok(true) => redirect(&return_to),
         Ok(false) => not_found(),
         Err(error) => {

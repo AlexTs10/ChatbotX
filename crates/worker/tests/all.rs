@@ -8,6 +8,8 @@ mod analytics_events;
 mod appointment_google_event;
 #[path = "inbound_webhook_worker.rs"]
 mod inbound_webhook_worker;
+#[path = "meta_catalog_reconciler.rs"]
+mod meta_catalog_reconciler;
 #[path = "schedule_broadcast.rs"]
 mod schedule_broadcast;
 #[path = "schedule_recurring.rs"]
