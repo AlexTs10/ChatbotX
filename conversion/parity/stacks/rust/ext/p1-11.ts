@@ -53,10 +53,6 @@ const oauth2Auth = (accessToken: string, metadata: Record<string, unknown>, redi
   metadata,
 })
 
-const notPorted = (name: string) => (): never => {
-  throw new Error(`p1-11 fixture ${name} is not ported to the Rust stack yet`)
-}
-
 class SqliteP111Fixtures implements P111Fixtures {
   private db: DatabaseSync | undefined
 
@@ -307,7 +303,12 @@ class SqliteP111Fixtures implements P111Fixtures {
       )
     return { templateId: templateId.toString() }
   }
-  setMustChangePassword = notPorted("setMustChangePassword")
+
+  async setMustChangePassword(input: { userId: string; value: boolean }): Promise<void> {
+    this.open()
+      .prepare(`UPDATE "User" SET "mustChangePassword" = ? WHERE "id" = ?`)
+      .run(input.value ? 1 : 0, BigInt(input.userId))
+  }
 
   async createContact(input: P111ContactInput): Promise<P111Contact> {
     const contactId = createId()

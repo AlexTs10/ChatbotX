@@ -572,7 +572,15 @@ fn display_message(message: &str, code: &str, data: Option<&Value>) -> String {
     if code == "invalidRequestData" || map.is_empty() {
         return message.to_string();
     }
-    let params = map
+    // ponytail: `data` keys are sorted (no serde_json `preserve_order`); a
+    // code whose JS insertion order differs lists it here.
+    let order: &[&str] = match code {
+        "imagesNotSupportedOnChannel" => &["reason", "channel", "max"],
+        _ => &[],
+    };
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by_key(|(key, _)| order.iter().position(|k| k == key).unwrap_or(usize::MAX));
+    let params = entries
         .iter()
         .map(|(key, value)| format!("{key}={}", js_string(value)))
         .collect::<Vec<_>>()
