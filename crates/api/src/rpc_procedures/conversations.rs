@@ -518,7 +518,7 @@ async fn message_route(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Result<Valu
         .ok_or_else(invalid)?;
     let route = match name {
         "editMessageAction" => "messages.update",
-        "deleteMessageAction" => "messages.delete",
+        "deleteMessageAction" => "messages.deleteAction",
         _ => "messages.changeAttributes",
     };
     let params = [

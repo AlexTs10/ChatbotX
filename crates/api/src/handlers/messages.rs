@@ -29,6 +29,8 @@ pub const ROUTES: &[&str] = &[
     "messages.create",
     "messages.update",
     "messages.delete",
+    // Internal (no public path): the `/rpc` `deleteMessage` answer.
+    "messages.deleteAction",
     "messages.changeAttributes",
     "messages.sendWhatsappTemplate",
     "messages.requestWhatsappCallPermission",
@@ -228,7 +230,9 @@ async fn update(state: &ApiState, call: Call<'_>) -> Reply {
     Ok(json(200, body))
 }
 
-async fn delete(state: &ApiState, call: Call<'_>) -> Reply {
+/// `deleteMessage`: the deleted ids (`{ success, messageIds }` for `/rpc`,
+/// 204 for the public route).
+async fn delete(state: &ApiState, call: Call<'_>) -> Result<Vec<String>, crate::orpc::OrpcError> {
     let mut input = Input::from_body(call.params, call.body);
     let t = target(&mut input);
     input.finish()?;
@@ -236,11 +240,19 @@ async fn delete(state: &ApiState, call: Call<'_>) -> Reply {
     let done = actions::delete_message(&state.db, &found, t.message, t.created_at)
         .await
         .map_err(|e| business_error(e, MUTATING))?;
+    let ids = done.event.as_ref().map_or_else(Vec::new, |e| {
+        e.data["messageIds"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect()
+    });
     if let Some(event) = done.event {
         state.queue_realtime(call.workspace_id, event).await;
     }
     queue_jobs(state, done.job).await;
-    Ok(no_content())
+    Ok(ids)
 }
 
 async fn change_attributes(state: &ApiState, call: Call<'_>) -> Reply {
@@ -427,7 +439,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "messages.create" => create(state, call).await,
         "messages.update" => update(state, call).await,
-        "messages.delete" => delete(state, call).await,
+        "messages.delete" => delete(state, call).await.map(|_| no_content()),
+        "messages.deleteAction" => {
+            let ids = delete(state, call).await?;
+            Ok(json(200, json!({ "success": true, "messageIds": ids })))
+        }
         "messages.changeAttributes" => change_attributes(state, call).await,
         "messages.sendWhatsappTemplate" => send_template(state, call).await,
         _ => request_call_permission(state, call).await,
