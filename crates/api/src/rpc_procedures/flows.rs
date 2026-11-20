@@ -26,6 +26,7 @@ pub const ACTIONS: &[&str] = &[
     "deleteFolderAction",
     "changeFolderAction",
     "flowAnalyticsStats",
+    "testExternalRequestAction",
 ];
 
 /// `flowWithVersionsResource`.
@@ -125,6 +126,9 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
     }
     if name == "flowAnalyticsStats" {
         return Some(analytics_stats(ctx, args).await);
+    }
+    if name == "testExternalRequestAction" {
+        return Some(test_external_request(ctx, args).await);
     }
     let db = &ctx.api.db;
     let ws = ctx.workspace_id;
@@ -307,4 +311,33 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
         }
         .await,
     )
+}
+
+/// `test-external-request-action.ts`: runs the request of the editor's
+/// "Test request" button. A coded error (`ssrfBlocked`, …) is passed on; any
+/// other failure is the `externalRequestFailed` copy.
+async fn test_external_request(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcError> {
+    let input = chatbotx_core::flow_config::steps::external_request_fields_schema()
+        .parse(arg(args, 1))
+        .map_err(|_| invalid())?;
+    match chatbotx_business::external_request::execute(&ctx.api.db, &input, ctx.workspace_id, None)
+        .await
+    {
+        Ok(result) => Ok(json!({
+            "statusCode": result.status_code,
+            "durationMs": result.duration_ms,
+            "responseBody": result.response_body,
+        })),
+        Err(error) if error.code().is_some() => Err(action_fail(error)),
+        Err(error) => {
+            tracing::error!(err = %error.message(), workspace_id = ctx.workspace_id, "External request test failed");
+            Err(action_fail(
+                chatbotx_business::errors::BusinessError::exception(
+                    "Unable to test the external request. Verify the request configuration and try again.",
+                    "externalRequestFailed",
+                    400,
+                ),
+            ))
+        }
+    }
 }

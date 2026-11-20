@@ -393,12 +393,33 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         }
         None => spin(&step),
     };
-    // ponytail: `resolveCollectionStep` (shop-token card links, ecommerce
-    // settings) comes with the webshop unit Q.D8; a collection is skipped.
-    if step_type == "sendCollection" {
-        tracing::warn!(conversation_id, step_type = %step_type, "Product collection steps are not ported yet; skipped");
-        return Ok(());
-    }
+    // `resolveCollectionStep`: the collection becomes its product cards for
+    // this contact only now, after the variable pass (product names are the
+    // store's data, never spun).
+    let resolved = if step_type == "sendCollection" {
+        match chatbotx_business::webshop::collection::resolve_collection_step(
+            &deps.db,
+            conversation.workspace_id,
+            conversation.contact_id,
+            Some(contact_inbox.id),
+            &deps.app_url,
+            &resolved,
+        )
+        .await
+        .map_err(|e| fail(e.message()))?
+        {
+            Some(step) => step,
+            None => {
+                tracing::debug!(
+                    conversation_id,
+                    "Skipping a product collection that matched no product"
+                );
+                return Ok(());
+            }
+        }
+    } else {
+        resolved
+    };
     if is_blank_text_carrier_step(&resolved) {
         tracing::warn!(conversation_id, step_type = %step_type, "Skipping blank text flow step");
         return Ok(());

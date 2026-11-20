@@ -8,9 +8,12 @@ mod appointment;
 mod condition;
 mod contact;
 mod conversation;
+mod coupon;
 mod decision;
 pub mod delay;
 mod email_marketing;
+mod external_request;
+mod facebook_audience;
 mod make;
 mod messenger;
 mod pipeline;
@@ -136,6 +139,9 @@ pub(crate) async fn run(
     if let Some(status) = contact::run(&ctx, step_type).await? {
         return Ok(status);
     }
+    if let Some(status) = coupon::run(&ctx, step_type).await? {
+        return Ok(status);
+    }
     if let Some(status) = conversation::run(&ctx, step_type).await? {
         return Ok(status);
     }
@@ -183,6 +189,8 @@ pub(crate) async fn run(
     }
     match step_type {
         "make" | "triggerN8n" => make::handle(&ctx).await,
+        "callApi" => external_request::handle(&ctx).await,
+        "facebookCustomAudience" => facebook_audience::handle(&ctx).await,
         "condition" => condition::handle(&ctx).await,
         "pipeline" => pipeline::handle(&ctx).await,
         "findPlacesNearMe" => places::handle(&ctx).await,
@@ -222,3 +230,5 @@ mod send_message_tests;
 pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod u4_tests;
