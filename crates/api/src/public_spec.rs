@@ -94,13 +94,17 @@ fn etag_of(body: &str) -> String {
     format!("\"{hex}\"")
 }
 
-/// `getTenantSettings().name` (one tenant: the root tenant's name).
+/// `getTenantSettings().name`: the root tenant's `brandName` with the
+/// enterprise features, else `ChatbotX` (one tenant: the root tenant).
 async fn tenant_name(api: &ApiState) -> String {
+    if api.assert_enterprise_features().await.is_err() {
+        return "ChatbotX".to_string();
+    }
     api.db
         .read(|conn| {
             Ok(conn
                 .query_row(
-                    r#"SELECT "name" FROM "Tenant" WHERE "id" = ?1"#,
+                    r#"SELECT "brandName" FROM "Tenant" WHERE "id" = ?1"#,
                     [chatbotx_business::tenant::ROOT_TENANT_ID],
                     |row| row.get::<_, Option<String>>(0),
                 )

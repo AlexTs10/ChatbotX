@@ -57,6 +57,13 @@ fn stats_route(path: &str, input: &Value) -> Option<(&'static str, Vec<(&'static
 
 pub(super) async fn procedure(ctx: &Ctx<'_>, path: &str, input: &Value) -> Outcome {
     if let Some((route_id, params)) = stats_route(path, input) {
+        // The private schema: each id is a required numeric string (400).
+        if params
+            .iter()
+            .any(|(_, v)| v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()))
+        {
+            return Some(Err(super::invalid()));
+        }
         return Some(
             public(ctx, route_id, &params, Some(""), None)
                 .await

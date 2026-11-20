@@ -90,7 +90,7 @@ async fn flows(fx: &Fixture) {
             )?;
             tx.execute(
                 r#"INSERT INTO "FlowVersion" ("id", "workspaceId", "flowId", "nodes", "edges", "isDraft", "isLatest", "startNodeId")
-                   VALUES (611, ?1, 61, '[]', '[]', 0, 1, NULL), (621, ?1, 62, '[]', '[]', 1, 1, NULL)"#,
+                   VALUES (611, ?1, 61, '[]', '[]', 0, 1, 1), (621, ?1, 62, '[]', '[]', 1, 1, 1)"#,
                 params![WS],
             )?;
             Ok(())
@@ -259,8 +259,8 @@ async fn ads_export_prefixes_a_bom_and_keeps_the_legacy_shape_without_a_channel(
     assert_eq!(
         String::from_utf8_lossy(&answer.bytes[3..]),
         "Contact name,Phone,Ad ID,Occurred at\n\
-         Ada Lovelace,'+12025550101,ad-1,2026-08-06T08:10:00.000Z\n\
-         Nguyễn Văn Bình,,ad-2,2026-08-07T08:10:00.000Z\n"
+         Ada Lovelace,'+12025550101,ad-1,2026-08-06T09:30:00.000Z\n\
+         Nguyễn Văn Bình,,ad-2,2026-08-07T09:30:00.000Z\n"
     );
 }
 
@@ -282,7 +282,7 @@ async fn ads_export_with_a_channel_gets_the_five_column_format() {
     assert_eq!(
         String::from_utf8_lossy(&answer.bytes[3..]),
         "Kontaktname,Telefon,Anzeigen-ID,Aufgetreten am,Kanal\n\
-         Ada Lovelace,'+12025550101,ad-1,2026-08-06T08:10:00.000Z,WhatsApp\n"
+         Ada Lovelace,'+12025550101,ad-1,2026-08-06T09:30:00.000Z,WhatsApp\n"
     );
 }
 
@@ -309,8 +309,8 @@ async fn ads_export_all_channels_streams_each_rows_channel_with_a_neutral_file_n
     assert_eq!(
         String::from_utf8_lossy(&answer.bytes[3..]),
         "Contact name,Phone,Ad ID,Occurred at,Channel\n\
-         Ada Lovelace,'+12025550101,ad-1,2026-08-06T08:10:00.000Z,WhatsApp\n\
-         Nguyễn Văn Bình,,ad-2,2026-08-07T08:10:00.000Z,WhatsApp\n"
+         Ada Lovelace,'+12025550101,ad-1,2026-08-06T09:30:00.000Z,WhatsApp\n\
+         Nguyễn Văn Bình,,ad-2,2026-08-07T09:30:00.000Z,WhatsApp\n"
     );
     // The old bookmark path answers the same.
     let old = get(
@@ -543,15 +543,27 @@ async fn public_spec_answers_304_and_scopes_the_etag_by_filter_and_tenant() {
     fx.db()
         .write(|tx| {
             tx.execute(
-                r#"INSERT INTO "Tenant" ("id", "name") VALUES (1, 'OtherTenant')
-                   ON CONFLICT ("id") DO UPDATE SET "name" = 'OtherTenant'"#,
+                r#"INSERT INTO "Tenant" ("id", "brandName") VALUES (1, 'OtherTenant')
+                   ON CONFLICT ("id") DO UPDATE SET "brandName" = 'OtherTenant'"#,
                 [],
             )?;
             Ok(())
         })
         .await
         .unwrap();
-    let other = get(&fx, "/api/public-spec.json", None, None).await;
+    // Without the enterprise features the brand name is not used.
+    let community = get(&fx, "/api/public-spec.json", None, None).await;
+    assert_eq!(community.header(header::ETAG), etag);
+    assert_eq!(community.json()["info"]["title"], "ChatbotX");
+    // A licensed enterprise edition: the tenant's name, its own ETag.
+    let (token, keys) = rpc_common::license("enterprise");
+    let mut licensed = (*fx.api).clone().with_license(Some(token), keys);
+    licensed.edition = chatbotx_business::keys::Edition::Enterprise;
+    let enterprise = Fixture {
+        auth: Arc::clone(&fx.auth),
+        api: Arc::new(licensed),
+    };
+    let other = get(&enterprise, "/api/public-spec.json", None, None).await;
     assert_ne!(other.header(header::ETAG), etag);
     assert_eq!(other.json()["info"]["title"], "OtherTenant");
 }

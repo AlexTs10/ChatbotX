@@ -13,7 +13,8 @@
 //! ported. A SPA stub that nothing imports is still listed (COVERAGE.md
 //! marks it).
 //! Each call gets a fresh copy of one migrated, seeded template database
-//! file; 8 run at once (on 8 runtime threads). The api and auth state
+//! file; 8 run at once (on 8 runtime threads); a timed-out call is made
+//! once more. The api and auth state
 //! (its HTTP clients are slow to build) is built once and cloned with the
 //! copy's database. A panic, a 30 s
 //! time-out or a 401 / 403 is not listed (printed).
@@ -195,7 +196,11 @@ fn concrete_path(template: &str) -> String {
 
 /// One call, on its own fresh database (a delete or a workspace deletion
 /// must not change the next call's answer): the answer body.
-type Probe = std::pin::Pin<Box<dyn Future<Output = String> + Send>>;
+type ProbeCall = std::pin::Pin<Box<dyn Future<Output = String> + Send>>;
+
+/// A [`ProbeCall`] factory: a call that times out is made once more (a
+/// stalled host must not change the list).
+type Probe = Box<dyn Fn() -> ProbeCall + Send>;
 
 /// Calls at once (each has its own database file).
 const PARALLEL: usize = 8;
@@ -294,7 +299,10 @@ async fn measure_all(probes: Vec<(String, Probe)>) -> Tally {
             };
             running.spawn(async move {
                 let start = std::time::Instant::now();
-                let outcome = measure(probe).await;
+                let mut outcome = measure(probe()).await;
+                if matches!(outcome, Outcome::TimedOut) {
+                    outcome = measure(probe()).await;
+                }
                 (id, outcome, start.elapsed())
             });
         }
@@ -309,6 +317,11 @@ async fn measure_all(probes: Vec<(String, Probe)>) -> Tally {
 }
 
 fn public_probe(route: &'static PublicRoute, template: &Arc<Template>) -> Probe {
+    let template = Arc::clone(template);
+    Box::new(move || public_call(route, &template))
+}
+
+fn public_call(route: &'static PublicRoute, template: &Arc<Template>) -> ProbeCall {
     let template = Arc::clone(template);
     Box::pin(async move {
         let (fx, path) = template.fixture();
@@ -495,6 +508,16 @@ fn call_name<'a>(text: &'a str, at: usize, kind: &str) -> Option<(String, &'a st
 
 /// One `/rpc` call with the owner session.
 fn rpc_probe(template: &Arc<Template>, method: &'static str, url: String, input: Value) -> Probe {
+    let template = Arc::clone(template);
+    Box::new(move || rpc_call(&template, method, url.clone(), input.clone()))
+}
+
+fn rpc_call(
+    template: &Arc<Template>,
+    method: &'static str,
+    url: String,
+    input: Value,
+) -> ProbeCall {
     let template = Arc::clone(template);
     Box::pin(async move {
         let (fx, path) = template.fixture();
