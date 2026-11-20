@@ -617,77 +617,6 @@ async fn store(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn credential(config: Value) -> OAuthCredential {
-        OAuthCredential {
-            config,
-            callback_url: "https://app.test/integrations/messenger/callback".into(),
-        }
-    }
-
-    #[test]
-    fn builds_each_flow_url() {
-        let c = credential(
-            json!({ "clientId": "app1", "version": "v22.0", "marketingMessagesConfigId": "cfg" }),
-        );
-        let lead = auth_url(&Flow::LeadAds, &c, "1.n").unwrap();
-        assert!(lead.starts_with(
-            "https://www.facebook.com/v22.0/dialog/oauth?auth_type=rerequest&client_id=app1"
-        ));
-        assert!(lead.contains(
-            "scope=leads_retrieval%2Cpages_manage_ads%2Cpages_manage_metadata%2Cpages_show_list"
-        ));
-        assert!(lead.contains("state=1.n"));
-        let mm = auth_url(&Flow::MarketingMessages, &c, "1.n").unwrap();
-        assert!(mm.contains("config_id=cfg") && mm.contains("override_default_response_type=true"));
-        assert!(!mm.contains("scope="));
-        let ads = Flow::MessagingAds {
-            channel: "whatsapp".into(),
-            integration_id: 5,
-        };
-        let ads = auth_url(&ads, &c, "1.n").unwrap();
-        assert!(ads.contains("whatsapp_business_management") && !ads.contains("auth_type"));
-    }
-
-    /// `integrations/meta-catalog/__tests__/auth.test.ts`.
-    #[test]
-    fn meta_catalog_asks_facebook_to_rerequest_previously_declined_permissions() {
-        let c = credential(json!({ "clientId": "client-id" }));
-        let url = url::Url::parse(&auth_url(&Flow::MetaCatalog, &c, "1.n").unwrap()).unwrap();
-        let get = |k: &str| {
-            url.query_pairs()
-                .find(|(key, _)| key == k)
-                .map(|(_, v)| v.into_owned())
-        };
-        assert_eq!(get("auth_type").as_deref(), Some("rerequest"));
-        assert!(get("scope").unwrap().contains("catalog_management"));
-        assert!(url.path().starts_with("/v24.0/"));
-    }
-
-    #[test]
-    fn marketing_messages_needs_a_config_id() {
-        let c = credential(json!({ "clientId": "app1" }));
-        assert!(auth_url(&Flow::MarketingMessages, &c, "s").is_err());
-        assert!(
-            auth_url(&Flow::LeadAds, &c, "s")
-                .unwrap()
-                .contains("/v23.0/")
-        );
-    }
-
-    #[test]
-    fn messaging_ads_scopes_per_channel() {
-        assert!(messaging_ads_scopes("instagram").contains(&"instagram_basic"));
-        assert_eq!(
-            messaging_ads_scopes("messenger"),
-            FACEBOOK_ADS_SCOPES.to_vec()
-        );
-    }
-}
-
 // ---- metaCapi (`callback-meta-capi.ts`) -----------------------------------------
 
 /// `CapiConnectResult` (or the original's `notFound()`).
@@ -902,5 +831,76 @@ async fn connect_capi(
             tracing::warn!(%error, channel, integration_id = id, "Meta CAPI dataset could not be created with the dedicated token");
             Ok(CapiOutcome::Error("datasetFailed"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn credential(config: Value) -> OAuthCredential {
+        OAuthCredential {
+            config,
+            callback_url: "https://app.test/integrations/messenger/callback".into(),
+        }
+    }
+
+    #[test]
+    fn builds_each_flow_url() {
+        let c = credential(
+            json!({ "clientId": "app1", "version": "v22.0", "marketingMessagesConfigId": "cfg" }),
+        );
+        let lead = auth_url(&Flow::LeadAds, &c, "1.n").unwrap();
+        assert!(lead.starts_with(
+            "https://www.facebook.com/v22.0/dialog/oauth?auth_type=rerequest&client_id=app1"
+        ));
+        assert!(lead.contains(
+            "scope=leads_retrieval%2Cpages_manage_ads%2Cpages_manage_metadata%2Cpages_show_list"
+        ));
+        assert!(lead.contains("state=1.n"));
+        let mm = auth_url(&Flow::MarketingMessages, &c, "1.n").unwrap();
+        assert!(mm.contains("config_id=cfg") && mm.contains("override_default_response_type=true"));
+        assert!(!mm.contains("scope="));
+        let ads = Flow::MessagingAds {
+            channel: "whatsapp".into(),
+            integration_id: 5,
+        };
+        let ads = auth_url(&ads, &c, "1.n").unwrap();
+        assert!(ads.contains("whatsapp_business_management") && !ads.contains("auth_type"));
+    }
+
+    /// `integrations/meta-catalog/__tests__/auth.test.ts`.
+    #[test]
+    fn meta_catalog_asks_facebook_to_rerequest_previously_declined_permissions() {
+        let c = credential(json!({ "clientId": "client-id" }));
+        let url = url::Url::parse(&auth_url(&Flow::MetaCatalog, &c, "1.n").unwrap()).unwrap();
+        let get = |k: &str| {
+            url.query_pairs()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.into_owned())
+        };
+        assert_eq!(get("auth_type").as_deref(), Some("rerequest"));
+        assert!(get("scope").unwrap().contains("catalog_management"));
+        assert!(url.path().starts_with("/v24.0/"));
+    }
+
+    #[test]
+    fn marketing_messages_needs_a_config_id() {
+        let c = credential(json!({ "clientId": "app1" }));
+        assert!(auth_url(&Flow::MarketingMessages, &c, "s").is_err());
+        assert!(
+            auth_url(&Flow::LeadAds, &c, "s")
+                .unwrap()
+                .contains("/v23.0/")
+        );
+    }
+
+    #[test]
+    fn messaging_ads_scopes_per_channel() {
+        assert!(messaging_ads_scopes("instagram").contains(&"instagram_basic"));
+        assert_eq!(
+            messaging_ads_scopes("messenger"),
+            FACEBOOK_ADS_SCOPES.to_vec()
+        );
     }
 }
