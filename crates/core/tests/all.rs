@@ -256,6 +256,8 @@ mod utils_media_download;
 mod utils_meta_capi;
 #[path = "utils_money.rs"]
 mod utils_money;
+#[path = "utils_no_avatar_sentinel.rs"]
+mod utils_no_avatar_sentinel;
 #[path = "utils_normalize_for_match.rs"]
 mod utils_normalize_for_match;
 #[path = "utils_placeholder_email.rs"]

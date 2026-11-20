@@ -686,10 +686,11 @@ async fn run_scheduled(deps: RefreshDeps<'_>, name: &str) -> Result<()> {
         "tiktok" => one(RefreshChannel::Tiktok).await,
         "threads" => refresh_threads(deps).await,
         "instagram" => {
-            let (direct, facebook) = futures::join!(
+            let (direct, facebook) = futures::future::join(
                 one(RefreshChannel::Instagram),
-                one(RefreshChannel::InstagramFacebook)
-            );
+                one(RefreshChannel::InstagramFacebook),
+            )
+            .await;
             direct.and(facebook)
         }
         "messenger" => one(RefreshChannel::Messenger).await,
@@ -979,7 +980,8 @@ pub async fn refresh_connection(
         _ => return Ok(false),
     };
     let table = channel.map_or("IntegrationThreads", RefreshChannel::table);
-    let Some(integration_id) = connection.integration_id else {
+    // A channel connection points at its satellite row through `inboxId`.
+    let Some(inbox_id) = connection.inbox_id else {
         return Err(crate::connection::not_configured(&connection.provider));
     };
     let _guard = refresh_locks()
@@ -993,17 +995,21 @@ pub async fn refresh_connection(
         .await
         .map_err(|e| BusinessError::exception(e.to_string(), "lockFailed", 500))?;
     let workspace_id = connection.workspace_id;
-    let sql = format!(r#"SELECT "auth" FROM "{table}" WHERE "id" = ?1 AND "workspaceId" = ?2"#);
-    let auth: Option<Option<String>> = tx::read(db, move |conn| {
-        conn.query_row(&sql, params![integration_id, workspace_id], |r| r.get(0))
-            .optional()
-            .map_err(repo_err)
+    let sql = format!(
+        r#"SELECT "id", "auth" FROM "{table}" WHERE "inboxId" = ?1 AND "workspaceId" = ?2"#
+    );
+    let row: Option<(i64, Option<String>)> = tx::read(db, move |conn| {
+        conn.query_row(&sql, params![inbox_id, workspace_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .optional()
+        .map_err(repo_err)
     })
     .await?;
-    let Some(auth) = auth
-        .flatten()
-        .and_then(|a| serde_json::from_str::<Value>(&a).ok())
-    else {
+    let Some((integration_id, Some(auth))) = row else {
+        return Err(crate::connection::not_configured(&connection.provider));
+    };
+    let Ok(auth) = serde_json::from_str::<Value>(&auth) else {
         return Err(crate::connection::not_configured(&connection.provider));
     };
     if auth["authType"] != "oauth2" {
@@ -1037,7 +1043,7 @@ pub async fn refresh_connection(
                     &connection.provider,
                     &connection.source_id,
                     workspace_id,
-                    connection.inbox_id.unwrap_or_default(),
+                    inbox_id,
                 )
                 .await
                 {
