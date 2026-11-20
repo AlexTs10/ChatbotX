@@ -299,7 +299,6 @@ pub(crate) fn outgoing_input(input: Input) -> Result<OutgoingInput, crate::orpc:
     }
     input.finish()?;
     let data = parsed.data.unwrap_or(Value::Null);
-    let has = |k: &str| data.get(k).is_some_and(|v| !v.is_null());
     let media_file_path = data
         .pointer("/mediaFile/path")
         .and_then(Value::as_str)
