@@ -6,9 +6,7 @@
 //!
 //! No default-queue worker is ported yet: the API runs the job in the
 //! request ([`run`]); [`BulkTagJob::job_data`] keeps the original
-//! `bulkTagContacts` payload for the worker port. The comment-automation
-//! source finds no contacts (its stats / miss repositories belong to the
-//! comment-automation analytics port). The member access scope
+//! `bulkTagContacts` payload for the worker port. The member access scope
 //! (`restrictToAssignedUserId`) keeps only the contacts with a conversation
 //! assigned to that member (`bulkAttachToContacts` with the `accessScope`).
 
@@ -199,9 +197,21 @@ pub(crate) fn event_condition(event_type: &str) -> &'static str {
     }
 }
 
+/// `CommentAutomationStatsRepository.buildEventFilter` (unknown = sent).
+fn comment_event_condition(event_type: &str) -> &'static str {
+    match event_type {
+        "message:delivered" => r#""deliveredAt" IS NOT NULL"#,
+        "message:seen" => r#""seenAt" IS NOT NULL"#,
+        "message:failed" => r#""failedAt" IS NOT NULL"#,
+        "flow:clicked" => r#""clickedAt" IS NOT NULL"#,
+        _ => r#"("deliveredAt" IS NOT NULL OR "failedAt" IS NOT NULL)"#,
+    }
+}
+
 /// `getContactIdsPage` of the job's source: broadcast rows by `contactId`
 /// (cursor = contact id), sequence-step dispatches by `id` (cursor =
-/// dispatch id), both without the excluded contacts.
+/// dispatch id), comment-automation replies or misses by `contactId`, all
+/// without the excluded contacts.
 pub async fn contact_ids_page(
     db: &Db,
     job: &BulkTagJob,
@@ -234,10 +244,45 @@ pub async fn contact_ids_page(
             ],
             event_type.clone(),
         ),
-        // The comment-automation stats / miss repositories are not ported.
-        BulkTagSource::CommentAutomation { .. } => return Ok(Vec::new()),
+        // `commentAutomationMissRepository.getMissContactIdsPage`.
+        BulkTagSource::CommentAutomation {
+            automation_id,
+            event_type,
+        } if event_type == "comment:missed" => (
+            r#""contactId""#,
+            r#""CommentAutomationMiss""#,
+            r#""workspaceId" = ? AND "automationId" = ? AND "contactId" IS NOT NULL"#.to_string(),
+            vec![Sql::Integer(job.workspace_id), Sql::Integer(*automation_id)],
+            String::new(),
+        ),
+        // `commentAutomationStatsRepository.getContactIdsPage`: the counted
+        // half (`resolveCountedReplyChannel`: public on Threads, else the DM).
+        BulkTagSource::CommentAutomation {
+            automation_id,
+            event_type,
+        } => (
+            r#""contactId""#,
+            r#""CommentAutomationEvent""#,
+            format!(
+                r#""workspaceId" = ? AND "automationId" = ? AND "contactId" IS NOT NULL
+                   AND "replyChannel" = (SELECT CASE WHEN "type" = 'threads' THEN 'public' ELSE 'private' END
+                                         FROM "CommentAutomation" WHERE "id" = ?)
+                   AND {}"#,
+                comment_event_condition(event_type)
+            ),
+            vec![
+                Sql::Integer(job.workspace_id),
+                Sql::Integer(*automation_id),
+                Sql::Integer(*automation_id),
+            ],
+            String::new(),
+        ),
     };
-    let mut filter = format!("{scope} AND {}", event_condition(&event_type));
+    let mut filter = if matches!(job.source, BulkTagSource::CommentAutomation { .. }) {
+        scope
+    } else {
+        format!("{scope} AND {}", event_condition(&event_type))
+    };
     if let Some(cursor) = cursor {
         filter.push_str(&format!(" AND {id_column} > ?"));
         binds.push(Sql::Integer(cursor));
@@ -249,7 +294,7 @@ pub async fn contact_ids_page(
     }
     binds.push(Sql::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
     let sql = format!(
-        r#"SELECT {id_column}, "contactId" FROM {table} WHERE {filter} ORDER BY {id_column} LIMIT ?"#
+        r#"SELECT DISTINCT {id_column}, "contactId" FROM {table} WHERE {filter} ORDER BY {id_column} LIMIT ?"#
     );
     tx::read(db, move |conn| {
         let mut stmt = conn.prepare(&sql).map_err(repo_err)?;

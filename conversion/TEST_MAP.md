@@ -1968,7 +1968,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/analytics/__tests__/magic-link-analytics.service.test.ts` | C | `crates/worker/tests/analytics_events.rs` | ported | Analytics dashboards; Q.D13b |
 | `packages/analytics/__tests__/ref-link-analytics.service.test.ts` | C | `crates/worker/tests/analytics_events.rs` | ported | Analytics dashboards; Q.D13b |
 | `packages/analytics/__tests__/sequence-analytics.service.test.ts` | C | tbd | todo | Analytics dashboards |
-| `packages/analytics/__tests__/stats-contact-ids-page.repository.test.ts` | C | tbd | todo | Analytics dashboards |
+| `packages/analytics/__tests__/stats-contact-ids-page.repository.test.ts` | C | `crates/business/tests/contact_bulk_tag_stats.rs` | ported | Analytics dashboards |
 | `packages/analytics/__tests__/stats-occurred-at.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/analytics/__tests__/time-series.test.ts` | C | tbd | todo | Analytics dashboards |
 | `packages/auth/__tests__/account-linking.test.ts` | C | tbd | todo | Authentication (sign-in, social, mobile, magic links) |
