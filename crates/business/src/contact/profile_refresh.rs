@@ -454,14 +454,6 @@ where
     }
 }
 
-/// `profileFetcherFactories[channel]`: the channel profile APIs (Graph,
-/// Zalo, Telegram `getChat`) are not ported, so every on-demand fetch fails.
-async fn fetch_channel_profile(channel: String) -> FetchResult {
-    Err(format!(
-        "on-demand profile fetch is not ported for {channel}"
-    ))
-}
-
 /// `refreshContactProfile` (builder lib): the contact (`Contact not found`),
 /// its contact inbox (`Contact inbox not found`), then [`refresh`] with the
 /// channel fetcher (`channelApi`).
@@ -472,19 +464,43 @@ pub async fn refresh_contact_profile(
     contact_id: i64,
     contact_inbox_id: i64,
 ) -> Result<RefreshOutcome> {
-    let contact_inbox = tx::read(db, move |conn| {
+    let http = crate::channel_api::LiveChannelHttp;
+    refresh_contact_profile_with(
+        db,
+        services,
+        &http,
+        workspace_id,
+        contact_id,
+        contact_inbox_id,
+    )
+    .await
+}
+
+/// [`refresh_contact_profile`] over `http` (the channel provider calls).
+pub async fn refresh_contact_profile_with(
+    db: &Db,
+    services: RefreshServices<'_>,
+    http: &dyn crate::channel_api::ChannelHttp,
+    workspace_id: i64,
+    contact_id: i64,
+    contact_inbox_id: i64,
+) -> Result<RefreshOutcome> {
+    let (contact_inbox, inbox_id) = tx::read(db, move |conn| {
         find_or_fail(conn, workspace_id, contact_id)?;
         conn.query_row(
-            r#"SELECT "channel", "language", "sourceId" FROM "ContactInbox" WHERE "id" = ?1 AND "contactId" = ?2"#,
+            r#"SELECT "channel", "language", "sourceId", "inboxId" FROM "ContactInbox" WHERE "id" = ?1 AND "contactId" = ?2"#,
             params![contact_inbox_id, contact_id],
             |row| {
-                Ok(RefreshContactInbox {
-                    id: contact_inbox_id,
-                    channel: row.get(0)?,
-                    contact_id,
-                    language: row.get(1)?,
-                    source_id: row.get(2)?,
-                })
+                Ok((
+                    RefreshContactInbox {
+                        id: contact_inbox_id,
+                        channel: row.get(0)?,
+                        contact_id,
+                        language: row.get(1)?,
+                        source_id: row.get(2)?,
+                    },
+                    row.get::<_, i64>(3)?,
+                ))
             },
         )
         .map_err(|error| match error {
@@ -495,12 +511,33 @@ pub async fn refresh_contact_profile(
         })
     })
     .await?;
-    let channel = contact_inbox.channel.clone();
+    let (channel, source_id) = (
+        contact_inbox.channel.clone(),
+        contact_inbox.source_id.clone(),
+    );
+    let deps = super::channel_profile::ProfileDeps {
+        db,
+        http,
+        uploader: services.uploader,
+    };
     let input = RefreshInput {
         workspace_id,
         contact_id,
         contact_inbox,
         source: ProfileNameSource::ChannelApi,
     };
-    refresh(db, services, input, move || fetch_channel_profile(channel)).await
+    // `profileFetcherFactories[channel]`: the channel's `contact.getProfile`.
+    let fetch = || async move {
+        super::channel_profile::fetch_profile(
+            deps,
+            workspace_id,
+            &channel,
+            inbox_id,
+            &source_id,
+            true,
+        )
+        .await
+        .map(Some)
+    };
+    refresh(db, services, input, fetch).await
 }
