@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chatbotx_api::inbound_webhook_intake::router;
-use chatbotx_kv::{Kv, KvConfig, SystemClock};
+use chatbotx_kv::{Kv, KvConfig, TestClock};
 use handlers_common::fixture;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
@@ -42,7 +42,9 @@ async fn a_rate_limited_hook_request_keeps_the_connection_open() {
     let mut fx = fixture().await;
     fx.state.kv = Some(Kv::start(
         Arc::clone(&fx.state.db),
-        Arc::new(SystemClock),
+        // A fixed clock: on a loaded host the 300 requests can take longer
+        // than the 10 s window, and the window would reset before the 301st.
+        Arc::new(TestClock::new(1_800_000_000_000)),
         KvConfig::default(),
     ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
