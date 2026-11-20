@@ -236,6 +236,8 @@ mod mini_app_upload_service;
 mod minigame_play;
 #[path = "minigame_service.rs"]
 mod minigame_service;
+#[path = "missed_comments_scanners.rs"]
+mod missed_comments_scanners;
 #[path = "net_ssrf_guard.rs"]
 mod net_ssrf_guard;
 #[path = "pipeline_access.rs"]

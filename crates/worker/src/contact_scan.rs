@@ -1,12 +1,11 @@
 //! Automatic Customer Scan: the `scanContactScans` cron
 //! (`schedule/handlers/scan-contact-scans.ts`) and the `contactScan`
 //! integration job (`integration/handlers/contact-scan/engine.ts`) over
-//! `CoexistSyncRun` rows of `type = 'contact_scan'`, with the Messenger
-//! adapter (`adapters/messenger.ts`).
+//! `CoexistSyncRun` rows of `type = 'contact_scan'`, with the Messenger and
+//! Instagram adapters (`adapters/messenger.ts`, `adapters/instagram.ts`).
 //!
-//! ponytail: the Instagram adapter is not ported (such a run fails
-//! `channelUnsupported`); the Meta usage-header throttle, quota counters and
-//! profile snapshots are left out (no Rust consumer).
+//! ponytail: the Meta usage-header throttle, quota counters and profile
+//! snapshots are left out (no Rust consumer).
 
 use chatbotx_business::connection::credentials::{HttpUpstream, Upstream, UpstreamRequest};
 use chatbotx_db::repo::now_ms;
@@ -219,6 +218,142 @@ async fn load_context(
         })
         .await
         .map_err(db_fail)
+}
+
+/// The Instagram adapter context (`InstagramContactScanContext`): native
+/// Instagram Login reads the IG user node, Instagram via Facebook the Page
+/// node with `platform=instagram`.
+struct InstagramContext {
+    inbox: InboundInbox,
+    token: String,
+    version: String,
+    ig_id: String,
+    /// `Some(pageId)` for `type = 'facebook'`.
+    page_id: Option<String>,
+}
+
+/// The channel adapter of a run (`contactScanAdapters[run.channel]`).
+enum Adapter {
+    Messenger(Context),
+    Instagram(InstagramContext),
+}
+
+impl Adapter {
+    fn inbox(&self) -> &InboundInbox {
+        match self {
+            Adapter::Messenger(ctx) => &ctx.inbox,
+            Adapter::Instagram(ctx) => &ctx.inbox,
+        }
+    }
+
+    async fn list(
+        &self,
+        upstream: &impl Upstream,
+        cursor: Option<&str>,
+    ) -> Result<Page, GraphError> {
+        match self {
+            Adapter::Messenger(ctx) => list_page(upstream, ctx, cursor).await,
+            Adapter::Instagram(ctx) => list_instagram_page(upstream, ctx, cursor).await,
+        }
+    }
+}
+
+/// `instagramContactScanAdapter.loadContext`.
+async fn load_instagram_context(
+    deps: &Deps,
+    workspace_id: i64,
+    integration_id: i64,
+) -> Result<Option<InstagramContext>, JobError> {
+    deps.db
+        .read(move |conn| {
+            let row: Option<(String, String, i64, String, String)> = conn
+                .query_row(
+                    r#"SELECT "igId", "pageId", "inboxId", "auth", "type" FROM "IntegrationInstagram"
+                       WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+                    params![integration_id, workspace_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .optional()?;
+            let Some((ig_id, page_id, inbox_id, auth, kind)) = row else {
+                return Ok(None);
+            };
+            let auth: Value = serde_json::from_str(&auth).unwrap_or(Value::Null);
+            let Some(token) = auth["tokens"]["accessToken"].as_str() else {
+                return Ok(None);
+            };
+            let channel: Option<String> = conn
+                .query_row(
+                    r#"SELECT "channel" FROM "Inbox" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+                    params![inbox_id, workspace_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let facebook = kind == "facebook";
+            Ok(channel.map(|channel| InstagramContext {
+                inbox: InboundInbox {
+                    inbox_id,
+                    workspace_id,
+                    channel,
+                },
+                token: token.to_owned(),
+                version: auth["metadata"]["version"]
+                    .as_str()
+                    .unwrap_or(if facebook { "v23.0" } else { "v22.0" })
+                    .to_owned(),
+                ig_id,
+                page_id: facebook.then_some(page_id),
+            }))
+        })
+        .await
+        .map_err(db_fail)
+}
+
+/// `instagramContactScanAdapter.listPage` (`listInstagramConversations` /
+/// `listInstagramFacebookConversations` with `withInlineRetry`).
+async fn list_instagram_page(
+    upstream: &impl Upstream,
+    ctx: &InstagramContext,
+    cursor: Option<&str>,
+) -> Result<Page, GraphError> {
+    let (host, node) = match &ctx.page_id {
+        Some(page_id) => ("https://graph.facebook.com", page_id),
+        None => ("https://graph.instagram.com", &ctx.ig_id),
+    };
+    let mut url = url::Url::parse(&format!("{host}/{}/{node}/conversations", ctx.version))
+        .map_err(|e| GraphError {
+            status: Some(400),
+            body: Value::Null,
+            message: e.to_string(),
+        })?;
+    url.query_pairs_mut()
+        .append_pair("fields", "id,participants,updated_time")
+        .append_pair("limit", "100");
+    if ctx.page_id.is_some() {
+        url.query_pairs_mut().append_pair("platform", "instagram");
+    }
+    if let Some(after) = cursor {
+        url.query_pairs_mut().append_pair("after", after);
+    }
+    let (body, _) = graph_get_with_headers(upstream, &ctx.token, url.as_str()).await?;
+    let mut entries = Vec::new();
+    for conv in body["data"].as_array().into_iter().flatten() {
+        let participants = conv["participants"]["data"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let Some(participant) =
+            crate::coexist_instagram::find_customer(&participants, &[], &ctx.ig_id)
+        else {
+            continue;
+        };
+        let updated = str_of(conv, "updated_time").and_then(chatbotx_core::js::parse_date);
+        entries.push((
+            str_of(conv, "id").unwrap_or_default().to_owned(),
+            Some(crate::coexist_instagram::to_incoming_contact(&participant)),
+            updated,
+        ));
+    }
+    Ok((entries, next_cursor(&body)))
 }
 
 /// A Graph failure: the HTTP status (`None` = no answer) and the error body.
@@ -455,18 +590,26 @@ pub(crate) async fn run_with(
         return Ok(());
     }
     let token = run.claim_token.as_str();
-    if run.channel != "messenger" {
-        finish(
-            deps,
-            run_id,
-            token,
-            "failed",
-            Some("channelUnsupported".into()),
-        )
-        .await?;
-        return Ok(());
-    }
-    let context = match load_context(deps, workspace_id, run.integration_id).await {
+    let loaded = match run.channel.as_str() {
+        "messenger" => load_context(deps, workspace_id, run.integration_id)
+            .await
+            .map(|c| c.map(Adapter::Messenger)),
+        "instagram" => load_instagram_context(deps, workspace_id, run.integration_id)
+            .await
+            .map(|c| c.map(Adapter::Instagram)),
+        _ => {
+            finish(
+                deps,
+                run_id,
+                token,
+                "failed",
+                Some("channelUnsupported".into()),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let context = match loaded {
         Ok(Some(context)) => context,
         Ok(None) => {
             finish(
@@ -558,7 +701,7 @@ pub(crate) async fn run_with(
             return Ok(());
         }
         page_number += 1;
-        let page = match list_page(upstream, &context, cursor.as_deref()).await {
+        let page = match context.list(upstream, cursor.as_deref()).await {
             Ok(page) => page,
             Err(error) if recovery && classify(&error) != "retryable" => {
                 recovery = false;
@@ -626,7 +769,7 @@ pub(crate) async fn run_with(
         for contact in items.iter().filter(|c| seen.insert(c.source_id.clone())) {
             match crate::inbound::detect_contact_and_conversation(
                 deps,
-                &context.inbox,
+                context.inbox(),
                 contact,
                 "inboundMessage",
             )
@@ -829,6 +972,103 @@ pub(crate) mod tests {
         assert_eq!(
             (status.as_str(), imported, scanned, first.as_str()),
             ("succeeded", 1, 1, "Ana")
+        );
+    }
+
+    /// `contact-scan-instagram-adapter.test.ts`: the Facebook-linked login
+    /// reads the Page node with `platform=instagram`, the native one the IG
+    /// node; the business's own participant is skipped, the username is the
+    /// name fallback.
+    #[tokio::test]
+    async fn the_instagram_adapter_lists_the_right_node_and_imports_the_customer() {
+        let (deps, _) = setup().await;
+        let now = now_ms();
+        deps.db
+            .write(move |tx| {
+                tx.execute_batch(
+                    r#"INSERT INTO "Inbox" ("id", "workspaceId", "name", "channel", "sourceId") VALUES
+                         (6, 2, 'IG', 'instagram', 'ig-111'), (7, 2, 'IG2', 'instagram', 'ig-333');
+                       INSERT INTO "IntegrationInstagram" ("id", "auth", "igId", "pageId", "name", "username", "conversationStarters", "persistentMenus", "workspaceId", "inboxId", "type") VALUES
+                         (11, '{"tokens":{"accessToken":"tok"},"metadata":{"version":"v20.0"}}', 'ig-111', 'page-222', 'Shop', 'shop', '[]', '[]', 2, 6, 'facebook'),
+                         (12, '{"tokens":{"accessToken":"tok"}}', 'ig-333', 'page-444', 'Native', 'native', '[]', '[]', 2, 7, 'instagram'),
+                         (13, '{"tokens":{}}', 'ig-555', 'page-666', 'Broken', 'broken', '[]', '[]', 2, 7, 'instagram');"#,
+                )?;
+                for (id, integration) in [(19, 11), (20, 12), (21, 13)] {
+                    tx.execute(
+                        r#"INSERT INTO "CoexistSyncRun" ("id", "workspaceId", "integrationId", "channel", "type", "status", "triggerSource", "updatedAt")
+                           VALUES (?1, 2, ?2, 'instagram', 'contact_scan', 'init', 'contact-scan-manual', ?3)"#,
+                        params![id, integration, now - 60_000],
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let graph = Graph(
+            Mutex::default(),
+            json!({ "data": [
+                { "id": "conv-1", "updated_time": "2026-01-01T00:00:00Z", "participants": { "data": [
+                    { "id": "ig-111" }, { "id": "user-1", "name": "Bob Customer" } ] } },
+                { "id": "conv-2", "participants": { "data": [{ "id": "ig-111" }] } },
+                { "id": "conv-3", "updated_time": "2026-01-02T00:00:00Z", "participants": { "data": [
+                    { "id": "user-2", "username": "bob_ig" } ] } },
+            ] }),
+        );
+        for run in ["19", "20", "21"] {
+            run_with(&deps, &graph, &json!({ "runId": run, "workspaceId": "2" }))
+                .await
+                .unwrap();
+        }
+        let urls = graph.0.lock().unwrap().clone();
+        assert_eq!(urls.len(), 2, "{urls:?}");
+        assert!(
+            urls[0].starts_with("GET https://graph.facebook.com/v20.0/page-222/conversations?")
+                && urls[0].contains("platform=instagram"),
+            "{urls:?}"
+        );
+        assert!(
+            urls[1].starts_with("GET https://graph.instagram.com/v22.0/ig-333/conversations?")
+                && !urls[1].contains("platform="),
+            "{urls:?}"
+        );
+        let rows: Vec<(String, Option<String>)> = deps
+            .db
+            .read(|c| {
+                let mut stmt = c.prepare(
+                    r#"SELECT "status", "currentError" FROM "CoexistSyncRun" WHERE "id" IN (19, 20, 21) ORDER BY "id""#,
+                )?;
+                Ok(stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(rows[0].0, "succeeded");
+        assert_eq!(rows[1].0, "succeeded");
+        assert_eq!(
+            rows[2],
+            ("failed".into(), Some("integrationUnavailable".into()))
+        );
+        let names: Vec<(String, Option<String>)> = deps
+            .db
+            .read(|c| {
+                let mut stmt = c.prepare(
+                    r#"SELECT k."firstName", k."lastName" FROM "Contact" k
+                       JOIN "ContactInbox" ci ON ci."contactId" = k."id"
+                       WHERE ci."inboxId" = 6 ORDER BY ci."sourceId""#,
+                )?;
+                Ok(stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            names,
+            vec![
+                ("Bob".into(), Some("Customer".into())),
+                ("bob_ig".into(), None)
+            ]
         );
     }
 

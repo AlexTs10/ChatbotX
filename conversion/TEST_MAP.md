@@ -579,7 +579,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/minigame-share-url.test.ts` | C | tbd | todo | Minigames; builder server code |
 | `apps/builder/__tests__/minigames-public-api.test.ts` | C | tbd | todo | Minigames; builder server code |
 | `apps/builder/__tests__/minigames-public-scope.test.ts` | C | tbd | todo | Minigames; builder server code |
-| `apps/builder/__tests__/missed-comments-scanners.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok); builder server code |
+| `apps/builder/__tests__/missed-comments-scanners.test.ts` | C | `crates/business/tests/missed_comments_scanners.rs` | ported | Comment automation (FB/IG/Threads/TikTok); builder server code; Q.P6-U6 (E4) |
 | `apps/builder/__tests__/mobile-contacts-member-scope.test.ts` | C | `crates/api/tests/mobile_member_scope.rs` | ported | Contacts (profiles, notes, activity); builder server code; Q.A1 (real DB instead of mocked services) |
 | `apps/builder/__tests__/mobile-conversations-member-scope.test.ts` | C | `crates/api/tests/mobile_member_scope.rs` | ported | Inbox and live chat (conversations, messages); builder server code; Q.A1 (real DB; attribution `userId` of archive/follow/bot actions not ported) |
 | `apps/builder/__tests__/mobile-jwt-middleware.test.ts` | C | `crates/api/tests/mobile_member_scope.rs` (e2e) | ported | Authentication (sign-in, social, mobile, magic links); builder server code; Q.A1 (signed JWT through the `/api/v1` router) |
@@ -1273,7 +1273,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/contact-profile-refresh.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `apps/worker/__tests__/contact-scan-engine.test.ts` | C | tbd | todo | Contact scan |
 | `apps/worker/__tests__/contact-scan-graph-error.test.ts` | C | tbd | todo | Contact scan |
-| `apps/worker/__tests__/contact-scan-instagram-adapter.test.ts` | C | tbd | todo | Instagram channel |
+| `apps/worker/__tests__/contact-scan-instagram-adapter.test.ts` | C | `crates/worker/src/contact_scan.rs` (unit tests) | ported | Instagram channel; Q.P6-U6 (E4): through the `contactScan` job |
 | `apps/worker/__tests__/contact-scan-messenger-adapter.test.ts` | C | tbd | todo | Messenger channel |
 | `apps/worker/__tests__/contact-tag-steps.test.ts` | C | tbd | todo | Tags and labels |
 | `apps/worker/__tests__/context-source-workspace-scope.test.ts` | C | tbd | todo | Workspaces |
