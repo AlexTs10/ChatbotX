@@ -62,7 +62,7 @@ async fn router() -> (axum::Router, Arc<Db>) {
                  (11, ?1, 'Page', 'messenger', 'page-1'), (12, ?1, 'WA', 'whatsapp', 'wa-1')"#,
             [WS],
         )?;
-        tx.execute(r#"INSERT INTO "Contact" ("id", "workspaceId", "firstName") VALUES (?1, ?2, 'Ada'), (402, ?2, 'Bob')"#, params![CONTACT, WS])?;
+        tx.execute(r#"INSERT INTO "Contact" ("id", "workspaceId", "firstName") VALUES (?1, ?2, NULL), (402, ?2, 'Bob')"#, params![CONTACT, WS])?;
         tx.execute(
             r#"INSERT INTO "ContactInbox" ("id", "originalContactId", "contactId", "inboxId", "channel", "source", "sourceId") VALUES
                  (41, ?1, ?1, 11, 'messenger', 'direct', 'psid-1'),
