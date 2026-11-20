@@ -190,6 +190,8 @@ mod qr_reflinks_public_api;
 mod questionnaires_public_api;
 #[path = "reflink_chat_widget.rs"]
 mod reflink_chat_widget;
+#[path = "route_coverage.rs"]
+mod route_coverage;
 #[path = "routes_channel_and_mobile_auth.rs"]
 mod routes_channel_and_mobile_auth;
 #[path = "routes_public_scope.rs"]

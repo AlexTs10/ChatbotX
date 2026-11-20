@@ -1,0 +1,2 @@
+# Public routes (PUBLIC_ROUTES ids) that answer "not ported" (Q.P6-audit).
+sequences.listStepContacts
