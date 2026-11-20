@@ -729,3 +729,37 @@ async fn bsuid_ignores_a_bsuid_on_a_non_whatsapp_channel() {
     assert_eq!(inboxes[0]["sourceId"], "psid-1");
     assert_eq!(inboxes[0]["sourceUserId"], Value::Null);
 }
+
+/// Q.P5-fixD: the `contact:created` dashboard event (with a source id).
+#[tokio::test]
+async fn records_the_contact_created_analytics_event() {
+    let db = db_with(None).await;
+    let created = create_with_inbox(
+        &db,
+        WS,
+        CreateContactInput {
+            inbox_id: MESSENGER,
+            channel: "messenger".to_string(),
+            contact_id: Some("psid-77".to_string()),
+            ..base_input()
+        },
+        CreateOptions::default(),
+    )
+    .await
+    .expect("created");
+    let events = rows(
+        &db,
+        r#"SELECT "contactId", "eventType", "source", "sourceId", "channel", "inboxId"
+           FROM "AnalyticsContactEvent" WHERE "workspaceId" = ?1"#,
+        WS,
+    )
+    .await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    let event = &events[0];
+    assert_eq!(event["contactId"], created.contact_inbox.id);
+    assert_eq!(event["eventType"], "contact_created");
+    assert_eq!(event["source"], "direct");
+    assert_eq!(event["sourceId"], "psid-77");
+    assert_eq!(event["channel"], "messenger");
+    assert_eq!(event["inboxId"], MESSENGER);
+}

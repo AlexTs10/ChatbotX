@@ -348,7 +348,7 @@ pub fn create_with_inbox_in(
             last_name: input.last_name.clone(),
             gender: Some(input.gender.clone()),
         };
-        insert_with_inbox(
+        let created = insert_with_inbox(
             tx,
             workspace_id,
             &data,
@@ -359,6 +359,43 @@ pub fn create_with_inbox_in(
                 source_id: &source_id,
                 source_user_id: source_user_id.as_deref(),
             },
-        )
+        )?;
+        record_contact_created(tx, workspace_id, &created, &inbox_channel)?;
+        Ok(created)
     }
+}
+
+/// The `analytics:dashboard` `contact:created` event of `createWithInbox`
+/// (only with a source id), written in the same transaction as the block
+/// event (`block_and_record`). Like the original, `contactId` carries the
+/// contact inbox id.
+fn record_contact_created(
+    tx: &Connection,
+    workspace_id: i64,
+    created: &CreatedContact,
+    channel: &str,
+) -> Result<()> {
+    let ci = &created.contact_inbox;
+    if ci.source_id.is_empty() {
+        return Ok(());
+    }
+    let metadata = r#"{"triggerContext":{"triggerSource":"api","triggerHandler":"createContact","triggerType":"contact_created"}}"#;
+    tx.execute(
+        r#"INSERT INTO "AnalyticsContactEvent" ("eventId", "workspaceId", "contactId", "eventType",
+               "occurredAt", "source", "sourceId", "channel", "inboxId", "metadata")
+           VALUES (?1, ?2, ?3, 'contact_created', ?4, ?5, ?6, ?7, ?8, ?9)"#,
+        params![
+            new_id().to_string(),
+            workspace_id,
+            ci.id,
+            created.contact.created_at,
+            ci.source,
+            ci.source_id,
+            channel,
+            ci.inbox_id,
+            metadata
+        ],
+    )
+    .map_err(repo_err)?;
+    Ok(())
 }

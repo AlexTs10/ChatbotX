@@ -113,3 +113,57 @@ pub async fn list_by_events(
     })
     .await
 }
+
+/// The body of a `make` / `triggerN8n` delivery without its `event`:
+/// `{ contact, custom_fields, tags, contact_sequences }` (404 "Contact not
+/// found" outside the workspace, as `contactService.findByIdOrFail`).
+pub async fn delivery_body(
+    db: &Db,
+    workspace_id: i64,
+    contact_id: i64,
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    use serde_json::{Value, json};
+    let sequences =
+        crate::contact_sequence::list_by_contact_id(db, workspace_id, contact_id).await?;
+    let mut body = tx::read(db, move |c| {
+        let contact = repo::find_one::<chatbotx_db::repo::models::Contact>(
+            c,
+            r#""id" = ?1 AND "workspaceId" = ?2"#,
+            &[&contact_id, &workspace_id],
+        )?
+        .ok_or_else(|| BusinessError::not_found("Contact not found"))?;
+        let mut stmt = c.prepare_cached(
+            r#"SELECT f."name", v."value" FROM "ContactCustomField" v
+               JOIN "CustomField" f ON f."id" = v."customFieldId"
+               WHERE v."contactId" = ?1 ORDER BY v."id""#,
+        )?;
+        let custom_fields = stmt
+            .query_map(params![contact_id], |r| {
+                Ok(json!({ "name": r.get::<_, String>(0)?, "value": r.get::<_, String>(1)? }))
+            })?
+            .collect::<std::result::Result<Vec<Value>, _>>()?;
+        let mut stmt = c.prepare_cached(
+            r#"SELECT t."name" FROM "Tag" t JOIN "ContactToTag" ct ON ct."tagId" = t."id"
+               WHERE ct."contactId" = ?1 AND t."deletedAt" IS NULL ORDER BY t."name""#,
+        )?;
+        let tags = stmt
+            .query_map(params![contact_id], |r| {
+                Ok(json!({ "name": r.get::<_, String>(0)? }))
+            })?
+            .collect::<std::result::Result<Vec<Value>, _>>()?;
+        let mut body = serde_json::Map::new();
+        body.insert("contact".into(), contact.to_json());
+        body.insert("custom_fields".into(), Value::Array(custom_fields));
+        body.insert("tags".into(), Value::Array(tags));
+        Ok(body)
+    })
+    .await?;
+    let sequences = sequences
+        .into_iter()
+        .map(
+            |s| json!({ "sequenceId": s.sequence_id.to_string(), "sequenceName": s.sequence_name }),
+        )
+        .collect();
+    body.insert("contact_sequences".into(), Value::Array(sequences));
+    Ok(body)
+}

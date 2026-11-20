@@ -1498,3 +1498,40 @@ mod find_places_near_me_step {
         }
     }
 }
+
+/// `make-handler.test.ts` / `trigger-n8n-handler.test.ts`.
+mod make_step {
+    use super::*;
+
+    #[tokio::test]
+    async fn posts_the_contact_to_every_url_registered_for_the_events() {
+        let mut fx = Fixture::new().await;
+        let http = Arc::new(crate::webhook::RecordingWebhookHttp::default());
+        fx.deps.webhook_http = http.clone();
+        fx.exec(
+            r#"INSERT INTO "ExternalWebhook" ("id", "provider", "event", "url", "workspaceId") VALUES
+                 (40, 'make', 'lead', 'https://a.test/m', 2),
+                 (41, 'n8n', 'lead', 'https://a.test/n', 2),
+                 (42, 'make', 'other', 'https://a.test/x', 2);
+               INSERT INTO "Tag" ("id", "name", "workspaceId") VALUES (50, 'vip', 2);
+               INSERT INTO "ContactToTag" ("contactId", "tagId") VALUES (3, 50);"#,
+        )
+        .await;
+        fx.node(
+            json!([{ "id": "1", "stepType": "make", "events": ["lead"], "states": [] }]),
+            json!([]),
+        )
+        .await;
+        fx.run(json!({})).await.unwrap();
+        let posts = http.posts.lock().unwrap().clone();
+        let urls: Vec<&str> = posts.iter().map(|(u, _)| u.as_str()).collect();
+        assert_eq!(urls, ["https://a.test/m", "https://a.test/n"]);
+        let body = &posts[0].1;
+        assert_eq!(body["event"], "lead");
+        assert_eq!(body["contact"]["id"], "3");
+        assert_eq!(body["contact"]["firstName"], "Ada");
+        assert_eq!(body["tags"], json!([{ "name": "vip" }]));
+        assert_eq!(body["custom_fields"], json!([]));
+        assert_eq!(body["contact_sequences"], json!([]));
+    }
+}

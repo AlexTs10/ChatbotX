@@ -275,13 +275,15 @@ fn merge(
             row
         })
         .collect();
-    let spend: f64 = per_ad.iter().map(|r| num(r, "spend")).sum();
-    let impressions: f64 = per_ad.iter().map(|r| num(r, "impressions")).sum();
-    let clicks: f64 = per_ad.iter().map(|r| num(r, "clicks")).sum();
+    // `fold(0.0)`, not `sum()`: an empty f64 sum is -0, which JSON shows as `-0`.
+    let total = |field: &str| per_ad.iter().fold(0.0, |acc, r| acc + num(r, field));
+    let spend = total("spend");
+    let impressions = total("impressions");
+    let clicks = total("clicks");
     let mut totals = Map::new();
     for field in ["conversations", "leads", "purchases", "revenue"] {
         let value = if ad_account_filter {
-            json!(per_ad.iter().map(|r| num(r, field)).sum::<f64>())
+            json!(total(field))
         } else {
             funnel["totals"][field].clone()
         };
@@ -405,5 +407,14 @@ mod tests {
         assert_eq!(out["perAd"][1]["roas"], json!(0.0));
         assert_eq!(out["spendCurrency"], json!("USD"));
         assert!(is_ad_account_id("act_1") && !is_ad_account_id("123"));
+    }
+
+    #[test]
+    fn empty_totals_are_plus_zero() {
+        let funnel = json!({ "totals": { "conversations": 0, "leads": 0, "purchases": 0, "revenue": 0 }, "perAd": [] });
+        let out = merge(&funnel, &[], false, false);
+        for field in ["spend", "impressions", "clicks"] {
+            assert_eq!(out["totals"][field].to_string(), "0.0", "{field}");
+        }
     }
 }

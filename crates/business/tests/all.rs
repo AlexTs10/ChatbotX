@@ -156,6 +156,8 @@ mod events_evaluator_filtered_cache;
 mod events_trigger_emitter_contact_inbox_roundtrip;
 #[path = "events_webhook_context.rs"]
 mod events_webhook_context;
+#[path = "facebook_lead_ads_forms.rs"]
+mod facebook_lead_ads_forms;
 #[path = "flow_duplicate.rs"]
 mod flow_duplicate;
 #[path = "flow_filters.rs"]

@@ -125,7 +125,11 @@ async fn handle(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    // An early answer still reads the (capped) body: hyper closes a
+    // connection whose request body was left unread, and the edge proxy then
+    // answers 502 for the requests it had queued on it.
     if !token_shape(&token) {
+        let _ = read_body(&headers, body).await;
         return failure(StatusCode::NOT_FOUND, "NOT_FOUND", "Webhook not found");
     }
     let client_ip = guest_client_ip(&headers);
@@ -140,6 +144,7 @@ async fn handle(
         &client_ip,
         preauth_limit,
     ) {
+        let _ = read_body(&headers, body).await;
         return rate_limited(retry);
     }
     let Some(raw) = read_body(&headers, body).await else {

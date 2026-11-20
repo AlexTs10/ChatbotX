@@ -530,9 +530,15 @@ pub fn business_error(error: BusinessError, errors: ErrorMap) -> OrpcError {
         } => {
             let message = display_message(&message, &code, data.as_ref());
             let mut out = OrpcError::new(&code, Some(status), Some(&message));
-            out.defined = errors.iter().any(|(c, s)| *c == code && *s == status)
+            let declared = errors.iter().any(|(c, s)| *c == code && *s == status)
                 || common_api_error(&code).is_some_and(|d| d.status == status);
-            out.data = if out.defined { data } else { None };
+            // oRPC `validateORPCError`: a declared code whose data fails its
+            // schema (`invalidRequestData` needs `issues`) is sent undefined,
+            // its data kept.
+            out.defined = declared
+                && (code != "invalidRequestData"
+                    || data.as_ref().is_some_and(|d| d["issues"].is_array()));
+            out.data = if declared { data } else { None };
             out
         }
         BusinessError::Repo(error) => internal_error(&error.message()),
@@ -579,6 +585,8 @@ fn display_message(message: &str, code: &str, data: Option<&Value>) -> String {
     let first: &[&str] = match code {
         "paymentProviderInUse" => &["provider", "count"],
         "imagesNotSupportedOnChannel" => &["reason", "channel", "max"],
+        // `validation.maxItemsReached` writes `{ max, feature }`.
+        "validation" => &["max", "feature"],
         _ => &[],
     };
     let mut entries: Vec<(&String, &Value)> = map.iter().collect();

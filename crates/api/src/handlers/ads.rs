@@ -88,6 +88,10 @@ const MAX_RANGE_DAYS: f64 = 366.0;
 const MS_PER_DAY: f64 = 86_400_000.0;
 
 /// An optional `zodBigintAsString` key.
+fn digits(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
+}
+
 pub(super) fn opt_id(input: &mut Input, name: &str) -> Option<i64> {
     let value = input.get(name).cloned()?;
     input.id_at(&key(name), Some(&value), true)
@@ -510,9 +514,19 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
         }
         "ads.listChannelAdAccounts" => {
             let mut input = Input::from_query(call.params, call.query);
-            let (channel, integration_id) = integration_identity(&mut input);
+            let channel = enum_field(&mut input, "channel", MESSAGING_CHANNELS, true);
+            // `zodBigintAsString()`: digits, no length cap; an id past i64
+            // matches no connection.
+            let integration_id = input.opt_string(
+                "integrationId",
+                Str {
+                    pattern: Some(digits),
+                    ..Str::default()
+                },
+            );
+            let integration_id = integration_id.map(|t| t.parse::<i64>().unwrap_or(-1));
             input.finish()?;
-            graph::channel_ad_accounts(db, ws, &channel, Some(integration_id))
+            graph::channel_ad_accounts(db, ws, &channel.unwrap_or_default(), integration_id)
                 .await
                 .map(|accounts| {
                     let data: Vec<Value> = accounts.into_iter().map(|a| a.account).collect();
