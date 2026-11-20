@@ -965,7 +965,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/whatsapp-initiate-outbound-voip-call-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-manual-webhook-route.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-meta-call-permission.test.ts` | C | `crates/business/tests/whatsapp_meta_call_permission.rs` | ported | WhatsApp calling (VoIP); builder server code |
-| `apps/builder/__tests__/whatsapp-oauth-callback-outcome.test.ts` | B | - | todo | WhatsApp calling (VoIP); builder jsdom |
+| `apps/builder/__tests__/whatsapp-oauth-callback-outcome.test.ts` | B | `crates/api/tests/whatsapp_callback.rs` | ported | WhatsApp calling (VoIP); builder jsdom; Q.P6-U2 (the callback route logic) |
 | `apps/builder/__tests__/whatsapp-oauth-popup-cancel.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-oauth-relay.test.ts` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-onboarding-result-done.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |

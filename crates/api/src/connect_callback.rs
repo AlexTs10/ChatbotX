@@ -29,6 +29,12 @@ use crate::handlers::ApiState;
 /// The route.
 pub fn router(state: Arc<ApiState>) -> Router {
     Router::new()
+        // The WhatsApp embedded signup relay (a static path wins over the
+        // `{provider}` capture).
+        .route(
+            "/integrations/whatsapp/callback",
+            get(crate::whatsapp_callback::handle),
+        )
         .route("/integrations/{provider}/callback", get(handle))
         .with_state(state)
 }
