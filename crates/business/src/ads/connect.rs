@@ -249,7 +249,8 @@ pub async fn start(
     let purpose = flow.purpose();
     tx::write(db, move |conn| {
         conn.execute(
-            r#"UPDATE "ConnectSession" SET "status" = 'cancelled', "updatedAt" = ?3
+            r#"UPDATE "ConnectSession" SET "status" = 'cancelled', "updatedAt" = ?3, "consumedAt" = ?3,
+                   "encryptedAuth" = NULL
                WHERE "workspaceId" = ?1 AND "provider" = ?4 AND "purpose" = ?2
                  AND "status" = 'pending'"#,
             params![workspace_id, purpose, now_ms(), provider],
