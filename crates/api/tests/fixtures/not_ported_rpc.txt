@@ -58,7 +58,6 @@ fbCommentsAPI.createFbCommentAPI
 fbCommentsAPI.deleteFbCommentAPI
 fbCommentsAPI.listFbCommentsAPI
 fbCommentsAPI.updateFbCommentAPI
-flowsAPI.privateGetMessengerAdsJsonAPI
 igCommentsAPI.createIgCommentAPI
 igCommentsAPI.deleteIgCommentAPI
 igCommentsAPI.listIgCommentsAPI

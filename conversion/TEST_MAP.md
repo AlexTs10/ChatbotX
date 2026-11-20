@@ -1744,7 +1744,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/messenger/__tests__/list-reels-posts.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/marketing-messages-auth-url.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/message-templates-api.test.ts` | C | tbd | todo | Messenger channel |
-| `integrations/messenger/__tests__/messenger-ads-json.test.ts` | C | tbd | todo | Messenger channel |
+| `integrations/messenger/__tests__/messenger-ads-json.test.ts` | C | crates/business/tests/messenger_ads_json.rs | ported | Messenger channel; JSON key order is serde_json order |
 | `integrations/messenger/__tests__/messenger-welcome-profile.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/outgoing-message-ids.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/outgoing-message-policy.test.ts` | C | tbd | todo | Messenger channel |
