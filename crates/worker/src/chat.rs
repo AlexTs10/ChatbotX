@@ -56,10 +56,8 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         NOTIFY_EXPORT_RESULT => {
             tracing::warn!(job_id = %job.job_id, "notifyExportResult job received but no handler is implemented");
         }
-        // ponytail: the outbound automated-response cancel needs the
-        // automated-response session port (Q.D6); the job is a no-op until then.
         CHECK_OUTBOUND_AUTOMATED_RESPONSE => {
-            tracing::debug!(job_id = %job.job_id, "checkOutboundAutomatedResponse: not ported, skipped");
+            crate::ai_agent::check_outbound_automated_response(&deps, &job.data["data"]).await?;
         }
         "broadcastEvent" => {
             tracing::info!(job_id = %job.job_id, "Ignoring legacy broadcastEvent job during realtime v2 rollout");

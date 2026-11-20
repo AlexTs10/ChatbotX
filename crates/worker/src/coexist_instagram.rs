@@ -740,7 +740,11 @@ fn split_display_name(raw: Option<&str>) -> (Option<String>, Option<String>) {
 }
 
 /// `findCustomerParticipant`.
-fn find_customer(participants: &[Value], messages: &[Value], ig_id: &str) -> Option<Value> {
+pub(crate) fn find_customer(
+    participants: &[Value],
+    messages: &[Value],
+    ig_id: &str,
+) -> Option<Value> {
     let other = |p: &Value| p["id"].as_str().is_some_and(|id| id != ig_id);
     if let Some(p) = participants.iter().find(|p| other(p)) {
         return Some(p.clone());
@@ -758,7 +762,7 @@ fn find_customer(participants: &[Value], messages: &[Value], ig_id: &str) -> Opt
 }
 
 /// `toIncomingContact`.
-fn to_incoming_contact(participant: &Value) -> IncomingContact {
+pub(crate) fn to_incoming_contact(participant: &Value) -> IncomingContact {
     let id = participant["id"].as_str().unwrap_or_default().to_owned();
     let username = participant["username"].as_str().map(str::to_owned);
     let (first, last) = split_display_name(participant["name"].as_str().or(username.as_deref()));
@@ -806,6 +810,7 @@ fn attachments_of(m: &Value) -> Vec<IncomingAttachment> {
             height: dims.and_then(|d| d["height"].as_i64()),
             name: raw["name"].as_str().map(str::to_owned),
             is_photo_message: image.is_some(),
+            optimized: false,
         });
     }
     out

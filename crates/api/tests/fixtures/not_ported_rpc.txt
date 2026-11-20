@@ -18,7 +18,6 @@ actions.resetBotFields
 actions.resetContactCustomFields
 actions.submitAvailabilityRange
 actions.submitBooking
-actions.testExternalRequestAction
 actions.updateAutomatedResponse
 actions.updateIntegrationOpenAI
 actions.updateMagicLink

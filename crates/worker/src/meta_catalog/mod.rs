@@ -311,6 +311,28 @@ fn claim_run(
     ))
 }
 
+/// `logProviderError({ provider: "meta-catalog", workspaceId, error })`: the
+/// raw error (`ErrorLog.detail` is stored unredacted past the secret scrub,
+/// as the original); never fails.
+async fn log_provider_error(deps: &crate::Deps, workspace_id: i64, error: &McError) {
+    let error = match error {
+        McError::Meta {
+            message, status, ..
+        } => json!({ "message": message, "statusCode": status }),
+        other => json!({ "message": other.message() }),
+    };
+    crate::events::log_provider_errors(
+        deps.events.as_ref(),
+        &[crate::events::ProviderError {
+            provider: "meta-catalog".into(),
+            workspace_id: workspace_id.to_string(),
+            error,
+            ..Default::default()
+        }],
+    )
+    .await;
+}
+
 /// `metaCatalogSyncRunService.fail(runId, error)`.
 async fn fail_run(db: &chatbotx_db::Db, run_id: i64, error: &McError) -> McResult<()> {
     let message = to_public_error_message(error, GENERIC_SYNC_FAILURE);
@@ -379,6 +401,46 @@ fn workspace_name(
 mod tests {
     //! `safe-error-log.test.ts`.
     use super::*;
+
+    /// The `logProviderError` call of `import-products.ts` / `submit.ts` /
+    /// `check.ts`: one `error-log:recorded` for `meta-catalog`, Graph status
+    /// as the HTTP code.
+    #[tokio::test]
+    async fn a_failure_is_written_to_the_provider_error_log() {
+        let (mut deps, _) = crate::inbound::tests::setup().await;
+        let emitted = std::sync::Arc::new(crate::inbound::tests::Emitted::default());
+        deps.events = Some(chatbotx_jobs::events::EventBuses {
+            message: emitted.clone(),
+            flow: emitted.clone(),
+            dashboard: emitted.clone(),
+            error_log: emitted.clone(),
+        });
+        let error = McError::Meta {
+            message: "Invalid OAuth access token".into(),
+            status: 401,
+            graph_code: Some(190),
+            graph_subcode: None,
+            fbtrace_id: None,
+        };
+        log_provider_error(&deps, 7, &error).await;
+        log_provider_error(&deps, 7, &McError::internal("boom")).await;
+        let events = emitted.0.lock().unwrap().clone();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, "error-log:recorded");
+        let (first, second) = (&events[0].1, &events[1].1);
+        assert_eq!(
+            (&first["provider"], &first["workspaceId"]),
+            (&json!("meta-catalog"), &json!("7"))
+        );
+        assert_eq!(
+            first["error"],
+            json!({ "message": "Invalid OAuth access token", "httpCode": "401" })
+        );
+        assert_eq!(
+            second["error"],
+            json!({ "message": "boom", "httpCode": null })
+        );
+    }
 
     #[test]
     fn redacts_upstream_credentials_while_retaining_non_secret_graph_metadata() {

@@ -16,6 +16,8 @@ mod schedule_recurring;
 mod sequence_worker;
 #[path = "smart_delay.rs"]
 mod smart_delay;
+#[path = "whatsapp_ad_referral.rs"]
+mod whatsapp_ad_referral;
 
 // ponytail: one test binary per crate (was one per file: ~200 MB link each,
 // the Dell gate bottleneck). Every tests/*.rs file must be listed above.

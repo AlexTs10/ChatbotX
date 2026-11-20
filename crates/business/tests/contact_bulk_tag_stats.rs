@@ -13,6 +13,8 @@
 //! - `apps/builder/__tests__/bulk-tag-stats-contacts-action-behavior.test.ts`
 //!   (3): adapted, `queue.add("bulkTagContacts", ...)` becomes the job
 //!   `prepare` returns and its `job_data()` payload.
+//! - The comment-automation source (`getContactIdsPage` of
+//!   `commentAutomationAnalyticsService`): Q.P6-U6 E14, on stored rows.
 
 mod common;
 
@@ -342,4 +344,103 @@ async fn bulk_tag_stats_contacts_action_does_not_enqueue_when_tag_resolution_ret
         .await
         .expect("prepare");
     assert_eq!(job, None);
+}
+
+// --- comment-automation source (`commentAutomationAnalyticsService.getContactIdsPage`)
+
+/// Automation 90 (Messenger: the DM is counted) and 91 (Threads: the public
+/// reply), with replies `(automation, contact, channel, delivered, failed)`
+/// and misses `(automation, contact)`.
+async fn comment_fixture() -> TestDb {
+    let db = fixture().await;
+    setup(&db, |tx| {
+        tx.execute_batch(&format!(
+            r#"INSERT INTO "CommentAutomation" ("id", "name", "workspaceId", "type") VALUES
+                 (90, 'dm', {WS}, 'messenger'), (91, 'th', {WS}, 'threads');"#
+        ))?;
+        let replies = [
+            (90, Some(10), "private", Some(1), None),
+            (90, Some(10), "private", Some(2), None),
+            (90, Some(11), "private", None, Some(3)),
+            (90, Some(12), "public", Some(4), None),
+            (90, Some(13), "private", None, None),
+            (90, None, "private", Some(5), None),
+            (91, Some(12), "public", Some(6), None),
+        ];
+        for (n, (automation, contact, channel, delivered, failed)) in replies.into_iter().enumerate()
+        {
+            tx.execute(
+                r#"INSERT INTO "CommentAutomationEvent" ("workspaceId", "automationId", "contactId", "postId", "commentId",
+                     "replyChannel", "replyType", "status", "deliveredAt", "failedAt", "occurredAt")
+                   VALUES (?1, ?2, ?3, 'post', ?4, ?5, 'text', 'sent', ?6, ?7, 1)"#,
+                params![WS, automation, contact, format!("c{n}"), channel, delivered, failed],
+            )?;
+        }
+        for (n, (automation, contact)) in [(90, 14), (90, 14), (90, 11), (91, 10)].into_iter().enumerate()
+        {
+            tx.execute(
+                r#"INSERT INTO "CommentAutomationMiss" ("workspaceId", "automationId", "contactId", "postId", "commentId",
+                     "reason", "occurredAt")
+                   VALUES (?1, ?2, ?3, 'post', ?4, 'keywordsNotMatched', 1)"#,
+                params![WS, automation, contact, format!("m{n}")],
+            )?;
+        }
+        Ok(())
+    })
+    .await;
+    db
+}
+
+fn comment_automation(id: i64, event: &str) -> BulkTagSource {
+    BulkTagSource::CommentAutomation {
+        automation_id: id,
+        event_type: event.into(),
+    }
+}
+
+/// `comment-automation-analytics.service.test.ts` "getContactIdsPage routes
+/// comment:missed to the miss table", adapted to the rows: replies of the
+/// counted half only, one row per contact, keyset on `contactId`.
+#[tokio::test]
+async fn comment_automation_pages_use_the_counted_half_and_route_misses_to_their_table() {
+    let db = comment_fixture().await;
+    let page = |source: BulkTagSource, cursor: Option<i64>, excluded: &[i64]| {
+        let job = job(source, &[1], excluded);
+        let db = &db;
+        async move { contact_ids_page(db, &job, cursor, 10).await.expect("page") }
+    };
+    // Sent = delivered or failed, the DM half of a Messenger automation.
+    assert_eq!(
+        page(comment_automation(90, "message:sent"), None, &[]).await,
+        rows(&[(10, 10), (11, 11)])
+    );
+    assert_eq!(
+        page(comment_automation(90, "message:delivered"), None, &[]).await,
+        rows(&[(10, 10)])
+    );
+    assert_eq!(
+        page(comment_automation(90, "message:sent"), Some(10), &[]).await,
+        rows(&[(11, 11)])
+    );
+    // Threads has no DM: its public replies are the counted half.
+    assert_eq!(
+        page(comment_automation(91, "message:sent"), None, &[]).await,
+        rows(&[(12, 12)])
+    );
+    // `comment:missed` reads the misses.
+    assert_eq!(
+        page(comment_automation(90, "comment:missed"), None, &[]).await,
+        rows(&[(11, 11), (14, 14)])
+    );
+    assert_eq!(
+        page(comment_automation(90, "comment:missed"), None, &[11]).await,
+        rows(&[(14, 14)])
+    );
+    let linked = run(
+        &db,
+        &job(comment_automation(90, "comment:missed"), &[2], &[]),
+    )
+    .await
+    .expect("run");
+    assert_eq!(linked, vec![(11, 2), (14, 2)]);
 }

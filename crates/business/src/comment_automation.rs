@@ -2,7 +2,8 @@
 //! `listAutomationAccounts` (`comment-automation/account-scope.ts`),
 //! `commentAutomationService` (`findOrFail`, `resolveMissedCommentsTarget`,
 //! `findProcessedCommentIds`, the missed-comments lock and counter),
-//! `processMissedComments` with the Messenger scan
+//! `processMissedComments` with the Messenger, Instagram, Threads and TikTok
+//! scans
 //! (`features/shared/comment-automation/lib/missed-comments/*`) and the
 //! moderation log (`lib/moderation-logs`, the analytics repository).
 
@@ -204,16 +205,20 @@ fn resolve_target(
     }))
 }
 
-/// One comment shaped like the channel's webhook enqueues it.
+/// One comment shaped like the channel's webhook enqueues it (`ScannedComment`).
 #[derive(Debug, Clone)]
-struct Scanned {
-    integration_identifier: String,
-    comment: Value,
-    comment_id: String,
-    created_time: i64,
+pub struct Scanned {
+    pub integration_identifier: String,
+    pub comment: Value,
+    pub comment_id: String,
+    /// Epoch ms (the replay order).
+    pub created_time: i64,
 }
 
-enum ScanError {
+/// A failed scan (`MissedCommentsIntegrationNotFoundError` or the last
+/// account's fetch error).
+#[derive(Debug)]
+pub enum ScanError {
     IntegrationNotFound,
     Fetch(String),
 }
@@ -234,6 +239,152 @@ fn parse_graph_time(value: &str) -> Option<i64> {
         .map(|t| t.timestamp_millis())
 }
 
+/// `parseGraphTime` of `item[key]`; `None` stands for the original's `NaN`.
+fn graph_time(item: &Value, key: &str) -> Option<i64> {
+    item[key].as_str().and_then(parse_graph_time)
+}
+
+/// One page: the items and the next cursor.
+type ScanPage = (Vec<Value>, Option<String>);
+
+/// `collectCommentsSince`: walks the pages (up to `MAX_PAGES`) and keeps the
+/// items written at or after `since`; `newest_first` stops at the first
+/// older item. A `None` time (unparseable) is never kept.
+async fn collect_since(
+    upstream: &impl Upstream,
+    request: impl Fn(Option<&str>) -> UpstreamRequest,
+    page: impl Fn(u16, &str) -> std::result::Result<ScanPage, String>,
+    created_at: impl Fn(&Value) -> Option<i64>,
+    since: i64,
+    newest_first: bool,
+) -> std::result::Result<Vec<Value>, String> {
+    let mut collected = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_PAGES {
+        let (status, body) = upstream.send(request(cursor.as_deref())).await?;
+        let (items, next) = page(status, &body)?;
+        for item in items {
+            if created_at(&item).is_some_and(|t| t >= since) {
+                collected.push(item);
+            } else if newest_first {
+                return Ok(collected);
+            }
+        }
+        match next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    Ok(collected)
+}
+
+/// A Graph list page: `data` and the `after` cursor while `paging.next` is set.
+fn graph_page(status: u16, body: &str) -> std::result::Result<ScanPage, String> {
+    if !(200..300).contains(&status) {
+        return Err(format!("Graph {status}: {body}"));
+    }
+    let body: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+    let next = body["paging"]["next"]
+        .is_string()
+        .then(|| {
+            body["paging"]["cursors"]["after"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .flatten();
+    Ok((body["data"].as_array().cloned().unwrap_or_default(), next))
+}
+
+fn graph_url(base: &str, query: &[(&str, &str)], after: Option<&str>) -> String {
+    let mut url = url::Url::parse(base).expect("fixed graph url");
+    url.query_pairs_mut().extend_pairs(query);
+    if let Some(after) = after {
+        url.query_pairs_mut().append_pair("after", after);
+    }
+    url.to_string()
+}
+
+fn get(url: String, headers: Vec<(String, String)>) -> UpstreamRequest {
+    UpstreamRequest {
+        method: "GET",
+        url,
+        headers,
+        body: None,
+    }
+}
+
+fn bearer(token: &str) -> Vec<(String, String)> {
+    vec![("Authorization".into(), format!("Bearer {token}"))]
+}
+
+/// Sets `key` when `value` is a string (the original's `undefined` drops it).
+fn put_str(data: &mut Value, key: &str, value: &Value) {
+    if let Some(value) = value.as_str() {
+        data[key] = json!(value);
+    }
+}
+
+/// The connected accounts of `sql` (`identifier`, `inboxId`, `auth`, extra),
+/// narrowed by `filterIntegrationsByAccount`.
+async fn scan_accounts(
+    db: &Db,
+    workspace_id: i64,
+    sql: &'static str,
+    inbox_id: Option<i64>,
+) -> std::result::Result<Vec<(String, Value, String)>, ScanError> {
+    let rows: Vec<(String, Option<i64>, String, String)> = tx::read(db, move |conn| {
+        let mut stmt = conn.prepare(sql).map_err(repo_err)?;
+        stmt.query_map([workspace_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .map_err(repo_err)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(repo_err)
+    })
+    .await
+    .map_err(|e| ScanError::Fetch(e.to_string()))?;
+    let accounts: Vec<_> = rows
+        .into_iter()
+        .filter(|(_, inbox, _, _)| inbox_id.is_none() || *inbox == inbox_id)
+        .map(|(id, _, auth, extra)| {
+            (
+                id,
+                serde_json::from_str(&auth).unwrap_or(Value::Null),
+                extra,
+            )
+        })
+        .collect();
+    if accounts.is_empty() {
+        return Err(ScanError::IntegrationNotFound);
+    }
+    Ok(accounts)
+}
+
+/// `scanPostComments`: the post's comments since `since` (epoch ms) on the
+/// automation's channel, webhook-shaped. Each connected account is tried
+/// until one answers; else the last error.
+pub async fn scan_post_comments(
+    db: &Db,
+    upstream: &impl Upstream,
+    workspace_id: i64,
+    kind: &str,
+    post_id: &str,
+    since: i64,
+    inbox_id: Option<i64>,
+) -> std::result::Result<Vec<Scanned>, ScanError> {
+    match kind {
+        "messenger" => scan_messenger(db, upstream, workspace_id, post_id, since, inbox_id).await,
+        "instagram" | "instagramFacebook" => {
+            scan_instagram(db, upstream, workspace_id, kind, post_id, since, inbox_id).await
+        }
+        "threads" => scan_threads(db, upstream, workspace_id, post_id, since, inbox_id).await,
+        "tiktok" => scan_tiktok(db, upstream, workspace_id, post_id, since, inbox_id).await,
+        other => Err(ScanError::Fetch(format!(
+            "Unsupported comment automation type: {other}"
+        ))),
+    }
+}
+
 /// `scanMessengerComments` (`listPostComments`, newest first, until the
 /// first comment older than `since`).
 async fn scan_messenger(
@@ -244,101 +395,64 @@ async fn scan_messenger(
     since: i64,
     inbox_id: Option<i64>,
 ) -> std::result::Result<Vec<Scanned>, ScanError> {
-    let pages: Vec<(String, i64, String)> = tx::read(db, move |conn| {
-        let mut stmt = conn
-            .prepare(r#"SELECT "pageId", "inboxId", "auth" FROM "IntegrationMessenger" WHERE "workspaceId" = ?1 ORDER BY "id""#)
-            .map_err(repo_err)?;
-        stmt.query_map([workspace_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .map_err(repo_err)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(repo_err)
-    })
-    .await
-    .map_err(|e| ScanError::Fetch(e.to_string()))?;
     let page_in_post = post_id.split_once('_').map(|(page, _)| page.to_string());
-    let candidates: Vec<_> = pages
-        .into_iter()
-        .filter(|(_, inbox, _)| inbox_id.is_none_or(|id| id == *inbox))
-        .filter(|(page, _, _)| page_in_post.as_ref().is_none_or(|p| p == page))
-        .collect();
+    let candidates: Vec<_> = scan_accounts(
+        db,
+        workspace_id,
+        r#"SELECT "pageId", "inboxId", "auth", '' FROM "IntegrationMessenger" WHERE "workspaceId" = ?1 ORDER BY "id""#,
+        inbox_id,
+    )
+    .await?
+    .into_iter()
+    .filter(|(page, _, _)| page_in_post.as_ref().is_none_or(|p| p == page))
+    .collect();
     if candidates.is_empty() {
         return Err(ScanError::IntegrationNotFound);
     }
     let story = post_id.rsplit('_').next().unwrap_or(post_id).to_string();
     let mut last_error = String::new();
-    'pages: for (page_id, _, auth) in candidates {
-        let auth: Value = serde_json::from_str(&auth).unwrap_or(Value::Null);
-        let version = auth["version"].as_str().unwrap_or("v23.0").to_string();
-        let token = auth["tokens"]["accessToken"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+    for (page_id, auth, _) in candidates {
+        let version = auth["version"].as_str().unwrap_or("v23.0");
+        let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
         let composite = format!("{page_id}_{story}");
-        let mut collected = Vec::new();
-        let mut after: Option<String> = None;
-        for _ in 0..MAX_PAGES {
-            let mut url = url::Url::parse(&format!("{GRAPH}/{version}/{composite}/comments"))
-                .expect("graph url");
-            url.query_pairs_mut()
-                .append_pair(
-                    "fields",
-                    "id,message,created_time,from{id,name},parent{id},message_tags",
+        let base = format!("{GRAPH}/{version}/{composite}/comments");
+        let collected = collect_since(
+            upstream,
+            |after| {
+                get(
+                    graph_url(
+                        &base,
+                        &[
+                            (
+                                "fields",
+                                "id,message,created_time,from{id,name},parent{id},message_tags",
+                            ),
+                            ("order", "reverse_chronological"),
+                            ("filter", "stream"),
+                            ("limit", "100"),
+                        ],
+                        after,
+                    ),
+                    bearer(token),
                 )
-                .append_pair("order", "reverse_chronological")
-                .append_pair("filter", "stream")
-                .append_pair("limit", "100");
-            if let Some(after) = &after {
-                url.query_pairs_mut().append_pair("after", after);
+            },
+            graph_page,
+            |c| graph_time(c, "created_time"),
+            since,
+            true,
+        )
+        .await;
+        let collected = match collected {
+            Ok(collected) => collected,
+            Err(error) => {
+                last_error = error;
+                continue;
             }
-            let reply = upstream
-                .send(UpstreamRequest {
-                    method: "GET",
-                    url: url.to_string(),
-                    headers: vec![("Authorization".into(), format!("Bearer {token}"))],
-                    body: None,
-                })
-                .await;
-            let body: Value = match reply {
-                Ok((status, body)) if (200..300).contains(&status) => {
-                    serde_json::from_str(&body).unwrap_or(Value::Null)
-                }
-                Ok((status, body)) => {
-                    last_error = format!("Graph {status}: {body}");
-                    continue 'pages;
-                }
-                Err(error) => {
-                    last_error = error;
-                    continue 'pages;
-                }
-            };
-            let mut older = false;
-            for comment in body["data"].as_array().into_iter().flatten() {
-                let created = comment["created_time"]
-                    .as_str()
-                    .and_then(parse_graph_time)
-                    .unwrap_or(i64::MIN);
-                if created < since {
-                    older = true;
-                    break;
-                }
-                collected.push((comment.clone(), created));
-            }
-            let next = body["paging"]["next"]
-                .is_string()
-                .then(|| {
-                    body["paging"]["cursors"]["after"]
-                        .as_str()
-                        .map(str::to_string)
-                })
-                .flatten();
-            if older || next.is_none() {
-                break;
-            }
-            after = next;
-        }
+        };
         return Ok(collected
             .into_iter()
-            .filter_map(|(comment, created)| {
+            .filter_map(|comment| {
+                let created = graph_time(&comment, "created_time")?;
                 let from_id = comment["from"]["id"]
                     .as_str()
                     .filter(|id| !id.is_empty() && *id != page_id)?
@@ -358,12 +472,8 @@ async fn scan_messenger(
                     "fromId": from_id,
                     "createdTime": created.div_euclid(1000),
                 });
-                if let Some(name) = comment["from"]["name"].as_str() {
-                    data["fromName"] = json!(name);
-                }
-                if let Some(message) = comment["message"].as_str() {
-                    data["message"] = json!(message);
-                }
+                put_str(&mut data, "fromName", &comment["from"]["name"]);
+                put_str(&mut data, "message", &comment["message"]);
                 if comment["message_tags"].is_array() {
                     data["tags"] = json!(tags);
                 }
@@ -372,6 +482,337 @@ async fn scan_messenger(
                     comment: data,
                     comment_id,
                     created_time: created,
+                })
+            })
+            .collect());
+    }
+    Err(ScanError::Fetch(last_error))
+}
+
+/// `MEDIA_COMMENT_FIELDS` of both Instagram logins.
+const IG_COMMENT_FIELDS: &str = "id,text,timestamp,username,from{id,username},parent_id";
+
+/// `scanInstagramComments`: the media's comments and their replies
+/// (`listMediaComments`, unordered: every page up to the cap), each kept
+/// on its own time; the account's own comments are left out.
+async fn scan_instagram(
+    db: &Db,
+    upstream: &impl Upstream,
+    workspace_id: i64,
+    kind: &str,
+    post_id: &str,
+    since: i64,
+    inbox_id: Option<i64>,
+) -> std::result::Result<Vec<Scanned>, ScanError> {
+    let facebook = kind == "instagramFacebook";
+    let sql = if facebook {
+        r#"SELECT "igId", "inboxId", "auth", '' FROM "IntegrationInstagram" WHERE "workspaceId" = ?1 AND "type" = 'facebook' ORDER BY "id""#
+    } else {
+        r#"SELECT "igId", "inboxId", "auth", '' FROM "IntegrationInstagram" WHERE "workspaceId" = ?1 AND "type" = 'instagram' ORDER BY "id""#
+    };
+    let (host, default_version) = if facebook {
+        ("https://graph.facebook.com", "v23.0")
+    } else {
+        ("https://graph.instagram.com", "v22.0")
+    };
+    let fields = format!("{IG_COMMENT_FIELDS},replies{{{IG_COMMENT_FIELDS}}}");
+    let mut last_error = String::new();
+    for (ig_id, auth, _) in scan_accounts(db, workspace_id, sql, inbox_id).await? {
+        let version = auth["metadata"]["version"]
+            .as_str()
+            .unwrap_or(default_version);
+        let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
+        let base = format!("{host}/{version}/{post_id}/comments");
+        let replies = |c: &Value| c["replies"]["data"].as_array().cloned().unwrap_or_default();
+        let collected = collect_since(
+            upstream,
+            |after| {
+                get(
+                    graph_url(
+                        &base,
+                        &[("fields", fields.as_str()), ("limit", "50")],
+                        after,
+                    ),
+                    bearer(token),
+                )
+            },
+            graph_page,
+            // A thread is kept when the comment OR any reply is recent.
+            |c| {
+                std::iter::once(graph_time(c, "timestamp"))
+                    .chain(replies(c).iter().map(|r| graph_time(r, "timestamp")))
+                    .collect::<Option<Vec<_>>>()
+                    .and_then(|times| times.into_iter().max())
+            },
+            since,
+            false,
+        )
+        .await;
+        let collected = match collected {
+            Ok(collected) => collected,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
+        return Ok(collected
+            .iter()
+            .flat_map(|c| std::iter::once(c.clone()).chain(replies(c)))
+            .filter_map(|comment| {
+                let created = graph_time(&comment, "timestamp").filter(|t| *t >= since)?;
+                let from_id = comment["from"]["id"]
+                    .as_str()
+                    .filter(|id| !id.is_empty() && *id != ig_id)?
+                    .to_string();
+                let comment_id = comment["id"].as_str().unwrap_or_default().to_string();
+                let username = comment["from"]["username"]
+                    .as_str()
+                    .or(comment["username"].as_str());
+                let mut data = json!({
+                    "commentId": comment_id,
+                    "postId": post_id,
+                    "fromId": from_id,
+                    "fromName": username.unwrap_or(&from_id),
+                    "createdTime": created.div_euclid(1000),
+                });
+                put_str(&mut data, "parentId", &comment["parent_id"]);
+                if let Some(username) = username {
+                    data["fromUsername"] = json!(username);
+                }
+                put_str(&mut data, "message", &comment["text"]);
+                Some(Scanned {
+                    integration_identifier: ig_id.clone(),
+                    comment: data,
+                    comment_id,
+                    created_time: created,
+                })
+            })
+            .collect());
+    }
+    Err(ScanError::Fetch(last_error))
+}
+
+/// `scanThreadsComments`: every reply under the post, at any depth, newest
+/// first (`listPostConversation`); the commenter is keyed by the lowercased
+/// username, the account's own replies are left out.
+async fn scan_threads(
+    db: &Db,
+    upstream: &impl Upstream,
+    workspace_id: i64,
+    post_id: &str,
+    since: i64,
+    inbox_id: Option<i64>,
+) -> std::result::Result<Vec<Scanned>, ScanError> {
+    let mut last_error = String::new();
+    let accounts = scan_accounts(
+        db,
+        workspace_id,
+        r#"SELECT "threadsUserId", "inboxId", "auth", '' FROM "IntegrationThreads" WHERE "workspaceId" = ?1 ORDER BY "createdAt", "id""#,
+        inbox_id,
+    )
+    .await?;
+    for (threads_user_id, auth, _) in accounts {
+        let version = auth["metadata"]["version"].as_str().unwrap_or("v1.0");
+        let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
+        let own = auth["metadata"]["username"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase();
+        let base = format!("https://graph.threads.com/{version}/{post_id}/conversation");
+        let collected = collect_since(
+            upstream,
+            |after| {
+                get(
+                    graph_url(
+                        &base,
+                        &[
+                            (
+                                "fields",
+                                "id,text,timestamp,username,replied_to,is_reply_owned_by_me",
+                            ),
+                            ("reverse", "true"),
+                            ("limit", "100"),
+                            ("access_token", token),
+                        ],
+                        after,
+                    ),
+                    Vec::new(),
+                )
+            },
+            graph_page,
+            |r| graph_time(r, "timestamp"),
+            since,
+            true,
+        )
+        .await;
+        let collected = match collected {
+            Ok(collected) => collected,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
+        return Ok(collected
+            .into_iter()
+            .filter_map(|reply| {
+                let username = reply["username"].as_str().filter(|u| !u.is_empty())?;
+                if reply["is_reply_owned_by_me"] == json!(true) || username.to_lowercase() == own {
+                    return None;
+                }
+                let created = graph_time(&reply, "timestamp")?;
+                let comment_id = reply["id"].as_str().unwrap_or_default().to_string();
+                let mut data = json!({
+                    "commentId": comment_id,
+                    "postId": post_id,
+                    "fromId": username.to_lowercase(),
+                    "fromName": username,
+                    "createdTime": created.div_euclid(1000),
+                });
+                put_str(&mut data, "parentId", &reply["replied_to"]["id"]);
+                put_str(&mut data, "message", &reply["text"]);
+                Some(Scanned {
+                    integration_identifier: threads_user_id.clone(),
+                    comment: data,
+                    comment_id,
+                    created_time: created,
+                })
+            })
+            .collect());
+    }
+    Err(ScanError::Fetch(last_error))
+}
+
+/// `TIKTOK_COMMENT_PAGE_SIZE` (`business/comment/list/` caps a page at 30).
+const TIKTOK_PAGE_SIZE: &str = "30";
+
+/// `scanTiktokComments`: the video's comments with their replies, newest
+/// first by the top-level comment (`listTiktokComments`), each kept on its
+/// own time; the owner's comments are left out.
+async fn scan_tiktok(
+    db: &Db,
+    upstream: &impl Upstream,
+    workspace_id: i64,
+    post_id: &str,
+    since: i64,
+    inbox_id: Option<i64>,
+) -> std::result::Result<Vec<Scanned>, ScanError> {
+    let mut last_error = String::new();
+    let accounts = scan_accounts(
+        db,
+        workspace_id,
+        r#"SELECT "openId", "inboxId", "auth", '' FROM "IntegrationTiktok" WHERE "workspaceId" = ?1 ORDER BY "id""#,
+        inbox_id,
+    )
+    .await?;
+    let seconds = |c: &Value| c["create_time"].as_i64().unwrap_or(0);
+    let replies = |c: &Value| c["reply_list"].as_array().cloned().unwrap_or_default();
+    for (open_id, auth, _) in accounts {
+        let token = auth["tokens"]["accessToken"].as_str().unwrap_or_default();
+        let business_id = auth["metadata"]["openId"].as_str().unwrap_or_default();
+        let base = format!(
+            "{}business/comment/list/",
+            crate::channel_integration::TIKTOK_BUSINESS_API_URL
+        );
+        let collected = collect_since(
+            upstream,
+            |cursor| {
+                let mut query = vec![
+                    ("business_id", business_id),
+                    ("video_id", post_id),
+                    ("include_replies", "true"),
+                    ("status", "PUBLIC"),
+                    ("sort_field", "create_time"),
+                    ("sort_type", "DESC"),
+                ];
+                if let Some(cursor) = cursor {
+                    query.push(("cursor", cursor));
+                }
+                query.push(("max_count", TIKTOK_PAGE_SIZE));
+                get(
+                    graph_url(&base, &query, None),
+                    vec![("Access-Token".into(), token.to_string())],
+                )
+            },
+            |status, body| {
+                let parsed: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+                if !(200..300).contains(&status) {
+                    return Err(format!("TikTok {status}: {body}"));
+                }
+                // The Business API rejects with HTTP 200 and a non-zero `code`.
+                if parsed["code"].as_i64() != Some(0) {
+                    return Err(parsed["message"]
+                        .as_str()
+                        .unwrap_or("business/comment/list failed")
+                        .to_string());
+                }
+                let data = &parsed["data"];
+                let next = (data["has_more"] == json!(true))
+                    .then(|| match &data["cursor"] {
+                        Value::Number(n) => Some(n.to_string()),
+                        Value::String(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .flatten();
+                Ok((
+                    data["comments"].as_array().cloned().unwrap_or_default(),
+                    next,
+                ))
+            },
+            |c| {
+                std::iter::once(seconds(c))
+                    .chain(replies(c).iter().map(seconds))
+                    .max()
+                    .map(|s| s * 1000)
+            },
+            since,
+            true,
+        )
+        .await;
+        let collected = match collected {
+            Ok(collected) => collected,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
+        let since_seconds = since.div_euclid(1000);
+        return Ok(collected
+            .iter()
+            .flat_map(|c| std::iter::once(c.clone()).chain(replies(c)))
+            .filter(|c| seconds(c) >= since_seconds)
+            .filter_map(|comment| {
+                let from_id = comment["unique_identifier"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())?;
+                if comment["owner"] == json!(true) {
+                    return None;
+                }
+                let comment_id = comment["comment_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let created = comment["create_time"]
+                    .as_i64()
+                    .unwrap_or_else(|| repo_now().div_euclid(1000));
+                let mut data = json!({
+                    "commentId": comment_id,
+                    "postId": post_id,
+                    "fromId": from_id,
+                    "createdTime": created,
+                });
+                // `resolveParentCommentId`: `0` and a self-parent are top-level.
+                if let Some(parent) = comment["parent_comment_id"]
+                    .as_str()
+                    .filter(|p| !p.is_empty() && *p != "0" && *p != comment_id)
+                {
+                    data["parentId"] = json!(parent);
+                }
+                put_str(&mut data, "message", &comment["text"]);
+                Some(Scanned {
+                    integration_identifier: open_id.clone(),
+                    comment: data,
+                    comment_id,
+                    created_time: created * 1000,
                 })
             })
             .collect());
@@ -410,8 +851,7 @@ fn kv_err(error: impl std::fmt::Display) -> BusinessError {
     BusinessError::Repo(chatbotx_db::repo::Error::msg(error.to_string()))
 }
 
-/// `processMissedComments`. Only the Messenger scan is ported; another
-/// channel's run answers `fetchFailed`.
+/// `processMissedComments`.
 pub async fn process_missed_comments(
     db: &Db,
     kv: &DurableKv,
@@ -470,23 +910,16 @@ async fn run_claimed(
     now: i64,
 ) -> Result<RunResult> {
     let since = now - SCAN_DAYS * 86_400_000;
-    let scanned = if automation.kind == "messenger" {
-        scan_messenger(
-            db,
-            upstream,
-            workspace_id,
-            post_id,
-            since,
-            automation.inbox_id,
-        )
-        .await
-    } else {
-        // ponytail: Instagram / Threads / TikTok scans are not ported yet.
-        Err(ScanError::Fetch(format!(
-            "{} scan not ported",
-            automation.kind
-        )))
-    };
+    let scanned = scan_post_comments(
+        db,
+        upstream,
+        workspace_id,
+        &automation.kind,
+        post_id,
+        since,
+        automation.inbox_id,
+    )
+    .await;
     let comments = match scanned {
         Ok(comments) => comments,
         Err(ScanError::IntegrationNotFound) => return Ok(RunResult::Failed("integrationNotFound")),

@@ -632,7 +632,7 @@ pub async fn handle(deps: &Deps, data: &Value) -> Result<(), JobError> {
     if let Some(run_id) = run_id {
         fail_run(db, run_id, &error).await.map_err(job_err)?;
     }
-    // ponytail: `logProviderError` (the provider error log) is not ported.
+    super::log_provider_error(deps, workspace_id, &error).await;
     Ok(())
 }
 

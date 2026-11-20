@@ -294,6 +294,7 @@ pub(crate) async fn store_downloaded(
     if stored.optimized {
         attachment.mime_type = fields.mime_type;
     }
+    attachment.optimized = stored.optimized;
     Ok(())
 }
 
