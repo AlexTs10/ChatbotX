@@ -843,7 +843,7 @@ fn whatsapp_timestamp_ms(timestamp: &Value) -> Option<i64> {
         Value::String(t) => t.trim().parse::<f64>().ok()?,
         other => other.as_f64()?,
     };
-    (seconds.is_finite() && seconds > 0.0).then(|| (seconds * 1000.0) as i64)
+    (seconds.is_finite() && seconds > 0.0).then_some((seconds * 1000.0) as i64)
 }
 
 /// `readReferredProductCommerce`: "Message business" on a catalog message.
