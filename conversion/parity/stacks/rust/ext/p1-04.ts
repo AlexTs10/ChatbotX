@@ -34,28 +34,6 @@ const createId = (): bigint => {
   return (now << 14n) | (PLACE_ID << 10n) | sequence
 }
 
-const SNOWFLAKE_EPOCH_MS = Date.parse("2004-02-01T00:00:00.000Z")
-// A place id of its own (the other Rust ext drivers use 4-11, 13 and 15).
-const PLACE_ID = 12n
-
-let lastMs = 0n
-let sequence = 0n
-const createId = (): bigint => {
-  let now = BigInt(Date.now() - SNOWFLAKE_EPOCH_MS)
-  if (now <= lastMs) {
-    sequence += 1n
-    if (sequence >= 1024n) {
-      lastMs += 1n
-      sequence = 0n
-    }
-    now = lastMs
-  } else {
-    lastMs = now
-    sequence = 0n
-  }
-  return (now << 14n) | (PLACE_ID << 10n) | sequence
-}
-
 const ms = (value: Date | null) => (value ? value.getTime() : null)
 
 class SqliteP104Ext implements P104FixtureExt {
