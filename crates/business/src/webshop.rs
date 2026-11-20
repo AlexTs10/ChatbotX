@@ -24,6 +24,7 @@ use crate::order::{self, Actor, ContactRef, Deps, PlaceInput, PlaceItem, Quote};
 use crate::store_source::{is_external_store_source, resolve_store_source};
 use crate::{cart, ecommerce_settings, order_payment, tx};
 
+pub mod collection;
 mod external_checkout;
 
 /// Most distinct lines (product and variant pairs) one cart may hold.

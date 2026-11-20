@@ -2,6 +2,8 @@
 // Each test file keeps its own copy of its helper modules, as before.
 #![allow(clippy::duplicate_mod)]
 
+#[path = "ads_audience_users.rs"]
+mod ads_audience_users;
 #[path = "ai_agent_service.rs"]
 mod ai_agent_service;
 #[path = "ai_file_service.rs"]
@@ -156,6 +158,8 @@ mod events_evaluator_filtered_cache;
 mod events_trigger_emitter_contact_inbox_roundtrip;
 #[path = "events_webhook_context.rs"]
 mod events_webhook_context;
+#[path = "external_request.rs"]
+mod external_request;
 #[path = "facebook_lead_ads_forms.rs"]
 mod facebook_lead_ads_forms;
 #[path = "flow_duplicate.rs"]
@@ -334,6 +338,8 @@ mod user_quota_plan;
 mod user_quota_reconcile;
 #[path = "vendor_service.rs"]
 mod vendor_service;
+#[path = "webshop_collection.rs"]
+mod webshop_collection;
 #[path = "whatsapp_call_announcement_options.rs"]
 mod whatsapp_call_announcement_options;
 #[path = "whatsapp_call_hours.rs"]

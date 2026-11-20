@@ -404,3 +404,221 @@ mod tests {
         );
     }
 }
+
+/// `normalizePhoneNumber(phone, country, fallbackCountry)`.
+pub fn normalize_contact_phone(
+    phone: &str,
+    country: Option<&str>,
+    fallback_country: Option<&str>,
+) -> Option<String> {
+    let region = |c: Option<&str>| {
+        c.map(|c| c.trim().to_uppercase())
+            .filter(|c| c.len() == 2 && c.chars().all(|ch| ch.is_ascii_uppercase()))
+    };
+    let (own, fallback) = (region(country), region(fallback_country));
+    let parse = |region: Option<&str>| {
+        crate::contact::phone::parse(phone.trim(), region)
+            .filter(|n| n.is_valid())
+            .map(|n| {
+                n.format()
+                    .mode(phonenumber::Mode::E164)
+                    .to_string()
+                    .replacen('+', "", 1)
+            })
+    };
+    let parsed = parse(own.as_deref()).or_else(|| {
+        fallback
+            .as_deref()
+            .filter(|f| own.as_deref() != Some(*f))
+            .and_then(|f| parse(Some(f)))
+    });
+    if parsed.is_some() {
+        return parsed;
+    }
+    let digits: String = phone.chars().filter(char::is_ascii_digit).collect();
+    (!digits.is_empty() && !digits.starts_with('0')).then_some(digits)
+}
+
+fn hash_field(value: Option<&str>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_lowercase())
+        .filter(|v| !v.is_empty())
+        .map(|v| sha256_hex(&v))
+}
+
+/// The contact fields `buildHashedPayload` reads.
+#[derive(Debug, Clone, Default)]
+pub struct AudienceContact {
+    pub email: Option<String>,
+    pub phone_number: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub country: Option<String>,
+}
+
+/// `buildHashedPayload`: `None` without a usable phone or email.
+pub fn hashed_payload(contact: &AudienceContact, fallback_country: Option<&str>) -> Option<Value> {
+    let blank = |v: &Option<String>| v.as_deref().is_none_or(str::is_empty);
+    if blank(&contact.phone_number) && blank(&contact.email) {
+        return None;
+    }
+    let phone = contact
+        .phone_number
+        .as_deref()
+        .filter(|p| !p.is_empty())
+        .and_then(|p| normalize_contact_phone(p, contact.country.as_deref(), fallback_country))
+        .map(|p| sha256_hex(&p));
+    let email = hash_field(contact.email.as_deref());
+    if phone.is_none() && email.is_none() {
+        return None;
+    }
+    let row = [
+        phone,
+        email,
+        hash_field(contact.first_name.as_deref()),
+        hash_field(contact.last_name.as_deref()),
+    ]
+    .map(Option::unwrap_or_default);
+    Some(json!({ "schema": ["PHONE", "EMAIL", "FN", "LN"], "data": [row] }))
+}
+
+/// `buildPageUidPayload`.
+pub fn page_uid_payload(psid: &str, page_id: &str) -> Value {
+    json!({ "schema": ["PAGEUID"], "is_raw": true, "page_ids": [page_id], "data": [[psid]] })
+}
+
+/// `GRAPH_ERROR_CODE_INVALID_TOKEN`.
+pub const GRAPH_ERROR_CODE_INVALID_TOKEN: i64 = 190;
+
+/// `syncAudienceUser`: a marketing-message audience matches the hashed
+/// contact, a normal one the Messenger page-scoped id.
+pub async fn sync_audience_user(
+    auth: &AdsAuth,
+    custom_audience_id: &str,
+    operation: &str,
+    contact: &AudienceContact,
+    psid_page: Option<(&str, &str)>,
+    fallback_country: Option<&str>,
+) -> std::result::Result<(), GraphError> {
+    let audience = g::call(
+        "GET",
+        g::url(
+            &format!("{}/{}", auth.version, seg(custom_audience_id)),
+            &[
+                ("fields", "messenger_marketing_messages_page"),
+                ("access_token", auth.access_token.as_str()),
+            ],
+        ),
+        None,
+        None,
+    )
+    .await?;
+    let marketing_page = audience["messenger_marketing_messages_page"]["id"]
+        .as_str()
+        .filter(|id| !id.is_empty());
+    let payload = if marketing_page.is_some() {
+        hashed_payload(contact, fallback_country).ok_or_else(|| {
+            GraphError::invalid(
+                "Contact has no email or phone number to match against the marketing message audience",
+            )
+        })?
+    } else {
+        let (psid, page_id) = psid_page.ok_or_else(|| {
+            GraphError::invalid(
+                "Contact is not a Messenger subscriber; normal custom audiences require a page-scoped user id",
+            )
+        })?;
+        page_uid_payload(psid, page_id)
+    };
+    g::call(
+        if operation == "add" { "POST" } else { "DELETE" },
+        g::url(
+            &format!("{}/{}/users", auth.version, seg(custom_audience_id)),
+            &[("access_token", auth.access_token.as_str())],
+        ),
+        Some(&json!({ "payload": payload })),
+        None,
+    )
+    .await?;
+    Ok(())
+}
+
+/// `handleFacebookCustomAudience` without the step plumbing: the workspace
+/// Facebook Ads connection, the contact and (on Messenger) its page-scoped
+/// id; an invalid token marks the connection invalid. `Err` = the message to
+/// log (the step never branches).
+pub async fn sync_contact_to_audience(
+    db: &Db,
+    workspace_id: i64,
+    contact_id: i64,
+    messenger: Option<(String, i64)>,
+    custom_audience_id: &str,
+    operation: &str,
+) -> std::result::Result<(), String> {
+    let auth = auth_of(db, workspace_id).await.map_err(|e| e.message())?;
+    let inbox_id = messenger.as_ref().map(|(_, inbox)| *inbox);
+    let (contact, country, page_id) = tx::read(db, move |conn| {
+        let contact = crate::contact::service::find_or_fail(conn, workspace_id, contact_id)?;
+        let country: Option<String> = conn
+            .query_row(
+                "SELECT \"targetCountry\" FROM \"Workspace\" WHERE \"id\" = ?1",
+                [workspace_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let page_id: Option<String> = match inbox_id {
+            Some(inbox) => conn
+                .query_row(
+                    "SELECT \"pageId\" FROM \"IntegrationMessenger\" WHERE \"inboxId\" = ?1",
+                    [inbox],
+                    |r| r.get(0),
+                )
+                .optional()?,
+            None => None,
+        };
+        Ok((contact, country, page_id))
+    })
+    .await
+    .map_err(|e| e.message())?;
+    let audience_contact = AudienceContact {
+        email: contact.email.clone(),
+        phone_number: contact.phone_number.clone(),
+        first_name: contact.first_name.clone(),
+        last_name: contact.last_name.clone(),
+        country: contact.country.clone(),
+    };
+    let psid_page = match (&messenger, &page_id) {
+        (Some((psid, _)), Some(page)) => Some((psid.as_str(), page.as_str())),
+        _ => None,
+    };
+    let result = sync_audience_user(
+        &auth,
+        custom_audience_id,
+        operation,
+        &audience_contact,
+        psid_page,
+        country.as_deref(),
+    )
+    .await;
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if error.code == Some(GRAPH_ERROR_CODE_INVALID_TOKEN) {
+                let marked = tx::write(db, move |tx| {
+                    tx.execute(
+                        "UPDATE \"IntegrationFacebookAds\" SET \"status\" = 'invalid' WHERE \"workspaceId\" = ?1",
+                        [workspace_id],
+                    )
+                    .map_err(|e| BusinessError::Repo(e.into()))?;
+                    Ok(())
+                })
+                .await;
+                if let Err(e) = marked {
+                    tracing::error!(workspace_id, err = %e.message(), "Failed to mark Facebook Ads integration invalid");
+                }
+            }
+            Err(g::redact_tokens(&error.message))
+        }
+    }
+}
