@@ -92,7 +92,7 @@ Only one unit can be `in_progress` at a time — exception (user, 2026-11-11): u
 | Q.F2+ | 4 | Frontend feature batches (cut by the web agent in `specs/P4-web.md` after the scaffold) | in progress (web run 6, screen state in `specs/P4-web.md` §6) | feat/conversion-web scaffold | B | | |
 | Q.F2-settings | 4 | Workspace settings screens (integrations, TikTok / Zalo / Threads, Google Ads, Facebook Ads, AI Router) + `(enterprise)/pricing` | done (spec specs/Q.F2-settings.md) | Q.F2+ | C + B | specs/Q.F2-settings.md | branch `feat/conversion-r2-settings` |
 | Q.F2-admin | 4 | Admin + manage consoles, public pages (unsubscribe, OAuth consent, connect, /go, /l, /bs, datetime picker, webchat), D4 SPA dispatch test (specs/Q.F2-admin.md) | in_pr | Q.F2+ | B + C | `/extensions/me` and guest file upload left | |
-| Q.P5 | 5 | Cutover: one-command build + run, RSS measurement ≤ 200 MB, full parity run, docs | in progress | all | A | scripts/chatbotx.sh; RSS ≈ 102 MB idle (MEMORY.md); parity b15fed15a 4572/4681 pass, 109 fail in 33 files → fix round pfa–pfe | |
+| Q.P5 | 5 | Cutover: one-command build + run, RSS measurement ≤ 200 MB, full parity run, docs | done | all | A | scripts/chatbotx.sh; RSS ≈ 102 MB idle (MEMORY.md); full parity 0ab101476: 144/152 files, the 8 p1-04 files failed on a merge duplicate in the fixture driver, fixed in ab185fb7c, p1-04 then 14/14 files, 355/355 tests → 152/152 files, 4681/4681 tests | |
 
 ## Proof
 
