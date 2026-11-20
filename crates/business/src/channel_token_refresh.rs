@@ -303,7 +303,6 @@ fn is_revoked(channel: RefreshChannel, failure: &ApiFailure) -> bool {
 struct Stored {
     auth: Value,
     identifier: String,
-    inbox_id: i64,
     provider: String,
 }
 
@@ -314,7 +313,7 @@ async fn load(
     id: i64,
 ) -> Result<Option<Stored>> {
     let sql = format!(
-        r#"SELECT "auth", "{}", "inboxId", {} FROM "{}" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+        r#"SELECT "auth", "{}", {} FROM "{}" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
         channel.identifier(),
         channel.provider_sql(),
         channel.table()
@@ -327,8 +326,7 @@ async fn load(
                     .and_then(|a| serde_json::from_str(&a).ok())
                     .unwrap_or(Value::Null),
                 identifier: r.get(1)?,
-                inbox_id: r.get(2)?,
-                provider: r.get(3)?,
+                provider: r.get(2)?,
             })
         })
         .optional()
