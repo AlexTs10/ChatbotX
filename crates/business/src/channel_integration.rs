@@ -461,9 +461,7 @@ pub async fn refresh_tiktok_token(
     workspace_id: i64,
     id: i64,
 ) -> Result<()> {
-    static LOCKS: std::sync::OnceLock<chatbotx_kv::LockMap> = std::sync::OnceLock::new();
-    let _guard = LOCKS
-        .get_or_init(chatbotx_kv::LockMap::new)
+    let _guard = crate::channel_token_refresh::refresh_locks()
         .acquire(
             &format!("auth:refresh:tiktok:{id}"),
             chatbotx_kv::LockOpts {

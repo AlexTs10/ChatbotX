@@ -104,7 +104,8 @@ pub fn check_guest_ip_limit(
     check_guest_rate_limit_with(state, webchat_id, client_ip, None, ip_limit, now_ms)
 }
 
-fn check_guest_rate_limit_with(
+/// `checkGuestRateLimit({ ..., ipLimit })` with an optional session key.
+pub fn check_guest_rate_limit_with(
     state: &ApiState,
     webchat_id: &str,
     client_ip: &str,

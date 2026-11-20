@@ -4,6 +4,7 @@
 
 pub mod avatar;
 pub mod bulk_tag_stats;
+pub mod channel_profile;
 pub mod create;
 pub mod extract;
 pub mod filter_fields;
@@ -12,6 +13,7 @@ pub mod identifier;
 pub mod list;
 pub mod phone;
 pub mod profile_refresh;
+pub mod profile_snapshot;
 pub mod service;
 pub mod update_fields;
 

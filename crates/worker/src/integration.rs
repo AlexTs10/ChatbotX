@@ -281,6 +281,9 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::coexist_instagram::JOB => {
             crate::coexist_instagram::run(&deps, &job.data["data"]).await?
         }
+        crate::contact_profile::UPDATE_CONTACT_AVATAR => {
+            crate::contact_profile::update_contact_avatar(&deps, &job.data["data"]).await?
+        }
         crate::contact_scan::CONTACT_SCAN => {
             crate::contact_scan::run(&deps, &job.data["data"]).await?
         }

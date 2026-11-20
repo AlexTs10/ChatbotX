@@ -35,6 +35,9 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
             .await,
         );
     }
+    if name == "refreshAllChannelTokensAction" {
+        return Some(refresh_all_channel_tokens(ctx).await);
+    }
     if !matches!(name, "createWebchatAction" | "createApiAction") {
         return None;
     }
@@ -202,4 +205,44 @@ pub(super) async fn is_member(ctx: &Ctx<'_>, workspace_id: i64) -> Result<bool, 
         })
         .await
         .map_err(|e| crate::handlers::internal_error(&e.to_string()))
+}
+
+/// `refreshAllChannelTokensAction` (`authActionClient`, no input): the
+/// channel tokens of every workspace the user is a member of, except the
+/// ones scheduled for deletion; `{ refreshed, failed }`.
+// ponytail: the cloud-only blocked-owner filter (`resolveWorkspaceBlockState`)
+// is not ported (cloud scope).
+async fn refresh_all_channel_tokens(ctx: &Ctx<'_>) -> Result<Value, OrpcError> {
+    use chatbotx_business::audit::{AuditActor, with_audit_context};
+    use chatbotx_business::channel_token_refresh::{RefreshDeps, refresh_for_workspaces};
+    let user_id = ctx.user_id;
+    let workspace_ids: Vec<i64> = ctx
+        .api
+        .db
+        .read(move |conn| {
+            let mut stmt = conn.prepare(
+                r#"SELECT w."id" FROM "WorkspaceMember" m JOIN "Workspace" w ON w."id" = m."workspaceId"
+                   WHERE m."userId" = ?1 AND w."scheduledDeletionAt" IS NULL ORDER BY w."id""#,
+            )?;
+            let ids = stmt
+                .query_map([user_id], |r| r.get(0))?
+                .collect::<Result<Vec<i64>, _>>()?;
+            Ok(ids)
+        })
+        .await
+        .map_err(|e| crate::handlers::internal_error(&e.to_string()))?;
+    let deps = RefreshDeps {
+        db: &ctx.api.db,
+        http: &chatbotx_business::channel_api::LiveChannelHttp,
+        audit: &ctx.api.audit,
+        buses: None,
+    };
+    let actor = AuditActor {
+        user_id: Some(user_id.to_string()),
+        ..AuditActor::default()
+    };
+    let summary = with_audit_context(actor, refresh_for_workspaces(deps, &workspace_ids))
+        .await
+        .map_err(action_fail)?;
+    Ok(json!({ "refreshed": summary.refreshed, "failed": summary.failed }))
 }

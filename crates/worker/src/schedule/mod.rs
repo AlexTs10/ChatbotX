@@ -44,6 +44,9 @@ pub const PORTED: &[&str] = &[
     "sweepStaleWhatsappCalls",
     "purgeExpiredCallRecordings",
     "finishOverdueLeaderboards",
+    "refreshChannelTokens",
+    "refreshShortLivedChannelTokens",
+    "dispatchProfileSnapshots",
 ];
 
 /// `ScheduleJobData` names of the ported jobs (broadcasts, smart delay).
@@ -181,6 +184,14 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         "googleAdsHousekeeping" => {
             crate::google_ads_housekeeping::housekeeping(&deps).await?;
+            Value::Null
+        }
+        "refreshChannelTokens" => {
+            crate::contact_profile::refresh_channel_tokens(&deps, &data).await;
+            Value::Null
+        }
+        "dispatchProfileSnapshots" => {
+            crate::contact_profile::dispatch_profile_snapshots(&deps).await?;
             Value::Null
         }
         "googleAdsSyncSetups" => {

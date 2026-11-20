@@ -54,6 +54,16 @@ mod broadcast_service;
 mod capabilities_service;
 #[path = "channel_integration_settings.rs"]
 mod channel_integration_settings;
+#[path = "channel_token_refresh_action.rs"]
+mod channel_token_refresh_action;
+#[path = "channel_token_refresh_table.rs"]
+mod channel_token_refresh_table;
+#[path = "channel_token_refresh_threads.rs"]
+mod channel_token_refresh_threads;
+#[path = "channel_token_refresh_tiktok.rs"]
+mod channel_token_refresh_tiktok;
+#[path = "channel_token_refresh_whatsapp.rs"]
+mod channel_token_refresh_whatsapp;
 #[path = "comment_automation_post_lists.rs"]
 mod comment_automation_post_lists;
 #[path = "connection_credentials.rs"]
@@ -66,8 +76,12 @@ mod connection_oauth_facebook_ads;
 mod connection_oauth_google_ads;
 #[path = "connection_oauth_instagram.rs"]
 mod connection_oauth_instagram;
+#[path = "connection_record_refreshed_auth.rs"]
+mod connection_record_refreshed_auth;
 #[path = "contact_bulk_tag_stats.rs"]
 mod contact_bulk_tag_stats;
+#[path = "contact_channel_profile.rs"]
+mod contact_channel_profile;
 #[path = "contact_create_with_inbox.rs"]
 mod contact_create_with_inbox;
 #[path = "contact_custom_field_apply_operation.rs"]
@@ -108,6 +122,8 @@ mod contact_note_service;
 mod contact_phone;
 #[path = "contact_profile_refresh.rs"]
 mod contact_profile_refresh;
+#[path = "contact_profile_snapshot.rs"]
+mod contact_profile_snapshot;
 #[path = "contact_referral_event_history.rs"]
 mod contact_referral_event_history;
 #[path = "contact_resolve_id_by_identifier.rs"]

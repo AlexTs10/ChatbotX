@@ -524,7 +524,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/me-extension-download-route.test.ts` | C | tbd | todo | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/media-library-actions.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/media-library-public-api.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
-| `apps/builder/__tests__/media-proxy-route.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
+| `apps/builder/__tests__/media-proxy-route.test.ts` | C | `crates/api/tests/avatar_proxy_route.rs` | ported | Media library and file storage; builder server code; avatar part only (Q.P6-U3); attachment proxy not ported |
 | `apps/builder/__tests__/media-public-scope.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/message-input-client-id.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/message-input-thread-control.test.tsx` | B | - | todo | Thread control (handover protocol); builder jsdom |
@@ -710,8 +710,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/recurrence-weekday-options.test.ts` | B | - | todo | Broadcasts (incl. recurring); builder jsdom |
 | `apps/builder/__tests__/reflink-widget-route.test.ts` | C | `crates/api/tests/reflink_chat_widget.rs` | ported | Leaderboards; builder server code; Q.D13b (stale row) |
 | `apps/builder/__tests__/reflinks-public-api.test.ts` | C | `crates/api/tests/qr_reflinks_public_api.rs`, `crates/api/tests/reflink_chat_widget.rs` | ported | Leaderboards; builder server code; Q.D13b (stale row) |
-| `apps/builder/__tests__/refresh-all-channel-tokens-action.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
-| `apps/builder/__tests__/refresh-contact-profile-action.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
+| `apps/builder/__tests__/refresh-all-channel-tokens-action.test.ts` | C | `crates/api/tests/rpc_channel_token_profile_actions.rs` + `crates/business/tests/channel_token_refresh_action.rs` | ported | Channel connection and OAuth connect flow; builder server code; Q.P6-U3 |
+| `apps/builder/__tests__/refresh-contact-profile-action.test.ts` | C | `crates/api/tests/rpc_channel_token_profile_actions.rs` | ported | Contacts (profiles, notes, activity); builder server code; Q.P6-U3 |
 | `apps/builder/__tests__/remove-contact-sequence.action.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/__tests__/request-resolver.test.tsx` | C | tbd | todo | Flow builder and execution; builder server code |
 | `apps/builder/__tests__/require-contact-scan-page-access.test.ts` | C | tbd | todo | Contact scan; builder server code |
@@ -1044,7 +1044,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/src/features/contact-filter/schema/__tests__/ctwa-retarget-filter.test.ts` | B | - | todo | Contact filters and segments; builder jsdom |
 | `apps/builder/src/features/contacts/actions/__tests__/contact-tag-actions.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
 | `apps/builder/src/features/contacts/lib/__tests__/channel-identity.test.ts` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
-| `apps/builder/src/features/contacts/lib/__tests__/refresh-contact-profile.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity); builder server code |
+| `apps/builder/src/features/contacts/lib/__tests__/refresh-contact-profile.test.ts` | C | `crates/business/tests/contact_profile_refresh.rs` + `crates/business/tests/contact_channel_profile.rs` | ported | Contacts (profiles, notes, activity); builder server code; Q.P6-U3 |
 | `apps/builder/src/features/contacts/provider/__tests__/contact-store.test.ts` | B | - | todo | Contacts (profiles, notes, activity); builder jsdom |
 | `apps/builder/src/features/conversations/lib/__tests__/is-conversation-unread.test.ts` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/src/features/conversations/queries/__tests__/list-conversations.query.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages); builder server code |
@@ -1236,7 +1236,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/call-phone-buttons.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/call-phone-number-handler.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/capi-scope-checkers.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
-| `apps/worker/__tests__/capture-contact-profile-snapshot.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
+| `apps/worker/__tests__/capture-contact-profile-snapshot.test.ts` | C | `crates/business/tests/contact_profile_snapshot.rs` | ported | Contacts (profiles, notes, activity); Q.P6-U3 |
 | `apps/worker/__tests__/challenge-handler.test.ts` | C | tbd | todo | Webchat channel |
 | `apps/worker/__tests__/change-gamification-score-step.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/channel-audience-event.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -1289,7 +1289,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/datetime-webhook-evaluator.test.ts` | C | tbd | todo | Outbound webhooks |
 | `apps/worker/__tests__/default-worker.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `apps/worker/__tests__/deferred-private-reply.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
-| `apps/worker/__tests__/dispatch-profile-snapshots.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
+| `apps/worker/__tests__/dispatch-profile-snapshots.test.ts` | C | `crates/business/tests/contact_profile_snapshot.rs` | ported | Contacts (profiles, notes, activity); Q.P6-U3 |
 | `apps/worker/__tests__/docker-entrypoint.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/docker-runtime-deps.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/document-reader-ensure-stored.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
@@ -1443,11 +1443,11 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/reconcile.test.ts` | C | `crates/jobs/tests/reconcile.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/record-provider-error-log.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/redispatch-template-jobs.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
-| `apps/worker/__tests__/refresh-channel-tokens-table.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
+| `apps/worker/__tests__/refresh-channel-tokens-table.test.ts` | C | `crates/business/tests/channel_token_refresh_table.rs` | ported | Channel connection and OAuth connect flow; Q.P6-U3 |
 | `apps/worker/__tests__/refresh-license.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `apps/worker/__tests__/refresh-threads-tokens.test.ts` | C | tbd | todo | Threads channel |
-| `apps/worker/__tests__/refresh-tiktok-tokens.test.ts` | C | tbd | todo | TikTok channel |
-| `apps/worker/__tests__/refresh-whatsapp-tokens.test.ts` | C | tbd | todo | WhatsApp channel |
+| `apps/worker/__tests__/refresh-threads-tokens.test.ts` | C | `crates/business/tests/channel_token_refresh_threads.rs` | ported | Threads channel; Q.P6-U3 |
+| `apps/worker/__tests__/refresh-tiktok-tokens.test.ts` | C | `crates/business/tests/channel_token_refresh_tiktok.rs` | ported | TikTok channel; Q.P6-U3 |
+| `apps/worker/__tests__/refresh-whatsapp-tokens.test.ts` | C | `crates/business/tests/channel_token_refresh_whatsapp.rs` | ported | WhatsApp channel; Q.P6-U3 |
 | `apps/worker/__tests__/register-schedules-edition.test.ts` | C | `crates/jobs/tests/register_schedules_edition.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/reply-to-inbound-cart.test.ts` | C | tbd | todo | Ecommerce: products, categories, vendors |
 | `apps/worker/__tests__/reregister-telegram-webhooks.test.ts` | C | tbd | todo | Telegram channel |
@@ -1562,7 +1562,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/trigger-worker-contact-inbox-propagation.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `apps/worker/__tests__/uninstall-template-handler.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/unsubscribe-expired-trials.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `apps/worker/__tests__/update-contact-avatar.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
+| `apps/worker/__tests__/update-contact-avatar.test.ts` | C | `crates/business/tests/contact_channel_profile.rs` | ported | Contacts (profiles, notes, activity); Q.P6-U3 |
 | `apps/worker/__tests__/wa-payment-request-guard.test.ts` | C | tbd | todo | WhatsApp message templates |
 | `apps/worker/__tests__/wa-template-handler.test.ts` | C | tbd | todo | WhatsApp message templates |
 | `apps/worker/__tests__/wait-for-chat-job-completion.test.ts` | C | `crates/jobs/tests/wait_for_chat_job_completion.rs` | passing | Flow steps: logic and utilities |
@@ -1653,10 +1653,10 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/instagram-facebook/__tests__/connection-oauth.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram-facebook/__tests__/eager-media-compression.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram-facebook/__tests__/error-mapper.test.ts` | C | tbd | todo | Instagram channel |
-| `integrations/instagram-facebook/__tests__/get-contact-profile-pic-url.test.ts` | C | tbd | todo | Instagram channel |
+| `integrations/instagram-facebook/__tests__/get-contact-profile-pic-url.test.ts` | C | `crates/business/tests/contact_channel_profile.rs` | ported | Instagram channel; Q.P6-U3 |
 | `integrations/instagram-facebook/__tests__/get-message-media-urls.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram-facebook/__tests__/get-page-instagram-access.test.ts` | C | tbd | todo | Instagram channel |
-| `integrations/instagram-facebook/__tests__/get-user-profile-avatar.test.ts` | C | tbd | todo | Instagram channel |
+| `integrations/instagram-facebook/__tests__/get-user-profile-avatar.test.ts` | C | `crates/business/tests/contact_channel_profile.rs` | ported | Instagram channel; Q.P6-U3 |
 | `integrations/instagram-facebook/__tests__/http-client-policy-error.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram-facebook/__tests__/incoming-attachment-storage.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram-facebook/__tests__/incoming-lazy-media.test.ts` | C | tbd | todo | Instagram channel |
@@ -1684,9 +1684,9 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/instagram/__tests__/connection.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram/__tests__/contact-profile.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram/__tests__/eager-media-compression.test.ts` | C | tbd | todo | Instagram channel |
-| `integrations/instagram/__tests__/get-contact-profile-pic-url.test.ts` | C | tbd | todo | Instagram channel |
+| `integrations/instagram/__tests__/get-contact-profile-pic-url.test.ts` | C | `crates/business/tests/contact_channel_profile.rs` | ported | Instagram channel; Q.P6-U3 |
 | `integrations/instagram/__tests__/get-message-media-urls.test.ts` | C | tbd | todo | Instagram channel |
-| `integrations/instagram/__tests__/get-user-profile-avatar.test.ts` | C | tbd | todo | Instagram channel |
+| `integrations/instagram/__tests__/get-user-profile-avatar.test.ts` | C | `crates/business/tests/contact_channel_profile.rs` | ported | Instagram channel; Q.P6-U3 |
 | `integrations/instagram/__tests__/http-client-policy-error.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram/__tests__/incoming-attachment.test.ts` | C | tbd | todo | Instagram channel |
 | `integrations/instagram/__tests__/incoming-lazy-media.test.ts` | C | tbd | todo | Instagram channel |
@@ -1729,7 +1729,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/messenger/__tests__/generate-auth-url.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/get-message-media-urls.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/get-user-pages.test.ts` | C | tbd | todo | Messenger channel |
-| `integrations/messenger/__tests__/get-user-profile-avatar.test.ts` | C | tbd | todo | Messenger channel |
+| `integrations/messenger/__tests__/get-user-profile-avatar.test.ts` | C | `crates/business/tests/contact_channel_profile.rs` | ported | Messenger channel; Q.P6-U3 |
 | `integrations/messenger/__tests__/get-user-profile.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/google-click-ref.test.ts` | C | tbd | todo | Messenger channel |
 | `integrations/messenger/__tests__/graph-error-message.test.ts` | C | tbd | todo | Messenger channel |
@@ -2576,7 +2576,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/connection/__tests__/credential-providers.test.ts` | C | `crates/business/tests/connection_credentials.rs` | todo | Channel connection and OAuth connect flow; partial: AI-key verify cases ported (P3.6-D2 §32.2), email-marketing providers left |
 | `packages/business/src/connection/__tests__/provider-account-event-service.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/connection/__tests__/provider-account-events.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/business/src/connection/__tests__/record-refreshed-auth.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
+| `packages/business/src/connection/__tests__/record-refreshed-auth.test.ts` | C | `crates/business/tests/connection_record_refreshed_auth.rs` | ported | Channel connection and OAuth connect flow; Q.P6-U3 |
 | `packages/business/src/connection/__tests__/state-service.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/connection/__tests__/state.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/connection/__tests__/store-bindings.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
@@ -2602,7 +2602,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/integration-ai-provider/__tests__/verify.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/business/src/integration-context/__tests__/auth-store.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `packages/business/src/integration/__tests__/find-token-refresh-errors.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
-| `packages/business/src/media/__tests__/no-avatar-sentinel.test.ts` | C | tbd | todo | Media library and file storage |
+| `packages/business/src/media/__tests__/no-avatar-sentinel.test.ts` | C | `crates/core/tests/utils_no_avatar_sentinel.rs` | ported | Media library and file storage; Q.P6-U3 |
 | `packages/business/src/media/__tests__/optimize-stored-image.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/business/src/media/__tests__/resolve-media-url.test.ts` | C | tbd | todo | Media library and file storage |
 | `packages/business/src/messaging-ads-connection/__tests__/context.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
@@ -3082,7 +3082,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/variables/__tests__/last-input.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |
 | `packages/variables/__tests__/pipeline-variable.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |
 | `packages/variables/__tests__/queued-messages.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |
-| `packages/variables/__tests__/refresh-profile-snapshot.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |
+| `packages/variables/__tests__/refresh-profile-snapshot.test.ts` | C | `crates/core/tests/variables_refresh_profile_snapshot.rs` | ported | Variables (contact/bot/system variable interpolation); Q.P6-U3 (worker sources wired) |
 | `packages/variables/__tests__/render-custom-field-value.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |
 | `packages/variables/__tests__/replace-custom-field-timezone.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |
 | `packages/variables/__tests__/system-field-timezone.test.ts` | C | tbd | todo | Variables (contact/bot/system variable interpolation) |

@@ -34,6 +34,8 @@ mod auth_workspace_token_auth_middleware;
 mod auth_workspace_token_scope_enforcement;
 #[path = "auth_workspace_token_scope_registry.rs"]
 mod auth_workspace_token_scope_registry;
+#[path = "avatar_proxy_route.rs"]
+mod avatar_proxy_route;
 #[path = "bot_fields_public_api.rs"]
 mod bot_fields_public_api;
 #[path = "bot_simulator_public_api.rs"]
@@ -200,6 +202,8 @@ mod routes_public_scope;
 mod rpc_automation_pages;
 #[path = "rpc_channel_connect.rs"]
 mod rpc_channel_connect;
+#[path = "rpc_channel_token_profile_actions.rs"]
+mod rpc_channel_token_profile_actions;
 #[path = "rpc_channels.rs"]
 mod rpc_channels;
 #[path = "rpc_google_ads_settings.rs"]

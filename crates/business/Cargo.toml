@@ -20,6 +20,8 @@ chatbotx-files = { workspace = true }
 chatbotx-jobs = { workspace = true }
 chatbotx-kv = { workspace = true }
 chatbotx-rt = { workspace = true }
+# Q.P6-U3 provider downloads (avatars).
+bytes = { workspace = true }
 # Concurrent error-log emits (`Promise.allSettled`, Q.D11).
 futures = { workspace = true }
 # Q.D13b dynamic images (`@napi-rs/canvas` + `qrcode` in the original): 2D raster,
@@ -57,7 +59,6 @@ url = { workspace = true }
 [dev-dependencies]
 # Q.D6 AI file tests: a fake download client (`HttpFetcher`) and its response.
 async-trait = "0.1"
-bytes = { workspace = true }
 http = { workspace = true }
 chatbotx-core = { workspace = true }
 # P3.6-D2 profile refresh tests: `MemKv::ttl_secs`.
