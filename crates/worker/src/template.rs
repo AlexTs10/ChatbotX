@@ -81,9 +81,17 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
                     .map_err(failed)?;
                 return Ok(Value::Null);
             }
-            uninstall::run_uninstall_job(&deps.db, workspace_id, installation_id)
-                .await
-                .map_err(failed)?;
+            let deleted_flows =
+                uninstall::run_uninstall_job(&deps.db, workspace_id, installation_id)
+                    .await
+                    .map_err(failed)?;
+            // `flow.welcomeCleanup`: the Meta welcome flows of the deleted flows.
+            chatbotx_business::welcome_flow_sync::enqueue_delete(
+                deps.jobs.as_ref(),
+                workspace_id,
+                &deleted_flows,
+            )
+            .await;
         }
         other => {
             return Err(JobError::unrecoverable(format!(

@@ -1525,12 +1525,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/summarize-conversation.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/sweep-stale-whatsapp-calls.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `apps/worker/__tests__/sync-ad-labels.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/sync-channel-labels.test.ts` | C | tbd | todo | Tags and labels |
+| `apps/worker/__tests__/sync-channel-labels.test.ts` | C | `crates/business/tests/sync_channel_labels_job.rs` | ported | Tags and labels |
 | `apps/worker/__tests__/sync-retarget-audience.test.ts` | C | tbd | todo | Facebook Ads integration |
-| `apps/worker/__tests__/sync-tag-create-attach.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/sync-tag-delete.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/sync-tag-detach.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/sync-tag.test.ts` | C | tbd | todo | Tags and labels |
+| `apps/worker/__tests__/sync-tag-create-attach.test.ts` | C | `crates/business/tests/tag_sync_jobs.rs` | ported | Tags and labels |
+| `apps/worker/__tests__/sync-tag-delete.test.ts` | C | `crates/business/tests/tag_sync_jobs.rs` | ported | Tags and labels |
+| `apps/worker/__tests__/sync-tag-detach.test.ts` | C | `crates/business/tests/tag_sync_jobs.rs` | ported | Tags and labels |
+| `apps/worker/__tests__/sync-tag.test.ts` | C | `crates/business/tests/tag_sync_jobs.rs` | ported | Tags and labels |
 | `apps/worker/__tests__/sync-template-installation-handler.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/sync-user-quota-mac.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `apps/worker/__tests__/sync-user-quota-monthly-bot-messages.test.ts` | C | tbd | todo | Licensing, billing and quotas |
@@ -1572,7 +1572,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/webhook-payload-contact-inbox-leak.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `apps/worker/__tests__/webhook-pipeline-payload.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `apps/worker/__tests__/webhook-worker-audit-context.test.ts` | C | tbd | todo | Outbound webhooks |
-| `apps/worker/__tests__/welcome-message-flows-handler.test.ts` | C | tbd | todo | Messenger channel |
+| `apps/worker/__tests__/welcome-message-flows-handler.test.ts` | C | `crates/business/tests/welcome_flow_sync_jobs.rs` | ported | Messenger channel |
 | `apps/worker/__tests__/whatsapp-call-finalize.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `apps/worker/__tests__/whatsapp-call-handler.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `apps/worker/__tests__/whatsapp-call-native-media.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |

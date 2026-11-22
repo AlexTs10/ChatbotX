@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use chatbotx_business::channel_api::LiveChannelHttp;
+use chatbotx_business::{tag_sync, welcome_flow_sync};
 use chatbotx_jobs::{Backoff, Enqueuer, JobCtx, JobError, JobOptions, QueueName, Retention};
 use chatbotx_rt::revoke::{
     REVOKE_RETRY_JOB_ATTEMPTS, REVOKE_RETRY_JOB_DELAY_MS, REVOKE_RETRY_JOB_NAME,
@@ -57,6 +59,26 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::inbound_webhook::process_request(&deps, &job, data).await?;
         }
         REVOKE_RETRY_JOB_NAME => retry_realtime_member_revoke(&deps, &job, data).await?,
+        tag_sync::SYNC_TAG => {
+            tag_sync::sync_tag(&deps.db, &LiveChannelHttp, deps.events.as_ref(), data)
+                .await
+                .map_err(|e| JobError::retryable(e.message()))?
+        }
+        tag_sync::SYNC_CHANNEL_LABELS => tag_sync::sync_channel_labels(
+            &deps.db,
+            &LiveChannelHttp,
+            deps.events.as_ref(),
+            data,
+            std::time::Duration::from_millis(200),
+        )
+        .await
+        .map_err(|e| JobError::retryable(e.message()))?,
+        welcome_flow_sync::SYNC => welcome_flow_sync::sync(&deps.db, &LiveChannelHttp, data)
+            .await
+            .map_err(JobError::retryable)?,
+        welcome_flow_sync::DELETE => welcome_flow_sync::delete(&deps.db, &LiveChannelHttp, data)
+            .await
+            .map_err(|e| JobError::retryable(e.message()))?,
         PROCESS_PIPELINE_STAGE_BULK => {
             let Some(job) = StageBulkJob::of(data) else {
                 return Err(JobError::unrecoverable(

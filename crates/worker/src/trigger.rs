@@ -535,16 +535,22 @@ async fn execute_action(ctx: &ActionCtx<'_>, scope: &mut Scope) -> Result<Outcom
     let (ws, contact) = (ctx.workspace_id, conversation.contact_id);
     let action_type = str_of(ctx.action, "type").unwrap_or("");
     let outcome = match action_type {
-        "addTag" => {
-            tag::attach_to_contact(db, ws, contact, &ids(ctx.action, "tagIds"))
-                .await
-                .map_err(biz)?;
-            Outcome::Succeeded
-        }
-        "removeTag" => {
-            tag::detach_from_contact(db, ws, contact, &ids(ctx.action, "tagIds"))
-                .await
-                .map_err(biz)?;
+        "addTag" | "removeTag" => {
+            let tag_ids = ids(ctx.action, "tagIds");
+            let add = action_type == "addTag";
+            let changed = if add {
+                tag::attach_to_contact(db, ws, contact, &tag_ids).await
+            } else {
+                tag::detach_from_contact(db, ws, contact, &tag_ids).await
+            }
+            .map_err(biz)?;
+            let pairs: Vec<(i64, i64)> = changed.iter().map(|t| (contact, *t)).collect();
+            let jobs = ctx.deps.jobs.as_ref();
+            if add {
+                chatbotx_business::tag_sync::enqueue_attach_many(jobs, ws, &pairs).await;
+            } else {
+                chatbotx_business::tag_sync::enqueue_detach_many(jobs, ws, &pairs).await;
+            }
             Outcome::Succeeded
         }
         "addSequence" | "removeSequence" => {

@@ -3,9 +3,7 @@
 //!
 //! ponytail: the Zalo channel of this job is not ported (Zalo unit); its
 //! jobs log "unsupported channel" until then. The `tagApplied` /
-//! `tagRemoved` events are not emitted (as the other Rust tag writes, Q.W2),
-//! and a deleted label is only logged until the tag-sync queue
-//! (`tagSyncService.enqueueDelete`) is ported.
+//! `tagRemoved` events are not emitted (as the other Rust tag writes, Q.W2).
 
 use chatbotx_db::repo::models::{IntegrationMessenger, TagChannel};
 use chatbotx_db::repo::tag_channel::{self, TagChannelKey};
@@ -256,11 +254,29 @@ async fn apply_event(
             Ok(())
         }
         LabelEvent::DeleteLabel { label_id } => {
-            tracing::info!(
-                channel = CHANNEL,
-                label_id,
-                "inbox labels: deleted label skipped (tag-sync queue not ported)"
-            );
+            // `removeLabel`: a channel-scoped delete of the mapped tag.
+            let scope = ctx.clone();
+            let label = label_id.clone();
+            let mapping = deps
+                .db
+                .read(move |conn| find_tag_channel(conn, &scope, &label).map_err(crate::repo_err))
+                .await
+                .map_err(db_error)?;
+            let Some(mapping) = mapping else {
+                tracing::info!(
+                    channel = CHANNEL,
+                    label_id,
+                    "inbox labels: deleted label not mapped to a tag, skipped"
+                );
+                return Ok(());
+            };
+            chatbotx_business::tag_sync::enqueue_delete(
+                deps.jobs.as_ref(),
+                ctx.workspace_id,
+                mapping.tag_id,
+                Some((CHANNEL, ctx.integration_id)),
+            )
+            .await;
             Ok(())
         }
     }

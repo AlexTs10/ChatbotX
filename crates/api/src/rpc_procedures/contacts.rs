@@ -10,7 +10,7 @@ use chatbotx_business::contact::list::{
 };
 use chatbotx_business::count_mode::CountMode;
 use chatbotx_business::{
-    contact, contact_custom_field, contact_note, contact_sequence, custom_field, tag,
+    contact, contact_custom_field, contact_note, contact_sequence, custom_field, tag, tag_sync,
 };
 use chatbotx_core::utils::custom_field_operation::FieldOperationType;
 use chatbotx_db::repo::contact::ContactTableRow;
@@ -496,6 +496,9 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                             })
                             .collect();
                         ctx.api.emit_triggers(events).await;
+                        if let Some(jobs) = ctx.api.jobs.as_deref() {
+                            tag_sync::enqueue_attach_many(jobs, ctx.workspace_id, &linked).await;
+                        }
                     }
                     return Ok(Value::Null);
                 }
@@ -526,12 +529,20 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
             match name {
                 "addContactTagAction" | "removeContactTagAction" => {
                     let names = input.strings("tags")?;
-                    let outcome = if name == "addContactTagAction" {
-                        tag::attach_by_names_to_contacts(db, ws, &ids, &names).await
+                    let add = name == "addContactTagAction";
+                    let (outcome, pairs) = if add {
+                        tag::attach_by_names_to_contacts_with_pairs(db, ws, &ids, &names).await
                     } else {
-                        tag::detach_by_names_from_contacts(db, ws, &ids, &names).await
+                        tag::detach_by_names_from_contacts_with_pairs(db, ws, &ids, &names).await
                     }
                     .map_err(action_fail)?;
+                    if let Some(jobs) = ctx.api.jobs.as_deref() {
+                        if add {
+                            tag_sync::enqueue_attach_many(jobs, ws, &pairs).await;
+                        } else {
+                            tag_sync::enqueue_detach_many(jobs, ws, &pairs).await;
+                        }
+                    }
                     Ok(json!({
                         "processedContactIds": outcome.processed_contact_ids.iter().map(i64::to_string).collect::<Vec<_>>(),
                         "skippedContactIds": outcome.skipped_contact_ids.iter().map(i64::to_string).collect::<Vec<_>>(),
@@ -705,9 +716,16 @@ async fn detail_action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome {
                         .map(|t| t.trim().to_string())
                         .collect();
                     accessible(ctx, scope, contact_id).await?;
-                    let rows = tag::replace_contact_tags_by_names(db, ws, contact_id, &tags)
-                        .await
-                        .map_err(action_fail)?;
+                    let (rows, added, removed) =
+                        tag::replace_contact_tags_by_names_with_changes(db, ws, contact_id, &tags)
+                            .await
+                            .map_err(action_fail)?;
+                    if let Some(jobs) = ctx.api.jobs.as_deref() {
+                        let pairs =
+                            |t: &[i64]| t.iter().map(|t| (contact_id, *t)).collect::<Vec<_>>();
+                        tag_sync::enqueue_attach_many(jobs, ws, &pairs(&added)).await;
+                        tag_sync::enqueue_detach_many(jobs, ws, &pairs(&removed)).await;
+                    }
                     Ok(rows.iter().map(|t| t.to_json()).collect())
                 }
                 "updateContactSequenceAction" => {

@@ -145,7 +145,11 @@ pub async fn handle(
                 return Err(oauth::not_configured(&row.provider));
             };
             let ids = targets.flatten().unwrap_or_default();
-            oauth::connect_targets(&state.db, encryption, &HttpUpstream, row.id, ws, &ids, row.actor_user_id).await
+            let result = oauth::connect_targets(&state.db, encryption, &HttpUpstream, row.id, ws, &ids, row.actor_user_id).await?;
+            if let Some(jobs) = state.jobs.as_deref() {
+                chatbotx_business::tag_sync::enqueue_new_zalo_scans(&state.db, jobs, &result.connections).await;
+            }
+            Ok(result)
         }
         .await
         .map(|result| {

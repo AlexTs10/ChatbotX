@@ -346,6 +346,8 @@ mod response_sla_window;
 mod sequence_service;
 #[path = "smart_delay_service.rs"]
 mod smart_delay_service;
+#[path = "sync_channel_labels_job.rs"]
+mod sync_channel_labels_job;
 #[path = "tag_service_attach_detach_replace.rs"]
 mod tag_service_attach_detach_replace;
 #[path = "tag_service_bulk_attach.rs"]
@@ -356,6 +358,8 @@ mod tag_service_create;
 mod tag_service_detach_from_contact;
 #[path = "tag_service_soft_delete.rs"]
 mod tag_service_soft_delete;
+#[path = "tag_sync_jobs.rs"]
+mod tag_sync_jobs;
 #[path = "template_install_intent.rs"]
 mod template_install_intent;
 #[path = "template_service.rs"]
@@ -376,6 +380,8 @@ mod user_quota_reconcile;
 mod vendor_service;
 #[path = "webshop_collection.rs"]
 mod webshop_collection;
+#[path = "welcome_flow_sync_jobs.rs"]
+mod welcome_flow_sync_jobs;
 #[path = "whatsapp_call_announcement_options.rs"]
 mod whatsapp_call_announcement_options;
 #[path = "whatsapp_call_hours.rs"]

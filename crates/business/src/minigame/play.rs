@@ -139,6 +139,14 @@ pub struct PlayDeps<'a> {
     pub random: Arc<dyn Fn() -> f64 + Send + Sync>,
 }
 
+/// `tagSyncService.enqueueAttach` for the newly linked tags.
+async fn sync_attached(deps: &PlayDeps<'_>, workspace_id: i64, contact_id: i64, tag_ids: &[i64]) {
+    if let Some(jobs) = deps.jobs.as_deref() {
+        let pairs: Vec<(i64, i64)> = tag_ids.iter().map(|t| (contact_id, *t)).collect();
+        crate::tag_sync::enqueue_attach_many(jobs, workspace_id, &pairs).await;
+    }
+}
+
 /// `Math.random`: 53 random bits in `[0, 1)`.
 fn system_random() -> f64 {
     let mut bytes = [0u8; 8];
@@ -360,7 +368,9 @@ pub async fn credit_shared_link_referral(
 
     // Tagging is about the friend having arrived, not about the grant.
     let tag_ids = json_ids(minigame.general_settings.get("newFriendTagIds"));
-    tag::attach_to_contact(deps.db, minigame.workspace_id, contact_id, &tag_ids).await?;
+    let linked =
+        tag::attach_to_contact(deps.db, minigame.workspace_id, contact_id, &tag_ids).await?;
+    sync_attached(deps, minigame.workspace_id, contact_id, &linked).await;
 
     let granted = grant_referral_bonus(
         deps.db,
@@ -610,7 +620,8 @@ pub async fn record_play_and_dispatch(
     }
 
     let tag_ids = json_ids(minigame.general_settings.get("playerTagIds"));
-    tag::attach_to_contact(deps.db, workspace_id, contact_id, &tag_ids).await?;
+    let linked = tag::attach_to_contact(deps.db, workspace_id, contact_id, &tag_ids).await?;
+    sync_attached(deps, workspace_id, contact_id, &linked).await;
 
     let prize_name = match &played.result {
         PlayResult::Prize(prize) => prize.get("name"),

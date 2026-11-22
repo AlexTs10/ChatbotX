@@ -387,6 +387,30 @@ fn zalo_failure(status: u16, body: &Value) -> Result<(), ApiFailure> {
     })
 }
 
+/// `POST {ZALO_API}/{endpoint}` with a JSON body (the OA tag calls).
+pub async fn zalo_post(
+    http: &dyn ChannelHttp,
+    access_token: &str,
+    endpoint: &str,
+    body: &Value,
+) -> Result<Value, ApiFailure> {
+    let reply = http
+        .send(UpstreamRequest {
+            method: "POST",
+            url: format!("{ZALO_API_URL}/{endpoint}"),
+            headers: vec![
+                ("access_token".into(), access_token.to_owned()),
+                ("Content-Type".into(), "application/json".into()),
+            ],
+            body: Some(body.to_string()),
+        })
+        .await;
+    let (status, text) = reply.map_err(ApiFailure::new)?;
+    let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    zalo_failure(status, &body)?;
+    Ok(body)
+}
+
 /// Zalo `isRevokedTokenError`: code `-124`.
 pub fn is_zalo_revoked(failure: &ApiFailure) -> bool {
     failure.code == Some(-124)

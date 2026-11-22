@@ -719,7 +719,13 @@ pub async fn cancel_as_installer(
 
 /// `uninstallTemplate`: claims the installation, decides and deletes in one
 /// transaction, then finalizes (a failure is recorded as `failed`).
-pub async fn run_uninstall_job(db: &Db, workspace_id: i64, installation_id: i64) -> Result<()> {
+/// `runTemplateUninstall`: the ids of the deleted flows (the
+/// `flow.welcomeCleanup` effect the caller runs after the commit).
+pub async fn run_uninstall_job(
+    db: &Db,
+    workspace_id: i64,
+    installation_id: i64,
+) -> Result<Vec<i64>> {
     let token = chatbotx_db::repo::random_uuid();
     let claim = token.clone();
     let claimed = tx::write(db, move |tx| {
@@ -727,7 +733,7 @@ pub async fn run_uninstall_job(db: &Db, workspace_id: i64, installation_id: i64)
     })
     .await?;
     if claimed.is_none() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let run_token = token.clone();
     let ran = tx::write(db, move |tx| {
@@ -735,33 +741,40 @@ pub async fn run_uninstall_job(db: &Db, workspace_id: i64, installation_id: i64)
         execute(conn, workspace_id, installation_id, &run_token)
     })
     .await;
-    if let Err(error) = ran {
-        let code = match &error {
-            BusinessError::Exception { code, .. } => code.clone(),
-            _ => "templateUninstallFailed".to_string(),
-        };
-        tracing::warn!(%error, installation_id, "Template uninstall failed");
-        tx::write(db, move |tx| {
-            let conn: &Connection = tx;
-            states::finalize(
-                conn,
-                installation_id,
-                &token,
-                "failed",
-                &states::empty_counts(),
-                Some(code.as_str()),
-            )?;
-            if let Some(operation) = states::operation_id_of(conn, installation_id)? {
-                states::finalize_operation_if_complete(conn, operation)?;
-            }
-            Ok(())
-        })
-        .await?;
-    }
-    Ok(())
+    let error = match ran {
+        Ok(deleted_flows) => return Ok(deleted_flows),
+        Err(error) => error,
+    };
+    let code = match &error {
+        BusinessError::Exception { code, .. } => code.clone(),
+        _ => "templateUninstallFailed".to_string(),
+    };
+    tracing::warn!(%error, installation_id, "Template uninstall failed");
+    tx::write(db, move |tx| {
+        let conn: &Connection = tx;
+        states::finalize(
+            conn,
+            installation_id,
+            &token,
+            "failed",
+            &states::empty_counts(),
+            Some(code.as_str()),
+        )?;
+        if let Some(operation) = states::operation_id_of(conn, installation_id)? {
+            states::finalize_operation_if_complete(conn, operation)?;
+        }
+        Ok(())
+    })
+    .await?;
+    Ok(Vec::new())
 }
 
-fn execute(conn: &Connection, workspace_id: i64, installation_id: i64, token: &str) -> Result<()> {
+fn execute(
+    conn: &Connection,
+    workspace_id: i64,
+    installation_id: i64,
+    token: &str,
+) -> Result<Vec<i64>> {
     let rows = syncs::list_installed_resources(conn, installation_id)?;
     let decisions = decide(conn, workspace_id, installation_id, &rows)?;
     let doomed: HashSet<(String, i64)> = decisions
@@ -770,6 +783,7 @@ fn execute(conn: &Connection, workspace_id: i64, installation_id: i64, token: &s
         .map(|(row, _)| (row.resource_kind.clone(), row.resource_id))
         .collect();
     let now = now_ms();
+    let mut deleted_flows = Vec::new();
     for (kind, table) in DELETE_ORDER {
         let ids: Vec<i64> = doomed
             .iter()
@@ -778,6 +792,9 @@ fn execute(conn: &Connection, workspace_id: i64, installation_id: i64, token: &s
             .collect();
         if ids.is_empty() {
             continue;
+        }
+        if *kind == "flow" {
+            deleted_flows.extend(&ids);
         }
         match *kind {
             "integrationWebchat" => {
@@ -827,7 +844,7 @@ fn execute(conn: &Connection, workspace_id: i64, installation_id: i64, token: &s
     if let Some(operation) = states::operation_id_of(conn, installation_id)? {
         states::finalize_operation_if_complete(conn, operation)?;
     }
-    Ok(())
+    Ok(deleted_flows)
 }
 
 /// `skipBlockedTemplateUninstall`.

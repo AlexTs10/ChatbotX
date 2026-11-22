@@ -222,7 +222,7 @@ async fn handle(
         {
             let only = done.targets.get(0).filter(|t| t["selectable"] == true);
             match only.and_then(|t| t["id"].as_str()) {
-                Some(id) => oauth::connect_targets(
+                Some(id) => match oauth::connect_targets(
                     &state.db,
                     encryption,
                     &HttpUpstream,
@@ -232,7 +232,20 @@ async fn handle(
                     None,
                 )
                 .await
-                .map(|r| r.session),
+                {
+                    Ok(result) => {
+                        if let Some(jobs) = state.jobs.as_deref() {
+                            chatbotx_business::tag_sync::enqueue_new_zalo_scans(
+                                &state.db,
+                                jobs,
+                                &result.connections,
+                            )
+                            .await;
+                        }
+                        Ok(result.session)
+                    }
+                    Err(error) => Err(error),
+                },
                 None => Ok(done),
             }
         }

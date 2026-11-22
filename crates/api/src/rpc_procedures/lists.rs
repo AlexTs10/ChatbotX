@@ -280,7 +280,14 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                 _ => {
                     let ids = In(body).ids("ids")?;
                     match name {
-                        "deleteTagAction" => tag::soft_delete(db, ws, &ids).await.map(|_| ()),
+                        "deleteTagAction" => match tag::soft_delete(db, ws, &ids).await {
+                            Ok(deleted) => {
+                                crate::handlers::tags::enqueue_tag_deletes(ctx.api, ws, &deleted)
+                                    .await;
+                                Ok(())
+                            }
+                            Err(error) => Err(error),
+                        },
                         "deleteFieldsAction" => custom_field::delete(db, ws, &ids).await,
                         "deleteBotFieldsAction" => bot_field::bulk_delete(db, ws, &ids).await,
                         _ => bot_field::bulk_clear_values(db, ws, &ids).await,
