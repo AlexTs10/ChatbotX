@@ -217,10 +217,8 @@ pub(crate) fn message_text(message: &Value) -> Option<String> {
     Some(caption.map_or_else(|| format!("[{kind}]"), str::to_owned))
 }
 
-/// `parseConversationContext` (summary / history; template echoes keep `[template]`).
-///
-/// ponytail: `renderTemplateEcho` (filled template text of a business history item)
-/// is not ported; the item reads `[template]`.
+/// `parseConversationContext` (summary / history; a template echo renders through
+/// its definition, `renderTemplateEcho`).
 pub fn parse_conversation_context(value: Option<&Value>) -> Option<Value> {
     let value = value.filter(|v| !v.is_null())?;
     match value.get("type").and_then(Value::as_str) {
@@ -242,12 +240,22 @@ pub fn parse_conversation_context(value: Option<&Value>) -> Option<Value> {
                         };
                     let echo = item.pointer("/message_echo/message");
                     let message = item.get("message");
-                    let candidates = if sender == "business" {
-                        [echo, message]
+                    let text = if let Some(echo) = echo.filter(|e| {
+                        e.is_object() && e.get("type").and_then(Value::as_str) == Some("template")
+                    }) {
+                        Some(render_template_echo(
+                            item.pointer("/message_echo/template"),
+                            echo.get("template"),
+                        ))
                     } else {
-                        [message, echo]
+                        let candidates = if sender == "business" {
+                            [echo, message]
+                        } else {
+                            [message, echo]
+                        };
+                        candidates.into_iter().flatten().find_map(message_text)
                     };
-                    let text = candidates.into_iter().flatten().find_map(message_text)?;
+                    let text = text?;
                     let mut out = json!({ "sender": sender, "text": text });
                     if let Some(t) = timestamp_text(item.get("timestamp")) {
                         out["timestamp"] = json!(t);
