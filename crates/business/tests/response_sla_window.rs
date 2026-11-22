@@ -397,3 +397,68 @@ async fn reassigning_to_an_agent_whose_calendar_cannot_supply_the_target_drops_t
         .expect("assign");
     assert_eq!(stored(&db).await, (None, None, None));
 }
+
+/// `recordAgentReply` (`agent-reply-metric.ts`): an agent reply closes the open
+/// window and keeps the reply time; an API reply closes it too.
+#[tokio::test]
+async fn an_agent_reply_closes_the_open_window() {
+    use chatbotx_business::message::{AgentReply, record_agent_reply};
+    let db = db().await;
+    let since = at("2026-06-01T09:00:00Z");
+    exec(
+        &db,
+        r#"UPDATE "Conversation" SET "awaitingHumanReplySince" = ?1 WHERE "id" = ?2"#,
+        vec![since, CONV],
+    )
+    .await;
+    let reply = AgentReply {
+        workspace_id: WS,
+        conversation_id: CONV,
+        contact_id: 7401,
+        channel: "messenger".into(),
+        inbox_id: 1,
+        at: since + 60_000,
+        admin_id: Some(AGENT),
+        event_id: "reply:1".into(),
+    };
+    record_agent_reply(&db, reply.clone()).await;
+    let row = db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT "awaitingHumanReplySince", "adminRepliedAt" FROM "Conversation" WHERE "id" = ?1"#,
+                [CONV],
+                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )?)
+        })
+        .await
+        .expect("read");
+    assert_eq!(row, (None, Some(since + 60_000)));
+
+    // A window opened after the reply stays open.
+    let later = since + 120_000;
+    exec(
+        &db,
+        r#"UPDATE "Conversation" SET "awaitingHumanReplySince" = ?1 WHERE "id" = ?2"#,
+        vec![later, CONV],
+    )
+    .await;
+    record_agent_reply(
+        &db,
+        AgentReply {
+            admin_id: None,
+            ..reply
+        },
+    )
+    .await;
+    let open = db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT "awaitingHumanReplySince" FROM "Conversation" WHERE "id" = ?1"#,
+                [CONV],
+                |r| r.get::<_, Option<i64>>(0),
+            )?)
+        })
+        .await
+        .expect("read");
+    assert_eq!(open, Some(later));
+}

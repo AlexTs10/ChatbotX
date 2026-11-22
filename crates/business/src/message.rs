@@ -307,6 +307,121 @@ pub struct Outgoing {
     pub message: Option<MessageWithAttachments>,
     pub realtime: Option<Value>,
     pub jobs: Vec<OutgoingJob>,
+    /// The reply to record once the jobs are added ([`record_agent_reply`]).
+    pub reply: Option<AgentReply>,
+}
+
+/// `recordAgentReply` input: a sent reply of `admin_id` (an inbox member;
+/// `None` = an API / system sender, which closes the window without a metric).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentReply {
+    pub workspace_id: i64,
+    pub conversation_id: i64,
+    pub contact_id: i64,
+    pub channel: String,
+    pub inbox_id: i64,
+    pub at: i64,
+    pub admin_id: Option<i64>,
+    pub event_id: String,
+}
+
+impl AgentReply {
+    fn of(
+        conversation: &Conversation,
+        contact_inbox: &ContactInbox,
+        at: i64,
+        admin_id: Option<i64>,
+        event_id: String,
+    ) -> AgentReply {
+        AgentReply {
+            workspace_id: conversation.workspace_id,
+            conversation_id: conversation.id,
+            contact_id: contact_inbox.contact_id,
+            channel: contact_inbox.channel.clone(),
+            inbox_id: contact_inbox.inbox_id,
+            at,
+            admin_id,
+            event_id,
+        }
+    }
+}
+
+/// `recordAgentReply`: closes the conversation's human-reply window
+/// (`markAgentReplied`) and, for a member, emits `agent:replied` with the
+/// measured seconds. Never fails: the message is already queued.
+pub async fn record_agent_reply(db: &Db, reply: AgentReply) {
+    let (workspace_id, conversation_id, event_id) = (
+        reply.workspace_id,
+        reply.conversation_id,
+        reply.event_id.clone(),
+    );
+    let payload = tx::write(db, move |conn| {
+        let Some(claim) = chatbotx_db::repo::conversation::close_human_reply_window(
+            conn,
+            reply.workspace_id,
+            reply.conversation_id,
+            reply.at,
+        )?
+        else {
+            return Ok(None);
+        };
+        let (Some(admin_id), Some(since)) = (reply.admin_id, claim.closed_awaiting_since) else {
+            return Ok(None);
+        };
+        // `resolveMeasuredFrom`: an assignment to the replier after the customer
+        // message (and not after the reply) starts the window.
+        let measured_from = match claim.assigned_user_at {
+            Some(at)
+                if claim.assigned_user_id == Some(admin_id) && at <= reply.at && at > since =>
+            {
+                at
+            }
+            _ => since,
+        };
+        let response_seconds = ((reply.at - measured_from) / 1000).max(0);
+        let schedule = crate::response_sla::load_schedule(
+            conn,
+            reply.workspace_id,
+            Some(admin_id),
+            measured_from,
+            reply.at,
+        )?;
+        let working = schedule.as_ref().map(|s| {
+            crate::response_sla::working_seconds_between(
+                measured_from,
+                reply.at,
+                &s.intervals,
+                &s.zone,
+                &s.overrides,
+            )
+        });
+        Ok(Some(json!({
+            "eventType": "agent:replied",
+            "eventId": reply.event_id,
+            "workspaceId": reply.workspace_id.to_string(),
+            "conversationId": reply.conversation_id.to_string(),
+            "contactId": reply.contact_id.to_string(),
+            "adminId": admin_id.to_string(),
+            "occurredAt": iso(reply.at),
+            "awaitingSince": iso(since),
+            "measuredFrom": iso(measured_from),
+            "responseSeconds": response_seconds,
+            "workingResponseSeconds": working,
+            "workingHoursId": schedule.map(|s| s.working_hours_id.to_string()),
+            "slaTargetSeconds": claim.closed_response_sla_target_seconds,
+            "slaMet": claim.closed_response_due_at.map(|due| reply.at <= due),
+            "isFirstResponse": claim.previous_admin_replied_at.is_none(),
+            "channel": reply.channel,
+            "inboxId": reply.inbox_id.to_string(),
+        })))
+    })
+    .await;
+    match payload {
+        Ok(Some(payload)) => crate::events::global::dashboard(payload).await,
+        Ok(None) => {}
+        Err(error) => tracing::error!(%error, workspace_id, conversation_id, event_id,
+            "Failed to record agent reply after enqueue"),
+    }
 }
 
 /// `createOutgoing`. `user_id` = the inbox user (`senderType` `user`); none
@@ -470,6 +585,14 @@ pub async fn create_outgoing_with_media(
                 data: json!({ "type": "sendFlow", "data": data }),
                 attempts: None,
             }],
+            // An inbox "send flow" counts as a human reply.
+            reply: Some(AgentReply::of(
+                conversation,
+                contact_inbox,
+                chatbotx_db::repo::now_ms(),
+                user_id,
+                format!("reply:flow:{}", chatbotx_db::repo::new_id()),
+            )),
         });
     }
 
@@ -667,10 +790,18 @@ pub async fn create_outgoing_with_media(
             attempts: None,
         });
     }
+    let reply = AgentReply::of(
+        conversation,
+        contact_inbox,
+        stored.message.created_at,
+        user_id,
+        format!("reply:{}", stored.message.id),
+    );
     Ok(Outgoing {
         message: Some(stored),
         realtime: Some(realtime),
         jobs,
+        reply: Some(reply),
     })
 }
 

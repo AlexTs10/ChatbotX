@@ -974,8 +974,8 @@ pub async fn start_handover_response(
         }
     }
     if settings.pause_bot_waiting_for_staff && conversation.bot_enabled {
-        // ponytail: the guarded handoff pauses the bot only; the transferred-to-human
-        // trigger / webhook / analytics of `handoffExecutorService` come with Q.D6.
+        // The bot pause sends the transferred-to-human trigger and dashboard row.
+        // ponytail: without the `handoffReason` / `triggerContext` metadata.
         chatbotx_business::conversation_actions::set_bot_enabled(
             &deps.db,
             ws,

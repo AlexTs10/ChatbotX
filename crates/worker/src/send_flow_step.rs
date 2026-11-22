@@ -723,6 +723,28 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
                 step_ids,
             )
             .await;
+            // A public reply went through `sendMessageToChannel`, which counts it.
+            if !is_public_reply {
+                let trigger = if text_field(&resolved, "stepType").as_deref()
+                    == Some("sendMessengerTemplateMessage")
+                {
+                    (
+                        "processMessengerTemplate",
+                        "message_bot_sent_messenger_template",
+                    )
+                } else {
+                    ("sendFlowStep", "message_bot_sent_flow")
+                };
+                crate::events::emit_message_sent(
+                    deps.events.as_ref(),
+                    conversation.workspace_id,
+                    &contact_inbox,
+                    &result,
+                    trigger,
+                    None,
+                )
+                .await;
+            }
             // A `flow` comment reply reports delivery as a `text` one does
             // (only the first step settles: `deliveredAt IS NULL`).
             crate::low::settle_anchor_delivered(

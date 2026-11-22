@@ -213,8 +213,60 @@ pub struct DeleteOutcome {
 }
 
 /// `deleteAndRecord`.
+///
+/// One `contact_deleted` row per deleted contact inbox (`emit("analytics:dashboard")`
+/// of the original), written in the delete transaction.
 pub async fn delete_and_record(db: &Db, workspace_id: i64, ids: &[i64]) -> Result<DeleteOutcome> {
-    let deleted = delete(db, workspace_id, ids).await?;
+    let id_list = ids.to_vec();
+    let deleted = tx::write(db, move |tx| {
+        let inboxes: Vec<(i64, i64, String, String, String)> = {
+            let mut stmt = tx
+                .prepare(
+                    r#"SELECT ci."contactId", ci."inboxId", ci."channel", ci."source", ci."sourceId"
+                       FROM "ContactInbox" ci JOIN "Contact" c ON c."id" = ci."contactId"
+                       WHERE c."workspaceId" = ?1 AND ci."contactId" IN (SELECT value FROM json_each(?2))"#,
+                )
+                .map_err(|error| BusinessError::Repo(error.into()))?;
+            stmt.query_map(
+                params![workspace_id, serde_json::json!(id_list).to_string()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .and_then(Iterator::collect)
+            .map_err(|error| BusinessError::Repo(error.into()))?
+        };
+        let deleted = delete_in(tx, workspace_id, &id_list)?;
+        let occurred_at = chatbotx_db::repo::now_ms();
+        let metadata = serde_json::json!({ "triggerContext": {
+            "triggerSource": "api",
+            "triggerHandler": "deleteContact",
+            "triggerType": "contact_deleted",
+        }})
+        .to_string();
+        for (contact_id, inbox_id, channel, source, source_id) in inboxes {
+            if !deleted.contains(&contact_id) {
+                continue;
+            }
+            tx.execute(
+                r#"INSERT INTO "AnalyticsContactEvent" ("eventId", "workspaceId", "contactId", "eventType",
+                       "occurredAt", "source", "sourceId", "channel", "inboxId", "metadata")
+                   VALUES (?1, ?2, ?3, 'contact_deleted', ?4, ?5, ?6, ?7, ?8, ?9)"#,
+                params![
+                    chatbotx_db::repo::new_id().to_string(),
+                    workspace_id,
+                    contact_id,
+                    occurred_at,
+                    source,
+                    source_id,
+                    channel,
+                    inbox_id,
+                    metadata
+                ],
+            )
+            .map_err(|error| BusinessError::Repo(error.into()))?;
+        }
+        Ok(deleted)
+    })
+    .await?;
     let skipped = ids
         .iter()
         .copied()

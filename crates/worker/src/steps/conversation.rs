@@ -1,10 +1,8 @@
 //! The conversation steps of `integration/handlers/step-handlers.ts`.
 //!
-//! ponytail: the flow-trigger / analytics events of these services
-//! (`conversationAssigned` trigger, `transferred_to_human`, ...), the
-//! response-SLA window tracking and the thread release on archive come with
-//! the event workers (Q.W2) and the SLA unit; the realtime envelopes and the
-//! assignment notification job are sent here.
+//! The services send their flow-trigger / analytics events
+//! (`conversation_actions`); the realtime envelopes and the assignment
+//! notification job are sent here.
 
 use chatbotx_business::conversation_actions::{self, ActionJob, Assigned};
 use chatbotx_core::flow_config::{is_bulk_outbound_metadata, is_proactive_outbound_metadata};

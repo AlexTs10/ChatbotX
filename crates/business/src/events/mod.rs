@@ -12,6 +12,7 @@ pub mod cache;
 pub mod contact_inbox;
 pub mod context;
 pub mod emitter;
+pub mod global;
 pub mod registry;
 pub mod trigger;
 

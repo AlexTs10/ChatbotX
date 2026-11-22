@@ -410,6 +410,33 @@ pub async fn send_message_to_channel(
     if !is_comment {
         unblock_if_blocked(deps, conversation.workspace_id, conversation.contact_id).await;
     }
+    // Bot-message quota accounting and the sent analytics: a bot message counts,
+    // a member's inbox message is a human send; `api` / `system` senders neither.
+    let sender_type = str_of(&message, "senderType");
+    let human = match (sender_type, id_of(&message["senderId"])) {
+        (Some("user"), Some(admin_id)) => Some(crate::events::HumanSender {
+            admin_id,
+            message_id,
+            occurred_at: created_at.unwrap_or_else(now_ms),
+        }),
+        _ => None,
+    };
+    if sender_type == Some("bot") || human.is_some() {
+        let trigger = if human.is_some() {
+            ("sendMessageToChannel", "message_human_sent_channel")
+        } else {
+            ("sendMessageToChannel", "message_bot_sent_channel")
+        };
+        crate::events::emit_message_sent(
+            deps.events.as_ref(),
+            conversation.workspace_id,
+            &contact_inbox,
+            &result,
+            trigger,
+            human.as_ref(),
+        )
+        .await;
+    }
     Ok(result)
 }
 

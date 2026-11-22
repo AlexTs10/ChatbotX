@@ -271,6 +271,8 @@ pub struct ProcessTemplate {
     pub metadata: Option<Value>,
     pub is_bulk_broadcast: bool,
     pub sent_by_user_id: Option<String>,
+    /// `humanSender.adminId`: a member's send from the inbox (`initiatedBy: "user"`).
+    pub human_admin_id: Option<i64>,
     /// `{ id, name, language, params }`.
     pub template: Value,
 }
@@ -489,6 +491,33 @@ pub async fn process_template(
     .await;
     let result = match sent {
         Ok(result) => {
+            let human = input
+                .human_admin_id
+                .map(|admin_id| crate::events::HumanSender {
+                    admin_id,
+                    message_id: Some(message.message.id),
+                    occurred_at: message.message.created_at,
+                });
+            let trigger = if human.is_some() {
+                (
+                    "processWhatsappTemplate",
+                    "message_human_sent_whatsapp_template",
+                )
+            } else {
+                (
+                    "processWhatsappTemplate",
+                    "message_bot_sent_whatsapp_template",
+                )
+            };
+            crate::events::emit_message_sent(
+                deps.events.as_ref(),
+                conversation.workspace_id,
+                contact_inbox,
+                &result,
+                trigger,
+                human.as_ref(),
+            )
+            .await;
             crate::events::emit_message_event(
                 deps.events.as_ref(),
                 "message:sent",
@@ -579,6 +608,9 @@ pub async fn send_template_to_conversation(deps: &Deps, data: &Value) -> Result<
         metadata: data.get("metadata").filter(|m| !m.is_null()).cloned(),
         template: json!({ "id": template.id.to_string(), "name": template.name,
             "language": template.language, "params": params }),
+        human_admin_id: (str_of(data, "initiatedBy") == Some("user"))
+            .then(|| crate::id_of(&data["adminId"]))
+            .flatten(),
         ..ProcessTemplate::default()
     };
     match process_template(deps, &conversation, &contact_inbox, input).await {

@@ -282,6 +282,9 @@ async fn serve(config: Config, rt_config: Option<RtConfig>) -> std::io::Result<(
         api.sessions = Some(Arc::clone(&sessions));
         api
     });
+    // The process-wide trigger bus and durable buses of the services that have no
+    // handle of their own (conversation actions, ...).
+    chatbotx_business::events::global::install(api.events.clone(), redirect_buses.clone());
     // The `/api/auth/*` routes behind the auth rate limits (Q.A1).
     let auth_routes = chatbotx_api::session::oauth_router(Arc::new(
         chatbotx_api::session::oauth_state_from_env(Arc::clone(&sessions), &edition()).await,

@@ -230,6 +230,10 @@ pub(crate) async fn deliver(state: &ApiState, conversation: &Conversation, outgo
         state.queue_realtime(conversation.workspace_id, event).await;
     }
     queue_outgoing_jobs(state, outgoing.jobs).await;
+    // Claimed only after the enqueue, so a failed send keeps the window open.
+    if let Some(reply) = outgoing.reply {
+        chatbotx_business::message::record_agent_reply(&state.db, reply).await;
+    }
 }
 
 /// Adds the jobs of a business call (`queue.add(name, data, opts)`).
