@@ -90,6 +90,7 @@ pub mod license;
 pub mod magic_link;
 pub mod marketing_messages;
 pub mod mcp_oauth;
+pub mod media_fresh;
 pub mod media_library;
 pub mod media_url;
 pub mod member_scope;

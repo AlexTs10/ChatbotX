@@ -524,7 +524,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/me-extension-download-route.test.ts` | C | `crates/api/tests/downloads_routes.rs` | ported | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/media-library-actions.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/media-library-public-api.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
-| `apps/builder/__tests__/media-proxy-route.test.ts` | C | `crates/api/tests/avatar_proxy_route.rs`, `crates/api/tests/media_proxy_route.rs` | ported | Media library and file storage; builder server code; avatar part (Q.P6-U3) and attachment part (Q.P6-U1); the Graph re-derivation cases are not ported |
+| `apps/builder/__tests__/media-proxy-route.test.ts` | C | `crates/api/tests/avatar_proxy_route.rs`, `crates/api/tests/media_proxy_route.rs` | ported | Media library and file storage; builder server code; avatar part (Q.P6-U3) and attachment part (Q.P6-U1); the Graph re-derivation cases (Q.P7-V5) |
 | `apps/builder/__tests__/media-public-scope.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/message-input-client-id.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/message-input-thread-control.test.tsx` | B | - | todo | Thread control (handover protocol); builder jsdom |
