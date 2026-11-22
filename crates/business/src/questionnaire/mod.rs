@@ -5,6 +5,7 @@
 //! `startOrResume`, `answerCurrent` and `conversationService` belong to the
 //! flow runtime unit.
 
+pub mod flow;
 pub mod submission;
 
 use std::collections::{HashMap, HashSet};

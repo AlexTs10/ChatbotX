@@ -845,6 +845,20 @@ pub(crate) async fn send_flow_message(
     anchor: Option<Value>,
     quick_replies: Option<Value>,
 ) -> Result<(), JobError> {
+    let mut extras = Map::new();
+    if let Some(replies) = quick_replies {
+        extras.insert("quickReplies".into(), replies);
+    }
+    send_flow_message_with(run, step, anchor, extras).await
+}
+
+/// [`send_flow_message`] with extra job fields (e.g. `presetQuickReplies`).
+pub(crate) async fn send_flow_message_with(
+    run: &Run<'_>,
+    step: &Value,
+    anchor: Option<Value>,
+    extras: Map<String, Value>,
+) -> Result<(), JobError> {
     let mut data = Map::new();
     data.insert(
         "conversationId".into(),
@@ -877,9 +891,7 @@ pub(crate) async fn send_flow_message(
     if let Some(bulk) = run.is_bulk_broadcast {
         data.insert("isBulkBroadcast".into(), json!(bulk));
     }
-    if let Some(replies) = quick_replies {
-        data.insert("quickReplies".into(), replies);
-    }
+    data.extend(extras);
     if let Some(anchor) = anchor {
         data.insert("commentAnchor".into(), anchor);
     }
