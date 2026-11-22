@@ -103,8 +103,13 @@ fn seed(tx: &Connection) -> chatbotx_db::rusqlite::Result<()> {
     )?;
     for (ws, flow) in [(WS, Some(FLOW)), (BLOCKED_WS, None)] {
         tx.execute(
-            r#"INSERT INTO "EcommerceSettings" ("id", "workspaceId", "orderingAvailable", "webshopProductView", "searchProducts", "abandonedCartDelayMinutes", "abandonedCartFlowId")
-               VALUES (?1, ?1, 1, 'list', 1, 5, ?2)"#,
+            r#"INSERT INTO "EcommerceSettings" ("id", "workspaceId", "orderingAvailable", "webshopProductView", "searchProducts",
+                 "abandonedCartDelayMinutes", "abandonedCartFlowId", "productButtons", "productImageSize", "allowRateOrders",
+                 "notifyOnCartStatusChange", "paymentMethods", "currency", "currencyPosition", "serviceFeePercent",
+                 "shippingType", "shippingCountries", "deliveryCost", "checkoutMode", "minimumOrderValue",
+                 "requireName", "requireEmail", "requirePhone", "requireState", "requireZip")
+               VALUES (?1, ?1, 1, 'list', 1, 5, ?2, '[]', 'bigSquare', 0, 0, '[]', 'USD', 'left', 0,
+                 'none', '[]', 0, 'default', 0, 0, 0, 0, 0, 0)"#,
             params![ws, flow],
         )?;
         tx.execute(
