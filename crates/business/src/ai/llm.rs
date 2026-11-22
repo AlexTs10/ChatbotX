@@ -667,7 +667,10 @@ fn anthropic_body(model: &Model, request: &Request, turns: &[Turn], defs: &[Tool
                 body.insert("tool_choice".into(), json!({ "type": "auto" }));
             }
             ToolChoice::Tool(name) => {
-                body.insert("tool_choice".into(), json!({ "type": "tool", "name": name }));
+                body.insert(
+                    "tool_choice".into(),
+                    json!({ "type": "tool", "name": name }),
+                );
             }
             _ => {}
         }

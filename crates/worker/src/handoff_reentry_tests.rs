@@ -76,7 +76,9 @@ async fn run(fx: &Fixture) {
 }
 
 async fn bot_enabled(fx: &Fixture) -> bool {
-    fx.int(r#"SELECT "botEnabled" FROM "Conversation" WHERE "id" = 6"#).await == Some(1)
+    fx.int(r#"SELECT "botEnabled" FROM "Conversation" WHERE "id" = 6"#)
+        .await
+        == Some(1)
 }
 
 fn forwarded(fx: &Fixture) -> Vec<Value> {
@@ -93,7 +95,10 @@ async fn enables_bot_only_after_the_classifier_selects_the_configured_rule_with_
     setup(&fx, TEXT, rules()).await;
     let http = with_ai(
         &mut fx,
-        vec![select("muốn xem thông tin tự động trước", "chưa cần gặp nhân viên")],
+        vec![select(
+            "muốn xem thông tin tự động trước",
+            "chưa cần gặp nhân viên",
+        )],
     );
     run(&fx).await;
     let body = &http.requests()[0].1;
@@ -101,9 +106,15 @@ async fn enables_bot_only_after_the_classifier_selects_the_configured_rule_with_
         body["tool_choice"],
         json!({ "type": "function", "function": { "name": "select_handoff_reentry_rule" } })
     );
-    assert_eq!(body["tools"][0]["function"]["name"], "select_handoff_reentry_rule");
+    assert_eq!(
+        body["tools"][0]["function"]["name"],
+        "select_handoff_reentry_rule"
+    );
     assert_eq!(body["temperature"], 0.0);
-    assert_eq!(body["messages"][1], json!({ "role": "user", "content": TEXT }));
+    assert_eq!(
+        body["messages"][1],
+        json!({ "role": "user", "content": TEXT })
+    );
     assert_eq!(http.requests().len(), 1, "one step, no follow-up call");
     assert!(bot_enabled(&fx).await);
     assert_eq!(
@@ -117,7 +128,8 @@ async fn enables_bot_only_after_the_classifier_selects_the_configured_rule_with_
 async fn forwards_the_trigger_message_when_the_bot_is_already_enabled() {
     let mut fx = Fixture::new().await;
     setup(&fx, TEXT, rules()).await;
-    fx.exec(r#"UPDATE "Conversation" SET "botEnabled" = 1 WHERE "id" = 6"#).await;
+    fx.exec(r#"UPDATE "Conversation" SET "botEnabled" = 1 WHERE "id" = 6"#)
+        .await;
     let http = with_ai(&mut fx, vec![]);
     run(&fx).await;
     assert_eq!(forwarded(&fx).len(), 1);
@@ -161,7 +173,8 @@ async fn keeps_human_handoff_when_classifier_evidence_is_not_quoted_from_the_mes
 async fn does_not_call_a_model_when_the_workspace_is_inactive() {
     let mut fx = Fixture::new().await;
     setup(&fx, TEXT, rules()).await;
-    fx.exec(r#"UPDATE "Workspace" SET "isActive" = 0 WHERE "id" = 2"#).await;
+    fx.exec(r#"UPDATE "Workspace" SET "isActive" = 0 WHERE "id" = 2"#)
+        .await;
     let http = with_ai(&mut fx, vec![]);
     run(&fx).await;
     assert!(http.requests().is_empty());
@@ -196,7 +209,10 @@ async fn enqueues_one_classifier_job_per_message_with_a_dedup_id() {
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].opts.job_id.as_deref(), Some("handoff-reentry-80"));
     let dedup = jobs[0].opts.dedup.clone().unwrap();
-    assert_eq!((dedup.id.as_str(), dedup.ttl_ms, dedup.extend, dedup.replace), ("handoff-reentry-80", Some(300_000), true, true));
+    assert_eq!(
+        (dedup.id.as_str(), dedup.ttl_ms, dedup.extend, dedup.replace),
+        ("handoff-reentry-80", Some(300_000), true, true)
+    );
     assert_eq!(
         jobs[0].data,
         json!({ "type": "processHandoffReentry", "data": {

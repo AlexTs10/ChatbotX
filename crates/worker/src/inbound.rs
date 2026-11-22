@@ -1408,7 +1408,11 @@ pub(crate) async fn enqueue_automated_response(
 ) -> Result<(), JobError> {
     enqueue_automated_response_for(
         deps,
-        (stored.conversation.id, stored.contact_inbox.id, stored.conversation.workspace_id),
+        (
+            stored.conversation.id,
+            stored.contact_inbox.id,
+            stored.conversation.workspace_id,
+        ),
         message_id,
         text,
         attachment_file_types,

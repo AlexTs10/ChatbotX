@@ -5,11 +5,11 @@
 
 pub mod chunk;
 pub mod context;
+#[cfg(test)]
+mod context_tests;
 pub mod conversation_source;
 #[cfg(test)]
 mod conversation_source_tests;
-#[cfg(test)]
-mod context_tests;
 pub mod extract;
 mod office;
 pub mod text;
@@ -353,7 +353,11 @@ pub async fn run_agent(
 }
 
 /// `createAgentModel`: `None` for a missing (or disabled) integration.
-pub(crate) async fn agent_model(db: &Db, workspace_id: i64, config: &Value) -> Result<Option<Model>, String> {
+pub(crate) async fn agent_model(
+    db: &Db,
+    workspace_id: i64,
+    config: &Value,
+) -> Result<Option<Model>, String> {
     let config = config.clone();
     db.read(move |conn| {
         let model_id = config.get("model").and_then(Value::as_str).unwrap_or("");
