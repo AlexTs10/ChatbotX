@@ -31,6 +31,9 @@ pub mod flow;
 pub(crate) mod google_ads_housekeeping;
 pub(crate) mod google_ads_producer;
 pub(crate) mod google_click_lookup;
+pub mod handoff_reentry;
+#[cfg(test)]
+mod handoff_reentry_tests;
 pub mod heavy;
 pub mod heavy_reader;
 pub mod inbound;

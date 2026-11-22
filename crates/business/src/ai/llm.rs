@@ -181,6 +181,8 @@ pub enum ToolChoice {
     Unset,
     Auto,
     None,
+    /// `{ type: "tool", toolName }`: the model must call this tool.
+    Tool(&'static str),
 }
 
 #[derive(Debug, Clone)]
@@ -531,6 +533,12 @@ fn openai_body(model: &Model, request: &Request, turns: &[Turn], defs: &[ToolDef
         ToolChoice::None => {
             body.insert("tool_choice".into(), json!("none"));
         }
+        ToolChoice::Tool(name) if !defs.is_empty() => {
+            body.insert(
+                "tool_choice".into(),
+                json!({ "type": "function", "function": { "name": name } }),
+            );
+        }
         _ => {}
     }
     if let Some(schema) = &request.output_schema {
@@ -654,8 +662,14 @@ fn anthropic_body(model: &Model, request: &Request, turns: &[Turn], defs: &[Tool
                 .map(|d| json!({ "name": d.name, "description": d.description, "input_schema": d.parameters }))
                 .collect(),
         );
-        if request.tool_choice == ToolChoice::Auto {
-            body.insert("tool_choice".into(), json!({ "type": "auto" }));
+        match request.tool_choice {
+            ToolChoice::Auto => {
+                body.insert("tool_choice".into(), json!({ "type": "auto" }));
+            }
+            ToolChoice::Tool(name) => {
+                body.insert("tool_choice".into(), json!({ "type": "tool", "name": name }));
+            }
+            _ => {}
         }
     }
     if let Some(schema) = &request.output_schema {
@@ -772,11 +786,20 @@ fn gemini_body(request: &Request, turns: &[Turn], defs: &[ToolDef]) -> Value {
             "tools".into(),
             json!([{ "functionDeclarations": declarations }]),
         );
-        if request.tool_choice == ToolChoice::Auto {
-            body.insert(
-                "toolConfig".into(),
-                json!({ "functionCallingConfig": { "mode": "AUTO" } }),
-            );
+        match request.tool_choice {
+            ToolChoice::Auto => {
+                body.insert(
+                    "toolConfig".into(),
+                    json!({ "functionCallingConfig": { "mode": "AUTO" } }),
+                );
+            }
+            ToolChoice::Tool(name) => {
+                body.insert(
+                    "toolConfig".into(),
+                    json!({ "functionCallingConfig": { "mode": "ANY", "allowedFunctionNames": [name] } }),
+                );
+            }
+            _ => {}
         }
     }
     Value::Object(body)

@@ -1208,7 +1208,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/agent-tool-stats.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/ai-agent-action-executor.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `apps/worker/__tests__/ai-agent-actions.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
-| `apps/worker/__tests__/ai-agent-handoff-reentry.test.ts` | C | tbd | todo | AI handover (human takeover) |
+| `apps/worker/__tests__/ai-agent-handoff-reentry.test.ts` | C | `crates/worker/src/handoff_reentry_tests.rs` | ported | AI handover (human takeover) |
 | `apps/worker/__tests__/ai-agent-runner-openai-compatible.test.ts` | C | tbd | todo | OpenAI-compatible integration |
 | `apps/worker/__tests__/ai-agent-worker-audit-context.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `apps/worker/__tests__/ai-analyze-image-handler.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
@@ -1276,7 +1276,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/contact-scan-instagram-adapter.test.ts` | C | `crates/worker/src/contact_scan.rs` (unit tests) | ported | Instagram channel; Q.P6-U6 (E4): through the `contactScan` job |
 | `apps/worker/__tests__/contact-scan-messenger-adapter.test.ts` | C | tbd | todo | Messenger channel |
 | `apps/worker/__tests__/contact-tag-steps.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/context-source-workspace-scope.test.ts` | C | tbd | todo | Workspaces |
+| `apps/worker/__tests__/context-source-workspace-scope.test.ts` | C | `crates/worker/src/ai/conversation_source_tests.rs` | ported | Workspaces |
 | `apps/worker/__tests__/convert-buttons-call-phone.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/convert-buttons-copy-text.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/copy-text-handler.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
@@ -1414,7 +1414,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/prepare-broadcast.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
 | `apps/worker/__tests__/process-ai-file.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/process-broadcast-contacts.test.ts` | C | `crates/worker/tests/schedule_broadcast.rs` | ported | Broadcasts (incl. recurring); Q.D5 slice 5a (see specs/Q.D5-test-map.tsv) |
-| `apps/worker/__tests__/process-conversation-source-ensure-stored.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
+| `apps/worker/__tests__/process-conversation-source-ensure-stored.test.ts` | C | `crates/worker/src/ai/conversation_source_tests.rs` | ported | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/process-inbound-webhook-request.test.ts` | C | `crates/worker/tests/inbound_webhook_worker.rs` | ported | Inbound webhooks; Q.D13a; log-redaction and injected-failure cases not applicable |
 | `apps/worker/__tests__/process-pending-embeddings.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/product-import-extractor.test.ts` | C | tbd | todo | Imports and exports (contacts, products, flows) |
@@ -1522,7 +1522,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/step-input-resolution.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/stored-step-content.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/story-reply-automation.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
-| `apps/worker/__tests__/summarize-conversation.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
+| `apps/worker/__tests__/summarize-conversation.test.ts` | C | `crates/worker/src/ai/context_tests.rs` | ported | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/sweep-stale-whatsapp-calls.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `apps/worker/__tests__/sync-ad-labels.test.ts` | C | tbd | todo | Tags and labels |
 | `apps/worker/__tests__/sync-channel-labels.test.ts` | C | tbd | todo | Tags and labels |
@@ -1912,7 +1912,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/zalo/__tests__/send-multiple-images.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/tag.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
 | `integrations/zalo/__tests__/webhook-routing.test.ts` | C | `crates/worker/src/channels/zalo_tests.rs` | passing | Zalo channel |
-| `packages/ai/__tests__/ai-context-service.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
+| `packages/ai/__tests__/ai-context-service.test.ts` | C | `crates/worker/src/ai/context_tests.rs` | ported | AI agents (tools, MCP client, functions) |
 | `packages/ai/__tests__/call-summarizer.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/ai/__tests__/embedding-model.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
 | `packages/ai/__tests__/extensions.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
@@ -1994,7 +1994,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/automated-response/__tests__/dispatch-reply-contact-activity.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/automated-response/__tests__/dispatch-reply-leaderboard.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/automated-response/__tests__/enqueue-flow-action.test.ts` | C | tbd | todo | Automated responses and keywords |
-| `packages/automated-response/__tests__/enqueue-handoff-reentry.test.ts` | C | tbd | todo | Automated responses and keywords |
+| `packages/automated-response/__tests__/enqueue-handoff-reentry.test.ts` | C | `crates/worker/src/handoff_reentry_tests.rs` | ported | Automated responses and keywords |
 | `packages/automated-response/__tests__/enqueue-message.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/automated-response/__tests__/keyword-match.test.ts` | C | tbd | todo | Automated responses and keywords |
 | `packages/automated-response/__tests__/process-messages.test.ts` | C | tbd | todo | Automated responses and keywords |
