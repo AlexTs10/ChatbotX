@@ -505,6 +505,9 @@ async fn refresh_row(
             Ok(None) => return Outcome::Skipped,
             Err(failure) => failure,
             Ok(Some(auth)) => {
+                // `afterRefresh` of the action (Messenger only).
+                let welcome = (!scheduled && matches!(channel, RefreshChannel::Messenger))
+                    .then(|| auth.clone());
                 match save(deps.db, channel.table(), workspace_id, id, &stored, auth).await {
                     Err(error) => ApiFailure::new(error.to_string()),
                     Ok(()) => {
@@ -517,6 +520,11 @@ async fn refresh_row(
                         input.workspace_id = Some(workspace_id.to_string());
                         input.source = scheduled.then(|| REFRESH_SOURCE.to_owned());
                         deps.audit.record(input).await;
+                        if let Some(auth) = welcome {
+                            // Outside the lock: the read never extends the critical section.
+                            drop(_guard);
+                            log_messenger_welcome_profile(deps.http, &auth).await;
+                        }
                         return Outcome::Refreshed;
                     }
                 }
@@ -550,6 +558,31 @@ async fn refresh_row(
         log_failure(deps.buses, channel.error_provider(), workspace_id, &failure).await;
     }
     Outcome::Failed
+}
+
+/// `logMessengerWelcomeProfile` (reason `tokenRefreshed`, Q.P7-V5): a
+/// diagnostic read-back of the page's welcome profile; never fails.
+async fn log_messenger_welcome_profile(http: &dyn ChannelHttp, auth: &Value) {
+    let page_id = auth["metadata"]["pageId"].as_str().unwrap_or_default();
+    let version = auth["version"]
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .unwrap_or(api::META_DEFAULT_VERSION);
+    let path = format!("{version}/me/messenger_profile");
+    let fields = [("fields", "get_started,ice_breakers,greeting")];
+    let token = auth["tokens"]["accessToken"].as_str();
+    match api::graph_get(http, api::GRAPH_API_URL, &path, &fields, token).await {
+        Ok(answer) => {
+            let profile = match &answer["data"][0] {
+                Value::Null => serde_json::json!({}),
+                found => found.clone(),
+            };
+            tracing::info!(page_id, reason = "tokenRefreshed", %profile, "Messenger welcome profile");
+        }
+        Err(error) => {
+            tracing::debug!(err = %error, page_id, reason = "tokenRefreshed", "Skipped Messenger welcome profile read-back");
+        }
+    }
 }
 
 async fn log_failure(
