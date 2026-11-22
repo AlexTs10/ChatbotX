@@ -882,6 +882,38 @@ pub(crate) async fn save_message(
     ))
 }
 
+/// The attachment rows of an incoming message (the message id is set by the
+/// insert).
+pub(crate) fn attachment_inputs(
+    attachments: &[crate::channel::IncomingAttachment],
+    workspace_id: i64,
+    conversation_id: i64,
+) -> Vec<CreateAttachmentInput> {
+    attachments
+        .iter()
+        .map(|a| CreateAttachmentInput {
+            id: None,
+            workspace_id,
+            conversation_id,
+            message_id: 0,
+            message_created_at: 0,
+            file_type: a.file_type.clone(),
+            mime_type: a.mime_type.clone(),
+            origin_path: a.origin_path.clone(),
+            created_at: None,
+            height: a.height,
+            width: a.width,
+            keep_original: Some(
+                !(a.is_photo_message && matches!(a.file_type.as_str(), "image" | "gif")),
+            ),
+            name: a.name.clone(),
+            size: a.size,
+            source_id: a.source_id.clone(),
+            thumbnail_path: None,
+        })
+        .collect()
+}
+
 /// The insert + activity tracking of [`save_message`] on the caller's
 /// transaction.
 fn save_message_tx(
@@ -911,30 +943,7 @@ fn save_message_tx(
         created_at: Some(created_at),
         updated_at: None,
     };
-    let attachments: Vec<CreateAttachmentInput> = incoming
-        .attachments
-        .iter()
-        .map(|a| CreateAttachmentInput {
-            id: None,
-            workspace_id: inbox.workspace_id,
-            conversation_id: conversation.id,
-            message_id: 0,
-            message_created_at: 0,
-            file_type: a.file_type.clone(),
-            mime_type: a.mime_type.clone(),
-            origin_path: a.origin_path.clone(),
-            created_at: None,
-            height: a.height,
-            width: a.width,
-            keep_original: Some(
-                !(a.is_photo_message && matches!(a.file_type.as_str(), "image" | "gif")),
-            ),
-            name: a.name.clone(),
-            size: a.size,
-            source_id: a.source_id.clone(),
-            thumbnail_path: None,
-        })
-        .collect();
+    let attachments = attachment_inputs(&incoming.attachments, inbox.workspace_id, conversation.id);
     let tracking_inbound = is_inbound_conversation_message(incoming);
     let last_btn_title = received.button_title.clone();
     let user_input = incoming.text.clone();

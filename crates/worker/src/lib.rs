@@ -21,6 +21,7 @@ pub mod coexist_messenger;
 pub(crate) mod coexist_throttle;
 pub mod coexist_whatsapp;
 pub mod coexist_whatsapp_payload;
+pub(crate) mod comment_extras;
 pub mod condition;
 pub mod contact_profile;
 pub mod contact_scan;

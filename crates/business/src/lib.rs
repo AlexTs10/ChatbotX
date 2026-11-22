@@ -22,6 +22,7 @@ pub mod capabilities;
 pub mod cart;
 pub mod channel_api;
 pub mod channel_integration;
+pub mod channel_post;
 pub mod channel_token_refresh;
 pub mod coexist;
 pub mod comment_automation;

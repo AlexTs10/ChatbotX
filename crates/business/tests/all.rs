@@ -54,6 +54,8 @@ mod broadcast_service;
 mod capabilities_service;
 #[path = "channel_integration_settings.rs"]
 mod channel_integration_settings;
+#[path = "channel_post_service.rs"]
+mod channel_post_service;
 #[path = "channel_token_refresh_action.rs"]
 mod channel_token_refresh_action;
 #[path = "channel_token_refresh_table.rs"]

@@ -586,6 +586,7 @@ impl ReplyTo<'_> {
                 created_at: Some(now_ms()),
                 updated_at: None,
             },
+            &[],
         )
         .await
         .map(|(row, ..)| row)

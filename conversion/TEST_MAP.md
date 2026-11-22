@@ -1371,7 +1371,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/leaderboard-follower-check.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/leaderboard-jobs.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/leaderboard-sources.test.ts` | C | `crates/worker/src/leaderboard.rs` (unit) | ported | Leaderboards; Q.D13b (pure source rules; DB paths in parity p1-10) |
-| `apps/worker/__tests__/live-comment.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
+| `apps/worker/__tests__/live-comment.test.ts` | C | `crates/worker/src/comment_extras.rs` (`tests`) | ported | Comment automation (FB/IG/Threads/TikTok); Q.P7-V5: the Redis-failure case is n/a (the KV is the database) |
 | `apps/worker/__tests__/lock-contention-deferral.test.ts` | C | `crates/jobs/tests/lock_contention_deferral.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/low-worker-boot.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/mailer-lite-handler.test.ts` | C | tbd | todo | MailerLite integration |
