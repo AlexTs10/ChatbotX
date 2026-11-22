@@ -55,70 +55,158 @@ fn form_reference(value: &Value) -> Option<(Option<String>, String)> {
     ))
 }
 
-/// The component index of `indexFlowComponents` (only the type matters here).
-struct Components {
-    by_screen: HashMap<String, HashMap<String, String>>,
-    by_name: HashMap<String, (String, bool)>,
+/// `FlowComponentInfo`.
+struct Info {
+    kind: String,
+    label: Option<String>,
+    options: Obj,
 }
 
-fn static_label(value: Option<&Value>) -> bool {
+/// `indexFlowComponents`: screen id → input name → component, and input
+/// name → the first component with a static label, else the first.
+struct Components {
+    by_screen: HashMap<String, HashMap<String, Info>>,
+    by_name: HashMap<String, Info>,
+}
+
+/// `readStaticLabel`.
+fn static_label(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
-        .is_some_and(|s| !s.trim().is_empty() && !s.contains("${"))
+        .filter(|s| !s.trim().is_empty() && !s.contains("${"))
+        .map(str::to_owned)
+}
+
+/// `readStaticOptions`.
+fn static_options(data_source: Option<&Value>) -> Obj {
+    data_source
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|o| {
+            Some((
+                o.get("id")?.as_str()?.to_owned(),
+                o.get("title")?.as_str()?.into(),
+            ))
+        })
+        .collect()
 }
 
 fn index_components(screens: &[Value]) -> Components {
-    let mut by_screen: HashMap<String, HashMap<String, String>> = HashMap::new();
-    let mut by_name: HashMap<String, (String, bool)> = HashMap::new();
+    let mut by_screen: HashMap<String, HashMap<String, Info>> = HashMap::new();
+    let mut by_name: HashMap<String, Info> = HashMap::new();
     for screen in screens {
         let on_screen = by_screen.entry(screen_id(screen).to_owned()).or_default();
-        if let Some(layout) = screen.get("layout") {
-            for_each_node(layout, &mut |obj| {
-                let (Some(name), Some(kind)) = (
-                    obj.get("name")
-                        .and_then(Value::as_str)
-                        .filter(|n| !n.is_empty()),
-                    obj.get("type").and_then(Value::as_str),
-                ) else {
-                    return;
-                };
-                if kind == "screen" {
-                    return;
-                }
-                on_screen
-                    .entry(name.to_owned())
-                    .or_insert_with(|| kind.to_owned());
-                let labelled = static_label(obj.get("label"));
-                match by_name.get(name) {
-                    Some((_, known)) if *known || !labelled => {}
-                    _ => {
-                        by_name.insert(name.to_owned(), (kind.to_owned(), labelled));
-                    }
-                }
+        let Some(layout) = screen.get("layout") else {
+            continue;
+        };
+        for_each_node(layout, &mut |obj| {
+            let (Some(name), Some(kind)) = (
+                obj.get("name")
+                    .and_then(Value::as_str)
+                    .filter(|n| !n.is_empty()),
+                obj.get("type").and_then(Value::as_str),
+            ) else {
+                return;
+            };
+            // A navigate target (`next: { type: "screen", name }`) is no input.
+            if kind == "screen" {
+                return;
+            }
+            let info = || Info {
+                kind: kind.to_owned(),
+                label: static_label(obj.get("label")),
+                options: static_options(obj.get("data-source")),
+            };
+            on_screen.entry(name.to_owned()).or_insert_with(info);
+            let replace = by_name.get(name).is_none_or(|known| {
+                known.label.is_none() && static_label(obj.get("label")).is_some()
             });
-        }
+            if replace {
+                by_name.insert(name.to_owned(), info());
+            }
+        });
     }
     Components { by_screen, by_name }
 }
 
-/// `readAnswerKind`: `file` for a PhotoPicker / DocumentPicker form answer.
-fn answer_kind(screen: &str, value: &Value, components: &Components) -> &'static str {
-    let Some((referenced, name)) = form_reference(value) else {
-        return "value";
-    };
-    let on_screen = components
+/// `findFormReferencedComponent`: the input a `${form.X}` /
+/// `${screen.S.form.X}` payload value reads, on the named screen first.
+fn form_component<'a>(screen: &str, value: &Value, components: &'a Components) -> Option<&'a Info> {
+    let (referenced, name) = form_reference(value)?;
+    components
         .by_screen
         .get(referenced.as_deref().unwrap_or(screen))
-        .and_then(|c| c.get(&name));
-    let kind = on_screen.or_else(|| components.by_name.get(&name).map(|(k, _)| k));
-    if matches!(
-        kind.map(String::as_str),
-        Some("PhotoPicker" | "DocumentPicker")
-    ) {
-        "file"
-    } else {
-        "value"
+        .and_then(|c| c.get(&name))
+        .or_else(|| components.by_name.get(&name))
+}
+
+/// `readAnswerKind`: `file` for a PhotoPicker / DocumentPicker form answer.
+fn answer_kind(screen: &str, value: &Value, components: &Components) -> &'static str {
+    match form_component(screen, value, components).map(|i| i.kind.as_str()) {
+        Some("PhotoPicker" | "DocumentPicker") => "file",
+        _ => "value",
     }
+}
+
+/// `WhatsappFlowResponseField`: a response key as the Flow JSON labels it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowResponseLabel {
+    pub key: String,
+    pub label: String,
+    pub options: Obj,
+    pub labelled: bool,
+}
+
+/// Every `(key, value)` one screen's `complete` actions return.
+fn complete_payload_entries(screen: &Value) -> Vec<(String, Value)> {
+    let mut entries = Vec::new();
+    if let Some(layout) = screen.get("layout") {
+        for_each_node(layout, &mut |obj| {
+            if let Some(action) = on_click(obj)
+                && action.get("name").and_then(Value::as_str) == Some("complete")
+                && let Some(payload) = action.get("payload").and_then(Value::as_object)
+            {
+                entries.extend(payload.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        });
+    }
+    entries
+}
+
+/// `parseFlowResponseFields`: each key the Flow's `complete` payloads return
+/// (the first screen that names it decides), traced through its form
+/// reference to the input that labels it. Endpoint Flows list none.
+///
+/// ponytail: serde_json maps are sorted (no `preserve_order`), so keys come in
+/// key order per payload, not the Flow JSON's question order.
+pub fn parse_flow_response_fields(json: &Value) -> Vec<FlowResponseLabel> {
+    let Some(screens) = json.get("screens").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let components = index_components(screens);
+    let mut seen = HashSet::new();
+    let mut fields = Vec::new();
+    for screen in screens {
+        for (key, value) in complete_payload_entries(screen) {
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            let component = if form_reference(&value).is_some() {
+                form_component(screen_id(screen), &value, &components)
+            } else {
+                components.by_name.get(&key)
+            };
+            let label = component.and_then(|c| c.label.clone());
+            fields.push(FlowResponseLabel {
+                labelled: label.is_some(),
+                label: label.unwrap_or_else(|| humanize_key(&key)),
+                options: component.map(|c| c.options.clone()).unwrap_or_default(),
+                key,
+            });
+        }
+    }
+    fields
 }
 
 /// `addAnswerKind`: first seen wins, `file` always wins.

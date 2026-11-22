@@ -24,6 +24,7 @@ use serde_json::{Map, Value, json};
 use crate::errors::{BusinessError, Result, sanitize_public_text};
 use crate::message::{OutgoingInput, OutgoingJob, contact_inbox_json, conversation_json};
 use crate::tx;
+use crate::whatsapp_flow::{FlowResponseLabel, humanize_key};
 
 /// `GRAPH_API_URL` / `DEFAULT_API_VERSION` of `integrations/whatsapp`.
 pub const GRAPH_API_URL: &str = "https://graph.facebook.com";
@@ -426,24 +427,6 @@ pub fn whatsapp_flow_response(attributes: Option<&Value>) -> Option<&Map<String,
     .then_some(attrs)
 }
 
-/// `humanizeKey`: `_` → space, `aB` → `a B`, first character upper-cased.
-fn humanize_key(key: &str) -> String {
-    let spaced = key.replace('_', " ");
-    let chars: Vec<char> = spaced.chars().collect();
-    let mut out = String::with_capacity(spaced.len() + 4);
-    for (i, c) in chars.iter().enumerate() {
-        out.push(*c);
-        if c.is_ascii_lowercase() && chars.get(i + 1).is_some_and(char::is_ascii_uppercase) {
-            out.push(' ');
-        }
-    }
-    let mut it = out.chars();
-    match it.next() {
-        Some(first) => first.to_uppercase().chain(it).collect(),
-        None => out,
-    }
-}
-
 fn nullable_str(value: Option<&Value>) -> Value {
     value
         .and_then(Value::as_str)
@@ -489,19 +472,24 @@ fn is_primitive(value: &Value) -> bool {
     value.is_string() || value.is_number()
 }
 
-/// `toField` with no Flow labels (`options` empty).
+/// `toField`: option ids read as their titles.
 fn to_field(
     key: &str,
+    label: &str,
     value: &Value,
+    options: &Map<String, Value>,
     files: Option<&Value>,
     url_of: &dyn Fn(&str) -> Option<String>,
 ) -> Value {
-    let label = humanize_key(key);
     let field = |kind: &str, value: Value| json!({ "key": key, "label": label, "kind": kind, "value": value });
+    let title = |item: &Value| {
+        let id = js::string_of(item);
+        options.get(&id).cloned().unwrap_or(json!(id))
+    };
     match value {
         Value::Bool(b) => return field("boolean", json!(b)),
         Value::Null => return field("text", json!("")),
-        v if is_primitive(v) => return field("text", json!(js::string_of(v))),
+        v if is_primitive(v) => return field("text", title(v)),
         Value::Array(items) => {
             let kept: Vec<Value> = files
                 .and_then(|f| f.get(key))
@@ -526,10 +514,7 @@ fn to_field(
                 return field("files", Value::Array(views));
             }
             if items.iter().all(is_primitive) {
-                return field(
-                    "list",
-                    Value::Array(items.iter().map(|i| json!(js::string_of(i))).collect()),
-                );
+                return field("list", Value::Array(items.iter().map(title).collect()));
             }
         }
         _ => {}
@@ -552,16 +537,55 @@ fn jsonb_order<'a>(keys: impl Iterator<Item = &'a String>) -> Vec<&'a String> {
     keys
 }
 
-/// `getWhatsappFlowResponseView` + `buildWhatsappFlowResponseFields`.
+/// `readFlowToken`: the entity's token, else the response's own.
+pub fn flow_response_token(entity: &Map<String, Value>) -> Option<&str> {
+    entity
+        .get("flowToken")
+        .and_then(Value::as_str)
+        .or_else(|| entity["flowResponse"]["flow_token"].as_str())
+}
+
+/// `buildWhatsappFlowResponseFields`: the answers in the Flow's label order,
+/// then the ones the Flow JSON does not list, with humanized keys.
+pub fn build_flow_response_fields(
+    response: &Map<String, Value>,
+    labels: &[FlowResponseLabel],
+    files: Option<&Value>,
+    url_of: &dyn Fn(&str) -> Option<String>,
+) -> Value {
+    let answers: Vec<&String> = jsonb_order(response.keys())
+        .into_iter()
+        .filter(|k| k.as_str() != "flow_token")
+        .collect();
+    let label_of = |key: &str| labels.iter().find(|l| l.key == key);
+    let ordered: Vec<&String> = labels
+        .iter()
+        .filter_map(|l| answers.iter().find(|k| **k == &l.key).copied())
+        .chain(answers.iter().filter(|k| label_of(k).is_none()).copied())
+        .collect();
+    let no_options = Map::new();
+    let fields: Vec<Value> = ordered
+        .iter()
+        .map(|key| {
+            let label = label_of(key);
+            let text = label.map_or_else(|| humanize_key(key), |l| l.label.clone());
+            let options = label.map_or(&no_options, |l| &l.options);
+            to_field(key, &text, &response[key.as_str()], options, files, url_of)
+        })
+        .collect();
+    let labelled = ordered
+        .iter()
+        .any(|k| label_of(k).is_some_and(|l| l.labelled));
+    json!({ "fields": fields, "labelSource": if labelled { "whatsappFlow" } else { "fallback" } })
+}
+
+/// `getWhatsappFlowResponseView` once the Flow's `labels` are loaded
+/// (`loadFlowResponseLabels`; none = humanized keys).
 ///
 /// `url_by_media_id`: the message's attachment URLs by provider media id.
-///
-/// ponytail: the Flow labels (`resolveSentWhatsappFlow` + the Flow JSON on
-/// Meta, `getFlowResponseFields`) are not ported: every response reads with
-/// humanized keys (`labelSource: fallback`), the original's answer whenever
-/// the Flow cannot be identified.
 pub fn flow_response_view(
     message: &chatbotx_db::repo::message::MessageWithAttachments,
+    labels: &[FlowResponseLabel],
     url_by_media_id: &[(String, String)],
 ) -> Result<Value> {
     let attrs = message.message.content_attributes.as_ref().map(|j| &j.0);
@@ -577,12 +601,12 @@ pub fn flow_response_view(
             .find(|(media_id, _)| media_id == id)
             .map(|(_, url)| url.clone())
     };
-    let fields: Vec<Value> = jsonb_order(response.keys())
-        .into_iter()
-        .filter(|k| k.as_str() != "flow_token")
-        .map(|k| to_field(k, &response[k], entity.get("files"), &url_of))
-        .collect();
-    Ok(json!({ "fields": fields, "labelSource": "fallback" }))
+    Ok(build_flow_response_fields(
+        &response,
+        labels,
+        entity.get("files"),
+        &url_of,
+    ))
 }
 
 /// `normalizeWhatsappDisplayPhoneNumber`: a valid number as E.164 without
@@ -602,13 +626,6 @@ pub fn normalize_display_phone_number(phone: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn humanizes_keys() {
-        assert_eq!(humanize_key("full_name"), "Full name");
-        assert_eq!(humanize_key("newsletterOptIn"), "Newsletter Opt In");
-        assert_eq!(humanize_key("age"), "Age");
-    }
 
     #[test]
     fn reads_meta_permission_actions() {

@@ -569,7 +569,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/meta-catalog-operations.test.ts` | C | tbd | todo | Meta Catalog; builder server code |
 | `apps/builder/__tests__/mini-app-contact-variables.test.ts` | C | `crates/core/tests/mini_app_display_text.rs`, `crates/business/src/mini_app_whatsapp.rs` (unit), `crates/api/tests/mini_apps_whatsapp_public_api.rs` | todo | Mini-apps; Q.D1m; escape and WhatsApp publish cases ported; the `resolveContactVariables` cases are covered by parity `50-mini-apps` |
 | `apps/builder/__tests__/mini-app-editor-store.test.ts` | B | - | todo | Mini-apps; builder jsdom |
-| `apps/builder/__tests__/mini-app-flow-response-labels.test.ts` | C | tbd | todo | Mini-apps; builder server code |
+| `apps/builder/__tests__/mini-app-flow-response-labels.test.ts` | C | `crates/business/tests/whatsapp_flow_labels.rs` | ported | Mini-apps; builder server code; Q.P7-V4 |
 | `apps/builder/__tests__/mini-app-simple-markdown.test.tsx` | B | - | todo | Mini-apps; builder jsdom |
 | `apps/builder/__tests__/mini-app-upload-route.test.ts` | C | tbd | todo | Mini-apps; builder server code; covered by parity `50-mini-apps` (server crate route; Q.D1m) |
 | `apps/builder/__tests__/mini-apps-public-api.test.ts` | C | `crates/api/tests/mini_apps_public_api.rs`, `mini_apps_whatsapp_public_api.rs` | ported | Mini-apps; Q.D1m; the WhatsApp draft/publish test runs against a local Graph server |
@@ -1856,7 +1856,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/whatsapp/__tests__/delivery-receipts.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/error-mapper-calling.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/error-mapper-thread-control.test.ts` | C | tbd | todo | WhatsApp channel |
-| `integrations/whatsapp/__tests__/flow-response-fields.test.ts` | C | tbd | todo | WhatsApp channel |
+| `integrations/whatsapp/__tests__/flow-response-fields.test.ts` | C | `crates/business/tests/whatsapp_flow_labels.rs` | ported | WhatsApp channel; Q.P7-V4 |
 | `integrations/whatsapp/__tests__/google-click-capture.test.ts` | C | `crates/worker/tests/whatsapp_ad_referral.rs` | ported | WhatsApp channel |
 | `integrations/whatsapp/__tests__/granted-scopes.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/incoming-flow-media.test.ts` | C | tbd | todo | WhatsApp channel |

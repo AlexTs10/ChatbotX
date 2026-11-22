@@ -404,7 +404,22 @@ pub(crate) async fn flow_response(
         .flatten()
         .filter_map(|a| Some((a["sourceId"].as_str()?.into(), a["url"].as_str()?.into())))
         .collect();
-    whatsapp::flow_response_view(found, &urls).map_err(|e| business_error(e, FINDING))
+    // `loadFlowResponseLabels` only for a Flow response (else not found below).
+    let attributes = found.message.content_attributes.as_ref().map(|j| &j.0);
+    let labels = match whatsapp::whatsapp_flow_response(attributes) {
+        Some(entity) => {
+            super::whatsapp_flows::flow_response_labels(
+                &state.db,
+                &state.graph_url,
+                workspace_id,
+                found.message.contact_inbox_id,
+                whatsapp::flow_response_token(entity).map(str::to_owned),
+            )
+            .await
+        }
+        None => Vec::new(),
+    };
+    whatsapp::flow_response_view(found, &labels, &urls).map_err(|e| business_error(e, FINDING))
 }
 
 /// Runs one of [`ROUTES`].
