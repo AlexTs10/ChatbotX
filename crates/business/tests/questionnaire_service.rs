@@ -539,8 +539,8 @@ mod submission_flow {
             common::contact(tx, CONTACT, WS)?;
             for conv in [CONV_OLD, CONV_NEW] {
                 tx.execute(
-                    r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId") VALUES (?1, ?2, ?3)"#,
-                    params![conv, WS, CONTACT],
+                    r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId", "sourceId") VALUES (?1, ?2, ?3, ?4)"#,
+                    params![conv, WS, CONTACT, format!("thread-{conv}")],
                 )?;
             }
             question_row(tx, QA, 0, kinds[0], "Question 1")?;

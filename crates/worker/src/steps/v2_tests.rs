@@ -339,7 +339,7 @@ mod questionnaire_engine {
         fx.run(json!({})).await.unwrap();
         let awards = fx.jobs.named("award");
         assert_eq!(awards.len(), 1, "{:?}", fx.jobs.all());
-        let award = &awards[0].data;
+        let award = &awards[0].data["data"];
         assert_eq!(award["rule"], "survey");
         assert_eq!(award["inboxId"], "4");
         assert_eq!(award["contactId"], "3");
