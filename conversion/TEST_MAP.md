@@ -1211,7 +1211,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/ai-agent-handoff-reentry.test.ts` | C | `crates/worker/src/handoff_reentry_tests.rs` | ported | AI handover (human takeover) |
 | `apps/worker/__tests__/ai-agent-runner-openai-compatible.test.ts` | C | tbd | todo | OpenAI-compatible integration |
 | `apps/worker/__tests__/ai-agent-worker-audit-context.test.ts` | C | tbd | todo | AI agents (tools, MCP client, functions) |
-| `apps/worker/__tests__/ai-analyze-image-handler.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
+| `apps/worker/__tests__/ai-analyze-image-handler.test.ts` | C | `crates/worker/src/steps/ai_tests.rs` | ported | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/ai-delete-message-history.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/ai-error-log-provider.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/ai-generate-text-agent-openai-compatible.test.ts` | C | tbd | todo | OpenAI-compatible integration |
@@ -1334,7 +1334,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/google-click-lookup.test.ts` | C | tbd | todo | Google Ads integration |
 | `apps/worker/__tests__/handoff-executor.test.ts` | C | tbd | todo | AI handover (human takeover) |
 | `apps/worker/__tests__/handover-response.test.ts` | C | tbd | todo | AI handover (human takeover) |
-| `apps/worker/__tests__/heavy-analyze-image.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
+| `apps/worker/__tests__/heavy-analyze-image.test.ts` | C | `crates/worker/src/heavy_reader.rs` | ported | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/heavy-provider-error.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/heavy-step-resume.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/heavy-step-runner.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
