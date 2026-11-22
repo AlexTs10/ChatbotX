@@ -1306,8 +1306,17 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
             )
             .await?;
         }
-        // ponytail: handoff re-entry needs the AI handover port (Q.D6).
-        IncomingRouting::HandoffReentry | IncomingRouting::None => {}
+        IncomingRouting::HandoffReentry => {
+            crate::handoff_reentry::enqueue(
+                deps,
+                conversation.id,
+                stored.contact_inbox.id,
+                message_id,
+                conversation.workspace_id,
+            )
+            .await;
+        }
+        IncomingRouting::None => {}
     }
     Ok(())
 }
@@ -1397,10 +1406,30 @@ pub(crate) async fn enqueue_automated_response(
     text: Option<String>,
     attachment_file_types: Vec<String>,
 ) -> Result<(), JobError> {
+    enqueue_automated_response_for(
+        deps,
+        (
+            stored.conversation.id,
+            stored.contact_inbox.id,
+            stored.conversation.workspace_id,
+        ),
+        message_id,
+        text,
+        attachment_file_types,
+    )
+    .await
+}
+
+/// [`enqueue_automated_response`] by `(conversationId, contactInboxId,
+/// workspaceId)`.
+pub(crate) async fn enqueue_automated_response_for(
+    deps: &Deps,
+    (conversation_id, contact_inbox_id, workspace_id): (i64, i64, i64),
+    message_id: i64,
+    text: Option<String>,
+    attachment_file_types: Vec<String>,
+) -> Result<(), JobError> {
     use chatbotx_business::keyword_match::{MatchInput, matches_any_keyword_rule};
-    let conversation_id = stored.conversation.id;
-    let contact_inbox_id = stored.contact_inbox.id;
-    let workspace_id = stored.conversation.workspace_id;
     let has_input = text.is_some() || !attachment_file_types.is_empty();
     if text.is_none() && has_input {
         let rules = crate::ai_agent::inbound_rules(deps, workspace_id).await?;
