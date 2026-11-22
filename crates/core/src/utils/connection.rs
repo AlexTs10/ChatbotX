@@ -477,6 +477,7 @@ string_enum! {
         MessagingAds = "messaging_ads",
         LeadAds = "lead_ads",
         MetaCatalog = "meta_catalog",
+        MetaCapi = "meta_capi",
     }
 }
 
