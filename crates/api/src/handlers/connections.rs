@@ -338,6 +338,23 @@ pub async fn handle(
                     ("connections.disconnect", _, _) => {
                         connection::disconnect(&state.db, row.id, ws).await
                     }
+                    ("connections.refresh", _, _)
+                        if matches!(row.provider.as_str(), "googleAds" | "googleCalendar") =>
+                    {
+                        match connection::assert_refreshable(&row) {
+                            Ok(()) => {
+                                let calendars = crate::handlers::appointments::externals(state);
+                                connection::refresh_google(
+                                    &state.db,
+                                    &HttpUpstream,
+                                    &calendars,
+                                    row,
+                                )
+                                .await
+                            }
+                            Err(error) => Err(error),
+                        }
+                    }
                     ("connections.refresh", _, _) => {
                         connection::refresh(&state.db, row.id, ws).await
                     }

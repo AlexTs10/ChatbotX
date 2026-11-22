@@ -254,3 +254,60 @@ async fn google_ads_connects_a_customer_and_replaces_an_inactive_one() {
         .expect("count");
     assert_eq!(rows, 1);
 }
+
+/// Q.P7-V5 `connection.refresh` (`refreshAuth` of `integrations/google-ads`):
+/// a forced refresh with the stored refresh token saves the new access token
+/// and leaves the connection `connected`; a revoked grant is an
+/// `authException` and marks it `needs_reauth`.
+#[tokio::test]
+async fn refresh_forces_a_google_ads_token_refresh() {
+    let db = two_workspaces().await;
+    connect(&db, "1234567890", "Shop").await;
+    let id: i64 = db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT "id" FROM "Connection" WHERE "provider" = 'googleAds'"#,
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .expect("connection id");
+    let row = chatbotx_business::connection::get_for_workspace(&db, id, WS)
+        .await
+        .expect("row")
+        .expect("found");
+    chatbotx_business::connection::assert_refreshable(&row).expect("refreshable");
+    let calendars = chatbotx_business::appointment::external::ExternalCalendars::default();
+    let up = Script::with(vec![json!({ "access_token": "at-2", "expires_in": 3600 })]);
+    let refreshed =
+        chatbotx_business::connection::refresh_google(&db, &up, &calendars, row.clone())
+            .await
+            .expect("refresh");
+    assert_eq!(refreshed.status, "connected");
+    assert!(refreshed.auth_expires_at.is_some());
+    let seen = up.seen.lock().expect("lock").clone();
+    assert_eq!(seen[0].url, "https://oauth2.googleapis.com/token");
+    let body = seen[0].body.as_deref().expect("form");
+    assert!(body.contains("grant_type=refresh_token") && body.contains("refresh_token=rt-1"));
+    let auth = open_auth(&satellite(&db).await.3).expect("auth");
+    assert_eq!(auth["tokens"]["accessToken"], "at-2");
+    assert_eq!(auth["tokens"]["refreshToken"], "rt-1");
+
+    let revoked = Script {
+        replies: Mutex::new(vec![Ok((
+            400,
+            json!({ "error": "invalid_grant" }).to_string(),
+        ))]),
+        seen: Mutex::new(Vec::new()),
+    };
+    let error = chatbotx_business::connection::refresh_google(&db, &revoked, &calendars, row)
+        .await
+        .expect_err("revoked");
+    assert!(error.to_string().contains("revoked"), "{error}");
+    let after = chatbotx_business::connection::get_for_workspace(&db, id, WS)
+        .await
+        .expect("row")
+        .expect("found");
+    assert_eq!(after.status, "needs_reauth");
+}

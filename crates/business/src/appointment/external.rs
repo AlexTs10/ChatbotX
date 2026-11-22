@@ -284,6 +284,32 @@ impl ExternalCalendars {
 
     /// The access token of `row`, refreshed (and stored) when it expired.
     async fn access_token(&self, db: &Db, row: &IntegrationGoogleCalendar) -> Result<String> {
+        self.token(db, row, false).await.map(|(token, _)| token)
+    }
+
+    /// `refreshAuth` (`connection.refresh`, Q.P7-V5): a forced refresh of the
+    /// connection's integration; the new auth.
+    pub async fn refresh_auth(
+        &self,
+        db: &Db,
+        workspace_id: i64,
+        integration_id: i64,
+    ) -> Result<Value> {
+        let row = tx::read(db, move |conn| {
+            google_connection(conn, workspace_id, integration_id)
+        })
+        .await?;
+        self.token(db, &row, true).await.map(|(_, auth)| auth)
+    }
+
+    /// The access token and the auth of `row`; refreshed (and stored) when it
+    /// expired, or always on `force`.
+    async fn token(
+        &self,
+        db: &Db,
+        row: &IntegrationGoogleCalendar,
+        force: bool,
+    ) -> Result<(String, Value)> {
         let auth = open_auth(self.encryption()?, row)?;
         let tokens = auth.get("tokens").cloned().unwrap_or(Value::Null);
         let token = tokens
@@ -296,8 +322,8 @@ impl ExternalCalendars {
             .and_then(Value::as_str)
             .and_then(parse_iso);
         // `buildContext` refreshes a token that expires within a minute.
-        if expires_at.is_none_or(|at| at > now_ms() + 60_000) {
-            return Ok(token);
+        if !force && expires_at.is_none_or(|at| at > now_ms() + 60_000) {
+            return Ok((token, auth));
         }
         let refresh = tokens
             .get("refreshToken")
@@ -350,6 +376,7 @@ impl ExternalCalendars {
             next["tokens"]["expiresAt"] = json!(iso(now_ms() + seconds * 1000));
         }
         let sealed = seal(self.encryption()?, row.integration_id, &next)?;
+        let access = access.to_string();
         let id = row.id;
         tx::write(db, move |conn| {
             conn.execute(
@@ -360,7 +387,7 @@ impl ExternalCalendars {
             Ok(())
         })
         .await?;
-        Ok(access.to_string())
+        Ok((access, next))
     }
 
     /// The Google OAuth app (`clientId`, `clientSecret`) for the workspace owner.
