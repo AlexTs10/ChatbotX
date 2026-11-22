@@ -44,7 +44,18 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::low::comment_moderation(&deps, &job.data["data"]).await?
         }
         crate::low::COMMENT_AI_REPLY => crate::low::comment_ai_reply(&deps, &job).await?,
-        // ponytail: handoff re-entry is Q.D6.
+        crate::ai::context::SUMMARIZE_CONVERSATION => {
+            crate::ai::context::handle_summarize(&deps, &job.data["data"]).await?
+        }
+        crate::ai::conversation_source::PROCESS_CONVERSATION_SOURCE => {
+            crate::ai::conversation_source::process_source(&deps, &job.data["data"]).await?
+        }
+        crate::ai::conversation_source::PROCESS_CONVERSATION_SOURCE_EMBEDDING => {
+            crate::ai::conversation_source::process_embedding(&deps, &job.data["data"]).await?
+        }
+        crate::handoff_reentry::PROCESS_HANDOFF_REENTRY => {
+            crate::handoff_reentry::process(&deps, &job.data["data"]).await?
+        }
         other => {
             return Err(JobError::unrecoverable(format!(
                 "AIJobAction action is not defined: {other}"

@@ -326,14 +326,29 @@ pub async fn create_message(
         if let Err(err) = add(deps, "runChallenge", data, opts).await {
             tracing::warn!(err = %err.message, "webchat challenge enqueue failed");
         }
-    } else if !has_postback
-        && inbound::ensure_active(deps, &conversation).await
-        && let Err(err) =
-            inbound::enqueue_automated_response(deps, &stored, message_id, Some(text), Vec::new())
-                .await
-    {
-        // ponytail: `enqueueHandoffReentry` needs the AI handover port (Q.D6).
-        tracing::warn!(err = %err, "webchat automated response enqueue failed");
+    } else if !has_postback {
+        if inbound::ensure_active(deps, &conversation).await {
+            if let Err(err) = inbound::enqueue_automated_response(
+                deps,
+                &stored,
+                message_id,
+                Some(text),
+                Vec::new(),
+            )
+            .await
+            {
+                tracing::warn!(err = %err, "webchat automated response enqueue failed");
+            }
+        } else if !text.is_empty() {
+            crate::handoff_reentry::enqueue(
+                deps,
+                conversation.id,
+                contact_inbox.id,
+                message_id,
+                conversation.workspace_id,
+            )
+            .await;
+        }
     }
     if let Some(challenge_id) = skip_challenge_id {
         use chatbotx_jobs::queues::resolve_step_input::{

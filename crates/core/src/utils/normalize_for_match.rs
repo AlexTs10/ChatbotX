@@ -1,6 +1,13 @@
 //! `packages/utils/src/normalize-for-match.ts` (+ the shared NFD helper).
 
-use icu_normalizer::DecomposingNormalizerBorrowed;
+use icu_normalizer::{ComposingNormalizerBorrowed, DecomposingNormalizerBorrowed};
+
+/// `value.normalize("NFKC")`.
+pub fn nfkc(value: &str) -> String {
+    ComposingNormalizerBorrowed::new_nfkc()
+        .normalize(value)
+        .into_owned()
+}
 
 /// `value.normalize("NFD")`.
 pub fn nfd(value: &str) -> String {
