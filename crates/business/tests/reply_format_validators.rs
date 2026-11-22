@@ -32,7 +32,7 @@ fn location(attrs: serde_json::Value) -> ReplyInputMessage {
     }
 }
 
-mod reply_format_validators {
+mod format_validators {
     use super::*;
 
     #[test]
