@@ -1387,7 +1387,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/message-analytics-quota.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `apps/worker/__tests__/message-failed-error-stack.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `apps/worker/__tests__/message-listener.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
-| `apps/worker/__tests__/messenger-contact-data.test.ts` | C | tbd | todo | Messenger channel |
+| `apps/worker/__tests__/messenger-contact-data.test.ts` | C | `crates/business/tests/messenger_contact_data.rs` | ported | Messenger channel; Q.P7-V4 (no-inbox case: `crates/worker/src/steps/messenger_contact_data_tests.rs`) |
 | `apps/worker/__tests__/messenger-template-handler.test.ts` | C | tbd | todo | Messenger channel |
 | `apps/worker/__tests__/messenger-thread-control-rejection.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `apps/worker/__tests__/meta-catalog-import.test.ts` | C | tbd | todo | Meta Catalog |

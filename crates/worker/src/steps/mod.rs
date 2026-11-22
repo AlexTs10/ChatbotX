@@ -223,6 +223,8 @@ pub(crate) async fn run(
 #[cfg(test)]
 mod ai_tests;
 #[cfg(test)]
+mod messenger_contact_data_tests;
+#[cfg(test)]
 mod send_flow_step_tests;
 #[cfg(test)]
 mod send_message_tests;

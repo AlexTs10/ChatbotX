@@ -252,6 +252,8 @@ mod message_outgoing_and_list;
 mod message_outgoing_media;
 #[path = "messenger_ads_json.rs"]
 mod messenger_ads_json;
+#[path = "messenger_contact_data.rs"]
+mod messenger_contact_data;
 #[path = "meta_capi_connect.rs"]
 mod meta_capi_connect;
 #[path = "meta_catalog_connect.rs"]
