@@ -384,6 +384,8 @@ mod whatsapp_call_hours;
 mod whatsapp_call_ring_targets;
 #[path = "whatsapp_call_voip_call_service.rs"]
 mod whatsapp_call_voip_call_service;
+#[path = "whatsapp_flow_response.rs"]
+mod whatsapp_flow_response;
 #[path = "whatsapp_meta_call_permission.rs"]
 mod whatsapp_meta_call_permission;
 #[path = "whatsapp_voip_sdp.rs"]

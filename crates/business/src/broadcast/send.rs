@@ -26,7 +26,7 @@ pub struct BroadcastForSend {
     pub json: Value,
 }
 
-fn with_targets(conn: &Connection, row: Broadcast) -> Result<BroadcastForSend> {
+pub(crate) fn with_targets(conn: &Connection, row: Broadcast) -> Result<BroadcastForSend> {
     let targets = repo::find_many::<BroadcastTarget>(
         conn,
         r#"WHERE "broadcastId" = ?1 ORDER BY "inboxId" ASC"#,

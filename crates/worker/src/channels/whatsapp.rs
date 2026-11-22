@@ -791,8 +791,7 @@ fn interactive_reply(
                 .clone()
                 .filter(|_| decoded.as_ref().is_some_and(|d| d.button_id.is_some()));
             let body = s(r, "body");
-            // ponytail: `templateFlowToken` (template-launched Flows) and the
-            // Flow response media download are not ported.
+            // ponytail: the Flow response media download is not ported.
             (
                 body.clone().unwrap_or_default(),
                 postback,
@@ -965,6 +964,16 @@ pub fn parse_incoming(payload: &Value) -> Received {
             incoming.text = Some(text);
             received.postback_action = postback;
             received.button_title = title;
+            // `templateFlowToken`: a Flow token that is not a flow-step
+            // button payload but a template FLOW button's token.
+            received.template_flow_token = attributes
+                .as_ref()
+                .filter(|a| a["type"] == "whatsapp_flow_response" && a["decoded"].is_null())
+                .and_then(|a| a["flowToken"].as_str())
+                .filter(|t| {
+                    chatbotx_core::flow_config::steps::is_template_flow_token(Some(t))
+                })
+                .map(str::to_owned);
             incoming.content_attributes = attributes;
         }
         "button" => {

@@ -1537,7 +1537,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/sync-user-quota-reconcile.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `apps/worker/__tests__/system-tools-heavy.test.ts` | C | tbd | todo | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/teardown-expired-trial.test.ts` | C | tbd | todo | Licensing, billing and quotas |
-| `apps/worker/__tests__/template-flow-response.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
+| `apps/worker/__tests__/template-flow-response.test.ts` | C | `crates/worker/tests/template_flow_response.rs` | ported | Template marketplace (install/share/sync); Q.P7-V4 |
 | `apps/worker/__tests__/text-extractor.test.ts` | C | tbd | todo | AI knowledge base (RAG, AI files) |
 | `apps/worker/__tests__/thread-control-handler.test.ts` | C | tbd | todo | Thread control (handover protocol) |
 | `apps/worker/__tests__/thread-control-queue-types.test.ts` | C | tbd | todo | Thread control (handover protocol) |
@@ -2390,7 +2390,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/reflink-service.test.ts` | C | `crates/business/tests/reflink_service.rs` | ported | Leaderboards; Q.D13b (stale row) |
 | `packages/business/__tests__/reply-format-validators.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/__tests__/resolve-minigame-prize.test.ts` | C | tbd | todo | Minigames |
-| `packages/business/__tests__/resolve-sent-whatsapp-flow.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
+| `packages/business/__tests__/resolve-sent-whatsapp-flow.test.ts` | C | `crates/business/tests/whatsapp_flow_response.rs` | ported | WhatsApp Flows (forms); Q.P7-V4 |
 | `packages/business/__tests__/resolve-workspace-access.test.ts` | C | tbd | todo | Workspaces |
 | `packages/business/__tests__/response-sla-service.test.ts` | C | `crates/business/tests/response_sla_window.rs` | ported | Response SLA; Q.D13a; cache / warm-up / lock cases not applicable |
 | `packages/business/__tests__/saved-reply-service.test.ts` | C | tbd | todo | Saved replies |
@@ -2539,7 +2539,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/whatsapp-call-ring-targets.test.ts` | C | `crates/business/tests/whatsapp_call_ring_targets.rs` | ported | WhatsApp calling (VoIP) |
 | `packages/business/__tests__/whatsapp-call-summary-service.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `packages/business/__tests__/whatsapp-call-voip-call-service.test.ts` | C | `crates/business/tests/whatsapp_call_voip_call_service.rs` | ported | WhatsApp calling (VoIP) |
-| `packages/business/__tests__/whatsapp-flow-response-service.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
+| `packages/business/__tests__/whatsapp-flow-response-service.test.ts` | C | `crates/business/tests/whatsapp_flow_response.rs` | ported | WhatsApp Flows (forms); Q.P7-V4 |
 | `packages/business/__tests__/whatsapp-integration.service.connect-phone.test.ts` | C | tbd | todo | WhatsApp channel |
 | `packages/business/__tests__/whatsapp-integration.service.set-coexist.test.ts` | C | tbd | todo | Coexist (existing-app history sync) |
 | `packages/business/__tests__/whatsapp-message-template-list.test.ts` | C | tbd | todo | WhatsApp message templates |

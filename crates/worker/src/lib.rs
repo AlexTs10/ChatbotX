@@ -58,6 +58,7 @@ pub mod store_sync;
 pub mod stored_image;
 pub mod story_automation;
 pub mod template;
+pub mod template_flow_response;
 pub mod thread_control;
 pub mod trigger;
 pub mod variables;

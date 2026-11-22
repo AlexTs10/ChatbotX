@@ -1209,6 +1209,38 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
         return Ok(());
     }
 
+    // A template FLOW button's response (`captureTemplateFlowResponse`).
+    if let Some(token) = received.template_flow_token.as_deref().filter(|_| can_automate)
+        && let Some(flow_response) = chatbotx_business::whatsapp::whatsapp_flow_response(
+            received
+                .message
+                .as_ref()
+                .and_then(|m| m.content_attributes.as_ref()),
+        )
+        .and_then(|entity| entity.get("flowResponse"))
+    {
+        // ponytail: `flowFiles` (the Flow response media download) is not
+        // ported, so a file answer keeps its field unchanged.
+        add_job(
+            deps,
+            QueueName::Integration,
+            "captureTemplateFlowResponse",
+            json!({ "type": "captureTemplateFlowResponse", "data": {
+                "workspaceId": conversation.workspace_id.to_string(),
+                "conversationId": conversation_json(conversation),
+                "contactInboxId": contact_inbox_json(&stored.contact_inbox),
+                "messageId": message_id.to_string(),
+                "templateFlowToken": token,
+                "flowResponse": flow_response,
+            }}),
+            JobOptions {
+                job_id: Some(format!("template-flow-response-{message_id}")),
+                ..JobOptions::default()
+            },
+        )
+        .await?;
+    }
+
     // Flow postbacks / quick replies (`automatedResponseService.enqueueFlowAction`).
     let action = received
         .postback_action

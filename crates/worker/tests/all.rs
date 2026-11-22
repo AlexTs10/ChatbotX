@@ -20,6 +20,8 @@ mod schedule_recurring;
 mod sequence_worker;
 #[path = "smart_delay.rs"]
 mod smart_delay;
+#[path = "template_flow_response.rs"]
+mod template_flow_response;
 #[path = "whatsapp_ad_referral.rs"]
 mod whatsapp_ad_referral;
 
