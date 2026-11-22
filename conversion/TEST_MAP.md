@@ -1237,7 +1237,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/call-phone-number-handler.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/capi-scope-checkers.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `apps/worker/__tests__/capture-contact-profile-snapshot.test.ts` | C | `crates/business/tests/contact_profile_snapshot.rs` | ported | Contacts (profiles, notes, activity); Q.P6-U3 |
-| `apps/worker/__tests__/challenge-handler.test.ts` | C | tbd | todo | Webchat channel |
+| `apps/worker/__tests__/challenge-handler.test.ts` | C | `crates/worker/src/challenge_tests.rs` | ported | Webchat channel; Q.P7-V2 (quick-reply delegation adapted: not ported, DECISIONS) |
 | `apps/worker/__tests__/change-gamification-score-step.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/channel-audience-event.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `apps/worker/__tests__/channel-policy-contract.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -1327,7 +1327,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/format-date-step.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/get-data-from-json-step.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/get-response-handler.test.ts` | C | tbd | todo | GetResponse integration |
-| `apps/worker/__tests__/get-user-data.test.ts` | C | tbd | todo | Get user data webview |
+| `apps/worker/__tests__/get-user-data.test.ts` | C | `crates/worker/src/steps/v2_gud_tests.rs` | todo | Get user data webview; Q.P7-V2 partial: core cases ported; left: lazy attachment store, signed date-picker link, mock call-order cases |
 | `apps/worker/__tests__/google-ads-housekeeping-schedule.test.ts` | C | tbd | todo | Google Ads integration |
 | `apps/worker/__tests__/google-ads-input-error.test.ts` | C | `crates/worker/src/google_ads_producer.rs` (unit tests) | ported | Google Ads integration; Q.D7 r2 |
 | `apps/worker/__tests__/google-ads-send-conversion.test.ts` | C | tbd | todo | Google Ads integration |
@@ -1432,8 +1432,8 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/purge-expired-oauth-tokens.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow |
 | `apps/worker/__tests__/purge-whatsapp-signup-sessions.test.ts` | C | tbd | todo | WhatsApp channel |
 | `apps/worker/__tests__/purge-workspaces.test.ts` | C | `crates/worker/tests/schedule_housekeeping.rs` | ported | Workspaces |
-| `apps/worker/__tests__/questionnaire-engine.test.ts` | C | tbd | todo | Questionnaires |
-| `apps/worker/__tests__/questionnaires-handler.test.ts` | C | tbd | todo | Questionnaires |
+| `apps/worker/__tests__/questionnaire-engine.test.ts` | C | `crates/worker/src/steps/v2_tests.rs` | ported | Questionnaires; Q.P7-V2 (serialized-timestamp cases not-applicable: typed epoch-ms rows) |
+| `apps/worker/__tests__/questionnaires-handler.test.ts` | C | `crates/worker/src/steps/v2_tests.rs` | ported | Questionnaires; Q.P7-V2 |
 | `apps/worker/__tests__/quick-reply-resume.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/quick-reply-settings.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
 | `apps/worker/__tests__/read-receipts.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
@@ -1519,7 +1519,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/spreadsheet-write-values.test.ts` | C | `crates/worker/src/spreadsheet.rs` (unit tests), `crates/worker/src/spreadsheet_tests.rs` | ported | Google Sheets integration; Q.D13a |
 | `apps/worker/__tests__/start-external-step-handlers.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/step-buttons.test.ts` | C | tbd | todo | Flow steps: messages and buttons |
-| `apps/worker/__tests__/step-input-resolution.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
+| `apps/worker/__tests__/step-input-resolution.test.ts` | C | `crates/worker/src/challenge_tests.rs` | ported | Flow steps: logic and utilities; Q.P7-V2 (dashboard-event and injected db-error cases not-applicable, DECISIONS) |
 | `apps/worker/__tests__/stored-step-content.test.ts` | C | tbd | todo | Flow steps: logic and utilities |
 | `apps/worker/__tests__/story-reply-automation.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
 | `apps/worker/__tests__/summarize-conversation.test.ts` | C | `crates/worker/src/ai/context_tests.rs` | ported | AI flow steps (text, image, speech, extraction) |
@@ -2129,7 +2129,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/conversation-find-by-contact-with-inboxes.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/business/__tests__/conversation-last-incoming-source-id.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/__tests__/conversation-resolve-contact-inbox-for-send.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
-| `packages/business/__tests__/conversation-service-consume-challenge.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
+| `packages/business/__tests__/conversation-service-consume-challenge.test.ts` | C | `crates/business/tests/conversation_service_consume_challenge.rs` | ported | Inbox and live chat (conversations, messages); Q.P7-V2 |
 | `packages/business/__tests__/conversation-service.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
 | `packages/business/__tests__/copy-name.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/business/__tests__/count-mode.test.ts` | C | tbd | todo | Business layer shared services |
@@ -2377,7 +2377,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/product-service.test.ts` | C | tbd | todo | Ecommerce: products, categories, vendors |
 | `packages/business/__tests__/profile-fields.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `packages/business/__tests__/qr-code.service.test.ts` | C | tbd | todo | Public links (open-link, QR codes, reflinks) |
-| `packages/business/__tests__/questionnaire-service.test.ts` | C | tbd | todo | Questionnaires |
+| `packages/business/__tests__/questionnaire-service.test.ts` | C | `crates/business/tests/questionnaire_service.rs` | ported | Questionnaires; Q.P7-V2 (template-lock and concurrent-copy cases not-applicable) |
 | `packages/business/__tests__/quota-enforcement-env.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/quota-enforcement-mac-admission.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `packages/business/__tests__/quota-enforcement.service.test.ts` | C | tbd | todo | Licensing, billing and quotas |
@@ -2388,7 +2388,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/__tests__/referral-ref-encoding.test.ts` | C | tbd | todo | Leaderboards; Q.D13b: left, decodeRef comes with the runRef handler |
 | `packages/business/__tests__/referral-utils-poll.test.ts` | C | tbd | todo | Leaderboards; Q.D13b: left, decodeRef comes with the runRef handler |
 | `packages/business/__tests__/reflink-service.test.ts` | C | `crates/business/tests/reflink_service.rs` | ported | Leaderboards; Q.D13b (stale row) |
-| `packages/business/__tests__/reply-format-validators.test.ts` | C | tbd | todo | Inbox and live chat (conversations, messages) |
+| `packages/business/__tests__/reply-format-validators.test.ts` | C | `crates/business/tests/reply_format_validators.rs` | ported | Inbox and live chat (conversations, messages); Q.P7-V2 |
 | `packages/business/__tests__/resolve-minigame-prize.test.ts` | C | tbd | todo | Minigames |
 | `packages/business/__tests__/resolve-sent-whatsapp-flow.test.ts` | C | tbd | todo | WhatsApp Flows (forms) |
 | `packages/business/__tests__/resolve-workspace-access.test.ts` | C | tbd | todo | Workspaces |

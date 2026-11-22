@@ -14,10 +14,12 @@ pub mod delay;
 pub(crate) mod email_marketing;
 mod external_request;
 mod facebook_audience;
+pub(crate) mod get_user_data;
 mod make;
 mod messenger;
 mod pipeline;
 mod places;
+mod questionnaires;
 mod reply;
 mod tools;
 pub(crate) mod working_hours;
@@ -190,6 +192,8 @@ pub(crate) async fn run(
     match step_type {
         "make" | "triggerN8n" => make::handle(&ctx).await,
         "callApi" => external_request::handle(&ctx).await,
+        "getUserData" => get_user_data::handle(&ctx).await,
+        "questionnaires" => questionnaires::handle(&ctx).await,
         "facebookCustomAudience" => facebook_audience::handle(&ctx).await,
         "condition" => condition::handle(&ctx).await,
         "pipeline" => pipeline::handle(&ctx).await,
@@ -233,3 +237,7 @@ pub(crate) mod test_support;
 mod tests;
 #[cfg(test)]
 mod u4_tests;
+#[cfg(test)]
+mod v2_gud_tests;
+#[cfg(test)]
+mod v2_tests;

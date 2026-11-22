@@ -160,6 +160,15 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::steps::delay::RESUME_FOLLOW_UP => {
             crate::steps::delay::run_follow_up_resume(&deps, &job.data["data"]).await?;
         }
+        crate::challenge::RUN_CHALLENGE => {
+            crate::challenge::run_challenge(&deps, &job.data["data"]).await?
+        }
+        crate::challenge::RESOLVE_STEP_INPUT => {
+            crate::challenge::resolve_step_input(&deps, &job.data["data"]).await?
+        }
+        crate::challenge::RESUME_STEP_INPUT_TIMEOUT => {
+            crate::challenge::resume_step_input_timeout(&deps, &job.data["data"]).await?
+        }
         crate::heavy::RESUME_HEAVY_STEP => {
             crate::heavy::resume_heavy_step(&deps, &job.data["data"]).await?;
         }

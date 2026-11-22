@@ -146,6 +146,8 @@ mod contact_service_upsert;
 mod contact_update_fields;
 #[path = "conversation_contact_inboxes.rs"]
 mod conversation_contact_inboxes;
+#[path = "conversation_service_consume_challenge.rs"]
+mod conversation_service_consume_challenge;
 #[path = "copy_name.rs"]
 mod copy_name;
 #[path = "count_mode.rs"]
@@ -346,6 +348,8 @@ mod questionnaire_service;
 mod quota_enforcement_service;
 #[path = "reflink_service.rs"]
 mod reflink_service;
+#[path = "reply_format_validators.rs"]
+mod reply_format_validators;
 #[path = "resolve_media_url.rs"]
 mod resolve_media_url;
 #[path = "response_sla_window.rs"]

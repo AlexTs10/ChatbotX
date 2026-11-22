@@ -773,8 +773,7 @@ async fn execute_step(
     }
     let continues = CONTINUES_AFTER_BRANCH_STEP_TYPES.contains(&step_type);
     // ponytail: a continuing branch (getUserData) is enqueued directly
-    // instead of being deferred behind the node's continuation; getUserData
-    // itself is not ported yet (Q.W2).
+    // instead of being deferred behind the node's continuation.
     if !continues && let Some(then) = then.take() {
         job.insert("thenSendFlow".into(), then);
     }
@@ -845,6 +844,20 @@ pub(crate) async fn send_flow_message(
     anchor: Option<Value>,
     quick_replies: Option<Value>,
 ) -> Result<(), JobError> {
+    let mut extras = Map::new();
+    if let Some(replies) = quick_replies {
+        extras.insert("quickReplies".into(), replies);
+    }
+    send_flow_message_with(run, step, anchor, extras).await
+}
+
+/// [`send_flow_message`] with extra job fields (e.g. `presetQuickReplies`).
+pub(crate) async fn send_flow_message_with(
+    run: &Run<'_>,
+    step: &Value,
+    anchor: Option<Value>,
+    extras: Map<String, Value>,
+) -> Result<(), JobError> {
     let mut data = Map::new();
     data.insert(
         "conversationId".into(),
@@ -877,9 +890,7 @@ pub(crate) async fn send_flow_message(
     if let Some(bulk) = run.is_bulk_broadcast {
         data.insert("isBulkBroadcast".into(), json!(bulk));
     }
-    if let Some(replies) = quick_replies {
-        data.insert("quickReplies".into(), replies);
-    }
+    data.extend(extras);
     if let Some(anchor) = anchor {
         data.insert("commentAnchor".into(), anchor);
     }

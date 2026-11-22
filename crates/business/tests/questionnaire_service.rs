@@ -4,8 +4,8 @@
 //! `questionnaireSubmissionService`). Adapted: the mocked Drizzle builders
 //! become real rows in a migrated SQLite file; "insert was called with"
 //! becomes the stored row. The template-lock tests and the concurrent-copy
-//! retry are not-applicable (test map); `startOrResume`, `answerCurrent` and
-//! `conversationService` move to the flow runtime unit.
+//! retry are not-applicable (test map). `startOrResume` / `answerCurrent` are
+//! in `submission_flow`, with the `conversationService.updateChallenge` tests.
 
 mod common;
 
@@ -482,4 +482,436 @@ async fn find_latest_completed_for_contact_returns_undefined_when_the_contact_ha
             .expect("findLatestCompletedForContact"),
         None
     );
+}
+
+// --- questionnaireSubmissionService.startOrResume / answerCurrent ----------------
+// Adapted: "update/insert was (not) called" becomes the stored submission row.
+
+mod submission_flow {
+    use super::*;
+    use chatbotx_business::questionnaire::flow::{self, AnswerInput, Answered, Started};
+
+    const CONTACT: i64 = 3010;
+    const CONV_OLD: i64 = 601;
+    const CONV_NEW: i64 = 602;
+    const QA: i64 = 9001;
+    const QB: i64 = 9002;
+    const SUB: i64 = 8101;
+
+    fn question_row(
+        tx: &Connection,
+        id: i64,
+        order: i64,
+        kind: &str,
+        title: &str,
+    ) -> Result<i64, DbError> {
+        tx.execute(
+            r#"INSERT INTO "QuestionnaireQuestion" ("id", "questionnaireId", "title", "type", "orderNo", "retryMessage")
+               VALUES (?1, ?2, ?3, ?4, ?5, 'Try again')"#,
+            params![id, Q1, title, kind, order],
+        )?;
+        Ok(id)
+    }
+
+    fn submission(
+        tx: &Connection,
+        status: &str,
+        conversation: i64,
+        current: Option<i64>,
+        questionnaire: i64,
+    ) -> Result<(), DbError> {
+        tx.execute(
+            r#"INSERT INTO "QuestionnaireSubmission"
+                 ("id", "workspaceId", "questionnaireId", "contactId", "conversationId", "status", "currentQuestionId")
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
+            params![SUB, WS, questionnaire, CONTACT, conversation, status, current],
+        )?;
+        Ok(())
+    }
+
+    /// Q1 with questions `QA` (email) and `QB` (text), a contact and two conversations.
+    async fn flow_db(
+        kinds: [&'static str; 2],
+        extra: impl FnOnce(&Connection) -> Result<(), DbError> + Send + 'static,
+    ) -> common::TestDb {
+        let db = service_db().await;
+        setup(&db, move |tx| {
+            common::contact(tx, CONTACT, WS)?;
+            for conv in [CONV_OLD, CONV_NEW] {
+                tx.execute(
+                    r#"INSERT INTO "Conversation" ("id", "workspaceId", "contactId", "sourceId") VALUES (?1, ?2, ?3, ?4)"#,
+                    params![conv, WS, CONTACT, format!("thread-{conv}")],
+                )?;
+            }
+            question_row(tx, QA, 0, kinds[0], "Question 1")?;
+            question_row(tx, QB, 1, kinds[1], "Question 2")?;
+            extra(tx)
+        })
+        .await;
+        db
+    }
+
+    async fn submission_state(db: &Db) -> serde_json::Map<String, serde_json::Value> {
+        rows(
+            db,
+            r#"SELECT "conversationId", "status", "currentQuestionId", "lastAnsweredMessageId", "completedAt"
+               FROM "QuestionnaireSubmission" WHERE "id" = ?1"#,
+            SUB,
+        )
+        .await
+        .remove(0)
+    }
+
+    async fn submission_count(db: &Db) -> Option<i64> {
+        scalar_i64(
+            db,
+            r#"SELECT COUNT(*) FROM "QuestionnaireSubmission" WHERE "contactId" = ?1"#,
+            CONTACT,
+        )
+        .await
+    }
+
+    async fn start(db: &Db, conversation: i64) -> Started {
+        flow::start_or_resume(db, WS, Q1, CONTACT, Some(conversation))
+            .await
+            .expect("start_or_resume")
+    }
+
+    fn question_id(started: &Started) -> i64 {
+        match started {
+            Started::Wait { question, .. } => question.id,
+            other => panic!("expected wait, got {other:?}"),
+        }
+    }
+
+    fn answer(text: &str, attempts: i64, trigger: Option<i64>) -> AnswerInput {
+        AnswerInput {
+            workspace_id: WS,
+            contact_id: CONTACT,
+            conversation_id: CONV_OLD,
+            questionnaire_id: Q1,
+            raw_text: text.into(),
+            attempts,
+            trigger_message_id: trigger,
+        }
+    }
+
+    #[tokio::test]
+    async fn start_or_resume_skips_when_the_contact_already_has_a_submission_for_the_questionnaire()
+    {
+        let db = flow_db(["text", "text"], |tx| {
+            submission(tx, "completed", CONV_OLD, None, Q1)
+        })
+        .await;
+        assert_eq!(
+            start(&db, CONV_NEW).await,
+            Started::Skip("questionnaire_already_submitted")
+        );
+        assert_eq!(submission_count(&db).await, Some(1));
+        assert_eq!(
+            submission_state(&db).await["conversationId"],
+            json!(CONV_OLD)
+        );
+    }
+
+    #[tokio::test]
+    async fn start_or_resume_restarts_a_cancelled_applicant_from_the_first_question() {
+        let db = flow_db(["text", "text"], |tx| {
+            submission(tx, "cancelled", CONV_OLD, None, Q1)?;
+            tx.execute(
+                r#"INSERT INTO "QuestionnaireAnswer" ("id", "submissionId", "questionId", "questionIdSnapshot",
+                     "questionTitleSnapshot", "questionTypeSnapshot", "labelSnapshot", "value")
+                   VALUES (1, ?1, ?2, ?3, 'Question 1', 'text', 'Question 1', '"old"')"#,
+                params![SUB, QA, QA.to_string()],
+            )?;
+            Ok(())
+        })
+        .await;
+        let started = start(&db, CONV_NEW).await;
+        assert_eq!(question_id(&started), QA);
+        let state = submission_state(&db).await;
+        assert_eq!(state["conversationId"], json!(CONV_NEW));
+        assert_eq!(state["status"], json!("inProgress"));
+        assert_eq!(state["currentQuestionId"], json!(QA));
+        assert_eq!(state["completedAt"], json!(null));
+        assert_eq!(submission_count(&db).await, Some(1));
+        assert_eq!(
+            scalar_i64(
+                &db,
+                r#"SELECT COUNT(*) FROM "QuestionnaireAnswer" WHERE "submissionId" = ?1"#,
+                SUB
+            )
+            .await,
+            Some(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn start_or_resume_reassigns_active_same_questionnaire_submission_to_current_conversation()
+     {
+        let db = flow_db(["text", "text"], |tx| {
+            submission(tx, "inProgress", CONV_OLD, Some(QB), Q1)
+        })
+        .await;
+        assert_eq!(question_id(&start(&db, CONV_NEW).await), QB);
+        assert_eq!(
+            submission_state(&db).await["conversationId"],
+            json!(CONV_NEW)
+        );
+        assert_eq!(submission_count(&db).await, Some(1));
+    }
+
+    #[tokio::test]
+    async fn start_or_resume_resumes_active_same_questionnaire_submission_without_update_when_conversation_is_unchanged()
+     {
+        let db = flow_db(["text", "text"], |tx| {
+            submission(tx, "inProgress", CONV_OLD, Some(QB), Q1)
+        })
+        .await;
+        let before = scalar_i64(
+            &db,
+            r#"SELECT "updatedAt" FROM "QuestionnaireSubmission" WHERE "id" = ?1"#,
+            SUB,
+        )
+        .await;
+        assert_eq!(question_id(&start(&db, CONV_OLD).await), QB);
+        let after = scalar_i64(
+            &db,
+            r#"SELECT "updatedAt" FROM "QuestionnaireSubmission" WHERE "id" = ?1"#,
+            SUB,
+        )
+        .await;
+        assert_eq!(before, after);
+        assert_eq!(submission_count(&db).await, Some(1));
+    }
+
+    #[tokio::test]
+    async fn start_or_resume_skips_active_same_questionnaire_submission_when_the_current_question_is_missing()
+     {
+        let db = flow_db(["text", "text"], |tx| {
+            submission(tx, "inProgress", CONV_OLD, Some(QB), Q1)?;
+            tx.execute(
+                r#"UPDATE "QuestionnaireQuestion" SET "active" = 0 WHERE "id" = ?1"#,
+                [QB],
+            )?;
+            Ok(())
+        })
+        .await;
+        assert_eq!(
+            start(&db, CONV_OLD).await,
+            Started::Skip("questionnaire_current_question_missing")
+        );
+    }
+
+    #[tokio::test]
+    async fn start_or_resume_creates_the_first_submission_when_the_contact_has_no_applicant_record()
+    {
+        // Inactive and deleted questions are not asked; the first active one by orderNo is.
+        let db = flow_db(["text", "text"], |tx| {
+            tx.execute(
+                r#"UPDATE "QuestionnaireQuestion" SET "active" = 0 WHERE "id" = ?1"#,
+                [QA],
+            )?;
+            Ok(())
+        })
+        .await;
+        assert_eq!(question_id(&start(&db, CONV_OLD).await), QB);
+        let stored = rows(
+            &db,
+            r#"SELECT "questionnaireId", "conversationId", "status", "currentQuestionId"
+               FROM "QuestionnaireSubmission" WHERE "contactId" = ?1"#,
+            CONTACT,
+        )
+        .await;
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0]["questionnaireId"], json!(Q1));
+        assert_eq!(stored[0]["conversationId"], json!(CONV_OLD));
+        assert_eq!(stored[0]["status"], json!("inProgress"));
+        assert_eq!(stored[0]["currentQuestionId"], json!(QB));
+    }
+
+    #[tokio::test]
+    async fn start_or_resume_skips_when_the_contact_has_another_active_questionnaire() {
+        let db = flow_db(["text", "text"], |tx| {
+            questionnaire_row(tx, 7002, WS, "Other survey")?;
+            submission(tx, "inProgress", CONV_OLD, None, 7002)
+        })
+        .await;
+        assert_eq!(
+            start(&db, CONV_OLD).await,
+            Started::Skip("contact_has_other_active_questionnaire")
+        );
+        assert_eq!(submission_count(&db).await, Some(1));
+    }
+
+    #[tokio::test]
+    async fn answer_current_locks_the_active_submission_before_reading_typed_state() {
+        // The read runs inside the one-writer transaction; no submission → skip.
+        let db = flow_db(["text", "text"], |_| Ok(())).await;
+        assert_eq!(
+            flow::answer_current(&db, answer("hello", 0, None))
+                .await
+                .unwrap(),
+            Answered::Skip("submission_not_found")
+        );
+    }
+
+    #[tokio::test]
+    async fn answer_current_treats_repeated_trigger_messages_as_already_processed() {
+        let db = flow_db(["text", "text"], |tx| {
+            submission(tx, "inProgress", CONV_OLD, Some(QB), Q1)?;
+            tx.execute(
+                r#"UPDATE "QuestionnaireSubmission" SET "lastAnsweredMessageId" = 77, "currentQuestionSentAt" = 1767398400000 WHERE "id" = ?1"#,
+                [SUB],
+            )?;
+            Ok(())
+        })
+        .await;
+        match flow::answer_current(&db, answer("should not be applied again", 0, Some(77)))
+            .await
+            .unwrap()
+        {
+            Answered::Wait {
+                submission_id,
+                question,
+                sent_at,
+            } => {
+                assert_eq!(
+                    (submission_id, question.id, sent_at),
+                    (SUB, QB, 1_767_398_400_000)
+                );
+            }
+            other => panic!("expected wait, got {other:?}"),
+        }
+        assert_eq!(
+            scalar_i64(
+                &db,
+                r#"SELECT COUNT(*) FROM "QuestionnaireAnswer" WHERE "submissionId" = ?1"#,
+                SUB
+            )
+            .await,
+            Some(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn answer_current_rejects_overlong_free_text_answers() {
+        let db = flow_db(["text", "text"], |tx| {
+            submission(tx, "inProgress", CONV_OLD, Some(QA), Q1)
+        })
+        .await;
+        match flow::answer_current(&db, answer(&"x".repeat(1001), 0, None))
+            .await
+            .unwrap()
+        {
+            Answered::Retry {
+                submission_id,
+                question,
+                attempts,
+                retry_message,
+                reason,
+            } => {
+                assert_eq!((submission_id, question.id, attempts), (SUB, QA, 1));
+                assert_eq!(retry_message.as_deref(), Some("Try again"));
+                assert_eq!(reason, "too_long");
+            }
+            other => panic!("expected retry, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn answer_current_advances_to_the_next_question_after_max_invalid_attempts() {
+        let db = flow_db(["email", "text"], |tx| {
+            submission(tx, "inProgress", CONV_OLD, Some(QA), Q1)
+        })
+        .await;
+        match flow::answer_current(&db, answer("not-an-email", 2, Some(78)))
+            .await
+            .unwrap()
+        {
+            Answered::Wait {
+                submission_id,
+                question,
+                ..
+            } => assert_eq!((submission_id, question.id), (SUB, QB)),
+            other => panic!("expected wait, got {other:?}"),
+        }
+        let state = submission_state(&db).await;
+        assert_eq!(state["currentQuestionId"], json!(QB));
+        assert_eq!(state["lastAnsweredMessageId"], json!(78));
+        assert_eq!(state["status"], json!("inProgress"));
+    }
+
+    #[tokio::test]
+    async fn answer_current_completes_the_submission_when_max_invalid_attempts_happen_on_the_last_question()
+     {
+        let db = flow_db(["text", "email"], |tx| {
+            tx.execute(
+                r#"UPDATE "Questionnaire" SET "triggerFlowId" = NULL WHERE "id" = ?1"#,
+                [Q1],
+            )?;
+            submission(tx, "inProgress", CONV_OLD, Some(QB), Q1)
+        })
+        .await;
+        match flow::answer_current(&db, answer("not-an-email", 2, Some(79)))
+            .await
+            .unwrap()
+        {
+            Answered::Completed {
+                submission_id,
+                trigger_flow_id,
+                ..
+            } => {
+                assert_eq!((submission_id, trigger_flow_id), (SUB, None));
+            }
+            other => panic!("expected completed, got {other:?}"),
+        }
+        let state = submission_state(&db).await;
+        assert_eq!(state["status"], json!("completed"));
+        assert_eq!(state["currentQuestionId"], json!(null));
+        assert_eq!(state["lastAnsweredMessageId"], json!(79));
+        assert!(state["completedAt"].is_i64());
+    }
+
+    #[tokio::test]
+    async fn update_challenge_updates_only_the_challenge_key_in_additional_attributes() {
+        let db = flow_db(["text", "text"], |tx| {
+            tx.execute(
+                r#"UPDATE "Conversation" SET "additionalAttributes" = '{"other":1}' WHERE "id" = ?1"#,
+                [CONV_OLD],
+            )?;
+            Ok(())
+        })
+        .await;
+        let challenge = json!({ "type": "step", "data": { "stepId": "s1" } });
+        chatbotx_business::conversation_challenge::update_challenge(
+            &db,
+            WS,
+            CONV_OLD,
+            Some(challenge.clone()),
+        )
+        .await
+        .unwrap();
+        let raw = scalar_text(
+            &db,
+            r#"SELECT "additionalAttributes" FROM "Conversation" WHERE "id" = ?1"#,
+            CONV_OLD,
+        )
+        .await
+        .unwrap();
+        let stored: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(stored, json!({ "other": 1, "challenge": challenge }));
+    }
+
+    #[tokio::test]
+    async fn update_challenge_throws_when_conversation_update_matches_no_rows() {
+        let db = flow_db(["text", "text"], |_| Ok(())).await;
+        assert!(
+            chatbotx_business::conversation_challenge::update_challenge(
+                &db, OTHER_WS, CONV_OLD, None
+            )
+            .await
+            .is_err()
+        );
+    }
 }

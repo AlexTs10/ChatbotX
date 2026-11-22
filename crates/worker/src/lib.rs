@@ -12,6 +12,7 @@ pub mod ai_file;
 pub mod ai_handover;
 pub mod analytics_events;
 pub mod appointment;
+pub mod challenge;
 pub mod channel;
 pub mod channels;
 pub mod chat;
