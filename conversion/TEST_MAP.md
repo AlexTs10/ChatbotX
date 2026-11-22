@@ -598,7 +598,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/oauth-error-alert-flash.test.tsx` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
 | `apps/builder/__tests__/oauth-protected-resource-route.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/oauth-reconnect-callback.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
-| `apps/builder/__tests__/oauth-referer.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
+| `apps/builder/__tests__/oauth-referer.test.ts` | C | `crates/api/tests/whatsapp_callback.rs` | ported | Channel connection and OAuth connect flow; builder server code; Q.P6-U2 + Q.P7-V4 |
 | `apps/builder/__tests__/oauth-sign-in-route.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
 | `apps/builder/__tests__/oauth-state-decode.test.ts` | B | - | todo | Channel connection and OAuth connect flow; builder jsdom |
 | `apps/builder/__tests__/oauth-state-nonce.test.ts` | C | tbd | todo | Channel connection and OAuth connect flow; builder server code |
@@ -944,7 +944,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/whatsapp-coexist-mode.test.ts` | B | - | todo | Coexist (existing-app history sync); builder node-env, client logic |
 | `apps/builder/__tests__/whatsapp-connect-action.direct.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-connect-action.follow-ups.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
-| `apps/builder/__tests__/whatsapp-connect-action.session.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
+| `apps/builder/__tests__/whatsapp-connect-action.session.test.ts` | C | `crates/api/tests/whatsapp_connect.rs` | ported | WhatsApp channel; builder server code; Q.P7-V4 (trialExpired / macLimitReached are cloud-only) |
 | `apps/builder/__tests__/whatsapp-connect-card.picker.test.tsx` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-connect-card.post-connect.test.tsx` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/__tests__/whatsapp-connect-card.test.tsx` | C | tbd | todo | WhatsApp channel; builder server code |
@@ -974,7 +974,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/whatsapp-permission-status.test.ts` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-phone-verification-queue.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-public-api-lib.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
-| `apps/builder/__tests__/whatsapp-reconnect-action.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
+| `apps/builder/__tests__/whatsapp-reconnect-action.test.ts` | C | `crates/api/tests/whatsapp_connect.rs` | ported | WhatsApp channel; builder server code; Q.P7-V4 |
 | `apps/builder/__tests__/whatsapp-reconnect-button.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/__tests__/whatsapp-request-call-permission-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
 | `apps/builder/__tests__/whatsapp-resolve-outbound-call-mode-action.test.ts` | C | `crates/api/tests/whatsapp_calling_actions.rs` | ported | WhatsApp calling (VoIP); builder server code |
@@ -1128,7 +1128,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/src/features/integration-messenger/actions/__tests__/disconnect-messenger.test.ts` | C | tbd | todo | Messenger channel; builder server code |
 | `apps/builder/src/features/integration-messenger/actions/__tests__/reconnect-callback.test.ts` | C | tbd | todo | Messenger channel; builder server code |
 | `apps/builder/src/features/integration-messenger/actions/__tests__/toggle-tag-sync.test.ts` | C | tbd | todo | Messenger channel; builder server code |
-| `apps/builder/src/features/integration-whatsapp/actions/__tests__/persist-reconnect-auth.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
+| `apps/builder/src/features/integration-whatsapp/actions/__tests__/persist-reconnect-auth.test.ts` | C | `crates/api/tests/whatsapp_connect.rs` | ported | WhatsApp channel; builder server code; Q.P7-V4 |
 | `apps/builder/src/features/integration-whatsapp/calling/actions/__tests__/claim-conversation-for-call-agent.test.ts` | C | tbd | todo | WhatsApp channel; builder server code |
 | `apps/builder/src/features/integration-whatsapp/flows/lib/__tests__/build-flow-field-mappings.test.ts` | B | - | todo | WhatsApp channel; builder jsdom |
 | `apps/builder/src/features/integration-whatsapp/message-templates/components/__tests__/meta-catalog-product-select.test.tsx` | B | - | todo | WhatsApp channel; builder jsdom |

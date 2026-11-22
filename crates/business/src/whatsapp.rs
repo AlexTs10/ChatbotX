@@ -585,6 +585,20 @@ pub fn flow_response_view(
     Ok(json!({ "fields": fields, "labelSource": "fallback" }))
 }
 
+/// `normalizeWhatsappDisplayPhoneNumber`: a valid number as E.164 without
+/// the `+`, else its digits.
+pub fn normalize_display_phone_number(phone: &str) -> String {
+    match phonenumber::parse(None, phone) {
+        Ok(parsed) if parsed.is_valid() => parsed
+            .format()
+            .mode(phonenumber::Mode::E164)
+            .to_string()
+            .trim_start_matches('+')
+            .to_owned(),
+        _ => phone.chars().filter(char::is_ascii_digit).collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
