@@ -773,8 +773,7 @@ async fn execute_step(
     }
     let continues = CONTINUES_AFTER_BRANCH_STEP_TYPES.contains(&step_type);
     // ponytail: a continuing branch (getUserData) is enqueued directly
-    // instead of being deferred behind the node's continuation; getUserData
-    // itself is not ported yet (Q.W2).
+    // instead of being deferred behind the node's continuation.
     if !continues && let Some(then) = then.take() {
         job.insert("thenSendFlow".into(), then);
     }

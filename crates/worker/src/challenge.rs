@@ -147,6 +147,15 @@ pub(crate) async fn run_step_challenge(deps: &Deps, r: Reentry<'_>) -> Result<()
         );
         return Ok(());
     }
+    // ponytail: the `message:bot_received` dashboard events of the original
+    // come with the analytics producers (the inbound path emits none either).
+    let key = crate::integration::mint_random_flow_execution_key("flow-inline-");
+    crate::flow::run_flow_node(deps, &reentry_job(&r), key).await
+}
+
+/// The `runFlowNode` data of a step challenge re-entry.
+fn reentry_job(r: &Reentry<'_>) -> Value {
+    let data = &r.challenge["data"];
     let mut variables = Map::new();
     variables.insert("attempts".into(), data["attempts"].clone());
     variables.insert("lastAttemptAt".into(), data["lastAttemptAt"].clone());
@@ -189,10 +198,7 @@ pub(crate) async fn run_step_challenge(deps: &Deps, r: Reentry<'_>) -> Result<()
         json!(r.started_by_contact_message),
     );
     run.insert(STEP_CHALLENGE.into(), Value::Object(variables));
-    // ponytail: the `message:bot_received` dashboard events of the original
-    // come with the analytics producers (the inbound path emits none either).
-    let key = crate::integration::mint_random_flow_execution_key("flow-inline-");
-    crate::flow::run_flow_node(deps, &Value::Object(run), key).await
+    Value::Object(run)
 }
 
 /// `runChallenge`.
@@ -329,3 +335,7 @@ pub async fn resume_step_input_timeout(deps: &Deps, data: &Value) -> Result<(), 
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "challenge_tests.rs"]
+mod tests;

@@ -12,7 +12,7 @@ use chatbotx_business::get_user_data::{
 use chatbotx_core::flow_config::step_input_resolution::{
     STEP_INPUT_RESOLUTION_PAYLOAD_TYPE, encode_step_input_skip_postback,
 };
-use chatbotx_core::flow_config::steps::get_user_data::encode_contact_hint_quick_reply_payload;
+use chatbotx_core::flow_config::steps::encode_contact_hint_quick_reply_payload;
 use chatbotx_core::utils::id::create_id;
 use chatbotx_db::repo::message::{
     FindLastByConversationOptions, FindTriggerMessageOptions, MessageWithAttachments,
@@ -55,7 +55,7 @@ enum Fail {
 
 impl From<JobError> for Fail {
     fn from(e: JobError) -> Fail {
-        Fail::Step(e.message)
+        Fail::Step(e.to_string())
     }
 }
 
@@ -252,7 +252,7 @@ async fn arm_input_timeout(
     };
     crate::smart_delay::schedule_smart_delay_resume(run.deps, row, extras)
         .await
-        .map_err(|e| Fail::Step(e.message))
+        .map_err(|e| Fail::Step(e.to_string()))
 }
 
 /// `advanceChallengeAttempt`: the challenge id for the one winner of two
@@ -369,7 +369,7 @@ async fn restore_challenge_after_failed_claim(
             Some(p) => p,
             None => challenge_value(ctx, 1, challenge_id, None).map_err(|f| match f {
                 Fail::Step(m) => m,
-                Fail::Job(e) => e.message,
+                Fail::Job(e) => e.to_string(),
             })?,
         };
         let restored = challenges::restore_challenge_if_absent(

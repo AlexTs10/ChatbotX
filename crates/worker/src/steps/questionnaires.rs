@@ -6,8 +6,7 @@
 use chatbotx_business::conversation_challenge::update_challenge;
 use chatbotx_business::leaderboard::scoring::Award;
 use chatbotx_business::questionnaire::flow::{self as engine, AnswerInput, Answered, Started};
-use chatbotx_core::flow_config::steps::button_limits::BUTTON_LABEL_MAX;
-use chatbotx_core::flow_config::steps::send_quick_reply::MAX_QUICK_REPLIES;
+use chatbotx_core::flow_config::steps::{BUTTON_LABEL_MAX, MAX_QUICK_REPLIES};
 use chatbotx_db::repo::message::{
     FindLastByConversationOptions, FindMessageByIdParams, SinceTimeInput, find_by_id,
     find_last_by_conversation, get_safe_since_time,
@@ -22,7 +21,7 @@ use super::StepCtx;
 use super::get_user_data::send_chat_message;
 use crate::challenge::{STEP_CHALLENGE, pending_step_challenge};
 use crate::flow::{SEND_FLOW, StepStatus};
-use crate::{id_of, ms_of, str_of};
+use crate::{id_of, ms_of};
 
 /// `QUICK_REPLY_CHANNELS`.
 const QUICK_REPLY_CHANNELS: &[&str] = &["messenger", "instagram", "telegram", "webchat"];
@@ -115,7 +114,7 @@ async fn send_question(
         .map(str::to_owned);
     send_chat_message(ctx, &text, url.as_deref(), replies, true)
         .await
-        .map_err(|e| e.message)?;
+        .map_err(|e| e.to_string())?;
     engine::mark_question_sent(
         &run.deps.db,
         ctx.workspace_id(),
