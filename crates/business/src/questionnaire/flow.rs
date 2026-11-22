@@ -29,7 +29,7 @@ pub enum Started {
     Skip(&'static str),
     Wait {
         submission_id: i64,
-        question: QuestionnaireQuestion,
+        question: Box<QuestionnaireQuestion>,
     },
 }
 
@@ -170,7 +170,7 @@ pub async fn start_or_resume(
                 )?;
                 return Ok(Started::Wait {
                     submission_id: existing.id,
-                    question: first,
+                    question: Box::new(first),
                 });
             }
             if existing.status != "inProgress" {
@@ -191,7 +191,7 @@ pub async fn start_or_resume(
             }
             return Ok(Started::Wait {
                 submission_id: existing.id,
-                question: current.clone(),
+                question: Box::new(current.clone()),
             });
         }
         let active = submission_where(
@@ -216,7 +216,7 @@ pub async fn start_or_resume(
         match inserted {
             Ok(_) => Ok(Started::Wait {
                 submission_id: id,
-                question: first,
+                question: Box::new(first),
             }),
             Err(e) => {
                 let e = chatbotx_db::repo::Error::from(e);
