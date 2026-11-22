@@ -1832,7 +1832,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/whatsapp/__tests__/account-update-webhook.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/app-subscriptions.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/auth.test.ts` | C | tbd | todo | WhatsApp channel |
-| `integrations/whatsapp/__tests__/automatic-events-webhook.test.ts` | C | tbd | todo | WhatsApp channel |
+| `integrations/whatsapp/__tests__/automatic-events-webhook.test.ts` | C | `crates/worker/tests/whatsapp_automatic_events.rs` | ported | WhatsApp channel; Q.P7-V1 |
 | `integrations/whatsapp/__tests__/bsuid-send-status.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/call-permission-public-message.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/call-permission-reply.test.ts` | C | tbd | todo | WhatsApp channel |

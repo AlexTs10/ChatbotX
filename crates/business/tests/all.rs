@@ -4,6 +4,8 @@
 
 #[path = "ads_audience_users.rs"]
 mod ads_audience_users;
+#[path = "ads_automatic_event.rs"]
+mod ads_automatic_event;
 #[path = "ai_agent_service.rs"]
 mod ai_agent_service;
 #[path = "ai_file_service.rs"]
