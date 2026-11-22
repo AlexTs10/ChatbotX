@@ -247,8 +247,13 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
         .as_ref()
         .is_some_and(is_inbound_conversation_message)
     {
-        crate::google_click_lookup::lookup_and_persist(deps, inbox.workspace_id, &contact_inbox)
-            .await;
+        crate::google_click_lookup::lookup_and_persist(
+            deps,
+            inbox.workspace_id,
+            &contact_inbox,
+            is_new_contact,
+        )
+        .await;
     }
 
     let mut message = None;

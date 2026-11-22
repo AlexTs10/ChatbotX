@@ -56,11 +56,15 @@ fn mark_done(contact_inbox_id: i64, now: i64) {
 }
 
 /// `lookupAndPersistGoogleClick` for a real inbound message (the caller checks
-/// `isInboundConversationMessage`).
+/// `isInboundConversationMessage`). For a contact created by this message it is
+/// `persistNewContactGoogleClick` too: the profile is read without the Google
+/// Ads gate (the original reads it at creation) and a click makes the contact
+/// inbox an `ads` contact (`resolveContactSource` ran before the lookup).
 pub(crate) async fn lookup_and_persist(
     deps: &Deps,
     workspace_id: i64,
     contact_inbox: &ContactInbox,
+    is_new_contact: bool,
 ) {
     if resolve_google_click_capture_source(&contact_inbox.channel)
         != Some(GoogleClickCaptureSource::ProfileLookup)
@@ -71,7 +75,7 @@ pub(crate) async fn lookup_and_persist(
     if !claim(contact_inbox.id, now_ms()) {
         return;
     }
-    if let Err(reason) = run(deps, workspace_id, contact_inbox).await {
+    if let Err(reason) = run(deps, workspace_id, contact_inbox, is_new_contact).await {
         tracing::warn!(
             %reason,
             contact_inbox_id = contact_inbox.id,
@@ -81,7 +85,12 @@ pub(crate) async fn lookup_and_persist(
     }
 }
 
-async fn run(deps: &Deps, workspace_id: i64, contact_inbox: &ContactInbox) -> Result<(), String> {
+async fn run(
+    deps: &Deps,
+    workspace_id: i64,
+    contact_inbox: &ContactInbox,
+    is_new_contact: bool,
+) -> Result<(), String> {
     // `integrationGoogleAdsService.hasIntegration`.
     let connected: bool = deps
         .db
@@ -94,7 +103,7 @@ async fn run(deps: &Deps, workspace_id: i64, contact_inbox: &ContactInbox) -> Re
         })
         .await
         .map_err(|e| e.to_string())?;
-    if !connected {
+    if !connected && !is_new_contact {
         return Ok(());
     }
     let (_, ctx) = deps
@@ -119,11 +128,13 @@ async fn run(deps: &Deps, workspace_id: i64, contact_inbox: &ContactInbox) -> Re
     let stored = contact_inbox.referral.as_ref().map(|r| &r.0);
     if let Some(referral) = without_repeated_google_click(stored, profile.referral.as_ref()) {
         let referral = serde_json::to_value(referral).map_err(|e| e.to_string())?;
-        if !persist(deps, workspace_id, contact_inbox, referral).await {
+        if !persist(deps, workspace_id, contact_inbox, referral, is_new_contact).await {
             return Ok(());
         }
     }
-    mark_done(contact_inbox.id, now_ms());
+    if connected {
+        mark_done(contact_inbox.id, now_ms());
+    }
     Ok(())
 }
 
@@ -134,7 +145,10 @@ async fn persist(
     workspace_id: i64,
     contact_inbox: &ContactInbox,
     referral: serde_json::Value,
+    is_new_contact: bool,
 ) -> bool {
+    let ads =
+        is_new_contact && chatbotx_core::utils::google_click::has_google_click(Some(&referral));
     let (id, contact_id, channel) = (
         contact_inbox.id,
         contact_inbox.contact_id,
@@ -146,9 +160,10 @@ async fn persist(
             let now = now_ms();
             tx.execute(
                 r#"UPDATE "ContactInbox" SET
-                     "referral" = json_patch(COALESCE("referral", '{}'), ?1), "updatedAt" = ?2
+                     "referral" = json_patch(COALESCE("referral", '{}'), ?1), "updatedAt" = ?2,
+                     "source" = CASE WHEN ?5 THEN 'ads' ELSE "source" END
                    WHERE "id" = ?3 AND "contactId" = ?4"#,
-                params![referral.to_string(), now, id, contact_id],
+                params![referral.to_string(), now, id, contact_id, ads],
             )?;
             // The click id keys the touch; a profile lookup has no carrying event.
             chatbotx_business::contact_referral_event::record_ad_touches_contained(
@@ -208,5 +223,43 @@ mod tests {
         assert_eq!(attempt_of(done), None);
         assert!(!claim(done, t1 + DONE_TTL_MS - 1));
         assert!(claim(done, t1 + DONE_TTL_MS + 1));
+    }
+
+    /// `persistNewContactGoogleClick`: "makes a new contact with a looked-up
+    /// click an ads contact"; an existing contact keeps its source.
+    #[tokio::test]
+    async fn a_looked_up_click_makes_a_new_contact_an_ads_contact() {
+        let (deps, _) = crate::contact_scan::tests::setup().await;
+        deps.db
+            .write(|tx| {
+                tx.execute_batch(
+                    r#"INSERT INTO "Contact" ("id", "workspaceId") VALUES (30, 2), (31, 2);
+                       INSERT INTO "ContactInbox" ("id", "originalContactId", "contactId", "inboxId", "channel", "source", "sourceId")
+                       VALUES (300, 30, 30, 4, 'zalo', 'inboundMessage', 'z1'), (301, 31, 31, 4, 'zalo', 'inboundMessage', 'z2')"#,
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let click = serde_json::json!({ "gclid": "g-1" });
+        for (id, contact, new) in [(300, 30, true), (301, 31, false)] {
+            let row = crate::load_contact_inbox(&deps.db, id, contact)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(persist(&deps, 2, &row, click.clone(), new).await);
+        }
+        let sources: Vec<String> = deps
+            .db
+            .read(|c| {
+                let mut stmt = c.prepare(
+                    r#"SELECT "source" || ':' || json_extract("referral", '$.gclid') FROM "ContactInbox" WHERE "id" IN (300, 301) ORDER BY "id""#,
+                )?;
+                let rows = stmt.query_map([], |r| r.get(0))?;
+                Ok(rows.collect::<Result<_, _>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(sources, vec!["ads:g-1", "inboundMessage:g-1"]);
     }
 }
