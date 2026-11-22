@@ -43,6 +43,7 @@ pub mod lead_ads;
 pub mod leaderboard;
 pub mod low;
 pub mod marketing_message;
+pub(crate) mod meta_capi_producer;
 pub mod meta_catalog;
 pub mod mini_app_buttons;
 pub mod notification;

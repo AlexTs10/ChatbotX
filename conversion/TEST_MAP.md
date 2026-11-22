@@ -1781,7 +1781,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/meta-catalog/__tests__/remote-product.test.ts` | C | tbd | todo | Meta Catalog |
 | `integrations/meta-catalog/__tests__/retailer-id.test.ts` | C | tbd | todo | Meta Catalog |
 | `integrations/meta-conversions/__tests__/dataset.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
-| `integrations/meta-conversions/__tests__/events.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
+| `integrations/meta-conversions/__tests__/events.test.ts` | C | `crates/business/tests/meta_conversions_events.rs` | ported | Meta Conversions API (CAPI); Q.P7-V1 |
 | `integrations/meta-conversions/__tests__/exception.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
 | `integrations/moosend/__tests__/client.test.ts` | C | tbd | todo | Moosend integration |
 | `integrations/moosend/__tests__/connection.test.ts` | C | tbd | todo | Moosend integration |
@@ -1851,7 +1851,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `integrations/whatsapp/__tests__/conversation-routing-extractor.test.ts` | C | `crates/worker/src/thread_control.rs` | ported | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversation-routing-handlers.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/conversation-routing-parsers.test.ts` | C | `crates/worker/src/thread_control.rs` | ported | WhatsApp channel |
-| `integrations/whatsapp/__tests__/conversions.test.ts` | C | tbd | todo | WhatsApp channel |
+| `integrations/whatsapp/__tests__/conversions.test.ts` | C | `crates/business/tests/whatsapp_conversions.rs` | ported | WhatsApp channel; Q.P7-V1 |
 | `integrations/whatsapp/__tests__/delete-flow.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/delivery-receipts.test.ts` | C | tbd | todo | WhatsApp channel |
 | `integrations/whatsapp/__tests__/error-mapper-calling.test.ts` | C | tbd | todo | WhatsApp channel |
@@ -2614,7 +2614,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `packages/business/src/messaging-ads/__tests__/resolve-channel-assets.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/business/src/messaging-ads/__tests__/service.test.ts` | C | tbd | todo | Ads campaigns (Meta messaging ads) |
 | `packages/business/src/meta-conversions/__tests__/event-input.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
-| `packages/business/src/meta-conversions/__tests__/hash-user-data.test.ts` | C | tbd | todo | Meta Conversions API (CAPI) |
+| `packages/business/src/meta-conversions/__tests__/hash-user-data.test.ts` | C | `crates/business/tests/meta_conversions_hash_user_data.rs` | ported | Meta Conversions API (CAPI); Q.P7-V1 |
 | `packages/business/src/order-payment/__tests__/order-payment-service.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `packages/business/src/order-payment/__tests__/settle.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |
 | `packages/business/src/order-payment/__tests__/webhooks.test.ts` | C | parity p1-12 `20`/`30`/`31` | dropped | Ecommerce: orders and payment providers; P3.6-D1o (mock-based service test, see DECISIONS) |

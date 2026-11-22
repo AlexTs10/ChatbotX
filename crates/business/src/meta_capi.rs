@@ -97,7 +97,7 @@ fn token_error() -> BusinessError {
     )
 }
 
-fn decrypt_token(raw: &Value, aad: Option<&str>) -> Option<String> {
+pub(crate) fn decrypt_token(raw: &Value, aad: Option<&str>) -> Option<String> {
     let data: EncryptedData = serde_json::from_value(raw.clone()).ok()?;
     let value: Value = process_encryption().decrypt_object(&data, aad).ok()?;
     value["accessToken"]
@@ -241,7 +241,7 @@ fn segment(id: &str) -> String {
 }
 
 /// `MetaConversionsException` message of a Graph error body.
-fn graph_message(body: &Value) -> String {
+pub(crate) fn graph_message(body: &Value) -> String {
     let error = &body["error"];
     let text = |v: &Value| v.as_str().map(str::to_owned);
     let details = match &error["error_data"] {

@@ -2,10 +2,8 @@
 //! `trigger-executor`, `action-executor`, `actions/*`) and the bookkeeping
 //! of `triggerService` (run limiter, contact history, daily stats).
 //!
-//! ponytail: `sendMetaCapiEvent` waits for its integration, and the
-//! tag-sync / ads
-//! conversion fan-out of `addTag` waits for those units; they are skipped
-//! with a log line. Actions run in order; triggers run one after another
+//! ponytail: the tag-sync / ads conversion fan-out of `addTag` waits for
+//! those units; it is skipped with a log line. Actions run in order; triggers run one after another
 //! (the original runs them with `Promise.allSettled`).
 
 use std::collections::HashMap;
@@ -673,20 +671,74 @@ async fn execute_action(ctx: &ActionCtx<'_>, scope: &mut Scope) -> Result<Outcom
             }
             Outcome::Succeeded
         }
-        "sendMetaCapiEvent" => {
-            tracing::warn!(
-                action_type,
-                trigger_id = ctx.trigger_id,
-                "Trigger action integration is not ported yet; skipped"
-            );
-            Outcome::Skipped("notPorted".to_owned())
-        }
+        "sendMetaCapiEvent" => return meta_capi_event(ctx, scope, &conversation).await,
         other => {
             tracing::warn!("Unknown action type: {other}");
             Outcome::Skipped("unknownAction".to_owned())
         }
     };
     Ok(outcome)
+}
+
+/// `sendMetaCapiEvent` (`integration-actions.ts`): a trigger-sourced action
+/// on a Meta channel inbox, checked with the flow step's field schema.
+async fn meta_capi_event(
+    ctx: &ActionCtx<'_>,
+    scope: &mut Scope,
+    conversation: &Conversation,
+) -> Result<Outcome, JobError> {
+    use chatbotx_core::flow_config::steps::{
+        meta_capi_event_fields_schema, with_meta_capi_event_refinements,
+    };
+    if ctx
+        .occurrence_key
+        .as_deref()
+        .is_some_and(|k| k.starts_with("inboundWebhook:"))
+    {
+        return skipped("unsupportedSource");
+    }
+    let (ws, contact, trigger) = (ctx.workspace_id, ctx.contact_id, ctx.trigger_id);
+    let Some(contact_inbox) = scope.contact_inbox(ctx).await? else {
+        tracing::warn!(
+            "No contact inbox found for contact {contact}, skipping sendMetaCapiEvent action"
+        );
+        return skipped("noContactInbox");
+    };
+    if chatbotx_business::meta_capi_send::capi_channel(&contact_inbox.channel).is_none() {
+        tracing::warn!(
+            "Unsupported Meta CAPI trigger channel: {}",
+            contact_inbox.channel
+        );
+        return skipped("unsupportedChannel");
+    }
+    let parsed =
+        with_meta_capi_event_refinements(meta_capi_event_fields_schema()).safe_parse(ctx.action);
+    let Some(action) = parsed.data.clone().filter(|_| parsed.success) else {
+        let detail = chatbotx_business::meta_capi_send::prettify(parsed.issues());
+        tracing::warn!("Invalid Meta CAPI trigger action for trigger {trigger}: {detail}");
+        chatbotx_business::meta_capi_send::report_input_failure(
+            ctx.deps.events.as_ref(),
+            ws,
+            contact,
+            &contact_inbox.source_id,
+            format!("Invalid Meta CAPI trigger action (trigger {trigger}):\n{detail}"),
+        )
+        .await;
+        return skipped("invalidAction");
+    };
+    crate::meta_capi_producer::produce(crate::meta_capi_producer::Produce {
+        deps: ctx.deps,
+        conversation,
+        contact_inbox: &contact_inbox,
+        source: "triggerAction",
+        scope: "trigger",
+        scope_id: trigger.to_string(),
+        fields: &action,
+        sent_by_user_id: None,
+    })
+    .await
+    .map_err(JobError::retryable)?;
+    Ok(Outcome::Succeeded)
 }
 
 /// `sendGoogleAdsConversion` (`integration-actions.ts`): the threaded inbox

@@ -232,10 +232,23 @@ async fn dispatch_reply(
         if !rule_matches_message(rule, &input) {
             continue;
         }
-        // ponytail: the keyword leaderboard award is not ported. The CTWA ads
-        // `keywordMatched` evaluation waits for its consumer
-        // (`evaluateConversionTrigger` / `sendConversionEvent`, not ported):
-        // a job with no handler fails unrecoverable (DECISIONS 2026-11-20).
+        // ponytail: the keyword leaderboard award is not ported.
+        // Ads conversion `keywordMatched`: inbound rules on ad channels only.
+        if row.r#type == "inbound"
+            && chatbotx_business::ads::conversion::is_ads_eligible_channel(&contact_inbox.channel)
+        {
+            chatbotx_business::ads::conversion::enqueue_keyword_matched_evaluation(
+                &deps.db,
+                deps.jobs.as_ref(),
+                conversation.workspace_id,
+                &contact_inbox.channel,
+                contact_inbox.inbox_id,
+                contact_inbox.id,
+                row.id,
+                &message.id.to_string(),
+            )
+            .await;
+        }
         let tracking = json!({
             "aiProvider": "none",
             "messageId": message.id.to_string(),
