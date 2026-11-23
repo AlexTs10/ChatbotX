@@ -4,6 +4,8 @@
 
 #[path = "ads_audience_users.rs"]
 mod ads_audience_users;
+#[path = "ads_automatic_event.rs"]
+mod ads_automatic_event;
 #[path = "ai_agent_service.rs"]
 mod ai_agent_service;
 #[path = "ai_file_service.rs"]
@@ -256,10 +258,16 @@ mod messenger_ads_json;
 mod messenger_contact_data;
 #[path = "meta_capi_connect.rs"]
 mod meta_capi_connect;
+#[path = "meta_capi_send_event.rs"]
+mod meta_capi_send_event;
 #[path = "meta_catalog_connect.rs"]
 mod meta_catalog_connect;
 #[path = "meta_catalog_service.rs"]
 mod meta_catalog_service;
+#[path = "meta_conversions_events.rs"]
+mod meta_conversions_events;
+#[path = "meta_conversions_hash_user_data.rs"]
+mod meta_conversions_hash_user_data;
 #[path = "mini_app_definition.rs"]
 mod mini_app_definition;
 #[path = "mini_app_service.rs"]
@@ -386,6 +394,8 @@ mod whatsapp_call_hours;
 mod whatsapp_call_ring_targets;
 #[path = "whatsapp_call_voip_call_service.rs"]
 mod whatsapp_call_voip_call_service;
+#[path = "whatsapp_conversions.rs"]
+mod whatsapp_conversions;
 #[path = "whatsapp_flow_labels.rs"]
 mod whatsapp_flow_labels;
 #[path = "whatsapp_flow_response.rs"]

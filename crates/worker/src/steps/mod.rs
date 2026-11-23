@@ -195,6 +195,7 @@ pub(crate) async fn run(
         "pipeline" => pipeline::handle(&ctx).await,
         "findPlacesNearMe" => places::handle(&ctx).await,
         "sendGoogleAdsConversion" => Ok(crate::google_ads_producer::step(&ctx).await),
+        "sendMetaCapiEvent" => Ok(crate::meta_capi_producer::step(&ctx).await),
         "evaluateDecision" => decision::handle(&ctx).await,
         "changeGamificationScore" => crate::leaderboard::change_score_step(&ctx).await,
         // The dropped Execute JavaScript step (DECISIONS 2026-11-11) has no

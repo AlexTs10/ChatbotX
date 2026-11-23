@@ -44,7 +44,18 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             crate::low::comment_moderation(&deps, &job.data["data"]).await?
         }
         crate::low::COMMENT_AI_REPLY => crate::low::comment_ai_reply(&deps, &job).await?,
-        // ponytail: handoff re-entry is Q.D6.
+        crate::ai::context::SUMMARIZE_CONVERSATION => {
+            crate::ai::context::handle_summarize(&deps, &job.data["data"]).await?
+        }
+        crate::ai::conversation_source::PROCESS_CONVERSATION_SOURCE => {
+            crate::ai::conversation_source::process_source(&deps, &job.data["data"]).await?
+        }
+        crate::ai::conversation_source::PROCESS_CONVERSATION_SOURCE_EMBEDDING => {
+            crate::ai::conversation_source::process_embedding(&deps, &job.data["data"]).await?
+        }
+        crate::handoff_reentry::PROCESS_HANDOFF_REENTRY => {
+            crate::handoff_reentry::process(&deps, &job.data["data"]).await?
+        }
         other => {
             return Err(JobError::unrecoverable(format!(
                 "AIJobAction action is not defined: {other}"
@@ -232,10 +243,23 @@ async fn dispatch_reply(
         if !rule_matches_message(rule, &input) {
             continue;
         }
-        // ponytail: the keyword leaderboard award is not ported. The CTWA ads
-        // `keywordMatched` evaluation waits for its consumer
-        // (`evaluateConversionTrigger` / `sendConversionEvent`, not ported):
-        // a job with no handler fails unrecoverable (DECISIONS 2026-11-20).
+        // ponytail: the keyword leaderboard award is not ported.
+        // Ads conversion `keywordMatched`: inbound rules on ad channels only.
+        if row.r#type == "inbound"
+            && chatbotx_business::ads::conversion::is_ads_eligible_channel(&contact_inbox.channel)
+        {
+            chatbotx_business::ads::conversion::enqueue_keyword_matched_evaluation(
+                &deps.db,
+                deps.jobs.as_ref(),
+                conversation.workspace_id,
+                &contact_inbox.channel,
+                contact_inbox.inbox_id,
+                contact_inbox.id,
+                row.id,
+                &message.id.to_string(),
+            )
+            .await;
+        }
         let tracking = json!({
             "aiProvider": "none",
             "messageId": message.id.to_string(),

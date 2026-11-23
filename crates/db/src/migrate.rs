@@ -43,6 +43,11 @@ pub const MIGRATIONS: &[Migration] = &[
     migration!(3, "jobs", "0003_jobs.sql"),
     migration!(4, "rest", "0004_rest.sql"),
     migration!(5, "kv", "0005_kv.sql"),
+    migration!(
+        6,
+        "connect_session_meta_capi_q_p7_v1",
+        "0006_connect_session_meta_capi_q_p7_v1.sql"
+    ),
 ];
 
 const CREATE_SCHEMA_MIGRATIONS: &str = r#"CREATE TABLE IF NOT EXISTS "schema_migrations" (
@@ -406,12 +411,12 @@ mod tests {
         let mut conn = conn();
         assert_eq!(
             migrate(&mut conn).expect("migrate").applied,
-            [1, 2, 3, 4, 5]
+            [1, 2, 3, 4, 5, 6]
         );
-        assert_eq!(count(&conn, "PRAGMA user_version"), 5);
+        assert_eq!(count(&conn, "PRAGMA user_version"), 6);
         assert_eq!(
             count(&conn, r#"SELECT count(*) FROM "schema_migrations""#),
-            5
+            6
         );
         let checksums: Vec<String> = conn
             .prepare(r#"SELECT "checksum" FROM "schema_migrations" ORDER BY "version""#)
@@ -422,7 +427,7 @@ mod tests {
             .expect("rows");
         assert_eq!(
             checksums,
-            MIGRATIONS[0..5]
+            MIGRATIONS[0..6]
                 .iter()
                 .map(Migration::checksum)
                 .collect::<Vec<_>>()
@@ -451,10 +456,10 @@ mod tests {
             migrate(&mut conn).expect("second run").applied,
             Vec::<u32>::new()
         );
-        assert_eq!(count(&conn, "PRAGMA user_version"), 5);
+        assert_eq!(count(&conn, "PRAGMA user_version"), 6);
         assert_eq!(
             count(&conn, r#"SELECT count(*) FROM "schema_migrations""#),
-            5
+            6
         );
     }
 

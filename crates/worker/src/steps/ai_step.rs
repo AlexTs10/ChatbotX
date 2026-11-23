@@ -7,6 +7,7 @@
 
 use chatbotx_business::contact_custom_field::{self, SetValueByKeyInput};
 use chatbotx_db::repo::message::{SinceTimeInput, get_safe_since_time};
+use chatbotx_db::repo::now_ms;
 use chatbotx_db::rusqlite::{OptionalExtension as _, params};
 use chatbotx_jobs::JobError;
 use serde_json::{Value, json};
@@ -15,7 +16,7 @@ use super::{StepCtx, step_error};
 use crate::ai::llm::{self, Part, Request, ToolChoice, Turn};
 use crate::ai::{self, Agent, model, text, toolset};
 use crate::flow::StepStatus;
-use crate::{db_fail, id_of, str_of};
+use crate::{db_fail, fail, id_of, str_of};
 
 const ERROR_INSUFFICIENT_CREDITS: &str =
     "AI provider has insufficient credits. Please check your billing settings.";
@@ -263,13 +264,17 @@ async fn generate_text_agent(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobErr
         return Ok(step_error(ctx, "AI Agent not found"));
     };
     let deps = ctx.run.deps;
-    let summary = ai::context_summary(
+    // A message read failure retries the job (`isMessageStorageError`).
+    let summary = ai::context::get_or_init(
         deps,
         ctx.workspace_id(),
         ctx.run.conversation.id,
         &agent.models,
     )
-    .await;
+    .await
+    .map_err(fail)?
+    .map(|context| context.summary)
+    .unwrap_or_default();
     let message = match ctx
         .resolve_variables(&json!(ctx.str("message").unwrap_or("")), false)
         .await
@@ -325,6 +330,12 @@ async fn generate_text_agent(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobErr
         if is_preferred { None } else { native },
     )
     .await;
+    // `runAIAgentRunner` appends a model answer (not the fallback text).
+    if let Some(reply) = reply.as_ref().filter(|r| !r.used_fallback_text) {
+        let answer =
+            ai::context::AiMessage::text("assistant", &reply.full_text, None, Some(now_ms()));
+        ai::context::append_history(deps, ctx.run.conversation.id, vec![answer]).await;
+    }
     let Some(reply) = reply else {
         if provider == "openaiCompatible" {
             return Ok(step_error(ctx, OPENAI_COMPATIBLE_MISSING));

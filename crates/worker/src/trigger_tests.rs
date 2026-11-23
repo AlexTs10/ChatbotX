@@ -167,7 +167,7 @@ async fn a_contact_without_a_conversation_is_skipped_and_unknown_actions_are_ski
         act(&f, json!({ "type": "sendMetaCapiEvent" }), None, None)
             .await
             .unwrap(),
-        Outcome::Skipped("notPorted".into())
+        Outcome::Skipped("unsupportedChannel".into())
     );
     f.exec(r#"DELETE FROM "Conversation""#).await;
     assert_eq!(
@@ -482,4 +482,48 @@ async fn a_pipeline_action_without_a_pipeline_is_reported_not_raised() {
     .await
     .unwrap();
     assert!(matches!(outcome, Outcome::Skipped(_)), "{outcome:?}");
+}
+
+#[tokio::test]
+async fn send_meta_capi_event_enqueues_one_event_on_a_meta_inbox() {
+    let mut f = fixture().await;
+    f.on_channel("messenger").await;
+    // Purchase without value / currency is an invalid action: Error Log, skip.
+    assert_eq!(
+        act(
+            &f,
+            json!({ "type": "sendMetaCapiEvent", "eventName": "Purchase" }),
+            Some(5),
+            None
+        )
+        .await
+        .unwrap(),
+        Outcome::Skipped("invalidAction".into())
+    );
+    assert!(f.jobs.named("sendMetaCapiEvent").is_empty());
+    assert_eq!(
+        act(
+            &f,
+            json!({ "type": "sendMetaCapiEvent", "eventName": "Purchase", "value": "35", "currency": "usd" }),
+            Some(5),
+            None
+        )
+        .await
+        .unwrap(),
+        Outcome::Succeeded
+    );
+    let jobs = f.jobs.named("sendMetaCapiEvent");
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(
+        f.text(r#"SELECT "source" || ':' || "eventName" || ':' || "currency" || ':' || "value" FROM "MetaCapiEvent""#)
+            .await
+            .as_deref(),
+        Some("triggerAction:Purchase:USD:35")
+    );
+    assert!(
+        f.text(r#"SELECT "sourceKey" FROM "MetaCapiEvent""#)
+            .await
+            .unwrap()
+            .starts_with("trigger:70:5:")
+    );
 }

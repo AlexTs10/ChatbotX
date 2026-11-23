@@ -130,6 +130,70 @@ pub(crate) async fn extract_text_from_file(deps: &Deps, data: &Value) -> Result<
     Ok(json!({ "snippets": snippets, "truncated": truncated }))
 }
 
+/// `heavy/handlers/analyze-image.ts`: the stored image and the prompt to
+/// the reply model of `providerInfo`; `{ analysis }` is the trimmed answer.
+pub(crate) async fn analyze_image(deps: &Deps, data: &Value) -> Result<Value, JobError> {
+    use base64::Engine as _;
+
+    use crate::ai::llm::{self, Part, Request, Turn};
+
+    let max = crate::heavy::max_image_bytes();
+    let too_large = || JobError::unrecoverable("Image is too large for image reader");
+    if data.get("sizeBytes").and_then(Value::as_f64).unwrap_or(0.0) > max as f64 {
+        return Err(too_large());
+    }
+    let path = str_of(data, "originPath").unwrap_or("");
+    let Some(files) = &deps.files else {
+        return Err(fail("File storage is not configured"));
+    };
+    match files.head_object(path).await {
+        Ok(head) if head.content_length > max => return Err(too_large()),
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!(err = %e, origin_path = path, "[image-reader] headObject failed, falling back to byte check");
+        }
+    }
+    let image = files
+        .get_object(path)
+        .await
+        .map_err(|e| fail(e.to_string()))?;
+    if image.len() as u64 > max {
+        return Err(too_large());
+    }
+    let workspace_id = data
+        .get("workspaceId")
+        .and_then(crate::id_of)
+        .unwrap_or_default();
+    let provider_info = data.get("providerInfo").cloned().unwrap_or(Value::Null);
+    let model = crate::ai::agent_model(&deps.db, workspace_id, &provider_info)
+        .await
+        .map_err(fail)?
+        .ok_or_else(|| JobError::unrecoverable("Image reader model is not available"))?;
+    let mime = str_of(data, "mimeType").unwrap_or("").to_owned();
+    let url = format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&image)
+    );
+    let mut request = Request::new(
+        None,
+        vec![Turn::User(vec![
+            Part::Text(str_of(data, "prompt").unwrap_or("").to_owned()),
+            Part::File {
+                url,
+                media_type: mime,
+            },
+        ])],
+    );
+    request.max_output_tokens = Some(IMAGE_READER_MAX_OUTPUT_TOKENS);
+    request.temperature = Some(0.2);
+    let generated = llm::generate(&*deps.ai.http, &model, &request, &llm::NoTools)
+        .await
+        .map_err(|e| fail(e.message))?;
+    Ok(json!({ "analysis": generated.text().trim() }))
+}
+
+const IMAGE_READER_MAX_OUTPUT_TOKENS: i64 = 800;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +223,84 @@ mod tests {
         let text = format!("{sentence} {sentence}");
         let chunks = chunk_large_segment(text);
         assert_eq!(chunks, vec![sentence.clone(), sentence]);
+    }
+
+    /// `heavy-analyze-image.test.ts`, on a local file store and a scripted
+    /// provider.
+    mod analyze {
+        use std::sync::Arc;
+
+        use chatbotx_files::{Backend, FilesConfig, Uploader};
+
+        use super::super::analyze_image;
+        use crate::ai::Ai;
+        use crate::ai::llm::fake::FakeHttp;
+        use crate::steps::test_support::Fixture;
+        use serde_json::{Value, json};
+
+        async fn env(answers: Vec<(u16, Value)>) -> (Fixture, Arc<FakeHttp>, std::path::PathBuf) {
+            let mut fx = Fixture::new().await;
+            let root =
+                std::env::temp_dir().join(format!("cx-analyze-{}", chatbotx_db::repo::new_id()));
+            std::fs::create_dir_all(root.join("workspace")).unwrap();
+            std::fs::write(root.join("workspace/image.jpg"), [1u8, 2, 3]).unwrap();
+            let files = FilesConfig {
+                backend: Backend::Local { root: root.clone() },
+                signing_secret: None,
+                url_base: "http://files.test".into(),
+            };
+            fx.deps.files = Some(Arc::new(Uploader::new(&files).unwrap()));
+            let http = Arc::new(FakeHttp::new(answers));
+            fx.deps.ai = Arc::new(Ai {
+                http: http.clone(),
+                embedder: Arc::new(chatbotx_business::ai::knowledge::HttpEmbedder::new()),
+            });
+            fx.exec(
+                r#"INSERT INTO "Integration" ("id", "workspaceId", "integrationType") VALUES (70, 2, 'muse');
+                   INSERT INTO "IntegrationMuse" ("id", "auth", "workspaceId", "integrationId", "maxOutputTokens", "model", "autoReply")
+                     VALUES (72, '{"authType":"secretText","secretText":"k"}', 2, 70, 500, 'muse-spark-1.3', 1);"#,
+            )
+            .await;
+            (fx, http, root)
+        }
+
+        fn job(size: u64) -> Value {
+            json!({ "mimeType": "image/jpeg", "originPath": "workspace/image.jpg", "prompt": "Describe the image",
+                    "providerInfo": { "model": "muse-spark-1.3", "provider": "muse" }, "sizeBytes": size, "workspaceId": "2" })
+        }
+
+        #[tokio::test]
+        async fn sends_the_image_as_a_file_part_with_its_exact_mime_type() {
+            let (fx, http, root) = env(vec![FakeHttp::openai_text("  A photo  ")]).await;
+            let out = analyze_image(&fx.deps, &job(3)).await.unwrap();
+            assert_eq!(out, json!({ "analysis": "A photo" }));
+            let body = &http.requests()[0].1;
+            assert_eq!(
+                body["messages"][0],
+                json!({ "role": "user", "content": [
+                    { "type": "text", "text": "Describe the image" },
+                    { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,AQID" } }] })
+            );
+            assert_eq!(
+                (body["max_tokens"].clone(), body["temperature"].clone()),
+                (json!(800 + 1024), json!(0.2)),
+                "800 tokens plus the Muse reasoning headroom"
+            );
+            let _ = std::fs::remove_dir_all(root);
+        }
+
+        #[tokio::test]
+        async fn a_too_large_image_or_a_missing_model_is_unrecoverable() {
+            let (fx, http, root) = env(vec![]).await;
+            let err = analyze_image(&fx.deps, &job(u64::MAX >> 1))
+                .await
+                .unwrap_err();
+            assert!(format!("{err:?}").contains("Image is too large for image reader"));
+            fx.exec(r#"DELETE FROM "IntegrationMuse""#).await;
+            let err = analyze_image(&fx.deps, &job(3)).await.unwrap_err();
+            assert!(format!("{err:?}").contains("Image reader model is not available"));
+            assert!(http.requests().is_empty());
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 }
