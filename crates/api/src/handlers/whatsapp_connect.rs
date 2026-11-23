@@ -645,11 +645,15 @@ pub async fn reconnect(
     )
     .await
     .map_err(graph)?;
-    let waba_id =
-        resolve_owning_waba_id(base, &token, &settings, &[existing.phone_number_id.clone()])
-            .await
-            .map_err(graph)?
-            .ok_or_else(|| exception(WABA_RESOLVE_FAILED))?;
+    let waba_id = resolve_owning_waba_id(
+        base,
+        &token,
+        &settings,
+        std::slice::from_ref(&existing.phone_number_id),
+    )
+    .await
+    .map_err(graph)?
+    .ok_or_else(|| exception(WABA_RESOLVE_FAILED))?;
     if waba_id != existing.waba_id {
         return Err(exception(WABA_MISMATCH));
     }

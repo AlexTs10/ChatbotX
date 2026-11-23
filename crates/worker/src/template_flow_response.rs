@@ -112,8 +112,7 @@ pub(crate) async fn award_survey(
     let Some(message_id) = message_id.filter(|_| contact_inbox.channel == "whatsapp") else {
         return;
     };
-    let Some(event_at) =
-        chatbotx_core::utils::id::created_at_from_id(&message_id.to_string())
+    let Some(event_at) = chatbotx_core::utils::id::created_at_from_id(&message_id.to_string())
     else {
         return;
     };

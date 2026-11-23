@@ -476,7 +476,9 @@ pub fn resolve_sent_whatsapp_flow(
     let Some(flow_token) = flow_token.filter(|t| !t.is_empty()) else {
         return Ok(None);
     };
-    if let Some(token) = chatbotx_core::flow_config::steps::decode_template_flow_token(Some(flow_token)) {
+    if let Some(token) =
+        chatbotx_core::flow_config::steps::decode_template_flow_token(Some(flow_token))
+    {
         return Ok(
             resolve_template_flow_button(conn, &token, workspace_id, inbox_id)?.map(|r| SentFlow {
                 flow_source_id: r.flow_source_id,

@@ -970,9 +970,7 @@ pub fn parse_incoming(payload: &Value) -> Received {
                 .as_ref()
                 .filter(|a| a["type"] == "whatsapp_flow_response" && a["decoded"].is_null())
                 .and_then(|a| a["flowToken"].as_str())
-                .filter(|t| {
-                    chatbotx_core::flow_config::steps::is_template_flow_token(Some(t))
-                })
+                .filter(|t| chatbotx_core::flow_config::steps::is_template_flow_token(Some(t)))
                 .map(str::to_owned);
             incoming.content_attributes = attributes;
         }

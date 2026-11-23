@@ -154,9 +154,12 @@ fn file(id: &str) -> Value {
             "size": 10, "url": format!("https://cdn.example.com/{id}.pdf") })
 }
 
+/// `(mappings, response, files, stored values)`.
+type FileCase = (Value, Value, Option<Value>, Vec<(i64, String)>);
+
 #[tokio::test]
 async fn file_answers_store_kept_urls_and_never_the_raw_answer() {
-    let cases: Vec<(Value, Value, Option<Value>, Vec<(i64, String)>)> = vec![
+    let cases: Vec<FileCase> = vec![
         // Every URL, comma-separated, by default; `firstUrl` keeps one.
         (
             json!([{ "paramKey": "docs", "customFieldId": "35" }]),
@@ -212,7 +215,8 @@ async fn file_answers_store_kept_urls_and_never_the_raw_answer() {
             json!([{ "paramKey": "docs", "customFieldId": "35" }]),
             json!({ "docs": [{ "id": "1", "file_name": "a.pdf" }] }),
             None,
-            values(&[(35, r#"[{"id":"1","file_name":"a.pdf"}]"#)]),
+            // serde_json sorts the keys (no `preserve_order`).
+            values(&[(35, r#"[{"file_name":"a.pdf","id":"1"}]"#)]),
         ),
     ];
     for (mappings, response, files, expected) in cases {
@@ -247,16 +251,23 @@ const LATE_EVENING_UTC_MS: &str = "1710958020000";
 
 #[tokio::test]
 async fn date_answers_take_the_shape_of_a_date_field() {
-    // A legacy millisecond timestamp: the workspace's day in a date field,
-    // the instant in a datetime field.
+    // A legacy millisecond timestamp: the workspace's day in a date field
+    // (stored by `setValues` as that day's local midnight), the instant in a
+    // datetime field.
     assert_eq!(
         save_answers(json!({ "33": LATE_EVENING_UTC_MS, "34": LATE_EVENING_UTC_MS })).await,
-        values(&[(33, "2024-03-21"), (34, "2024-03-20T18:07:00.000Z")])
+        values(&[
+            (33, "2024-03-21T00:00:00+07:00"),
+            (34, "2024-03-20T18:07:00.000Z")
+        ])
     );
     // Older timestamps (before 2001, before 1970) are dates too.
     assert_eq!(
         save_answers(json!({ "33": "631152000000", "34": "-315619200000" })).await,
-        values(&[(33, "1990-01-01"), (34, "1960-01-01T00:00:00.000Z")])
+        values(&[
+            (33, "1990-01-01T00:00:00+07:00"),
+            (34, "1960-01-01T00:00:00.000Z")
+        ])
     );
     for (ms, expected) in [
         ("0", "1970-01-01T00:00:00.000Z"),
@@ -272,7 +283,10 @@ async fn date_answers_take_the_shape_of_a_date_field() {
     // workspace zone, +07:00) in a datetime field.
     assert_eq!(
         save_answers(json!({ "34": "2024-10-21", "33": "2024-10-21" })).await,
-        values(&[(33, "2024-10-21"), (34, "2024-10-20T17:00:00.000Z")])
+        values(&[
+            (33, "2024-10-21T00:00:00+07:00"),
+            (34, "2024-10-20T17:00:00.000Z")
+        ])
     );
     // A number in a number field and a date-like text answer are untouched;
     // a CalendarPicker range is `start - end`.

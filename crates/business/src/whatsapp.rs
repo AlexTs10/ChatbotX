@@ -648,11 +648,8 @@ mod tests {
         });
         let map = response.as_object().unwrap();
         let none = |_: &str| None;
-        let fields: Vec<Value> = jsonb_order(map.keys())
-            .into_iter()
-            .filter(|k| k.as_str() != "flow_token")
-            .map(|k| to_field(k, &map[k], None, &none))
-            .collect();
+        let view = build_flow_response_fields(map, &[], None, &none);
+        let fields = view["fields"].as_array().unwrap();
         let keys: Vec<&str> = fields.iter().map(|f| f["key"].as_str().unwrap()).collect();
         assert_eq!(
             keys,

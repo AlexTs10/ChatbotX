@@ -396,7 +396,11 @@ async fn session(fx: &Fixture, user: i64, workspace: Option<i64>, candidates: &[
         now: chatbotx_db::repo::now_ms(),
     };
     fx.db()
-        .write(move |tx| Ok(signup::create_signup_session(tx, &input)?.id))
+        .write(move |tx| {
+            Ok(signup::create_signup_session(tx, &input)
+                .expect("signup session")
+                .id)
+        })
         .await
         .unwrap()
         .to_string()

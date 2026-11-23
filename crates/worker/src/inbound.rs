@@ -1210,7 +1210,10 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
     }
 
     // A template FLOW button's response (`captureTemplateFlowResponse`).
-    if let Some(token) = received.template_flow_token.as_deref().filter(|_| can_automate)
+    if let Some(token) = received
+        .template_flow_token
+        .as_deref()
+        .filter(|_| can_automate)
         && let Some(flow_response) = chatbotx_business::whatsapp::whatsapp_flow_response(
             received
                 .message
