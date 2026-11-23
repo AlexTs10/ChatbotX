@@ -3,7 +3,10 @@
 //! `sanitizeReferer` block of `oauth-referer.test.ts` and the state block of
 //! `whatsapp-embedded-signup.test.ts` (real `CustomDomain` rows in place of
 //! the mocked `findActiveByDomain`; the fixture app URL is `http://app`),
-//! plus the relay page itself.
+//! plus the relay page itself. Q.P7-V4 adds the `sanitizeOptionalReturnUrl`,
+//! `resolveRelayTarget` and "with a dedicated broker host" blocks (the broker
+//! origin is passed explicitly in place of `NEXT_PUBLIC_BROKER_URL`; without
+//! one it is the builder origin).
 
 mod handlers_common;
 
@@ -13,7 +16,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::Engine as _;
 use chatbotx_api::whatsapp_callback::{
-    FALLBACK_REDIRECT, decode_state, outcome, relay_html, safe_json, sanitize_referer,
+    FALLBACK_REDIRECT, decode_state, outcome, relay_html, resolve_relay_target, safe_json,
+    sanitize_optional_return_url, sanitize_referer, sanitize_referer_via,
 };
 use handlers_common::fixture;
 use tower::ServiceExt as _;
@@ -216,4 +220,149 @@ async fn the_callback_relays_the_code_to_an_allowed_origin_only() {
             (StatusCode::BAD_REQUEST, "Invalid request")
         );
     }
+}
+
+// ---- sanitizeOptionalReturnUrl / resolveRelayTarget (Q.P7-V4) -----------
+
+const PLATFORM: &str = "http://app";
+const BROKER: &str = "https://auth.broker.example";
+
+fn url(raw: &str) -> url::Url {
+    url::Url::parse(raw).unwrap()
+}
+
+#[tokio::test]
+async fn sanitize_optional_return_url_refuses_missing_malformed_and_foreign_urls() {
+    let fx = fixture().await;
+    for raw in [
+        None,
+        Some(""),
+        Some("not-a-url"),
+        Some("javascript:alert(document.cookie)"),
+        Some("//evil.com/path"),
+        Some("https://evil.example.org/steal"),
+    ] {
+        assert_eq!(
+            sanitize_optional_return_url(&fx.state, PLATFORM, raw).await,
+            None,
+            "{raw:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sanitize_optional_return_url_accepts_the_platform_and_an_active_custom_domain() {
+    let fx = fixture().await;
+    active_domain(&fx, "chat.acme.com", "active").await;
+    for raw in [
+        "http://app/connections/success",
+        "https://chat.acme.com/connections/success",
+    ] {
+        assert_eq!(
+            sanitize_optional_return_url(&fx.state, PLATFORM, Some(raw))
+                .await
+                .as_deref(),
+            Some(raw)
+        );
+    }
+}
+
+#[tokio::test]
+async fn resolve_relay_target_relays_to_the_originating_custom_domain_only() {
+    let fx = fixture().await;
+    active_domain(&fx, "chat.acme.com", "active").await;
+    let callback = url("http://app/integrations/messenger/callback?code=abc&state=xyz");
+    assert_eq!(
+        resolve_relay_target(
+            &fx.state,
+            PLATFORM,
+            &callback,
+            "https://chat.acme.com/space/42/dashboard"
+        )
+        .await
+        .as_deref(),
+        Some("https://chat.acme.com/integrations/messenger/callback?code=abc&state=xyz")
+    );
+    // Already on the originating domain, the platform itself, an unknown
+    // domain, an invalid referer: no relay.
+    let on_domain = url("https://chat.acme.com/integrations/messenger/callback?code=abc");
+    let on_platform = url("http://app/integrations/messenger/callback?code=abc");
+    for (callback, referer) in [
+        (&on_domain, "https://chat.acme.com/space/42/dashboard"),
+        (&on_platform, "http://app/space/42/dashboard"),
+        (&on_platform, "https://evil.example.org/space/42/dashboard"),
+        (&on_platform, "not-a-url"),
+    ] {
+        assert_eq!(
+            resolve_relay_target(&fx.state, PLATFORM, callback, referer).await,
+            None,
+            "{referer}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn with_a_dedicated_broker_host_both_hosts_are_ours() {
+    let fx = fixture().await;
+    active_domain(&fx, "chat.acme.com", "active").await;
+    for referer in [
+        format!("{BROKER}/welcome"),
+        "http://app/space/42/dashboard".to_owned(),
+    ] {
+        assert_eq!(
+            sanitize_referer_via(&fx.state, BROKER, &referer).await,
+            referer
+        );
+    }
+    let back = format!("{BROKER}/connections/success");
+    assert_eq!(
+        sanitize_optional_return_url(&fx.state, BROKER, Some(&back))
+            .await
+            .as_deref(),
+        Some(back.as_str())
+    );
+
+    // From the broker to the builder URL and to an active custom domain;
+    // from the builder host too (relay is not broker-only).
+    let google = url(&format!(
+        "{BROKER}/api/auth/callback/google?code=abc&state=xyz"
+    ));
+    assert_eq!(
+        resolve_relay_target(&fx.state, BROKER, &google, "http://app/space/42/dashboard")
+            .await
+            .as_deref(),
+        Some("http://app/api/auth/callback/google?code=abc&state=xyz")
+    );
+    let tiktok = url(&format!(
+        "{BROKER}/integrations/tiktok/callback?code=abc&state=xyz"
+    ));
+    assert_eq!(
+        resolve_relay_target(
+            &fx.state,
+            BROKER,
+            &tiktok,
+            "https://chat.acme.com/space/42/dashboard"
+        )
+        .await
+        .as_deref(),
+        Some("https://chat.acme.com/integrations/tiktok/callback?code=abc&state=xyz")
+    );
+    let platform = url("http://app/integrations/tiktok/callback?code=abc");
+    assert_eq!(
+        resolve_relay_target(
+            &fx.state,
+            BROKER,
+            &platform,
+            "https://chat.acme.com/space/42/dashboard"
+        )
+        .await
+        .as_deref(),
+        Some("https://chat.acme.com/integrations/tiktok/callback?code=abc")
+    );
+    // Never back to the broker itself.
+    let on_broker = url(&format!("{BROKER}/integrations/tiktok/callback?code=abc"));
+    assert_eq!(
+        resolve_relay_target(&fx.state, BROKER, &on_broker, &format!("{BROKER}/welcome")).await,
+        None
+    );
 }

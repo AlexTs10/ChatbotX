@@ -263,13 +263,15 @@ fn normalize_channel_api_profile(
     (update, language)
 }
 
-/// `contactService.updateIfProfileNameEmpty`: the write only lands while both
-/// names are still blank; `None` = a name was set first.
+/// `contactService.updateIfProfileNameEmpty` (`only_if_name_empty`: the
+/// write only lands while both names are still blank; `None` = a name was set
+/// first) or `contactService.update` (always written).
 fn update_if_profile_name_empty(
     tx: &Connection,
     workspace_id: i64,
     id: i64,
     update: &ContactProfileUpdate,
+    only_if_name_empty: bool,
 ) -> Result<Option<Contact>> {
     find_or_fail(tx, workspace_id, id)?;
     let columns: Vec<(&str, &Option<String>)> = vec![
@@ -291,10 +293,13 @@ fn update_if_profile_name_empty(
         sql.push_str(&format!(r#", "{column}" = ?{}"#, i + 5));
         values.push(value.clone().into());
     }
-    sql.push_str(
-        r#" WHERE "id" = ?2 AND "workspaceId" = ?3
-            AND trim(coalesce("firstName", ''), ?4) = '' AND trim(coalesce("lastName", ''), ?4) = ''"#,
-    );
+    sql.push_str(r#" WHERE "id" = ?2 AND "workspaceId" = ?3"#);
+    // `?4` is always bound, so the unconditional write reads it too.
+    sql.push_str(if only_if_name_empty {
+        r#" AND trim(coalesce("firstName", ''), ?4) = '' AND trim(coalesce("lastName", ''), ?4) = ''"#
+    } else {
+        " AND ?4 IS NOT NULL"
+    });
     let changed = tx
         .execute(&sql, params_from_iter(values))
         .map_err(repo_err)?;
@@ -335,6 +340,29 @@ async fn apply_contact_profile_if_name_empty(
     contact_id: i64,
     update: ContactProfileUpdate,
 ) -> Result<Option<Contact>> {
+    write_profile(db, uploader, workspace_id, contact_id, update, true).await
+}
+
+/// `applyContactProfile`: the write (current values overwritten), then the
+/// superseded managed avatar is deleted (best effort).
+pub async fn apply_contact_profile(
+    db: &Db,
+    uploader: Option<&Uploader>,
+    workspace_id: i64,
+    contact_id: i64,
+    update: ContactProfileUpdate,
+) -> Result<Option<Contact>> {
+    write_profile(db, uploader, workspace_id, contact_id, update, false).await
+}
+
+async fn write_profile(
+    db: &Db,
+    uploader: Option<&Uploader>,
+    workspace_id: i64,
+    contact_id: i64,
+    update: ContactProfileUpdate,
+    only_if_name_empty: bool,
+) -> Result<Option<Contact>> {
     let new_avatar = update.avatar.clone();
     let (previous_avatar, updated) = tx::write(db, move |tx| {
         let previous = if update.avatar.is_some() {
@@ -342,7 +370,13 @@ async fn apply_contact_profile_if_name_empty(
         } else {
             None
         };
-        let updated = update_if_profile_name_empty(tx, workspace_id, contact_id, &update)?;
+        let updated = update_if_profile_name_empty(
+            tx,
+            workspace_id,
+            contact_id,
+            &update,
+            only_if_name_empty,
+        )?;
         Ok((previous, updated))
     })
     .await?;
@@ -355,6 +389,37 @@ async fn apply_contact_profile_if_name_empty(
         tracing::warn!(%error, path = previous, "applyProfile: failed to delete superseded avatar");
     }
     Ok(updated)
+}
+
+/// The `updateMessengerContactData` step: the fetched profile overwrites the
+/// contact's current values (even a set name). Best effort: no profile, an
+/// empty one, or a fetch or write error is a no-op (errors are logged).
+pub async fn overwrite_contact_profile<F, Fut>(
+    db: &Db,
+    uploader: Option<&Uploader>,
+    workspace_id: i64,
+    contact_id: i64,
+    fetch_profile: F,
+) where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = FetchResult>,
+{
+    let profile = match fetch_profile().await {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(error, "updateMessengerContactData failed");
+            return;
+        }
+    };
+    let update = build_contact_profile_update(&profile);
+    if update == ContactProfileUpdate::default() {
+        return;
+    }
+    if let Err(error) = apply_contact_profile(db, uploader, workspace_id, contact_id, update).await
+    {
+        tracing::error!(%error, "updateMessengerContactData failed");
+    }
 }
 
 /// `contactProfileRefreshService.refresh`.

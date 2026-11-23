@@ -46,6 +46,9 @@ pub async fn call(
     context: &RpcContext,
     input: &Value,
 ) -> Option<Result<RpcOut, OrpcError>> {
+    if path == "integrationWhatsappAPIs.connectWhatsappNumberAPI" {
+        return Some(whatsapp(api, context, input).await);
+    }
     let (_, provider, key, table) = PROCEDURES.iter().find(|p| p.0 == path)?;
     let text = |k: &str| {
         input[k]
@@ -54,9 +57,7 @@ pub async fn call(
             .map(str::to_owned)
     };
     let (Some(session_id), Some(target)) = (text("sessionId"), text(key)) else {
-        let mut error = OrpcError::new("BAD_REQUEST", Some(400), Some("Input validation failed"));
-        error.defined = false;
-        return Some(Err(error));
+        return Some(Err(bad_input()));
     };
     let user_id = context.session.user_id;
     Some(Ok((
@@ -65,11 +66,56 @@ pub async fn call(
     )))
 }
 
-fn session_error(code: &str) -> Value {
+/// `connectWhatsappNumberAPI` (`connectWhatsappViaSessionRequest`): the
+/// picker's one request per number; `transferPhoneNumber: true` is refused.
+async fn whatsapp(
+    api: &ApiState,
+    context: &RpcContext,
+    input: &Value,
+) -> Result<RpcOut, OrpcError> {
+    let text = |k: &str| {
+        input[k]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    let flag = |k: &str| input.get(k).is_none_or(|v| v.is_null() || v.is_boolean());
+    let (Some(signup_session_id), Some(phone_number_id), Some(connect_existing)) = (
+        text("signupSessionId"),
+        text("phoneNumberId"),
+        input["connectExisting"].as_bool(),
+    ) else {
+        return Err(bad_input());
+    };
+    if !flag("transferPhoneNumber")
+        || !flag("marketingMessageLite")
+        || input["transferPhoneNumber"] == true
+    {
+        return Err(bad_input());
+    }
+    let request = crate::handlers::whatsapp_connect::SessionConnect {
+        signup_session_id,
+        phone_number_id,
+        connect_existing,
+    };
+    let user_id = context.session.user_id;
+    Ok((
+        crate::handlers::whatsapp_connect::connect_number(api, user_id, &request).await,
+        Vec::new(),
+    ))
+}
+
+fn bad_input() -> OrpcError {
+    let mut error = OrpcError::new("BAD_REQUEST", Some(400), Some("Input validation failed"));
+    error.defined = false;
+    error
+}
+
+pub(crate) fn session_error(code: &str) -> Value {
     json!({ "kind": "sessionError", "code": code })
 }
 
-fn outcome(source: &str, name: &str, fields: Value) -> Value {
+pub(crate) fn outcome(source: &str, name: &str, fields: Value) -> Value {
     let mut out = json!({ "sourceId": source, "name": name, "coexistEligible": false });
     if let (Value::Object(target), Value::Object(extra)) = (&mut out, fields) {
         target.extend(extra);
@@ -79,7 +125,7 @@ fn outcome(source: &str, name: &str, fields: Value) -> Value {
 
 /// `toConnectActionFailure`: a session-level exception is a `sessionError`,
 /// anything else a failed item.
-fn failure(error: &BusinessError, source: &str, name: &str) -> Value {
+pub(crate) fn failure(error: &BusinessError, source: &str, name: &str) -> Value {
     let code = match error {
         BusinessError::Exception { code, .. } => code.as_str(),
         _ => "",

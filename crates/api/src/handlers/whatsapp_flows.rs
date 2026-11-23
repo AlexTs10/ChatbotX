@@ -5,7 +5,9 @@
 use std::time::Duration;
 
 use chatbotx_business::net::ssrf_guard::assert_public_url;
-use chatbotx_business::whatsapp_flow::parse_flow_screens;
+use chatbotx_business::whatsapp_flow::{
+    FlowResponseLabel, parse_flow_response_fields, parse_flow_screens,
+};
 use chatbotx_business::{BusinessError, tx};
 use chatbotx_db::repo::models::{IntegrationWhatsapp, WhatsappFlow};
 use chatbotx_db::repo::{find_many, new_id, now_ms};
@@ -168,6 +170,59 @@ async fn flow_screens(graph_url: &str, auth: &Value, flow_source_id: &str) -> Ve
         Ok(flow) => parse_flow_screens(&flow),
         Err(error) => {
             tracing::error!(%error, "Failed to load flow assets");
+            Vec::new()
+        }
+    }
+}
+
+/// `loadFlowResponseLabels`: the labels of the Flow a response answers.
+/// Every miss (a token from outside ChatbotX, a deleted Flow or number, Meta
+/// unreachable) reads as no labels, so the response shows humanized keys.
+pub async fn flow_response_labels(
+    db: &chatbotx_db::Db,
+    graph_url: &str,
+    workspace_id: i64,
+    contact_inbox_id: i64,
+    flow_token: Option<String>,
+) -> Vec<FlowResponseLabel> {
+    use chatbotx_db::repo::integration_whatsapp as repo;
+    let found = tx::read(db, move |conn| {
+        let Some(contact_inbox) = chatbotx_db::repo::find_one::<
+            chatbotx_db::repo::models::ContactInbox,
+        >(conn, "\"id\" = ?1", &[&contact_inbox_id])?
+        else {
+            return Ok(None);
+        };
+        let inbox_id = contact_inbox.inbox_id;
+        let Some(sent) = chatbotx_business::whatsapp_flow_response::resolve_sent_whatsapp_flow(
+            conn,
+            workspace_id,
+            inbox_id,
+            flow_token.as_deref(),
+        )?
+        else {
+            return Ok(None);
+        };
+        let integration = match sent.integration_whatsapp_id {
+            Some(id) => repo::find_by_id_for_workspace(conn, id, workspace_id)?,
+            None => repo::find_by_inbox_id_for_workspace(conn, workspace_id, inbox_id)?,
+        };
+        Ok(integration.map(|i| (sent.flow_source_id, i)))
+    })
+    .await;
+    let (flow_source_id, integration) = match found {
+        Ok(Some(found)) => found,
+        Ok(None) => return Vec::new(),
+        Err(error) => {
+            tracing::warn!(%error, workspace_id, "Could not label a WhatsApp Flow response");
+            return Vec::new();
+        }
+    };
+    // `getFlowResponseFields`.
+    match download_flow_json(graph_url, &integration.auth.0, &flow_source_id).await {
+        Ok(flow) => parse_flow_response_fields(&flow),
+        Err(error) => {
+            tracing::warn!(%error, flow_source_id, "Failed to load flow response labels");
             Vec::new()
         }
     }

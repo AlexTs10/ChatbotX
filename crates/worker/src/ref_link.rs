@@ -453,7 +453,7 @@ mod tests {
         for config in [
             RefConfig::Flow {
                 flow_id: 42,
-                node_id: Some("node-1".into()),
+                node_id: Some("1234567".into()),
             },
             RefConfig::Flow {
                 flow_id: 7,

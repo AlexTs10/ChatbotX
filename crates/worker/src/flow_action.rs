@@ -3,12 +3,12 @@
 //! names.
 //!
 //! ponytail: the rich-response button fallback (`tryRunRichButtonFallback`)
-//! and the WhatsApp Flow form mapping (`applyWhatsappFlowResponseSideEffects`)
-//! are not ported: a tap that names no flow button is skipped with a log.
+//! is not ported: a tap that names no flow button is skipped with a log.
 //! A version-pinned payload keeps its version for the continuations.
 
 use chatbotx_business::conversation_challenge::{ClearQuickReply, clear_quick_reply_challenge};
 use chatbotx_core::flow_config::resolve_flow_action_target;
+use chatbotx_core::flow_config::steps::find_whatsapp_flow_step_by_button_id;
 use chatbotx_core::flow_config::util::decode_button_payload;
 use chatbotx_db::repo::{iso, now_ms};
 use chatbotx_jobs::JobError;
@@ -26,6 +26,49 @@ fn trigger_types(name: &str) -> (&'static str, &'static str) {
     } else {
         ("contact_quick_reply", "contact_quick_reply_failed")
     }
+}
+
+/// `applyWhatsappFlowResponseSideEffects`: a WhatsApp Flow form answer
+/// fills the mapped contact fields, then scores the "survey" rule.
+async fn apply_whatsapp_flow_response(
+    deps: &Deps,
+    conversation: &chatbotx_db::repo::models::Conversation,
+    contact_inbox: &chatbotx_db::repo::models::ContactInbox,
+    step: &Value,
+    response: &serde_json::Map<String, Value>,
+    data: &Value,
+) -> Result<(), JobError> {
+    let Some(flow_source_id) = str_of(&step["flow"], "sourceId").filter(|s| !s.is_empty()) else {
+        tracing::warn!(flow_id = %step["flow"]["id"], "[whatsapp-flow-response] step.flow.sourceId missing");
+        return Ok(());
+    };
+    chatbotx_business::whatsapp_flow_response::apply_response(
+        &deps.db,
+        chatbotx_business::whatsapp_flow_response::ApplyInput {
+            workspace_id: conversation.workspace_id,
+            contact_id: conversation.contact_id,
+            inbox_id: Some(contact_inbox.inbox_id),
+            integration_whatsapp_id: None,
+            flow_source_id: flow_source_id.to_owned(),
+            field_mappings: step["flow"]["fieldMappings"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+            flow_response: response.clone(),
+            flow_files: data["payload"]["flowFiles"].as_object().cloned(),
+        },
+    )
+    .await
+    .map_err(|e| fail(e.to_string()))?;
+    crate::template_flow_response::award_survey(
+        deps,
+        conversation.workspace_id,
+        conversation.contact_id,
+        contact_inbox,
+        data.get("messageId").and_then(id_of),
+    )
+    .await;
+    Ok(())
 }
 
 /// `runFlowAction`.
@@ -115,6 +158,12 @@ pub async fn run_flow_action(
         return Ok(());
     };
     let target_node_id = target.node_id.clone().unwrap_or_default();
+    if let Some(response) = data["payload"]["waFlowResponse"].as_object()
+        && let Some(step) = find_whatsapp_flow_step_by_button_id(&nodes, &button_id)
+    {
+        apply_whatsapp_flow_response(deps, &conversation, &contact_inbox, step, response, data)
+            .await?;
+    }
     if !from_status && let Some(buses) = deps.events.as_ref() {
         let event = json!({
             "nodeId": target_node_id,

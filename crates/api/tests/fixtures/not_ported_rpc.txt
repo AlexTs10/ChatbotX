@@ -1,5 +1,4 @@
 # /rpc procedures and SPA server actions that answer "not ported" (Q.P6-audit).
-actions.reconnectWhatsappAction
 analyticsRoutes.getFlowAnalytics
 analyticsRoutes.resetFlowAnalytics
 connectSessionsAPI.cancelConnectSessionAPI
@@ -38,7 +37,6 @@ igStoriesAPI.listIgStoriesAPI
 igStoriesAPI.updateIgStoryAPI
 inboxesAPI.listInboxesAuthenticatedAPI
 integrationFacebookAdsAPI.getAdInsights
-integrationWhatsappAPIs.connectWhatsappNumberAPI
 integrationWhatsappAPIs.listWhatsappPhoneNumbersInternalAPI
 mediaLibraryAPI.createMediaLibraryFile
 mediaLibraryAPI.createMediaLibraryFolder

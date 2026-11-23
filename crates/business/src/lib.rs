@@ -148,6 +148,7 @@ pub mod webshop;
 pub mod welcome_flow_sync;
 pub mod whatsapp;
 pub mod whatsapp_flow;
+pub mod whatsapp_flow_response;
 pub mod whatsapp_voip;
 pub mod whatsapp_voip_actions;
 pub mod woocommerce;

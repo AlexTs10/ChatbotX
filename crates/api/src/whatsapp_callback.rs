@@ -43,11 +43,16 @@ pub fn decode_state(raw: &str) -> Option<(String, Option<String>)> {
 /// `isAllowedOrigin`: the broker origin, the builder origin, or an active
 /// custom domain.
 pub async fn is_allowed_origin(state: &ApiState, target: &url::Url) -> bool {
+    allowed_origin(state, &broker_origin(&state.app_url), target).await
+}
+
+/// [`is_allowed_origin`] with an explicit broker origin.
+pub async fn allowed_origin(state: &ApiState, broker: &str, target: &url::Url) -> bool {
     let origin = target.origin().ascii_serialization();
     let builder = url::Url::parse(&state.app_url)
         .map(|u| u.origin().ascii_serialization())
         .unwrap_or_default();
-    if origin == broker_origin(&state.app_url) || origin == builder {
+    if origin == broker || origin == builder {
         return true;
     }
     let Some(host) = target.host_str().map(str::to_owned) else {
@@ -73,10 +78,52 @@ pub async fn is_allowed_origin(state: &ApiState, target: &url::Url) -> bool {
 /// `sanitizeReferer`: the referer when it is an allowed origin, else
 /// [`FALLBACK_REDIRECT`].
 pub async fn sanitize_referer(state: &ApiState, referer: &str) -> String {
+    sanitize_referer_via(state, &broker_origin(&state.app_url), referer).await
+}
+
+/// [`sanitize_referer`] with an explicit broker origin.
+pub async fn sanitize_referer_via(state: &ApiState, broker: &str, referer: &str) -> String {
     match url::Url::parse(referer) {
-        Ok(parsed) if is_allowed_origin(state, &parsed).await => referer.to_owned(),
+        Ok(parsed) if allowed_origin(state, broker, &parsed).await => referer.to_owned(),
         _ => FALLBACK_REDIRECT.to_owned(),
     }
+}
+
+/// `sanitizeOptionalReturnUrl`: like [`sanitize_referer`], but a missing,
+/// invalid or foreign URL is `None` (no `/manage` fallback).
+pub async fn sanitize_optional_return_url(
+    state: &ApiState,
+    broker: &str,
+    redirect_url: Option<&str>,
+) -> Option<String> {
+    let raw = redirect_url.filter(|u| !u.is_empty())?;
+    let parsed = url::Url::parse(raw).ok()?;
+    allowed_origin(state, broker, &parsed)
+        .await
+        .then(|| raw.to_owned())
+}
+
+/// `resolveRelayTarget`: the callback's path and query on the originating
+/// (`referer`) origin when the callback landed on another host and that
+/// origin is ours; `None` otherwise (loop-safe: equal hosts never relay).
+pub async fn resolve_relay_target(
+    state: &ApiState,
+    broker: &str,
+    url: &url::Url,
+    referer: &str,
+) -> Option<String> {
+    let referer = url::Url::parse(referer).ok()?;
+    if (url.host_str(), url.port()) == (referer.host_str(), referer.port()) {
+        return None;
+    }
+    if !allowed_origin(state, broker, &referer).await {
+        return None;
+    }
+    let mut target = referer;
+    target.set_path(url.path());
+    target.set_query(url.query());
+    target.set_fragment(None);
+    Some(target.to_string())
 }
 
 /// The relay result and the message index (done, cancelled, failed) of

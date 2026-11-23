@@ -35,8 +35,8 @@ no caller, `tests/fixtures/not_ported_rpc.txt`), the cloud / enterprise
 items (D2 7, E16, E17, E18), Postgres / Redis upkeep (D2 3), E22.
 
 Open gaps recorded in DECISIONS (2026-11-23): the poll chat runtime (poll
-cards, poll ref links), the WhatsApp Flow form field mapping and the
-rich-response button fallback of a tap, the AI rich response mode, action
+cards, poll ref links), the rich-response button fallback of a tap, the
+WhatsApp Flow response media download, the AI rich response mode, action
 rules and typing indicator, native provider web search, the provider
 `ErrorLog` rows, `resetContactForResume` on a stopped broadcast.
 

@@ -258,6 +258,8 @@ mod message_outgoing_and_list;
 mod message_outgoing_media;
 #[path = "messenger_ads_json.rs"]
 mod messenger_ads_json;
+#[path = "messenger_contact_data.rs"]
+mod messenger_contact_data;
 #[path = "meta_capi_connect.rs"]
 mod meta_capi_connect;
 #[path = "meta_capi_send_event.rs"]
@@ -406,6 +408,10 @@ mod whatsapp_call_ring_targets;
 mod whatsapp_call_voip_call_service;
 #[path = "whatsapp_conversions.rs"]
 mod whatsapp_conversions;
+#[path = "whatsapp_flow_labels.rs"]
+mod whatsapp_flow_labels;
+#[path = "whatsapp_flow_response.rs"]
+mod whatsapp_flow_response;
 #[path = "whatsapp_meta_call_permission.rs"]
 mod whatsapp_meta_call_permission;
 #[path = "whatsapp_voip_sdp.rs"]

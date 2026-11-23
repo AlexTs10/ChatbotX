@@ -324,6 +324,8 @@ mod whatsapp_callback;
 mod whatsapp_calling_actions;
 #[path = "whatsapp_calling_public_api.rs"]
 mod whatsapp_calling_public_api;
+#[path = "whatsapp_connect.rs"]
+mod whatsapp_connect;
 #[path = "whatsapp_flows_public_api.rs"]
 mod whatsapp_flows_public_api;
 #[path = "whatsapp_templates_public_api.rs"]

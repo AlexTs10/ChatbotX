@@ -1,11 +1,8 @@
 //! The Messenger user steps of `integration/handlers/messenger-user-menu.ts`
 //! (Q.I1b): `setMessengerUserPersistentMenu`, `enableMessengerComposer`,
 //! `disableMessengerComposer` (Graph `me/custom_user_settings`) and
-//! `setMessengerPersona`.
-//!
-//! ponytail: `updateMessengerContactData` needs the Messenger profile
-//! lookup (not ported, specs/Q.I1b.md "Left"); it stays an implicit
-//! success, like the original's silent no-op on a Graph error.
+//! `setMessengerPersona`, and
+//! `updateMessengerContactData` (`messenger-contact-data.ts`, Q.P7-V4).
 
 pub use chatbotx_business::messenger_menu::{branding_url, call_to_actions};
 use chatbotx_db::repo::Model as _;
@@ -29,6 +26,10 @@ pub(super) async fn run(
         | "enableMessengerComposer"
         | "disableMessengerComposer"
         | "setMessengerPersona" => {}
+        "updateMessengerContactData" => {
+            update_contact_data(ctx).await?;
+            return Ok(Some(StepStatus::Success));
+        }
         _ => return Ok(None),
     }
     let Some(user) = resolve_user(ctx).await? else {
@@ -60,9 +61,47 @@ struct MessengerUser {
     personas: Value,
 }
 
-/// `resolveMessengerUserContext`: the run's contact inbox when it is on
-/// Messenger, else the contact's most recently active Messenger one.
-async fn resolve_user(ctx: &StepCtx<'_, '_>) -> Result<Option<MessengerUser>, JobError> {
+/// `updateMessengerContactData`: re-syncs the contact's profile from
+/// Facebook, overwriting current values. A contact with no Messenger inbox,
+/// no profile or a Graph error is a silent no-op.
+async fn update_contact_data(ctx: &StepCtx<'_, '_>) -> Result<(), JobError> {
+    let Some(contact_inbox) = messenger_contact_inbox(ctx).await? else {
+        return Ok(());
+    };
+    let deps = ctx.run.deps;
+    let profile = chatbotx_business::contact::channel_profile::ProfileDeps {
+        db: &deps.db,
+        http: &chatbotx_business::channel_api::LiveChannelHttp,
+        uploader: deps.files.as_deref(),
+    };
+    let workspace_id = ctx.workspace_id();
+    let fetch = || async {
+        chatbotx_business::contact::channel_profile::fetch_profile(
+            profile,
+            workspace_id,
+            "messenger",
+            contact_inbox.inbox_id,
+            &contact_inbox.source_id,
+            true,
+        )
+        .await
+        .map(Some)
+    };
+    chatbotx_business::contact::profile_refresh::overwrite_contact_profile(
+        &deps.db,
+        deps.files.as_deref(),
+        workspace_id,
+        ctx.contact_id(),
+        fetch,
+    )
+    .await;
+    Ok(())
+}
+
+/// The contact inbox of `resolveMessengerUserContext`: the run's when it is
+/// on Messenger, else the contact's most recently active Messenger one;
+/// `None` without a PSID.
+async fn messenger_contact_inbox(ctx: &StepCtx<'_, '_>) -> Result<Option<ContactInbox>, JobError> {
     let deps = ctx.run.deps;
     let contact_inbox = if ctx.run.contact_inbox.channel == "messenger" {
         Some(ctx.run.contact_inbox.clone())
@@ -86,7 +125,13 @@ async fn resolve_user(ctx: &StepCtx<'_, '_>) -> Result<Option<MessengerUser>, Jo
             .await
             .map_err(db_fail)?
     };
-    let Some(contact_inbox) = contact_inbox.filter(|ci| !ci.source_id.is_empty()) else {
+    Ok(contact_inbox.filter(|ci| !ci.source_id.is_empty()))
+}
+
+/// `resolveMessengerUserContext`.
+async fn resolve_user(ctx: &StepCtx<'_, '_>) -> Result<Option<MessengerUser>, JobError> {
+    let deps = ctx.run.deps;
+    let Some(contact_inbox) = messenger_contact_inbox(ctx).await? else {
         return Ok(None);
     };
     let (channel, channel_ctx) = deps

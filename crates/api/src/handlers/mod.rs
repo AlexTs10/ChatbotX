@@ -99,6 +99,7 @@ pub mod whatsapp_calling;
 pub mod whatsapp_calls;
 pub mod whatsapp_channels;
 pub mod whatsapp_coexist;
+pub mod whatsapp_connect;
 pub mod whatsapp_flows;
 pub mod whatsapp_templates;
 pub mod working_hours;

@@ -12,12 +12,16 @@ use chatbotx_business::tx;
 use chatbotx_db::repo::integration_whatsapp::IntegrationWhatsappClientResource;
 use serde_json::{Value, json};
 
-use super::{Ctx, In, Outcome, arg, fail, invalid, public, query_of};
+use super::{Ctx, In, Outcome, action_fail, arg, fail, invalid, public, query_of};
 use crate::handlers::{internal_error, whatsapp_flows, whatsapp_templates};
 use crate::orpc::OrpcError;
 
 /// The workspace actions of this module.
-pub(super) const ACTIONS: &[&str] = &["syncMessageTemplateAction", "syncWhatsappFlowsAction"];
+pub(super) const ACTIONS: &[&str] = &[
+    "reconnectWhatsappAction",
+    "syncMessageTemplateAction",
+    "syncWhatsappFlowsAction",
+];
 
 const STATUSES: &[&str] = &["APPROVED", "PENDING", "REJECTED"];
 
@@ -134,7 +138,37 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
     if !ACTIONS.contains(&name) {
         return None;
     }
+    if name == "reconnectWhatsappAction" {
+        return Some(reconnect(ctx, args).await);
+    }
     Some(sync(ctx, name, args).await)
+}
+
+/// `reconnectWhatsappAction` (`[workspaceId, integrationWhatsappId]`,
+/// `{ code }`): the super-admin check runs before any lookup.
+async fn reconnect(ctx: &Ctx<'_>, args: &[Value]) -> Result<Value, OrpcError> {
+    use crate::handlers::whatsapp_connect;
+    let id = In(&json!({ "id": arg(args, 1) })).id("id")?;
+    if !ctx.has("superAdmin") {
+        return Err(action_fail(chatbotx_business::BusinessError::exception(
+            whatsapp_connect::SUPER_ADMIN_REQUIRED,
+            "systemError",
+            400,
+        )));
+    }
+    let code = arg(args, 2)["code"]
+        .as_str()
+        .map(str::trim)
+        .unwrap_or_default();
+    if code.is_empty() {
+        return Err(action_fail(chatbotx_business::BusinessError::validation(
+            "code",
+            "Too small: expected string to have >=1 characters",
+        )));
+    }
+    whatsapp_connect::reconnect(ctx.api, ctx.workspace_id, id, code)
+        .await
+        .map_err(action_fail)
 }
 
 /// Both actions bind `[workspaceId, integrationWhatsappId]`; a number of another
