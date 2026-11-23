@@ -128,17 +128,26 @@ async fn trigger(State(state): State<TriggerState>, RawQuery(query): RawQuery) -
         http: &chatbotx_business::channel_api::LiveChannelHttp,
         uploader: Some(files),
     };
-    let avatar = match service::contact_avatar_url_mirrored(
-        profile,
-        row.workspace_id,
-        contact_id,
-        Some((inbox.id, inbox.channel.as_str())),
-        &urls,
-    )
-    .await
-    {
-        Ok(avatar) => avatar,
-        Err(error) => return server_error(error),
+    // Only an `avatarUser` layer asks for the contact's picture.
+    let needs_avatar = document
+        .elements
+        .iter()
+        .any(|e| matches!(e, render::Element::Image(image) if image.image_type == "avatarUser"));
+    let avatar = if needs_avatar {
+        match service::contact_avatar_url_mirrored(
+            profile,
+            row.workspace_id,
+            contact_id,
+            Some((inbox.id, inbox.channel.as_str())),
+            &urls,
+        )
+        .await
+        {
+            Ok(avatar) => avatar,
+            Err(error) => return server_error(error),
+        }
+    } else {
+        None
     };
     let with_images =
         match service::resolve_dynamic_elements(&api.db, contact_id, avatar, &row.data.0).await {

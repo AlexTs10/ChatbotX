@@ -4,8 +4,7 @@
 //! `CoexistSyncRun` rows of `type = 'contact_scan'`, with the Messenger and
 //! Instagram adapters (`adapters/messenger.ts`, `adapters/instagram.ts`).
 //!
-//! ponytail: the Meta usage-header throttle, quota counters and profile
-//! snapshots are left out (no Rust consumer).
+//! ponytail: the Meta usage-header throttle is left out.
 
 use chatbotx_business::connection::credentials::{HttpUpstream, Upstream, UpstreamRequest};
 use chatbotx_db::repo::now_ms;
@@ -776,13 +775,7 @@ pub(crate) async fn run_with(
         let mut imported = 0i64;
         let mut seen = std::collections::HashSet::new();
         for contact in items.iter().filter(|c| seen.insert(c.source_id.clone())) {
-            match crate::inbound::detect_contact_and_conversation(
-                deps,
-                context.inbox(),
-                contact,
-                "inboundMessage",
-            )
-            .await
+            match crate::inbound::import_channel_contact(deps, context.inbox(), contact, true).await
             {
                 Ok((_, _, true)) => imported += 1,
                 Ok(_) => {}
@@ -873,6 +866,26 @@ pub(crate) mod tests {
         }
     }
 
+    /// An import must never look a profile up.
+    struct NoLookup;
+
+    impl chatbotx_business::channel_api::ChannelHttp for NoLookup {
+        fn send(&self, request: UpstreamRequest) -> chatbotx_jobs::BoxFuture<'_, UpstreamReply> {
+            panic!("profile lookup in an import: {}", request.url)
+        }
+
+        fn download(
+            &self,
+            url: String,
+            _: Option<String>,
+        ) -> chatbotx_jobs::BoxFuture<
+            '_,
+            Result<Option<chatbotx_business::channel_api::Download>, String>,
+        > {
+            panic!("download in an import: {url}")
+        }
+    }
+
     /// Answers every Graph call with one body; records `METHOD url body`.
     pub(crate) struct Graph(pub Mutex<Vec<String>>, pub Value);
 
@@ -942,7 +955,8 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn the_sweeper_dispatches_and_the_run_imports_the_customers() {
-        let (deps, jobs) = setup().await;
+        let (mut deps, jobs) = setup().await;
+        deps.channel_http = Some(Arc::new(NoLookup));
         sweep(&deps).await.unwrap();
         let queued = jobs.0.lock().unwrap().clone();
         assert_eq!(queued.len(), 1);
@@ -991,7 +1005,8 @@ pub(crate) mod tests {
     /// name fallback.
     #[tokio::test]
     async fn the_instagram_adapter_lists_the_right_node_and_imports_the_customer() {
-        let (deps, _) = setup().await;
+        let (mut deps, jobs) = setup().await;
+        deps.channel_http = Some(Arc::new(NoLookup));
         let now = now_ms();
         deps.db
             .write(move |tx| {
@@ -1080,6 +1095,24 @@ pub(crate) mod tests {
                 ("bob_ig".into(), None)
             ]
         );
+        // Enrolled for a profile snapshot; the import counts contacts, not MAC.
+        let (pending, mac, contacts): (i64, i64, i64) = deps
+            .db
+            .read(|c| {
+                Ok(c.query_row(
+                    r#"SELECT (SELECT count(*) FROM "ContactInbox" WHERE "inboxId" = 6 AND "profileSnapshotState" = 'pending'),
+                              COALESCE((SELECT sum("macUsed") FROM "WorkspaceUsage" WHERE "workspaceId" = 2), 0),
+                              COALESCE((SELECT sum("contactsUsed") FROM "WorkspaceUsage" WHERE "workspaceId" = 2), 0)"#,
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!((pending, mac), (2, 0));
+        assert_eq!(contacts, 4, "two inboxes, two customers each");
+        let captures = jobs.0.lock().unwrap();
+        assert_eq!(captures.iter().filter(|j| j.0 == "capture").count(), 4);
     }
 
     #[test]

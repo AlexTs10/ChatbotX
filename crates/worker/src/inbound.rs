@@ -1216,6 +1216,174 @@ fn detect_contact_and_conversation_tx(
     }))
 }
 
+/// `bulkImportChannelContacts` for one contact (Coexist history, customer
+/// scan): the existing contact, or a new one from the listed fields only. No
+/// profile lookup, locale or MAC gate (an import is passive); an Instagram
+/// contact is enrolled for a profile snapshot. `count_quota` = the owner's
+/// `contacts` quota counter moves too (the customer scan).
+pub(crate) async fn import_channel_contact(
+    deps: &Deps,
+    inbox: &InboundInbox,
+    contact: &IncomingContact,
+    count_quota: bool,
+) -> Result<(ContactInbox, Conversation, bool), JobError> {
+    use chatbotx_business::contact::profile_snapshot as snapshot;
+    let (tx_inbox, tx_contact) = (inbox.clone(), contact.clone());
+    let mut detected = deps
+        .db
+        .write(move |tx| import_channel_contact_tx(tx, &tx_inbox, &tx_contact, count_quota))
+        .await
+        .map_err(db_fail)?;
+    after_detect(deps, inbox.workspace_id, &mut detected).await;
+    if detected.is_new_contact
+        && snapshot::supports_profile_snapshot(&inbox.channel)
+        && let Err(error) = snapshot::enqueue_profile_snapshot_jobs(
+            deps.jobs.as_ref(),
+            &[detected.contact_inbox.id],
+            inbox.inbox_id,
+            inbox.workspace_id,
+        )
+        .await
+    {
+        tracing::warn!(
+            error,
+            inbox_id = inbox.inbox_id,
+            "Profile snapshot enqueue failed; recovery will retry"
+        );
+    }
+    Ok((
+        detected.contact_inbox,
+        detected.conversation,
+        detected.is_new_contact,
+    ))
+}
+
+fn import_channel_contact_tx(
+    tx: &Connection,
+    inbox: &InboundInbox,
+    contact: &IncomingContact,
+    count_quota: bool,
+) -> Result<Detected, chatbotx_db::DbError> {
+    use chatbotx_business::events::trigger;
+    use chatbotx_business::workspace_usage::{self, WorkspaceUsageMetric};
+    let (workspace_id, inbox_id) = (inbox.workspace_id, inbox.inbox_id);
+    if let Some((contact_inbox, _)) = find_existing_contact_inbox(tx, inbox, contact)? {
+        let conversation =
+            find_or_create_conversation(tx, workspace_id, contact_inbox.contact_id, None, None)?;
+        return Ok(Detected {
+            contact_inbox,
+            conversation,
+            is_new_contact: false,
+            events: Vec::new(),
+            new_avatar: None,
+        });
+    }
+    let (contact_id, contact_inbox_id, now) = (new_id(), new_id(), now_ms());
+    let snapshot =
+        chatbotx_business::contact::profile_snapshot::supports_profile_snapshot(&inbox.channel);
+    let insert = |tx: &Connection| -> chatbotx_db::rusqlite::Result<()> {
+        tx.execute(
+            r#"INSERT INTO "Contact" ("id", "createdAt", "updatedAt", "workspaceId", "firstName",
+                 "lastName", "email", "phoneNumber", "avatar")
+               VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+            params![
+                contact_id,
+                now,
+                workspace_id,
+                contact.first_name,
+                contact.last_name,
+                contact.email,
+                contact.phone_number,
+                contact.avatar,
+            ],
+        )?;
+        tx.execute(
+            r#"INSERT INTO "ContactInbox" ("id", "createdAt", "updatedAt", "inboxId", "contactId",
+                 "originalContactId", "source", "sourceId", "sourceUserId", "sourceUsername", "channel")
+               VALUES (?1, ?2, ?2, ?3, ?4, ?4, 'inboundMessage', ?5, ?6, ?7, ?8)"#,
+            params![
+                contact_inbox_id,
+                now,
+                inbox_id,
+                contact_id,
+                contact.source_id,
+                contact.source_user_id,
+                contact.source_username,
+                inbox.channel,
+            ],
+        )?;
+        if snapshot {
+            tx.execute(
+                r#"UPDATE "ContactInbox" SET "profileSnapshotAttempts" = 0,
+                     "profileSnapshotNextAttemptAt" = ?2, "profileSnapshotState" = 'pending'
+                   WHERE "id" = ?1"#,
+                params![contact_inbox_id, now],
+            )?;
+        }
+        tx.execute(
+            r#"DELETE FROM "MessageCleanup" WHERE "inboxId" = ?1 AND "sourceId" = ?2"#,
+            params![inbox_id, contact.source_id],
+        )?;
+        Ok(())
+    };
+    if count_quota {
+        let owner_id: i64 = tx.query_row(
+            r#"SELECT "ownerId" FROM "Workspace" WHERE "id" = ?1"#,
+            [workspace_id],
+            |r| r.get(0),
+        )?;
+        chatbotx_business::quota_enforcement::create_contact_without_mac(
+            tx,
+            owner_id,
+            workspace_id,
+            |tx| insert(tx).map_err(|e| chatbotx_business::BusinessError::Repo(e.into())),
+        )
+        .map_err(|e| chatbotx_db::DbError::other(e.to_string()))?;
+    } else {
+        insert(tx)?;
+        workspace_usage::adjust(tx, workspace_id, WorkspaceUsageMetric::Contacts, 1)
+            .map_err(|e| chatbotx_db::DbError::other(e.to_string()))?;
+    }
+    let contact_inbox = tx.query_row(
+        &format!(r#"{} WHERE "id" = ?1"#, ContactInbox::select_sql()),
+        params![contact_inbox_id],
+        ContactInbox::from_row,
+    )?;
+    let conversation = find_or_create_conversation(tx, workspace_id, contact_id, None, None)?;
+    if !contact_inbox.source_id.is_empty() {
+        tx.execute(
+            r#"INSERT INTO "AnalyticsContactEvent" ("eventId", "workspaceId", "contactId", "eventType",
+                   "occurredAt", "source", "sourceId", "channel", "inboxId", "metadata")
+               VALUES (?1, ?2, ?3, 'contact_created', ?4, 'inboundMessage', ?5, ?6, ?7, ?8)"#,
+            params![
+                new_id().to_string(),
+                workspace_id,
+                contact_inbox_id,
+                now,
+                contact_inbox.source_id,
+                contact_inbox.channel,
+                inbox_id,
+                r#"{"triggerContext":{"triggerSource":"worker","triggerHandler":"bulkImportChannelContacts","triggerType":"contact_created"}}"#,
+            ],
+        )?;
+    }
+    let events = vec![trigger::contact_created(
+        &workspace_id.to_string(),
+        &contact_id.to_string(),
+        contact.first_name.as_deref().filter(|n| !n.is_empty()),
+        contact.phone_number.as_deref().filter(|p| !p.is_empty()),
+        contact.email.as_deref().filter(|e| !e.is_empty()),
+        Some(&contact_inbox_id.to_string()),
+    )];
+    Ok(Detected {
+        contact_inbox,
+        conversation,
+        is_new_contact: true,
+        events,
+        new_avatar: None,
+    })
+}
+
 /// `updateContactFromMessage`: a phone / email the contact typed overwrites
 /// the contact's columns. Failures are logged.
 fn update_contact_from_message_tx(

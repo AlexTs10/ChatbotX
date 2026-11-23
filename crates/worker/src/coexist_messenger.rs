@@ -460,14 +460,7 @@ async fn contacts_page<U>(
         if !seen.insert(contact.source_id.clone()) {
             continue;
         }
-        match crate::inbound::detect_contact_and_conversation(
-            s.deps,
-            &s.graph.inbox,
-            contact,
-            "inboundMessage",
-        )
-        .await
-        {
+        match crate::inbound::import_channel_contact(s.deps, &s.graph.inbox, contact, false).await {
             Ok((_, _, is_new)) => imported += i64::from(is_new),
             Err(error) => {
                 tracing::error!(%error, run_id = s.run_id, page_number, "[coexist] Messenger contact bulk import threw — page lost");

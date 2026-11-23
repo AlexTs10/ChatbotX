@@ -10,9 +10,7 @@
 //! Page token. Up to 3 conversations run at once; the `X-App-Usage` reading
 //! lowers that or pauses the calls. A chunk yields after 4 minutes.
 //!
-//! ponytail: the profile snapshot capture (`enqueueProfileSnapshotJobs`) is
-//! not queued — no Rust worker consumes that queue yet. Graph GETs use the
-//! shared `withInlineRetry` (`contact_scan::graph_get_with_headers`); after
+//! ponytail: Graph GETs use the shared `withInlineRetry` (`contact_scan::graph_get_with_headers`); after
 //! it, a failed conversation read counts as failed, a failed page read fails
 //! the run.
 
@@ -563,13 +561,8 @@ async fn import_conversation<U: Upstream>(
                 if !s.ctx.facebook {
                     resolve_profile(s, &mut contact).await;
                 }
-                match crate::inbound::detect_contact_and_conversation(
-                    deps,
-                    &s.ctx.inbox,
-                    &contact,
-                    "inboundMessage",
-                )
-                .await
+                match crate::inbound::import_channel_contact(deps, &s.ctx.inbox, &contact, false)
+                    .await
                 {
                     Ok((contact_inbox, conversation, is_new)) => {
                         out.contacts += i64::from(is_new);

@@ -5,9 +5,7 @@
 //! historical messages under an exclusive run claim, and recover parked or
 //! stranded runs every minute.
 //!
-//! ponytail: contacts are imported one by one through the inbound
-//! `detect_contact_and_conversation` (no `contactCreated` event, analytics
-//! row or usage counter); no `logProviderError` row on a failed chunk.
+//! Contacts are imported one by one (`inbound::import_channel_contact`).
 //! Inserted attachments queue `coexistAttachmentDownload` (`coexist_attachment`).
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -392,13 +390,7 @@ async fn import_batch(
     let mut activity = Vec::new();
     for entry in batch {
         let (contact_inbox, conversation, is_new) =
-            crate::inbound::detect_contact_and_conversation(
-                deps,
-                inbox,
-                &entry.contact,
-                "inboundMessage",
-            )
-            .await?;
+            crate::inbound::import_channel_contact(deps, inbox, &entry.contact, false).await?;
         out.imported_contacts += i64::from(is_new);
         if entry.messages.is_empty() {
             continue;
