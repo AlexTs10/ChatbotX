@@ -724,6 +724,15 @@ pub(crate) async fn run_with(
             }
             Err(error) => {
                 tracing::error!(run_id, error = error.message, "[contact-scan] fatal error");
+                crate::events::log_failure(
+                    deps,
+                    &run.channel,
+                    workspace_id,
+                    None,
+                    None,
+                    json!({ "message": error.message }),
+                )
+                .await;
                 let (status, current) = match classify(&error) {
                     "retryable" => {
                         reset_for_retry(deps, run_id, token, "providerRetryable").await?;
@@ -924,6 +933,7 @@ pub(crate) mod tests {
             ai: Arc::new(crate::ai::Ai::live()),
             files: None,
             webhook_http: Arc::new(crate::webhook::RecordingWebhookHttp::default()),
+            channel_http: None,
             events: None,
             push: None,
         };

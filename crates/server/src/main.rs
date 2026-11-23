@@ -535,6 +535,7 @@ fn start_workers(
         ai: Arc::new(chatbotx_worker::ai::Ai::live()),
         files: Some(Arc::clone(&shared.files)),
         webhook_http: Arc::new(chatbotx_worker::webhook::LiveWebhookHttp::default()),
+        channel_http: Some(Arc::new(chatbotx_business::channel_api::LiveChannelHttp)),
         events,
         push: chatbotx_worker::notification::ExpoPush::from_env()
             .map(|p| Arc::new(p) as Arc<dyn chatbotx_worker::notification::PushSender>),

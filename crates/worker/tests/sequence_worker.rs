@@ -218,6 +218,7 @@ async fn fixture(status: &'static str) -> Fixture {
         ai: Arc::new(chatbotx_worker::ai::Ai::live()),
         files: None,
         webhook_http: Arc::new(chatbotx_worker::webhook::RecordingWebhookHttp::default()),
+        channel_http: None,
         events: None,
         push: None,
     };

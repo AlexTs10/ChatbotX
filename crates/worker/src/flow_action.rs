@@ -1,10 +1,9 @@
 //! `runFlowPostback` / `runFlowQuickReply` (`integration/handlers/flow.ts`
 //! `runFlowAction`): a tapped button or quick reply runs the flow target it
 //! names.
-//!
-//! ponytail: the rich-response button fallback (`tryRunRichButtonFallback`)
-//! is not ported: a tap that names no flow button is skipped with a log.
-//! A version-pinned payload keeps its version for the continuations.
+//! A tap on a rich-response button (AI reply, poll message) runs its stored
+//! payload first (`tryRunRichButtonFallback`). A version-pinned payload
+//! keeps its version for the continuations.
 
 use chatbotx_business::conversation_challenge::{ClearQuickReply, clear_quick_reply_challenge};
 use chatbotx_core::flow_config::resolve_flow_action_target;
@@ -110,6 +109,35 @@ pub async fn run_flow_action(
         );
         return Ok(());
     };
+    if let Some(button_id) = payload.button_id.as_deref() {
+        let message_id = data.get("messageId").and_then(id_of);
+        let fallback = crate::rich_response::try_run_rich_button_fallback(
+            deps,
+            button_id,
+            &conversation,
+            &contact_inbox,
+            &payload.flow_id,
+            message_id,
+        )
+        .await?;
+        if let crate::rich_response::Fallback::Handled {
+            enqueue_automated_response,
+        } = fallback
+        {
+            if enqueue_automated_response && let Some(message_id) = message_id {
+                // `automatedResponseService.enqueue`: no keyword gate.
+                crate::inbound::enqueue_automated_response_for(
+                    deps,
+                    (conversation.id, contact_inbox.id, ws),
+                    message_id,
+                    Some(String::new()),
+                    Vec::new(),
+                )
+                .await?;
+            }
+            return Ok(());
+        }
+    }
     let Some(flow_id) = payload.flow_id.parse::<i64>().ok() else {
         tracing::warn!(
             conversation_id = conversation.id,

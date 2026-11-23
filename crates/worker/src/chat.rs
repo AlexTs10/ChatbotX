@@ -822,8 +822,7 @@ pub async fn send_typing_to_channel(deps: &Deps, data: &Value) -> Result<(), Job
         )
         .await
         .map_err(channel_fail)?;
-    // ponytail: the WhatsApp wamid anchor (`resolveWhatsappMessageSourceId`)
-    // comes with the WhatsApp channel unit (Q.I1).
+    let message_source_id = whatsapp_message_source_id(deps, &conversation, &contact_inbox).await?;
     channel
         .send_typing(
             &ctx,
@@ -831,9 +830,49 @@ pub async fn send_typing_to_channel(deps: &Deps, data: &Value) -> Result<(), Job
                 contact: OutgoingContact::new(&contact_inbox, &conversation),
                 typing: data.get("typing").and_then(Value::as_bool).unwrap_or(true),
                 seconds: data.get("seconds").and_then(Value::as_f64),
-                message_source_id: None,
+                message_source_id,
             },
         )
         .await
         .map_err(channel_fail)
+}
+
+/// `resolveWhatsappMessageSourceId` (`findLastIncomingMessageSourceId`): the
+/// wamid of the newest of the last 10 incoming messages (30 days before the
+/// conversation's last activity) that came through this contact inbox.
+async fn whatsapp_message_source_id(
+    deps: &Deps,
+    conversation: &Conversation,
+    contact_inbox: &ContactInbox,
+) -> Result<Option<String>, JobError> {
+    if contact_inbox.channel != "whatsapp" {
+        return Ok(None);
+    }
+    let (id, ws, ci) = (conversation.id, conversation.workspace_id, contact_inbox.id);
+    let since = conversation
+        .last_activity_at
+        .unwrap_or(conversation.created_at)
+        - 30 * 24 * 60 * 60 * 1000;
+    deps.db
+        .read(move |conn| {
+            let mut stmt = conn.prepare_cached(
+                r#"SELECT "contactInboxId", "sourceId" FROM "Message" WHERE "conversationId" = ?1
+                   AND "workspaceId" = ?2 AND "messageType" = 'incoming' AND "createdAt" >= ?3
+                   ORDER BY "createdAt" DESC, "id" DESC LIMIT 10"#,
+            )?;
+            let rows = stmt.query_map(chatbotx_db::rusqlite::params![id, ws, since], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
+            })?;
+            for row in rows {
+                if let (owner, Some(source)) = row?
+                    && owner == ci
+                    && !source.is_empty()
+                {
+                    return Ok(Some(source));
+                }
+            }
+            Ok(None)
+        })
+        .await
+        .map_err(db_fail)
 }

@@ -2,9 +2,6 @@
 //! ref (flow / draft link, ref link or QR code, minigame share, leaderboard
 //! referral). The ref is unsigned: every lookup is scoped to the
 //! conversation's workspace, and a stale or crafted ref is a logged skip.
-//!
-//! ponytail: a poll ref (`pl_`) is skipped: the poll chat runtime (poll card
-//! send through the rich-response store) is not ported.
 
 use std::sync::Arc;
 
@@ -178,11 +175,24 @@ impl RefRun<'_> {
                 contact_id,
             } => self.leaderboard(leaderboard_id, contact_id).await,
             RefConfig::Poll { poll_id } => {
-                tracing::warn!(
-                    poll_id,
-                    "Poll ref: the poll chat runtime is not ported; skipped"
-                );
-                Ok(false)
+                if !chatbotx_business::inbox::links::can_receive_ref(&self.contact_inbox.channel) {
+                    return Ok(false);
+                }
+                let Some(poll) =
+                    crate::rich_response::find_poll_in_workspace(self.deps, poll_id, self.ws())
+                        .await?
+                else {
+                    tracing::warn!(poll_id, "Poll ref: poll not in workspace");
+                    return Ok(false);
+                };
+                crate::rich_response::send_poll_card(
+                    self.deps,
+                    &self.conversation,
+                    &self.contact_inbox,
+                    &poll.poll,
+                )
+                .await?;
+                Ok(true)
             }
             config @ (RefConfig::Reflink { .. } | RefConfig::QrCode { .. }) => {
                 self.reflink(&config, is_new_contact).await?;

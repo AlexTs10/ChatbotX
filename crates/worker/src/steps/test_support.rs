@@ -172,6 +172,7 @@ impl Fixture {
             ai: Arc::new(crate::ai::Ai::live()),
             files: None,
             webhook_http: Arc::new(crate::webhook::RecordingWebhookHttp::default()),
+            channel_http: None,
             events: None,
             push: None,
         };

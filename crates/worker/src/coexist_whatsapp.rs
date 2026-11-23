@@ -1067,6 +1067,15 @@ pub async fn flush(deps: &Deps, data: &Value) -> Result<(), JobError> {
             // `init` with the counters, and let the attempts bound it.
             state.current_error = Some(error.to_string());
             tracing::error!(%error, run_id = ctx.run.id, "[coexist] WhatsApp flush chunk failed — will retry");
+            crate::events::log_failure(
+                deps,
+                "whatsapp",
+                ctx.run.workspace_id,
+                None,
+                None,
+                json!({ "message": error.to_string() }),
+            )
+            .await;
             let mut fields = state.counters();
             fields.extend([
                 ("status", Sql::Text("init".into())),

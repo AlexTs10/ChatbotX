@@ -11,6 +11,7 @@ pub mod filter_fields;
 pub mod filter_value_labels;
 pub mod identifier;
 pub mod list;
+pub mod locale_profile;
 pub mod phone;
 pub mod profile_refresh;
 pub mod profile_snapshot;

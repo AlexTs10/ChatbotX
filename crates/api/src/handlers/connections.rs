@@ -1,8 +1,7 @@
 //! `features/connections/api/public.ts`: `connections.*` and
 //! `connectionProviders.list` (P3.6-D2: the self-serve `api` and `webchat`
-//! channels, the AI key integrations). Other credential connects, OAuth
-//! connects and `connectSessions.*` are not ported yet: a create for such a
-//! provider answers "Operation not ported yet".
+//! channels, the AI key, API key and Telegram credential connects, the OAuth
+//! connect / reconnect sessions).
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::connect_session::SessionRow;
@@ -456,7 +455,7 @@ fn enum_key(input: &mut Input, name: &str, options: &[&str]) -> Option<String> {
     input.enum_at(&key(name), value.as_ref(), options, false)
 }
 
-/// `connections.create`; `None` = a provider whose connect is not ported.
+/// `connections.create` (`startConnect`).
 async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Option<Reply> {
     let mut input = Input::from_body(call.params, call.body);
     let provider = enum_key_required(&mut input, "provider", INTEGRATION_TYPES);
@@ -619,7 +618,22 @@ async fn create(state: &ApiState, call: Call<'_>, principal: &Principal) -> Opti
                     .map_err(|e| with_idempotency(CREATING, e)),
                 );
             }
-            let provider = credentials::ai_key_provider(other)?;
+            let Some(provider) = credentials::ai_key_provider(other) else {
+                // `connectFromCredentials`: a self-serve provider has no
+                // `fromCredentials`; a `null` registry entry is not configured.
+                let error = if matches!(other, "whatsapp" | "smtp" | "chatbotx") {
+                    BusinessError::exception(
+                        format!(
+                            "Connection provider \"{other}\" does not accept direct credentials."
+                        ),
+                        "connectionWrongStrategy",
+                        400,
+                    )
+                } else {
+                    oauth::not_configured(other)
+                };
+                return Some(Err(with_idempotency(CREATING, error)));
+            };
             credentials::connect_ai_key(
                 &state.db,
                 &HttpUpstream,

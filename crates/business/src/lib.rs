@@ -34,6 +34,7 @@ pub mod contact;
 pub mod contact_custom_field;
 pub mod contact_export;
 pub mod contact_filter;
+pub mod contact_identity;
 pub mod contact_note;
 pub mod contact_referral_event;
 pub mod contact_scan;

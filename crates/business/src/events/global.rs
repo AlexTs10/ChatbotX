@@ -24,6 +24,11 @@ pub fn install(triggers: EventBus, buses: Option<EventBuses>) {
     }
 }
 
+/// The installed durable buses (`None` before [`install`]).
+pub fn buses() -> Option<&'static EventBuses> {
+    BUSES.get()
+}
+
 /// The object fields of `value` without `null`s (`undefined` keys of the original).
 fn defined(value: Value) -> Map<String, Value> {
     match value {

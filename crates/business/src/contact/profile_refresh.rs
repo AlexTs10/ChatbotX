@@ -230,9 +230,15 @@ fn start_cooldown_if_applicable(kv: Option<&MemKv>, source: ProfileNameSource, i
     }
 }
 
-/// `recordProfileRefreshFailure`: the Error-Log write is not ported; the
-/// failure is a warning.
-fn record_profile_refresh_failure(channel: &str, workspace_id: i64, contact_id: i64, error: &str) {
+/// `recordProfileRefreshFailure`: an Error-Log row for the channel (logged
+/// as a warning as well).
+async fn record_profile_refresh_failure(
+    channel: &str,
+    workspace_id: i64,
+    contact_id: i64,
+    source_id: &str,
+    error: &str,
+) {
     tracing::warn!(
         channel,
         workspace_id,
@@ -240,6 +246,19 @@ fn record_profile_refresh_failure(channel: &str, workspace_id: i64, contact_id: 
         error,
         "contact profile refresh failed"
     );
+    let mut input = crate::error_log::ProviderErrorInput::new(
+        channel,
+        &workspace_id.to_string(),
+        crate::error_log::Thrown::Text(error.to_owned()),
+    );
+    input.contact_id = Some(contact_id.to_string());
+    input.source_id = Some(source_id.to_owned());
+    crate::error_log::log_provider_error_for_channel(
+        crate::events::global::buses(),
+        channel,
+        input,
+    )
+    .await;
 }
 
 /// `normalizeChannelApiProfile`: the locale written is the normalized one;
@@ -457,8 +476,10 @@ where
                 &contact_inbox.channel,
                 workspace_id,
                 contact_id,
+                &contact_inbox.source_id,
                 &error,
-            );
+            )
+            .await;
             start_cooldown_if_applicable(services.kv, source, contact_inbox.id);
             return Ok(RefreshOutcome::Failed);
         }
@@ -511,8 +532,10 @@ where
                 &contact_inbox.channel,
                 workspace_id,
                 contact_id,
+                &contact_inbox.source_id,
                 &error.to_string(),
-            );
+            )
+            .await;
             start_cooldown_if_applicable(services.kv, source, contact_inbox.id);
             Ok(RefreshOutcome::Failed)
         }

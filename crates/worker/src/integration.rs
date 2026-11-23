@@ -434,6 +434,12 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         crate::coexist_instagram::JOB => {
             crate::coexist_instagram::run(&deps, &job.data["data"]).await?
         }
+        crate::channels::whatsapp_webhook::WHATSAPP_IDENTITY_CHANGE => {
+            crate::provider_account::whatsapp_identity_change(&deps, &job.data["data"]).await?
+        }
+        crate::channels::whatsapp_webhook::PROVIDER_ACCOUNT_EVENT => {
+            crate::provider_account::provider_account_event(&deps, &job.data["data"]).await?
+        }
         crate::contact_profile::UPDATE_CONTACT_AVATAR => {
             crate::contact_profile::update_contact_avatar(&deps, &job.data["data"]).await?
         }

@@ -87,6 +87,17 @@ pub fn verify_signature(
     }
 }
 
+/// Who a webhook route speaks for, for its `account_update` events.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AccountScope {
+    /// `ProviderAccountRouteScope` JSON.
+    Scoped(Value),
+    /// The route has no app id to scope the event.
+    Unscoped,
+    /// The delivery was accepted without a signature.
+    Unverified,
+}
+
 /// One queued job of a webhook delivery.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WebhookJob {
@@ -178,6 +189,7 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             }
             let Some(phone_id) = phone_id else { continue };
             let single_body = |single: Value| json!({ "object": object, "entry": [{ "id": entry.get("id"), "changes": [{ "field": "messages", "value": single }] }] });
+            jobs.extend(identity_change_jobs(value, phone_id));
             let contacts = value.get("contacts").and_then(Value::as_array);
             let messages: Vec<&Value> = value
                 .get("messages")
@@ -279,8 +291,8 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
                     continue;
                 }
                 let id = text(status, "id").unwrap_or_default();
-                // ponytail: the `continuesFlow` ingress stamp
-                // (`messageStatusBranchService`) is not ported.
+                // The `continuesFlow` ingress stamp only picks the queue in the
+                // original; here every status stays on `integration` (DECISIONS).
                 jobs.push(WebhookJob {
                     name: "messageStatus",
                     data: json!({ "type": "messageStatus", "data": {
@@ -306,9 +318,268 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             }
         }
     }
-    // ponytail: identity changes and account updates are not ported yet
-    // (calls: `whatsapp_call_webhook`).
     jobs.extend(automatic);
+    jobs
+}
+
+fn trimmed_text(v: &Value, k: &str) -> Option<String> {
+    v.get(k)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+/// `normalizeUserIdChanged` / `normalizePhoneChanged` of one system
+/// message: the `change` of a `whatsappIdentityChange` job.
+fn identity_change(message: &Value, phone_id: &str) -> Option<Value> {
+    use chatbotx_business::contact_identity::{
+        is_distinct_primary_identity, resolve_phone_transition,
+    };
+    let system = message.get("system")?;
+    let system_type = trimmed_text(system, "type")?;
+    let message_id = text(message, "id").unwrap_or_default();
+    let skipped = || {
+        tracing::warn!(
+            message_id,
+            phone_id,
+            "Whatsapp identity change skipped: invalid or incomplete identity transition"
+        );
+        None
+    };
+    let from_user_id = text(message, "from_user_id");
+    match system_type.as_str() {
+        "user_changed_user_id" => {
+            let Some(user_id) = trimmed_text(system, "user_id") else {
+                tracing::warn!(message_id, phone_id, "Whatsapp identity change skipped: malformed system payload");
+                return None;
+            };
+            // `parsePreviousUserIdFromBody`: "User <name> changed from <a> to <b>."
+            let from_body = text(system, "body").and_then(|body| {
+                let body = body.trim().trim_end_matches('.');
+                let rest = body.strip_prefix("User ")?;
+                let (head, to) = rest.rsplit_once(" to ")?;
+                let (_, from) = head.rsplit_once(" changed from ")?;
+                (to == user_id && !from.contains(' ')).then(|| from.to_owned())
+            });
+            let previous_user_id = [
+                trimmed_text(system, "previous_user_id"),
+                from_body,
+                trimmed_text(message, "from_user_id"),
+            ]
+            .into_iter()
+            .flatten()
+            .find(|c| *c != user_id);
+            let previous_parent_user_id = trimmed_text(system, "previous_parent_user_id")
+                .or_else(|| trimmed_text(message, "from_parent_user_id"));
+            let parent_user_id = trimmed_text(system, "parent_user_id");
+            let previous_phone = trimmed_text(message, "from");
+            let reported = trimmed_text(system, "wa_id");
+            let new_phone = is_distinct_primary_identity(
+                reported.as_deref(),
+                &[Some(&user_id), from_user_id.as_deref()],
+            )
+            .then(|| {
+                resolve_phone_transition(
+                    previous_phone.as_deref(),
+                    reported.as_deref(),
+                    &[Some(&user_id), from_user_id.as_deref()],
+                )
+            })
+            .flatten()
+            .map(|t| t.new_phone);
+            if previous_user_id.is_none()
+                && previous_parent_user_id.is_none()
+                && previous_phone.is_none()
+            {
+                return skipped();
+            }
+            Some(json!({
+                "kind": "userIdChanged",
+                "previousUserId": previous_user_id,
+                "userId": user_id,
+                "previousParentUserId": previous_parent_user_id,
+                "parentUserId": parent_user_id,
+                "previousPhone": previous_phone,
+                "newPhone": new_phone,
+            }))
+        }
+        "user_changed_number" | "customer_changed_number" => {
+            let (Some(reported), Some(previous_phone)) = (
+                trimmed_text(system, "wa_id"),
+                trimmed_text(message, "from"),
+            ) else {
+                tracing::warn!(message_id, phone_id, "Whatsapp identity change skipped: malformed system payload");
+                return None;
+            };
+            let system_user_id = text(system, "user_id");
+            let user_id = trimmed_text(message, "from_user_id")
+                .or_else(|| trimmed_text(system, "user_id"));
+            let scoped = [from_user_id.as_deref(), system_user_id.as_deref()];
+            let new_phone = is_distinct_primary_identity(Some(&reported), &scoped)
+                .then(|| resolve_phone_transition(Some(&previous_phone), Some(&reported), &scoped))
+                .flatten()
+                .map(|t| t.new_phone);
+            let Some(new_phone) = new_phone else {
+                return skipped();
+            };
+            Some(json!({
+                "kind": "phoneChanged",
+                "previousPhone": previous_phone,
+                "newPhone": new_phone,
+                "userId": user_id,
+            }))
+        }
+        other => {
+            tracing::info!(message_id, phone_id, system_type = other, "Whatsapp system message skipped: unsupported type");
+            None
+        }
+    }
+}
+
+/// `extractIdentityChangePayloads` + `enqueueIdentityChangePayloads` of one
+/// `messages` value.
+fn identity_change_jobs(value: &Value, phone_id: &str) -> Vec<WebhookJob> {
+    value
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|m| m.get("type").and_then(Value::as_str) == Some("system"))
+        .filter_map(|message| {
+            let message_id = trimmed_text(message, "id")?;
+            let change = identity_change(message, phone_id)?;
+            Some(WebhookJob {
+                name: WHATSAPP_IDENTITY_CHANGE,
+                data: json!({ "type": WHATSAPP_IDENTITY_CHANGE, "data": {
+                    "integrationType": "whatsapp",
+                    "integrationIdentifier": phone_id,
+                    "payload": {
+                        "phoneNumberId": phone_id,
+                        "messageId": message_id,
+                        "timestamp": message.get("timestamp"),
+                        "change": change,
+                    },
+                }}),
+                job_id: format!(
+                    "wa-sys-{}-{}",
+                    safe_id_segment(phone_id),
+                    safe_id_segment(&message_id)
+                ),
+            })
+        })
+        .collect()
+}
+
+/// `IntegrationJobAction.whatsappIdentityChange`.
+pub const WHATSAPP_IDENTITY_CHANGE: &str = "whatsappIdentityChange";
+/// `IntegrationJobAction.providerAccountEvent`.
+pub const PROVIDER_ACCOUNT_EVENT: &str = "providerAccountEvent";
+
+/// `boundedEnumValue`: a Meta enum value, else `"unknown"`.
+fn bounded_enum(value: Option<&Value>) -> String {
+    let ok = |s: &str| {
+        let mut chars = s.chars();
+        chars.next().is_some_and(|c| c.is_ascii_uppercase())
+            && s.len() <= 64
+            && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    };
+    value
+        .and_then(Value::as_str)
+        .filter(|s| ok(s))
+        .unwrap_or("unknown")
+        .to_owned()
+}
+
+/// `routeScopeKey`.
+fn route_scope_key(scope: &Value) -> String {
+    match scope["kind"].as_str() {
+        Some("credentialOwner") => format!("owner-{}", scope["ownerId"].as_str().unwrap_or("")),
+        Some("manualIntegration") => {
+            format!("manual-{}", scope["integrationId"].as_str().unwrap_or(""))
+        }
+        _ => "platform".into(),
+    }
+}
+
+/// `extractAccountUpdatePayloads` + `enqueueAccountUpdatePayloads` +
+/// `addRouteScopedJob`: one `providerAccountEvent` per recognised
+/// `account_update` (`entry.id` is the WABA id), scoped to the route.
+pub fn account_update_jobs(body: &Value, route_scope: &Value, now: i64) -> Vec<WebhookJob> {
+    let mut jobs = Vec::new();
+    for entry in body.get("entry").and_then(Value::as_array).into_iter().flatten() {
+        let (Some(waba_id), Some(changes)) = (
+            entry.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()),
+            entry.get("changes").and_then(Value::as_array),
+        ) else {
+            continue;
+        };
+        if !changes
+            .iter()
+            .any(|c| c.get("field").and_then(Value::as_str) == Some("account_update"))
+        {
+            continue;
+        }
+        let occurred_at = entry
+            .get("time")
+            .and_then(Value::as_f64)
+            .filter(|t| t.is_finite() && *t > 0.0)
+            .map(|t| (t * 1000.0) as i64);
+        let Some(occurred_at) = occurred_at else {
+            tracing::warn!(waba_id, "Whatsapp account_update skipped: no entry time");
+            continue;
+        };
+        if occurred_at > now + 5 * 60_000 {
+            tracing::warn!(waba_id, "Whatsapp account_update skipped: time is in the future");
+            continue;
+        }
+        for change in changes {
+            if change.get("field").and_then(Value::as_str) != Some("account_update") {
+                continue;
+            }
+            let Some(meta_event) = change.pointer("/value/event").and_then(Value::as_str) else {
+                tracing::warn!(waba_id, "Whatsapp account_update skipped: malformed payload");
+                continue;
+            };
+            let event = match meta_event {
+                "PARTNER_REMOVED" => "revoked",
+                "ACCOUNT_OFFBOARDED" => "offboarded",
+                "ACCOUNT_RECONNECTED" => "reconnected",
+                other => {
+                    tracing::info!(waba_id, meta_event = other, "Whatsapp account_update ignored: event not handled");
+                    continue;
+                }
+            };
+            let info = change
+                .pointer("/value/disconnection_info")
+                .filter(|v| v.is_object());
+            let reason = bounded_enum(info.and_then(|i| i.get("reason")));
+            let initiated_by = bounded_enum(info.and_then(|i| i.get("initiated_by")));
+            // `JSON.stringify(payload)` key order.
+            let hashed = format!(
+                r#"{{"integrationType":"whatsapp","account":{{"kind":"businessAccount","id":{}}},"event":"{event}","detail":{{"reason":"{reason}","initiatedBy":"{initiated_by}"}},"occurredAt":{occurred_at}}}"#,
+                Value::from(waba_id)
+            );
+            let job_id = format!(
+                "provider-account-whatsapp-{}-{event}-{occurred_at}-{}-{}",
+                safe_id_segment(waba_id),
+                chatbotx_core::utils::crypto::sha256_hex(&hashed),
+                safe_id_segment(&route_scope_key(route_scope))
+            );
+            jobs.push(WebhookJob {
+                name: PROVIDER_ACCOUNT_EVENT,
+                data: json!({ "type": PROVIDER_ACCOUNT_EVENT, "data": {
+                    "integrationType": "whatsapp",
+                    "account": { "kind": "businessAccount", "id": waba_id },
+                    "event": event,
+                    "detail": { "reason": reason, "initiatedBy": initiated_by },
+                    "occurredAt": occurred_at,
+                    "routeScope": route_scope,
+                }}),
+                job_id,
+            });
+        }
+    }
     jobs
 }
 
@@ -560,11 +831,45 @@ pub async fn enqueue_webhook_jobs(
     jobs: &dyn Enqueuer,
     body: &[u8],
     pinned: Option<&str>,
+    account_scope: AccountScope,
 ) -> Result<(), String> {
     let Ok(parsed) = serde_json::from_slice::<Value>(body) else {
         tracing::error!("Whatsapp webhook body is not JSON");
         return Ok(());
     };
+    // Account events change connection state: only from a verified delivery
+    // whose route can say who it speaks for. Failures propagate (redelivery).
+    let account_jobs = match &account_scope {
+        AccountScope::Scoped(scope) => account_update_jobs(&parsed, scope, now_ms()),
+        _ => Vec::new(),
+    };
+    if account_jobs.is_empty()
+        && !matches!(account_scope, AccountScope::Scoped(_))
+        && !account_update_jobs(&parsed, &Value::Null, now_ms()).is_empty()
+    {
+        match account_scope {
+            AccountScope::Unverified => tracing::warn!(
+                "Whatsapp account_update ignored: the webhook is not signature-verified"
+            ),
+            _ => tracing::error!(
+                "Provider account event dropped: the webhook credential has no app id to scope it"
+            ),
+        }
+    }
+    for job in account_jobs {
+        jobs.add(
+            QueueName::Integration,
+            job.name,
+            job.data,
+            JobOptions {
+                job_id: Some(job.job_id),
+                remove_on_fail: Some(Retention::Remove),
+                ..JobOptions::default()
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
     // Call events first (they propagate and are jobId-deduped).
     for job in crate::whatsapp_call_webhook::call_jobs(&parsed, pinned) {
         jobs.add(QueueName::Integration, job.name, job.data, job.opts)
@@ -680,7 +985,19 @@ pub async fn manual_webhook(
     if !verified {
         return json_reply(403, "Webhook not verified");
     }
-    let secret = auth.get("clientSecret").and_then(Value::as_str);
+    let secret = auth
+        .get("clientSecret")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let account_scope = if secret.is_some() {
+        AccountScope::Scoped(json!({
+            "kind": "manualIntegration",
+            "integrationId": row.id.to_string(),
+            "workspaceId": row.workspace_id.to_string(),
+        }))
+    } else {
+        AccountScope::Unverified
+    };
     if let Err(reason) = verify_signature(secret, true, signature_header, body) {
         tracing::warn!(
             reason,
@@ -688,7 +1005,7 @@ pub async fn manual_webhook(
         );
         return json_reply(401, "Whatsapp webhook signature verification failed");
     }
-    match enqueue_webhook_jobs(db, jobs, body, Some(&row.phone_number_id)).await {
+    match enqueue_webhook_jobs(db, jobs, body, Some(&row.phone_number_id), account_scope).await {
         Ok(()) => WebhookReply {
             status: 200,
             content_type: "text/plain;charset=UTF-8",
@@ -807,7 +1124,11 @@ pub async fn platform_webhook(
         );
         return json_reply(401, "Whatsapp webhook signature verification failed");
     }
-    match enqueue_webhook_jobs(db, jobs, request.body, None).await {
+    let account_scope = match text("clientId") {
+        Some(app_id) => AccountScope::Scoped(json!({ "kind": "platform", "appId": app_id })),
+        None => AccountScope::Unscoped,
+    };
+    match enqueue_webhook_jobs(db, jobs, request.body, None, account_scope).await {
         Ok(()) => WebhookReply {
             status: 200,
             content_type: "text/plain;charset=UTF-8",

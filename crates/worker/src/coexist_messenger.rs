@@ -306,6 +306,15 @@ pub(crate) async fn run_with(
         }
         Err(error) => {
             tracing::error!(run_id, %error, "[coexist] Messenger sync encountered fatal error");
+            crate::events::log_failure(
+                deps,
+                "messenger",
+                workspace_id,
+                None,
+                None,
+                json!({ "message": error.to_string() }),
+            )
+            .await;
             s.error = Some(error);
             Some("failed")
         }

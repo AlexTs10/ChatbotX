@@ -179,13 +179,26 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
     // Orchestrator decision (DECISIONS 2026-11-17): the contact lookup /
     // creation, the contact updates and the message insert are one write
     // transaction, so no reader sees a new contact without its message.
+    let profile = profile_if_new(deps, &inbox, &received.contact).await?;
     let (tx_inbox, tx_received, tx_skip) =
         (inbox.clone(), received.clone(), skip_challenge_id.clone());
-    let (contact_inbox, conversation, is_new_contact, saved, tap_label) = deps
+    let detected = deps
         .db
         .write(move |tx| {
-            let (contact_inbox, conversation, is_new_contact) =
-                detect_contact_and_conversation_tx(tx, &tx_inbox, &tx_received.contact, source)?;
+            let Some(detected) = detect_contact_and_conversation_tx(
+                tx,
+                &tx_inbox,
+                &tx_received.contact,
+                source,
+                profile.as_ref(),
+            )?
+            else {
+                return Ok(None);
+            };
+            let (contact_inbox, conversation) = (
+                detected.contact_inbox.clone(),
+                detected.conversation.clone(),
+            );
             // Zalo / Telegram echo a tap's raw payload as the text: show the
             // label the contact pressed instead.
             let tap_label =
@@ -226,22 +239,26 @@ pub async fn receive_message(deps: &Deps, data: &Value) -> Result<Option<Stored>
                     &tx_received,
                 )?);
             }
-            Ok((
-                contact_inbox,
-                conversation,
-                is_new_contact,
-                saved,
-                tap_label,
-            ))
+            Ok(Some((detected, saved, tap_label)))
         })
         .await
         .map_err(db_fail)?;
+    let Some((mut detected, saved, tap_label)) = detected else {
+        return Err(mac_limit_reached());
+    };
+    after_detect(deps, inbox.workspace_id, &mut detected).await;
+    let Detected {
+        contact_inbox,
+        conversation,
+        is_new_contact,
+        ..
+    } = detected;
     if let Some(label) = &tap_label {
         apply_tap_label(&mut received, label);
     }
     // `lookupAndPersistGoogleClick` (gated, best effort, saved by itself).
-    // Rust reads no profile when it creates a contact, so a new contact's
-    // click is looked up here too (`persistNewContactGoogleClick`).
+    // A new contact's click is looked up here too
+    // (`persistNewContactGoogleClick`).
     if received
         .message
         .as_ref()
@@ -687,6 +704,200 @@ pub(crate) fn find_or_create_conversation(
     find(conn)?.ok_or(chatbotx_db::rusqlite::Error::QueryReturnedNoRows)
 }
 
+/// What a new contact is created with: the channel's `contact.getProfile`
+/// (when the channel has one) and `finalizeContactProfile`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NewContactProfile {
+    first_name: Option<String>,
+    last_name: Option<String>,
+    avatar: Option<String>,
+    gender: Option<String>,
+    locale: Option<String>,
+    timezone: Option<String>,
+    language: Option<String>,
+    source_username: Option<String>,
+    snapshot: Option<chatbotx_business::contact::channel_profile::ProfileSnapshot>,
+}
+
+impl NewContactProfile {
+    /// `finalizeContactProfile` over the webhook fields and a looked-up profile.
+    fn finalize(
+        inbox: &InboundInbox,
+        contact: &IncomingContact,
+        mut profile: NewContactProfile,
+    ) -> NewContactProfile {
+        use chatbotx_business::contact::locale_profile::{LocaleProfile, finalize_contact_profile};
+        let user_id_keyed = contact
+            .source_user_id
+            .as_deref()
+            .is_some_and(|u| !u.is_empty() && u == contact.source_id);
+        let phone_hint = contact.phone_number.clone().or_else(|| {
+            (inbox.channel == "whatsapp" && !user_id_keyed).then(|| contact.source_id.clone())
+        });
+        let finalized = finalize_contact_profile(
+            &LocaleProfile {
+                locale: profile.locale.clone().or_else(|| contact.locale.clone()),
+                language: contact.language.clone(),
+                timezone: profile.timezone.clone(),
+            },
+            phone_hint.as_deref(),
+            (inbox.channel == "zalo").then_some("vi_VN"),
+        );
+        profile.locale = finalized.locale;
+        profile.timezone = finalized.timezone;
+        profile.language = finalized.language;
+        profile
+    }
+}
+
+/// The profile of a new contact: the channel lookup (a failure is logged
+/// and the contact is created from the webhook fields), then the locale.
+pub(crate) async fn new_contact_profile(
+    deps: &Deps,
+    inbox: &InboundInbox,
+    contact: &IncomingContact,
+) -> NewContactProfile {
+    use chatbotx_business::contact::channel_profile::{
+        ProfileDeps, fetch_profile, fetch_profile_snapshot,
+    };
+    let mut profile = NewContactProfile::default();
+    if let Some(http) = deps.channel_http.as_deref()
+        && chatbotx_business::contact::profile_refresh::has_on_demand_profile_api(&inbox.channel)
+    {
+        let include_avatar = !chatbotx_core::utils::live_media::is_lazy_avatar_channel(
+            &chatbotx_core::env::ProcessEnv,
+            &inbox.channel,
+        );
+        let profile_deps = ProfileDeps {
+            db: &deps.db,
+            http,
+            uploader: deps.files.as_deref(),
+        };
+        match fetch_profile(
+            profile_deps,
+            inbox.workspace_id,
+            &inbox.channel,
+            inbox.inbox_id,
+            &contact.source_id,
+            include_avatar,
+        )
+        .await
+        {
+            Ok(found) => {
+                profile.first_name = found.first_name;
+                profile.last_name = found.last_name;
+                profile.avatar = found.avatar;
+                profile.gender = found.gender;
+                profile.locale = found.locale;
+                profile.timezone = found.timezone;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error,
+                    source_id = contact.source_id,
+                    channel = inbox.channel,
+                    "detectContactAndConversation: getProfile failed, creating contact without profile data"
+                );
+                // `recordProfileRefreshFailure`: no contact yet, the source id only.
+                crate::events::log_failure(
+                    deps,
+                    &inbox.channel,
+                    inbox.workspace_id,
+                    None,
+                    Some(&contact.source_id),
+                    serde_json::Value::String(error),
+                )
+                .await;
+            }
+        }
+        if chatbotx_business::contact::profile_snapshot::supports_profile_snapshot(&inbox.channel) {
+            match fetch_profile_snapshot(
+                &deps.db,
+                http,
+                inbox.workspace_id,
+                &inbox.channel,
+                inbox.inbox_id,
+                &contact.source_id,
+            )
+            .await
+            {
+                Ok(snapshot) => {
+                    profile.source_username = snapshot.as_ref().and_then(|s| s.username.clone());
+                    profile.snapshot = snapshot;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, source_id = contact.source_id, "getProfileSnapshot failed")
+                }
+            }
+        }
+    }
+    NewContactProfile::finalize(inbox, contact, profile)
+}
+
+/// The result of [`detect_contact_and_conversation_tx`]: the rows, and the
+/// trigger events to publish once the transaction commits.
+pub(crate) struct Detected {
+    pub contact_inbox: ContactInbox,
+    pub conversation: Conversation,
+    pub is_new_contact: bool,
+    pub events: Vec<chatbotx_business::events::TriggerEvent>,
+    /// A new contact's stored avatar (the background re-encode).
+    pub new_avatar: Option<(i64, String)>,
+}
+
+/// `UnrecoverableError("contact_mac_limit_reached")`.
+fn mac_limit_reached() -> JobError {
+    JobError::unrecoverable("contact_mac_limit_reached")
+}
+
+/// Publishes the trigger events of a detection and queues a new avatar's
+/// re-encode.
+pub(crate) async fn after_detect(deps: &Deps, workspace_id: i64, detected: &mut Detected) {
+    if !detected.events.is_empty() {
+        let bus = crate::order_payment::bus(deps);
+        for event in std::mem::take(&mut detected.events) {
+            bus.publish(chatbotx_business::events::Event::Trigger(event))
+                .await;
+        }
+    }
+    if let Some((contact_id, key)) = detected.new_avatar.take() {
+        use chatbotx_jobs::queues::stored_image::{
+            StoredImageJob, StoredImageOptimizationConfig, enqueue_stored_image_optimizations,
+        };
+        let config = StoredImageOptimizationConfig {
+            enabled:
+                chatbotx_core::utils::image_optimize_settings::is_stored_image_optimization_enabled(
+                    &chatbotx_core::env::ProcessEnv,
+                ),
+        };
+        let job = StoredImageJob::Avatar {
+            workspace_id: workspace_id.to_string(),
+            object_key: key,
+            contact_id: contact_id.to_string(),
+        };
+        enqueue_stored_image_optimizations(deps.jobs.as_ref(), &config, vec![job]).await;
+    }
+}
+
+/// The profile a detection needs: a lookup only when the identity is new.
+async fn profile_if_new(
+    deps: &Deps,
+    inbox: &InboundInbox,
+    contact: &IncomingContact,
+) -> Result<Option<NewContactProfile>, JobError> {
+    let (probe_inbox, probe) = (inbox.clone(), contact.clone());
+    let known = deps
+        .db
+        .read(move |conn| Ok(find_existing_contact_inbox(conn, &probe_inbox, &probe)?.is_some()))
+        .await
+        .map_err(db_fail)?;
+    Ok(if known {
+        None
+    } else {
+        Some(new_contact_profile(deps, inbox, contact).await)
+    })
+}
+
 /// [`detect_contact_and_conversation_tx`] in its own write transaction
 /// (for callers outside [`receive_message`]).
 pub(crate) async fn detect_contact_and_conversation(
@@ -695,69 +906,150 @@ pub(crate) async fn detect_contact_and_conversation(
     contact: &IncomingContact,
     source: &'static str,
 ) -> Result<(ContactInbox, Conversation, bool), JobError> {
-    let inbox = inbox.clone();
+    let profile = profile_if_new(deps, inbox, contact).await?;
+    let inbox_owned = inbox.clone();
     let contact = contact.clone();
-    deps.db
-        .write(move |tx| detect_contact_and_conversation_tx(tx, &inbox, &contact, source))
+    let detected = deps
+        .db
+        .write(move |tx| {
+            detect_contact_and_conversation_tx(tx, &inbox_owned, &contact, source, profile.as_ref())
+        })
         .await
-        .map_err(db_fail)
+        .map_err(db_fail)?;
+    let Some(mut detected) = detected else {
+        return Err(mac_limit_reached());
+    };
+    after_detect(deps, inbox.workspace_id, &mut detected).await;
+    Ok((
+        detected.contact_inbox,
+        detected.conversation,
+        detected.is_new_contact,
+    ))
 }
 
-/// `detectContactAndConversation`: the existing contact inbox (identity
-/// sync not ported) or a new contact + contact inbox + conversation in one
-/// transaction (the caller's). Returns `(contactInbox, conversation, isNewContact)`.
+/// `detectContactAndConversation` in the caller's transaction: the existing
+/// contact inbox (its newly learned identity synced), or a new contact +
+/// contact inbox + conversation behind the MAC gate. `None` = the MAC limit
+/// refused the new contact.
 fn detect_contact_and_conversation_tx(
     tx: &Connection,
     inbox: &InboundInbox,
     contact: &IncomingContact,
     source: &'static str,
-) -> Result<(ContactInbox, Conversation, bool), chatbotx_db::DbError> {
+    profile: Option<&NewContactProfile>,
+) -> Result<Option<Detected>, chatbotx_db::DbError> {
+    use chatbotx_business::contact_identity::{IncomingIdentity, sync_existing_contact_identity};
+    use chatbotx_business::events::trigger;
     let source_conversation_id = contact.source_conversation_id.as_deref();
-    if let Some((existing, _matched_by)) = find_existing_contact_inbox(tx, inbox, contact)? {
-        // ponytail: `syncExistingContactIdentity` (BSUID / username
-        // learning) is not ported.
+    let business = |e: chatbotx_business::BusinessError| chatbotx_db::DbError::other(e.to_string());
+    if let Some((existing, matched_by)) = find_existing_contact_inbox(tx, inbox, contact)? {
+        let identity = IncomingIdentity {
+            source_id: contact.source_id.clone(),
+            source_user_id: contact.source_user_id.clone(),
+            source_parent_user_id: contact.source_parent_user_id.clone(),
+            source_username: contact.source_username.clone(),
+        };
+        let (synced, phone) = sync_existing_contact_identity(
+            tx,
+            inbox.workspace_id,
+            &existing,
+            &identity,
+            matched_by,
+        )
+        .map_err(business)?;
         let conversation = find_or_create_conversation(
             tx,
             inbox.workspace_id,
-            existing.contact_id,
+            synced.contact_id,
             source_conversation_id,
             contact.channel_conversation_id.as_deref(),
         )?;
-        return Ok((existing, conversation, false));
+        let events = phone
+            .map(|(before, after)| {
+                trigger::contact_info_changes(
+                    &inbox.workspace_id.to_string(),
+                    &synced.contact_id.to_string(),
+                    [before.as_deref(), None],
+                    [Some(&after), None],
+                )
+            })
+            .unwrap_or_default();
+        return Ok(Some(Detected {
+            contact_inbox: synced,
+            conversation,
+            is_new_contact: false,
+            events,
+            new_avatar: None,
+        }));
     }
-    // ponytail: the MAC quota gate, `getProfile` lookups and the
-    // locale / timezone inference (`finalizeContactProfile`) are not
-    // ported; the contact row takes the webhook's fields.
-    let contact_id = new_id();
-    let now = now_ms();
+    let profile = match profile {
+        Some(profile) => profile.clone(),
+        None => NewContactProfile::finalize(inbox, contact, NewContactProfile::default()),
+    };
+    let owner_id: i64 = tx
+        .query_row(
+            r#"SELECT "ownerId" FROM "Workspace" WHERE "id" = ?1"#,
+            [inbox.workspace_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| chatbotx_db::DbError::other("Workspace not found"))?;
     let phone_number = contact.phone_number.clone().or_else(|| {
         (inbox.channel == "whatsapp"
             && contact.source_user_id.as_deref() != Some(contact.source_id.as_str())
             && !contact.source_id.is_empty())
         .then(|| format!("+{}", contact.source_id.trim_start_matches('+')))
     });
-    tx.execute(
-        r#"INSERT INTO "Contact" ("id", "createdAt", "updatedAt", "workspaceId", "firstName",
-                     "lastName", "email", "phoneNumber", "avatar", "locale")
-                   VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
-        params![
-            contact_id,
-            now,
-            inbox.workspace_id,
-            contact.first_name,
-            contact.last_name,
-            contact.email,
-            phone_number,
-            contact.avatar,
-            contact.locale,
-        ],
-    )?;
-    let contact_inbox_id = new_id();
-    tx.execute(
+    let first_name = profile
+        .first_name
+        .clone()
+        .or_else(|| contact.first_name.clone());
+    let last_name = profile
+        .last_name
+        .clone()
+        .or_else(|| contact.last_name.clone());
+    let avatar = profile.avatar.clone().or_else(|| contact.avatar.clone());
+    let snapshot = profile.snapshot.clone().unwrap_or_default();
+    let username = contact
+        .source_username
+        .clone()
+        .or_else(|| profile.source_username.clone());
+    let created = chatbotx_business::quota_enforcement::create_new_contact_with_mac(
+        tx,
+        owner_id,
+        inbox.workspace_id,
+        |tx, period_start| {
+            let contact_id = new_id();
+            let now = now_ms();
+            let db = |e: chatbotx_db::rusqlite::Error| {
+                chatbotx_business::BusinessError::Repo(e.into())
+            };
+            tx.execute(
+                r#"INSERT INTO "Contact" ("id", "createdAt", "updatedAt", "workspaceId", "firstName",
+                             "lastName", "email", "phoneNumber", "avatar", "locale", "timezone", "gender")
+                           VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
+                params![
+                    contact_id,
+                    now,
+                    inbox.workspace_id,
+                    first_name,
+                    last_name,
+                    contact.email,
+                    phone_number,
+                    avatar,
+                    profile.locale,
+                    profile.timezone,
+                    profile.gender,
+                ],
+            )
+            .map_err(db)?;
+            let contact_inbox_id = new_id();
+            tx.execute(
                 r#"INSERT INTO "ContactInbox" ("id", "createdAt", "updatedAt", "inboxId", "contactId",
                      "originalContactId", "source", "sourceId", "sourceUserId", "sourceParentUserId",
-                     "sourceUsername", "channel", "language")
-                   VALUES (?1, ?2, ?2, ?3, ?4, ?4, ?11, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+                     "sourceUsername", "channel", "language", "followsBusiness",
+                     "businessFollowsContact", "accountVerified", "followerCount")
+                   VALUES (?1, ?2, ?2, ?3, ?4, ?4, ?11, ?5, ?6, ?7, ?8, ?9, ?10, ?12, ?13, ?14, ?15)"#,
                 params![
                     contact_inbox_id,
                     now,
@@ -766,12 +1058,43 @@ fn detect_contact_and_conversation_tx(
                     contact.source_id,
                     contact.source_user_id,
                     contact.source_parent_user_id,
-                    contact.source_username,
+                    username,
                     inbox.channel,
-                    contact.language,
+                    profile.language,
                     source,
+                    snapshot.follows_business,
+                    snapshot.business_follows_contact,
+                    snapshot.account_verified,
+                    snapshot.follower_count,
                 ],
-            )?;
+            )
+            .map_err(db)?;
+            let counted = match period_start {
+                Some(period_start) => chatbotx_business::analytics::mac::claim_new_active_contact(
+                    tx,
+                    inbox.workspace_id,
+                    (contact_id, contact_inbox_id),
+                    inbox.inbox_id,
+                    period_start,
+                    now,
+                )
+                .map_err(chatbotx_business::BusinessError::Repo)?,
+                None => false,
+            };
+            Ok(((contact_id, contact_inbox_id, now), counted))
+        },
+    )
+    .map_err(business)?;
+    let Ok((contact_id, contact_inbox_id, created_at)) = created else {
+        tracing::error!(
+            workspace_id = inbox.workspace_id,
+            owner_id,
+            channel = inbox.channel,
+            source_id = contact.source_id,
+            "Inbound new-contact rejected: MAC limit reached"
+        );
+        return Ok(None);
+    };
     let contact_inbox = tx.query_row(
         &format!(r#"{} WHERE "id" = ?1"#, ContactInbox::select_sql()),
         params![contact_inbox_id],
@@ -784,7 +1107,49 @@ fn detect_contact_and_conversation_tx(
         source_conversation_id,
         contact.channel_conversation_id.as_deref(),
     )?;
-    Ok((contact_inbox, conversation, true))
+    // The `analytics:dashboard` `contact:created` row (`contactId` carries
+    // the contact inbox id, as the original).
+    if !contact_inbox.source_id.is_empty() {
+        tx.execute(
+            r#"INSERT INTO "AnalyticsContactEvent" ("eventId", "workspaceId", "contactId", "eventType",
+                   "occurredAt", "source", "sourceId", "channel", "inboxId", "language", "metadata")
+               VALUES (?1, ?2, ?3, 'contact_created', ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+            params![
+                new_id().to_string(),
+                inbox.workspace_id,
+                contact_inbox_id,
+                created_at,
+                contact_inbox.source,
+                contact_inbox.source_id,
+                contact_inbox.channel,
+                inbox.inbox_id,
+                profile.language,
+                r#"{"triggerContext":{"triggerSource":"worker","triggerHandler":"receiveMessage","triggerType":"contact_created"}}"#,
+            ],
+        )?;
+    }
+    let ws = inbox.workspace_id.to_string();
+    let events = vec![trigger::contact_created(
+        &ws,
+        &contact_id.to_string(),
+        first_name.as_deref().filter(|n| !n.is_empty()),
+        phone_number.as_deref().filter(|p| !p.is_empty()),
+        contact.email.as_deref().filter(|e| !e.is_empty()),
+        Some(&contact_inbox_id.to_string()),
+    )];
+    // Only a stored key is re-encoded (a remote URL is not ours).
+    let new_avatar = profile
+        .avatar
+        .clone()
+        .filter(|a| !a.starts_with("http"))
+        .map(|key| (contact_id, key));
+    Ok(Some(Detected {
+        contact_inbox,
+        conversation,
+        is_new_contact: true,
+        events,
+        new_avatar,
+    }))
 }
 
 /// `updateContactFromMessage`: a phone / email the contact typed overwrites
@@ -1841,6 +2206,7 @@ pub(crate) mod tests {
             ai: Arc::new(crate::ai::Ai::live()),
             files: None,
             webhook_http: Arc::new(crate::webhook::RecordingWebhookHttp::default()),
+            channel_http: None,
             events: None,
             push: None,
         };

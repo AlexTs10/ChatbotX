@@ -3,10 +3,8 @@
 //! Search Products, the Global Router, the default AI agent's reply with its
 //! system tools, and the throttled default reply flow.
 //!
-//! ponytail: no typing indicator while the model runs, and no overall
-//! `aiTotal` abort across the provider attempts (each HTTP call has its own
-//! timeout). The provider `ErrorLog` row (`logProviderErrorForChannel`) is
-//! not written, as elsewhere in the worker.
+//! ponytail: no overall `aiTotal` abort across the provider attempts (each
+//! HTTP call has its own timeout).
 
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -505,6 +503,24 @@ impl Reply<'_> {
             }
             ids
         });
+        // The typing indicator every 4 s while the model runs (best effort).
+        let typing = {
+            let deps = self.deps.clone();
+            let data = json!({
+                "conversationId": self.conversation.id.to_string(),
+                "contactInboxId": self.contact_inbox.id.to_string(),
+                "typing": true,
+                "seconds": 5,
+            });
+            tokio::spawn(async move {
+                loop {
+                    if let Err(err) = crate::chat::send_typing_to_channel(&deps, &data).await {
+                        tracing::debug!(err = %err, "[automated-response] typing indicator failed");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                }
+            })
+        };
         let start = now_ms();
         let result = self
             .reply_by_ai(
@@ -516,6 +532,7 @@ impl Reply<'_> {
                 None,
             )
             .await;
+        typing.abort();
         match result {
             Some(r) if !r.used_fallback_text => {}
             Some(r) => {
@@ -672,6 +689,7 @@ impl Reply<'_> {
         };
         let web_search_selected = tools.iter().any(|t| t == "sys:web_search")
             && allowed_system_ids.is_none_or(|ids| ids.contains(&"web_search"));
+        let executed_rule_ids = Arc::new(Mutex::new(std::collections::HashSet::new()));
         for (index, config) in configs.iter().enumerate() {
             let provider = if config.get("kind").and_then(Value::as_str) == Some("openaiCompatible")
             {
@@ -696,6 +714,7 @@ impl Reply<'_> {
                     file_only,
                     allowed_system_ids,
                     tracking_trigger_type,
+                    &executed_rule_ids,
                 )
                 .await;
             tracing::info!(
@@ -737,6 +756,7 @@ impl Reply<'_> {
         file_only: bool,
         allowed_system_ids: Option<&[&str]>,
         tracking_trigger_type: Option<&str>,
+        executed_rule_ids: &Arc<Mutex<std::collections::HashSet<String>>>,
     ) -> Option<AiResult> {
         let conversation = self.conversation;
         let ws = conversation.workspace_id;
@@ -781,7 +801,23 @@ impl Reply<'_> {
         let toolset = toolset::load(&self.deps.db, &self.deps.ai.embedder, ws, tools)
             .await
             .with_reply(Arc::clone(&reply), tools, allowed_system_ids);
-        let mut system = text::guarded_prompt(prompt, &toolset);
+        let action_tool = self.action_tool(agent, executed_rule_ids).await;
+        let prompt = match &action_tool {
+            Some(_) => format!(
+                "{prompt}\n\n{}\n\n{}",
+                crate::ai_actions::actions_prompt(agent.action_prompt.as_deref()),
+                crate::ai_actions::ACTION_TOOL_PROTOCOL
+            )
+            .trim()
+            .to_owned(),
+            None => prompt.to_owned(),
+        };
+        let mut system = text::guarded_prompt(&prompt, &toolset);
+        if toolset.is_empty() && action_tool.is_some() {
+            system = format!("{system}\n\n{}", text::FABRICATION_GUARD)
+                .trim()
+                .to_owned();
+        }
         if toolset.has("connect_user_to_human") {
             system = format!("{system}\n\n{HANDOFF_POLICY}").trim().to_owned();
         }
@@ -790,16 +826,34 @@ impl Reply<'_> {
                 .trim()
                 .to_owned();
         }
+        let rich_mode = agent.is_rich_response && self.message_id.is_some();
+        if agent.is_rich_response && self.message_id.is_none() {
+            tracing::warn!(
+                workspace_id = ws,
+                conversation_id = conversation.id,
+                reason = "missing_rich_response_execution_id",
+                "[rich-response] rich mode disabled for AI reply"
+            );
+        }
+        if rich_mode {
+            system = format!("{system}\n\n{}", crate::rich_message::RICH_RESPONSE_FORMAT)
+                .trim()
+                .to_owned();
+        }
         let mut request = Request::new(Some(system), messages.to_vec());
         request.max_output_tokens = Some(agent.max_output_tokens);
         request.temperature = Some(agent.temperature);
         request.max_steps = 5;
-        request.tool_choice = if toolset.is_empty() {
+        let tools = crate::ai_actions::WithActions {
+            base: &toolset,
+            actions: action_tool,
+        };
+        request.tool_choice = if toolset.is_empty() && tools.actions.is_none() {
             ToolChoice::None
         } else {
             ToolChoice::Auto
         };
-        let generated = match llm::generate(&*self.deps.ai.http, &model, &request, &toolset).await {
+        let generated = match llm::generate(&*self.deps.ai.http, &model, &request, &tools).await {
             Ok(generated) => generated,
             Err(err) => {
                 tracing::error!(err = %err, provider, conversation_id = conversation.id, workspace_id = ws, "[automated-response] runAIReply failed");
@@ -818,6 +872,18 @@ impl Reply<'_> {
                 self.append_assistant(&sent).await;
             }
             return responded(false);
+        }
+        if rich_mode {
+            // One JSON document: the final step's text only.
+            return self
+                .rich_reply(
+                    &generated.final_step_text(),
+                    provider,
+                    &model.model_id,
+                    start,
+                    tracking_trigger_type,
+                )
+                .await;
         }
         let full_text = generated.step_separated_text();
         let parts = stream::message_parts(&full_text);
@@ -879,6 +945,168 @@ impl Reply<'_> {
         None
     }
 
+    /// The `apply_ai_agent_actions` tool of the agent's action rules: none
+    /// without a trigger message or with malformed rules.
+    async fn action_tool(
+        &self,
+        agent: &AiAgent,
+        executed_rule_ids: &Arc<Mutex<std::collections::HashSet<String>>>,
+    ) -> Option<crate::ai_actions::ActionTool> {
+        use chatbotx_db::repo::partials::ai::parse_ai_agent_action_rules;
+        let conversation = self.conversation;
+        let rules = match parse_ai_agent_action_rules(&agent.action_rules.0) {
+            Ok(rules) => rules,
+            Err(err) => {
+                tracing::warn!(err = %err, workspace_id = conversation.workspace_id, conversation_id = conversation.id, reason = "malformed_action_rules", "[ai-agent-actions] action tool disabled");
+                return None;
+            }
+        };
+        if rules.is_empty() {
+            return None;
+        }
+        let Some(trigger_message_id) = self.message_id else {
+            tracing::warn!(
+                workspace_id = conversation.workspace_id,
+                conversation_id = conversation.id,
+                reason = "missing_trigger_message_id",
+                "[ai-agent-actions] action tool disabled"
+            );
+            return None;
+        };
+        let field_names =
+            crate::ai_actions::field_names(self.deps, conversation.workspace_id, &rules).await;
+        let workspace_timezone = self.workspace_timezone().await;
+        Some(crate::ai_actions::ActionTool {
+            rules,
+            field_names,
+            context: crate::ai_actions::ActionContext {
+                deps: self.deps.clone(),
+                conversation: conversation.clone(),
+                contact_inbox: self.contact_inbox.clone(),
+                trigger_message_id,
+                workspace_timezone,
+            },
+            executed_rule_ids: Arc::clone(executed_rule_ids),
+        })
+    }
+
+    async fn workspace_timezone(&self) -> Option<String> {
+        let ws = self.conversation.workspace_id;
+        self.deps
+            .db
+            .read(move |conn| {
+                Ok(conn
+                    .query_row(
+                        r#"SELECT "timezone" FROM "Workspace" WHERE "id" = ?1"#,
+                        [ws],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten())
+            })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// `handleRichAIReply` after the stream: the parsed messages and actions.
+    async fn rich_reply(
+        &self,
+        full_text: &str,
+        provider: &str,
+        model_id: &str,
+        start: i64,
+        tracking_trigger_type: Option<&str>,
+    ) -> Option<AiResult> {
+        use crate::rich_message::{RichParse, parse_rich_response, send_rich_messages};
+        let conversation = self.conversation;
+        let execution_id = self.message_id?.to_string();
+        let tracking = tracking(
+            conversation,
+            self.message_id,
+            provider,
+            "ai_agent",
+            start,
+            tracking_trigger_type.unwrap_or("rich_response"),
+        );
+        let responded = Some(AiResult {
+            provider: provider.to_owned(),
+            used_fallback_text: false,
+        });
+        let parsed = match parse_rich_response(full_text) {
+            RichParse::Ok(parsed) => parsed,
+            other => {
+                tracing::warn!(
+                    workspace_id = conversation.workspace_id,
+                    conversation_id = conversation.id,
+                    reason = other.reason(),
+                    "[rich-response] invalid AI rich response"
+                );
+                let trimmed = full_text.trim();
+                if other == RichParse::PlainText && !trimmed.is_empty() {
+                    send_message(self.deps, conversation.id, trimmed, tracking, true).await;
+                    self.append_assistant(trimmed).await;
+                    return responded;
+                }
+                return None;
+            }
+        };
+        let flow_context_id = chatbotx_core::utils::id::create_id();
+        let (enqueued, skipped) = if parsed.messages.is_empty() {
+            (0, 0)
+        } else {
+            send_rich_messages(
+                self.deps,
+                &parsed.messages,
+                conversation.id,
+                &flow_context_id,
+                &execution_id,
+                tracking,
+            )
+            .await
+        };
+        let ctx = crate::rich_response::RichContext {
+            conversation,
+            contact_inbox: self.contact_inbox,
+            execution_id: execution_id.clone(),
+        };
+        let (executed, failed) =
+            crate::rich_response::execute_rich_actions(self.deps, &parsed.actions, &ctx).await;
+        let failed: Vec<Value> = failed
+            .into_iter()
+            .map(|(action, reason)| json!({ "action": action, "reason": reason }))
+            .collect();
+        if enqueued == 0 && executed == 0 {
+            tracing::warn!(
+                workspace_id = conversation.workspace_id,
+                conversation_id = conversation.id,
+                execution_id,
+                failed_actions = %serde_json::to_string(&failed).unwrap_or_default(),
+                enqueued,
+                skipped,
+                "[rich-response] action-only response failed without sending messages"
+            );
+            return None;
+        }
+        if enqueued == 0 {
+            self.bot_received(json!({
+                "hasResponse": true, "responseType": "ai_agent", "routeType": "agent",
+                "result": "success", "aiProvider": provider,
+                "metadata": {
+                    "latency": now_ms() - start, "modelId": model_id, "richMode": true,
+                    "actionResult": { "executed": executed, "failed": failed },
+                    "triggerContext": {
+                        "triggerSource": "worker", "triggerHandler": "replyByAI",
+                        "triggerType": tracking_trigger_type.unwrap_or("rich_response_action_only"),
+                    },
+                },
+            }))
+            .await;
+        }
+        self.append_assistant(full_text).await;
+        responded
+    }
+
     async fn append_assistant(&self, content: &str) {
         let message = AiMessage::text("assistant", content, None, Some(now_ms()));
         context::append_history(self.deps, self.conversation.id, vec![message]).await;
@@ -925,6 +1153,15 @@ impl Reply<'_> {
                     workspace_id = ws,
                     "Global Router is configured but unavailable"
                 );
+                crate::events::log_failure(
+                    self.deps,
+                    &self.contact_inbox.channel,
+                    ws,
+                    Some(self.conversation.contact_id),
+                    None,
+                    json!({ "message": reason }),
+                )
+                .await;
                 self.router_analytics(Some("global_router_config_invalid"), "fallback", now_ms())
                     .await;
                 return RouterResult::Other;

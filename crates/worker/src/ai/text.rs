@@ -17,7 +17,7 @@ pub fn file_search_found_prefix(count: usize) -> String {
 }
 
 const TOOL_OUTPUT_GUARD: &str = "IMPORTANT RULES (REQUIRED):\n- Never send raw JSON or tool outputs directly to the user.\n- If you use a tool, summarize the result concisely in natural language.\n- Only provide the most relevant information the customer is asking for.";
-const FABRICATION_GUARD: &str = "TOOL DATA RULES (REQUIRED):\n- Never fabricate, guess, or invent data — especially product names, prices, specifications, availability, or image URLs.\n- Only include image URLs that appear exactly in tool results. Never generate, guess, or modify image URLs.\n- Only include information that appears explicitly in tool results. If a tool returns no results, tell the user you could not find the information.";
+pub(crate) const FABRICATION_GUARD: &str = "TOOL DATA RULES (REQUIRED):\n- Never fabricate, guess, or invent data — especially product names, prices, specifications, availability, or image URLs.\n- Only include image URLs that appear exactly in tool results. Never generate, guess, or modify image URLs.\n- Only include information that appears explicitly in tool results. If a tool returns no results, tell the user you could not find the information.";
 const KNOWLEDGE_BASE_GUARD: &str = "KNOWLEDGE BASE RULES (REQUIRED):\n- You MUST call search_knowledge_base BEFORE answering any question about products, services, prices, images, or company-specific details.\n- Do NOT use search_knowledge_base for greetings, small talk, or simple clarification.\n- If search_knowledge_base returns no results or insufficient information, tell the user you could not find matching information.";
 
 pub mod summarizer {

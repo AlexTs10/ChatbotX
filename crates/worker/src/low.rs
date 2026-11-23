@@ -1623,7 +1623,7 @@ impl<U: Upstream> Run<'_, U> {
 
         let public = self.public_reply(a, delay).await?;
         if let Some((reply_type, outcome)) = public.clone() {
-            self.record_event(a.id, "public", reply_type, outcome)
+            self.record_event(a.id, "public", reply_type, outcome, true)
                 .await?;
             if reply_type == "AIAgent" {
                 self.dispatch_ai_reply(a, "public", delay).await;
@@ -1677,7 +1677,7 @@ impl<U: Upstream> Run<'_, U> {
             }
         }
         if let Some((reply_type, outcome)) = private.clone() {
-            self.record_event(a.id, "private", reply_type, outcome)
+            self.record_event(a.id, "private", reply_type, outcome, true)
                 .await?;
             if reply_type == "AIAgent" {
                 self.dispatch_ai_reply(a, "private", delay).await;
@@ -1812,7 +1812,7 @@ impl<U: Upstream> Run<'_, U> {
         }
         let (reply_type, outcome) = self.private_reply(a, remaining).await?;
         let sent = outcome.is_ok();
-        self.record_event(a.id, "private", reply_type, outcome)
+        self.record_event(a.id, "private", reply_type, outcome, true)
             .await?;
         if reply_type == "AIAgent" {
             self.dispatch_ai_reply(a, "private", remaining).await;
@@ -1843,8 +1843,14 @@ impl<U: Upstream> Run<'_, U> {
         detail: String,
     ) -> Result<(), JobError> {
         tracing::info!(automation_id, reason = log, "Comment automation skipped");
-        self.record_event(automation_id, "private", reply_type, Err((detail, None)))
-            .await
+        self.record_event(
+            automation_id,
+            "private",
+            reply_type,
+            Err((detail, None)),
+            false,
+        )
+        .await
     }
 
     /// `replyToNewContactsOnly`, `findDedup`, `hasRepliedOnOtherPost` and
@@ -2179,7 +2185,24 @@ impl<U: Upstream> Run<'_, U> {
         channel: &'static str,
         reply_type: &str,
         outcome: Outcome,
+        provider_log: bool,
     ) -> Result<(), JobError> {
+        if provider_log && let Err((detail, _)) = &outcome {
+            // `recordReplyFailure`: the Error-Log row (`ERROR_LOG_PROVIDER_BY_CHANNEL`).
+            let provider = match self.channel_type.as_str() {
+                "instagramFacebook" => "instagram",
+                other => other,
+            };
+            crate::events::log_failure(
+                self.deps,
+                provider,
+                self.ws,
+                Some(self.contact_inbox.contact_id),
+                None,
+                Value::String(detail.clone()),
+            )
+            .await;
+        }
         let (ws, contact_id, ciid) = (
             self.ws,
             self.contact_inbox.contact_id,

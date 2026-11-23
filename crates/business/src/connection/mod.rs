@@ -10,6 +10,7 @@ pub mod oauth_facebook_ads;
 pub mod oauth_google;
 pub mod oauth_google_ads;
 pub mod oauth_instagram;
+pub mod provider_account_event;
 pub mod providers;
 pub mod state;
 
@@ -483,7 +484,7 @@ pub async fn refresh_with(
 /// has no platform credential) is `connectionNotConfigured`.
 pub async fn reconnect(_db: &Db, connection: &ConnectionRow) -> Result<ConnectionRow> {
     // `startReconnect`: a provider that is not OAuth has no OAuth credential
-    // to resolve; the OAuth reconnect session is not ported yet.
+    // to resolve (the OAuth reconnect session is `start_oauth` in the API).
     Err(not_configured(&connection.provider))
 }
 

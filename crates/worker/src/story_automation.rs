@@ -339,6 +339,29 @@ pub async fn process(deps: &Deps, data: &Value, trigger: &'static str) -> Result
                             workspace_id = ws,
                             "Failed to process {trigger} automation"
                         );
+                        let source = deps
+                            .db
+                            .read(move |conn| {
+                                Ok(conn
+                                    .query_row(
+                                        r#"SELECT "contactId", "sourceId" FROM "ContactInbox" WHERE "id" = ?1"#,
+                                        [contact_inbox_id],
+                                        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+                                    )
+                                    .optional()?)
+                            })
+                            .await
+                            .ok()
+                            .flatten();
+                        crate::events::log_failure(
+                            deps,
+                            "instagram",
+                            ws,
+                            source.as_ref().map(|(c, _)| *c),
+                            source.as_ref().map(|(_, s)| s.as_str()),
+                            json!({ "message": format!("{err:?}") }),
+                        )
+                        .await;
                         false
                     }
                 }

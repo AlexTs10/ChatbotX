@@ -440,8 +440,24 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         {
             Ok(prepared) => {
                 if !prepared.missing.is_empty() {
-                    // ponytail: the provider ErrorLog row (`logProviderErrorForChannel`) comes with Q.W2.
                     tracing::warn!(conversation_id, flow_id = %flow_id, product_ids = ?prepared.missing, "Product message sent without products that are no longer sendable");
+                    // A bulk send counts it in its own analytics: no row.
+                    if !crate::events::is_bulk_send_origin(metadata.as_ref()) {
+                        let ids = &prepared.missing;
+                        crate::events::log_failure(
+                            deps,
+                            &contact_inbox.channel,
+                            conversation.workspace_id,
+                            Some(conversation.contact_id),
+                            Some(contact_inbox.source_id.as_str()),
+                            json!({ "message": format!(
+                                "Product message sent without {} product(s) that are no longer in the catalog: {}",
+                                ids.len(),
+                                ids.join(", ")
+                            ) }),
+                        )
+                        .await;
+                    }
                 }
                 Some(prepared)
             }

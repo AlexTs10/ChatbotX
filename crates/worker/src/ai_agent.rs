@@ -239,11 +239,35 @@ async fn dispatch_reply(
         text: Some(text.clone()),
         attachment_file_types: message.attachment_file_types.clone(),
     };
+    let mut keyword_awarded = false;
     for (row, rule) in rules {
         if !rule_matches_message(rule, &input) {
             continue;
         }
-        // ponytail: the keyword leaderboard award is not ported.
+        // `awardKeywordLeaderboard`: an inbound message that matches any
+        // inbound rule scores once (the message id is the source ref).
+        if row.r#type == "inbound" && !keyword_awarded {
+            keyword_awarded = true;
+            let message_ref = message.id.to_string();
+            if matches!(
+                contact_inbox.channel.as_str(),
+                "messenger" | "instagram" | "tiktok"
+            ) && let Some(event_at) =
+                chatbotx_core::utils::id::created_at_from_id(&message_ref)
+            {
+                let award = chatbotx_business::leaderboard::scoring::Award {
+                    workspace_id: conversation.workspace_id,
+                    contact_id: contact_inbox.contact_id,
+                    inbox_id: Some(contact_inbox.inbox_id),
+                    minigame_id: None,
+                    rule: "keywords".into(),
+                    source_ref: message_ref,
+                    event_at,
+                    context: Value::Null,
+                };
+                crate::leaderboard::enqueue(deps, false, award).await;
+            }
+        }
         // Ads conversion `keywordMatched`: inbound rules on ad channels only.
         if row.r#type == "inbound"
             && chatbotx_business::ads::conversion::is_ads_eligible_channel(&contact_inbox.channel)

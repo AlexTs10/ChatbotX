@@ -559,8 +559,32 @@ pub async fn record_broadcast_failed(db: &Db, payloads: &[Value]) {
     }
 }
 
+/// `logProviderError` / `logProviderErrorForChannel` of one failure: an
+/// unknown provider writes no row; never fails.
+pub(crate) async fn log_failure(
+    deps: &crate::Deps,
+    provider: &str,
+    workspace_id: i64,
+    contact_id: Option<i64>,
+    source_id: Option<&str>,
+    error: Value,
+) {
+    if !chatbotx_core::utils::error_log::is_error_log_provider(provider) {
+        return;
+    }
+    let input = ProviderError {
+        provider: provider.to_owned(),
+        workspace_id: workspace_id.to_string(),
+        contact_id: contact_id.map(|id| id.to_string()),
+        source_id: source_id.map(str::to_owned),
+        error,
+        ..Default::default()
+    };
+    log_provider_errors(deps.events.as_ref(), &[input]).await;
+}
+
 /// `isBulkSendOrigin`.
-fn is_bulk_send_origin(metadata: Option<&Value>) -> bool {
+pub(crate) fn is_bulk_send_origin(metadata: Option<&Value>) -> bool {
     matches!(
         metadata.and_then(|m| m.get("type")).and_then(Value::as_str),
         Some("broadcast" | "sequenceSchedule")

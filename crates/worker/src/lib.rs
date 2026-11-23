@@ -7,6 +7,7 @@
 //! ([`start`]).
 
 pub mod ai;
+pub mod ai_actions;
 pub mod ai_agent;
 pub mod ai_file;
 pub mod ai_handover;
@@ -56,8 +57,11 @@ pub mod mini_app_buttons;
 pub mod notification;
 pub mod order_payment;
 pub mod purge;
+pub mod provider_account;
 pub mod quick_reply;
 pub mod ref_link;
+pub mod rich_message;
+pub mod rich_response;
 pub mod schedule;
 pub mod send_flow_step;
 pub mod sequence;
@@ -116,6 +120,9 @@ pub struct Deps {
     pub events: Option<chatbotx_jobs::events::EventBuses>,
     /// The Expo push sender; `None` = `EXPO_PUSH_ENABLED=false` (tests).
     pub push: Option<Arc<dyn notification::PushSender>>,
+    /// The channel provider transport of the on-demand profile lookup of a
+    /// new contact; `None` = no lookup (tests).
+    pub channel_http: Option<Arc<dyn chatbotx_business::channel_api::ChannelHttp>>,
 }
 
 /// A handler failure that BullMQ would retry (`throw new Error(..)`).
