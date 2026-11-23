@@ -211,8 +211,8 @@ mod challenge_handler {
 
     #[tokio::test]
     async fn delegates_a_quick_reply_challenge_and_does_not_re_run_the_node() {
-        // Adapted: the quick-reply challenge resume is not ported (DECISIONS);
-        // the job is a no-op and the node does not run.
+        // A quick-reply challenge goes to `quick_reply` (its own tests); the
+        // node itself does not run again.
         let fx = fixture(None).await;
         let challenge = json!({ "type": "quickReply", "data": { "flowId": "10", "nodeId": "n1", "attempts": 0 } });
         run_challenge(&fx.deps, &run_data(challenge, json!({})))

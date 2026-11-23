@@ -102,9 +102,11 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             .await
             .map_err(|e| JobError::retryable(e.to_string()))?
         }
-        // ponytail: the other default jobs are later units. An unported
-        // action fails (kept for a retry) instead of the original's
-        // "Unknown job name" completion, so no job is lost.
+        // The other default jobs (`sendAuditLog`, `exportContacts`,
+        // `exportCoupons`, `bulkTagContacts`, `runImport`) run in the API
+        // request in Rust, so nothing enqueues them. An unknown action fails
+        // (kept for a retry) instead of the original's "Unknown job name"
+        // completion, so no job is lost.
         other => {
             return Err(JobError::unrecoverable(format!(
                 "DefaultJobAction action is not defined: {other}"

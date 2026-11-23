@@ -1,9 +1,7 @@
 //! `pipeline.ts` (`handlePipelineStep`): the business rules live in
 //! `runPipelineFlowAction`; this handler gives it the contact's variable
-//! resolver, publishes the realtime events and maps the outcome.
-//!
-//! ponytail: the flow-trigger events of the write (`outcome.triggers`) come
-//! with the trigger worker (Q.W2).
+//! resolver, publishes the realtime events and flow-trigger events, runs the
+//! `assignContact` effects and maps the outcome.
 
 use std::sync::Arc;
 
@@ -90,6 +88,28 @@ pub(super) async fn handle(ctx: &StepCtx<'_, '_>) -> Result<StepStatus, JobError
                 .queue_workspace_event(&change.workspace_id.to_string(), event)
                 .await;
         }
+    }
+    let bus = crate::order_payment::bus(run.deps);
+    for trigger in outcome.triggers.iter().cloned() {
+        bus.publish(chatbotx_business::events::Event::Trigger(trigger))
+            .await;
+    }
+    match chatbotx_business::pipeline::assignees::apply_contact_assignments(
+        &run.deps.db,
+        &outcome.assignments,
+    )
+    .await
+    {
+        Ok(done) => {
+            for (ws, assigned) in done {
+                if let Err(err) =
+                    crate::rich_response::publish_assigned(run.deps, ws, assigned).await
+                {
+                    tracing::warn!(%err, "Pipeline assignContact publish failed");
+                }
+            }
+        }
+        Err(err) => tracing::warn!(err = %err.message(), "Pipeline assignContact failed"),
     }
     let status = match outcome.status {
         PipelineFlowActionStatus::Success => return Ok(StepStatus::Success),

@@ -252,8 +252,7 @@ async fn dispatch_reply(
             if matches!(
                 contact_inbox.channel.as_str(),
                 "messenger" | "instagram" | "tiktok"
-            ) && let Some(event_at) =
-                chatbotx_core::utils::id::created_at_from_id(&message_ref)
+            ) && let Some(event_at) = chatbotx_core::utils::id::created_at_from_id(&message_ref)
             {
                 let award = chatbotx_business::leaderboard::scoring::Award {
                     workspace_id: conversation.workspace_id,

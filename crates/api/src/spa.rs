@@ -269,19 +269,56 @@ async fn page(
     }
     match name.as_str() {
         "session" => session_page(&state, &headers).await,
-        // ponytail: no OAuth providers in the Rust auth yet; add them with the providers.
-        "authOptions" => ok(json!({
-            "enabledProviders": [],
-            "genericOAuth": null,
-            "signUpAllowed": !state.settings.sign_up_disabled,
-        })),
+        "authOptions" => {
+            let edition =
+                std::env::var("NEXT_PUBLIC_EDITION").unwrap_or_else(|_| "community".into());
+            let (enabled, generic) = crate::session::auth_page_providers(&state, &edition).await;
+            ok(json!({
+                "enabledProviders": enabled,
+                "genericOAuth": generic,
+                "signUpAllowed": crate::session::is_sign_up_allowed(&*state, Some(&headers)).await,
+            }))
+        }
         "home" => match require_session(&state, &headers).await {
             Ok(session) => home_page(&state, api.as_deref(), session.user_id).await,
             Err(response) => *response,
         },
-        // ponytail: deletion records are a P3.x port; the list is empty until then.
+        // `listDeletedWorkspacesAPI`: the owner's records, newest first.
         "deletedWorkspaces" => match require_session(&state, &headers).await {
-            Ok(_) => ok(json!({ "data": [] })),
+            Ok(session) => {
+                let per_page = input["perPage"].as_i64().unwrap_or(20).clamp(1, 100);
+                let offset = (input["page"].as_i64().unwrap_or(1).max(1) - 1) * per_page;
+                let owner = session.user_id;
+                let rows = state
+                    .db
+                    .read(move |conn| {
+                        chatbotx_db::repo::workspace_deletion_record::list_for_owner(
+                            conn, owner, per_page, offset,
+                        )
+                        .map_err(|e| chatbotx_db::DbError::other(e.message()))
+                    })
+                    .await;
+                match rows {
+                    Ok((rows, total)) => {
+                        let mut meta = Vec::new();
+                        let data: Vec<Value> = rows
+                            .iter()
+                            .enumerate()
+                            .map(|(i, r)| {
+                                let prefix = [json!("data"), json!(i)];
+                                crate::rpc::workspace::deletion_record(r, &prefix, &mut meta)
+                            })
+                            .collect();
+                        let page_count = (total + per_page - 1) / per_page;
+                        rpc_json(
+                            StatusCode::OK,
+                            json!({ "data": data, "pageCount": page_count }),
+                            Value::Array(meta),
+                        )
+                    }
+                    Err(error) => internal(error),
+                }
+            }
             Err(response) => *response,
         },
         "channelsCreate" => match require_session(&state, &headers).await {

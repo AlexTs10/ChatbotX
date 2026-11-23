@@ -154,12 +154,10 @@ fn browser_recording(integration: &IntegrationWhatsapp) -> bool {
     integration.call_recording_enabled && integration.call_recording_mode == "browserWhisper"
 }
 
-/// `claimConversationForCallAgent`: assigns the conversation to the agent
-/// while unassigned (best effort; a support session never claims).
-///
-/// ponytail: like `assignOne`, the response-SLA window, the
-/// `conversation_assigned` flow trigger (`whatsappCallAnswered` /
-/// `whatsappCallDialed`) and the analytics attribution are not ported.
+/// `claimConversationForCallAgent` (`claimForCallAgent`): assigns the
+/// conversation to the agent while unassigned (best effort), inside the
+/// response-SLA window, then the realtime event, the `conversationAssigned`
+/// flow trigger and the analytics event, as `assignOne`.
 pub async fn claim_conversation_for_call_agent(
     c: Calling<'_>,
     workspace_id: i64,
@@ -167,13 +165,16 @@ pub async fn claim_conversation_for_call_agent(
     user_id: i64,
 ) {
     let claimed = tx::write(c.db, move |conn| {
-        Ok(chatbotx_db::repo::conversation::assign_user_if_unassigned(
-            conn,
-            workspace_id,
-            conversation_id,
-            user_id,
-            None,
-        )?)
+        crate::response_sla::track_window(conn, workspace_id, &[conversation_id], false, |c| {
+            chatbotx_db::repo::conversation::assign_user_if_unassigned(
+                c,
+                workspace_id,
+                conversation_id,
+                user_id,
+                None,
+            )
+        })
+        .map_err(Into::into)
     })
     .await;
     match claimed {
@@ -198,6 +199,20 @@ pub async fn claim_conversation_for_call_agent(
                     .queue_workspace_event(&workspace_id.to_string(), event)
                     .await;
             }
+            let to = user_id.to_string();
+            crate::conversation_actions::emit_change(
+                c.db,
+                workspace_id,
+                conversation_id,
+                rows[0].contact_id,
+                Some((
+                    "conversationAssigned",
+                    json!({ "conversationId": conversation_id.to_string(), "assignedTo": to }),
+                )),
+                "conversation:assigned",
+                json!({ "toAssignee": to }),
+            )
+            .await;
         }
         Ok(_) => {}
         Err(error) => {

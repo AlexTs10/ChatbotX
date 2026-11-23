@@ -30,13 +30,44 @@ pub struct ResumeExtras {
     pub appointment_id: Option<i64>,
 }
 
-/// `metadataSchema.safeParse`: a payload object with a `type`.
-// ponytail: the discriminated-union field checks are not ported; only the
-// `type` decides anything here (the resume priority).
+/// `metadataSchema.safeParse`: the discriminated union's required fields per
+/// `type`. Unknown keys are kept (zod strips them; nothing reads them).
+// ponytail: datetime fields are checked as strings, not as ISO formats.
 fn parse_metadata(value: Option<&Value>) -> Option<Value> {
-    value
-        .filter(|m| m.get("type").is_some_and(Value::is_string))
-        .cloned()
+    let m = value?.as_object()?;
+    let text = |key: &str| m.get(key).is_some_and(Value::is_string);
+    let optional = |key: &str| m.get(key).is_none_or(Value::is_string);
+    let one_of = |key: &str, allowed: &[&str]| {
+        m.get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|v| allowed.contains(&v))
+    };
+    let required: &[&str] = match m.get("type")?.as_str()? {
+        "broadcast" => &["broadcastId", "contactInboxId"],
+        "sequenceSchedule" => &[
+            "sequenceStepId",
+            "sequenceId",
+            "dispatchId",
+            "contactInboxId",
+        ],
+        "commentAutomation" if one_of("replyChannel", &["public", "private"]) => {
+            &["commentAutomationId", "commentId"]
+        }
+        "updateStatus" => &[],
+        "appointmentWebviewSelection" if optional("appointmentId") => {
+            &["stepId", "selectedStartAt"]
+        }
+        "appointmentAvailabilityRangeSelection" => &["stepId", "startDate", "endDate"],
+        "appointmentAvailabilityRangeSkipped" => &["stepId"],
+        "getUserDataWebviewSelection" => &["stepId", "challengeId", "selectedValue"],
+        "stepInputResolution" if one_of("reason", &["timeout", "user_skipped"]) => {
+            &["stepId", "challengeId"]
+        }
+        _ => return None,
+    };
+    (optional("stepId") && optional("contactInboxId") && required.iter().all(|k| text(k)))
+        .then(|| value.cloned())
+        .flatten()
 }
 
 fn resume_metadata(row: &Row, extras: Option<&ResumeExtras>) -> Option<Value> {
@@ -354,7 +385,23 @@ pub async fn scan_smart_delay_with(
 
 #[cfg(test)]
 mod tests {
-    use super::window_until;
+    use super::{parse_metadata, window_until};
+    use serde_json::json;
+
+    #[test]
+    fn metadata_needs_the_fields_of_its_type() {
+        let ok = |v: serde_json::Value| parse_metadata(Some(&v)).is_some();
+        assert!(ok(json!({ "type": "updateStatus" })));
+        assert!(ok(
+            json!({ "type": "broadcast", "broadcastId": "1", "contactInboxId": "2" })
+        ));
+        assert!(!ok(json!({ "type": "broadcast", "broadcastId": "1" })));
+        assert!(!ok(
+            json!({ "type": "stepInputResolution", "stepId": "s", "challengeId": "c", "reason": "invalid_input_attempts" })
+        ));
+        assert!(!ok(json!({ "type": "updateStatus", "stepId": 3 })));
+        assert!(!ok(json!({ "type": "other" })));
+    }
 
     #[test]
     fn the_claim_window_ends_at_the_end_of_the_minute_five_minutes_ahead() {

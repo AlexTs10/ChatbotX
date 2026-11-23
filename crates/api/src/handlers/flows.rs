@@ -1,6 +1,6 @@
 //! `features/flows/api/public.ts` (P3.6-D2): `flows.create`, `list`, `get`,
-//! `listNodes`, `update`, `delete`, `duplicate`. The other flow routes are
-//! not ported yet.
+//! `listNodes`, `update`, `delete`, `duplicate`, `publish`, `validate`,
+//! `updateDraft`, `versions`, `export`, `import`.
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::flow::{self, FlowGraphInput, FlowUpdate, ListFlows};

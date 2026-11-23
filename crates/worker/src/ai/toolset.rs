@@ -8,9 +8,9 @@
 //! [`Toolset::with_reply`]; the flow steps pass none, as the original runner
 //! passes no `systemFunctionContextGetter`.
 //!
-//! ponytail: `sys:web_search` is the provider's native search tool in the
-//! original (OpenAI Responses / Gemini grounding); the chat-completions
-//! client here has none, so the tool is left out and the prompt says so.
+//! `sys:web_search` is not a function tool: it is the provider's native
+//! search (`llm::Request::web_search`; OpenAI Responses `web_search`, Gemini
+//! `google_search`), set by the automated response.
 
 use std::collections::HashMap;
 use std::sync::Arc;

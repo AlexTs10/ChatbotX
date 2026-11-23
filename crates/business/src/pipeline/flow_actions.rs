@@ -69,6 +69,7 @@ pub struct PipelineFlowActionResult {
     pub message: Option<String>,
     pub events: Vec<PipelineItemChanged>,
     pub triggers: Vec<TriggerEvent>,
+    pub assignments: Vec<super::assignees::ContactAssignment>,
 }
 
 impl PipelineFlowActionResult {
@@ -78,6 +79,7 @@ impl PipelineFlowActionResult {
             message,
             events: Vec::new(),
             triggers: Vec::new(),
+            assignments: Vec::new(),
         }
     }
 
@@ -97,6 +99,7 @@ impl PipelineFlowActionResult {
         PipelineFlowActionResult {
             events: mutation.events,
             triggers: mutation.triggers,
+            assignments: mutation.assignments,
             ..PipelineFlowActionResult::success()
         }
     }

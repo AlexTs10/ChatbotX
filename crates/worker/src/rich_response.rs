@@ -182,7 +182,11 @@ pub async fn execute_rich_actions(
     (executed, failed)
 }
 
-async fn publish_assigned(deps: &Deps, ws: i64, assigned: Assigned) -> Result<(), String> {
+pub(crate) async fn publish_assigned(
+    deps: &Deps,
+    ws: i64,
+    assigned: Assigned,
+) -> Result<(), String> {
     if let (Some(realtime), Some(event)) = (&deps.realtime, assigned.event) {
         realtime.queue_workspace_event(&ws.to_string(), event).await;
     }

@@ -154,3 +154,41 @@ pub fn resolve_contact_avatar_url_with(
         .ok()?;
     Some(format!("{}/media/avatar/{token}", urls.app_url))
 }
+
+/// `resolveContactAvatarUrl(input, finalize, ensureContactAvatarMirrored)`
+/// for one contact inbox `(id, channel)` (the `{{avatar}}` variables): no
+/// avatar or a stale sentinel on a hydration channel mirrors the channel
+/// picture synchronously instead of handing out the proxy URL.
+pub async fn resolve_contact_avatar_url_mirrored(
+    deps: super::channel_profile::ProfileDeps<'_>,
+    workspace_id: i64,
+    avatar: Option<&str>,
+    contact_inbox: Option<(i64, &str)>,
+    urls: &TenantUrls,
+    now_ms: i64,
+) -> Option<String> {
+    let fin = |key: &str| finalize(key, urls);
+    let avatar = avatar.filter(|a| !a.is_empty());
+    let Some((contact_inbox_id, channel)) = contact_inbox else {
+        return finalize_avatar_or_placeholder(avatar?, urls, &fin);
+    };
+    if let Some(avatar) = avatar {
+        match parse_no_avatar_sentinel(avatar) {
+            None => return fin(avatar),
+            Some(failed_at) if is_no_avatar_sentinel_fresh(failed_at, now_ms) => {
+                return Some(default_avatar_url(urls));
+            }
+            Some(_) => {}
+        }
+    }
+    if !AVATAR_HYDRATION_CHANNELS.contains(&channel) {
+        return None;
+    }
+    let mirrored = super::channel_profile::ensure_contact_avatar_mirrored(
+        deps,
+        workspace_id,
+        contact_inbox_id,
+    )
+    .await?;
+    finalize_avatar_or_placeholder(&mirrored, urls, &fin)
+}

@@ -123,11 +123,23 @@ async fn trigger(State(state): State<TriggerState>, RawQuery(query): RawQuery) -
     };
     let dynamic = render::dynamic_element_ids(&document);
     let urls = chatbotx_api::handlers::contacts::tenant_urls(api);
-    let avatar =
-        match service::contact_avatar_url(&api.db, row.workspace_id, contact_id, &urls).await {
-            Ok(avatar) => avatar,
-            Err(error) => return server_error(error),
-        };
+    let profile = chatbotx_business::contact::channel_profile::ProfileDeps {
+        db: &api.db,
+        http: &chatbotx_business::channel_api::LiveChannelHttp,
+        uploader: Some(files),
+    };
+    let avatar = match service::contact_avatar_url_mirrored(
+        profile,
+        row.workspace_id,
+        contact_id,
+        Some((inbox.id, inbox.channel.as_str())),
+        &urls,
+    )
+    .await
+    {
+        Ok(avatar) => avatar,
+        Err(error) => return server_error(error),
+    };
     let with_images =
         match service::resolve_dynamic_elements(&api.db, contact_id, avatar, &row.data.0).await {
             Ok(value) => value,

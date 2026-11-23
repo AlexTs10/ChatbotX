@@ -313,6 +313,7 @@ pub(crate) fn done<T>(value: T, effects: &[PipelineEffect]) -> ItemMutation<T> {
         value,
         events: realtime_events(effects),
         triggers: trigger_events(effects),
+        assignments: Vec::new(),
     }
 }
 
@@ -397,6 +398,9 @@ pub struct ItemMutation<T> {
     pub events: Vec<PipelineItemChanged>,
     /// The flow-trigger events (`emitPipelineItemEvent`), in order.
     pub triggers: Vec<TriggerEvent>,
+    /// The `assignContact` effects; run them with
+    /// [`assignees::apply_contact_assignments`] after the write.
+    pub assignments: Vec<assignees::ContactAssignment>,
 }
 
 /// `PipelineItemView`.
@@ -426,6 +430,7 @@ pub async fn create(db: &Db, input: CreateItem) -> Result<ItemMutation<PipelineI
     )
     .await?;
     let pipeline = view_of(db, input.workspace_id, pipeline).await?;
+    let assign_contact = stored_settings(&pipeline.pipeline).assign_contact_on_assign;
     let (row, effects) = tx::write(db, move |tx| {
         let conn: &Connection = tx;
         let CreateItem {
@@ -445,7 +450,7 @@ pub async fn create(db: &Db, input: CreateItem) -> Result<ItemMutation<PipelineI
             if existing.contact_id != contact_id {
                 return Err(idempotency_conflict());
             }
-            return Ok((existing, Vec::new()));
+            return Ok((existing, (Vec::new(), None)));
         }
         let status = fields.status.clone().unwrap_or_else(|| "open".to_string());
         let stages = stage_repo::list_by_pipeline(conn, workspace_id, pipeline_id)?;
@@ -506,7 +511,7 @@ pub async fn create(db: &Db, input: CreateItem) -> Result<ItemMutation<PipelineI
             if row.contact_id != contact_id {
                 return Err(idempotency_conflict());
             }
-            return Ok((row, Vec::new()));
+            return Ok((row, (Vec::new(), None)));
         }
         item_repo::replace_assignees(
             conn,
@@ -529,10 +534,19 @@ pub async fn create(db: &Db, input: CreateItem) -> Result<ItemMutation<PipelineI
         pipeline_activity::insert_many(conn, &[created])?;
         let names = stage_names_of(&stages);
         let effects = created_effects(&subject(&pipeline, &stage, &row, &actor, &names));
-        Ok((row, effects))
+        // An item created without assignees has no primary to assign the contact to.
+        let assignment = if sets.workspace_member_ids.len() + sets.inbox_team_ids.len() > 0 {
+            assignees::queue_assignment_in(conn, assign_contact, &row, None)?
+        } else {
+            None
+        };
+        Ok((row, (effects, assignment)))
     })
     .await?;
-    Ok(done(row, &effects))
+    let (effects, assignment) = effects;
+    let mut mutation = done(row, &effects);
+    mutation.assignments.extend(assignment);
+    Ok(mutation)
 }
 
 /// `pipelineItemService.update` / `move`.
@@ -546,6 +560,7 @@ pub async fn update(db: &Db, input: UpdateItem) -> Result<ItemMutation<PipelineI
     )
     .await?;
     let pipeline = view_of(db, input.workspace_id, pipeline).await?;
+    let assign_contact = stored_settings(&pipeline.pipeline).assign_contact_on_assign;
     let (row, effects) = tx::write(db, move |tx| {
         let conn: &Connection = tx;
         let UpdateItem {
@@ -693,10 +708,19 @@ pub async fn update(db: &Db, input: UpdateItem) -> Result<ItemMutation<PipelineI
         if assignees_changed && diff.stage.is_none() {
             effects.push(item_realtime(&row, "updated"));
         }
-        Ok((row, effects))
+        // An unchanged assignee set cannot change the primary assignee.
+        let assignment = if assignees_changed {
+            assignees::queue_assignment_in(conn, assign_contact, &row, assignees_before.as_ref())?
+        } else {
+            None
+        };
+        Ok((row, (effects, assignment)))
     })
     .await?;
-    Ok(done(row, &effects))
+    let (effects, assignment) = effects;
+    let mut mutation = done(row, &effects);
+    mutation.assignments.extend(assignment);
+    Ok(mutation)
 }
 
 /// `pipelineItemService.transfer`.

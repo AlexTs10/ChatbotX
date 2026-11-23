@@ -1,8 +1,10 @@
 //! `packages/business/src/poll`: polls, their candidates and votes.
 //!
-//! Not ported yet: `chat-messages.ts` / `bot-strings.ts` (the poll cards a flow
-//! sends; worker side) and the template edit locks of `create` / `update`
-//! (`withTemplateLockedTransaction` / `assertReferencable`, template unit).
+//! The poll cards a flow sends (`chat-messages.ts`) run in the worker
+//! (`rich_response`). The template locks of `create` / `update`
+//! (`withTemplateLockedTransaction` / `assertReferencable`) are not needed:
+//! SQLite serializes the writes, so an uninstall never runs between the
+//! check and the insert.
 
 pub mod analytics;
 pub mod bot_strings;

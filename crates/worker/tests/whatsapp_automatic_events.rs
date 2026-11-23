@@ -191,9 +191,15 @@ async fn enqueues_one_job_per_automatic_event() {
         ("LeadSubmitted", "wamid.lead-1"),
         ("Purchase", "wamid.purchase-1"),
     ]);
-    enqueue_webhook_jobs(&db(), &queue, &raw, None, chatbotx_worker::channels::whatsapp_webhook::AccountScope::Unscoped)
-        .await
-        .expect("acknowledged");
+    enqueue_webhook_jobs(
+        &db(),
+        &queue,
+        &raw,
+        None,
+        chatbotx_worker::channels::whatsapp_webhook::AccountScope::Unscoped,
+    )
+    .await
+    .expect("acknowledged");
     let added = queue.added.lock().unwrap();
     assert_eq!(added.len(), 2);
     let (name, data, job_id) = &added[0];
@@ -223,9 +229,15 @@ async fn continues_when_one_automatic_event_job_fails() {
         ("Purchase", "wamid.purchase-1"),
         ("LeadSubmitted", "wamid.lead-2"),
     ]);
-    enqueue_webhook_jobs(&db(), &queue, &raw, None, chatbotx_worker::channels::whatsapp_webhook::AccountScope::Unscoped)
-        .await
-        .expect("still acknowledged");
+    enqueue_webhook_jobs(
+        &db(),
+        &queue,
+        &raw,
+        None,
+        chatbotx_worker::channels::whatsapp_webhook::AccountScope::Unscoped,
+    )
+    .await
+    .expect("still acknowledged");
     let ids: Vec<Option<String>> = queue
         .added
         .lock()

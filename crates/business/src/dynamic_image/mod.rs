@@ -395,12 +395,43 @@ pub async fn find_latest_contact_inbox(
     .await
 }
 
-/// `findContactAvatarUrl`: the stored picture as a public URL, the default
-/// avatar for the no-avatar sentinel, `None` without one (or another
-/// workspace's contact).
-///
-/// ponytail: no on-demand channel fetch (`ensureAvatarMirrored`): the
-/// channel profile APIs are not ported (`profile_refresh`).
+/// `findContactAvatarUrl` with `ensureAvatarMirrored`: as
+/// [`contact_avatar_url`], but a lazy-avatar contact (no picture or a stale
+/// sentinel on Messenger / Instagram) gets its channel picture mirrored now.
+pub async fn contact_avatar_url_mirrored(
+    deps: crate::contact::channel_profile::ProfileDeps<'_>,
+    workspace_id: i64,
+    contact_id: i64,
+    contact_inbox: Option<(i64, &str)>,
+    urls: &crate::contact::avatar::TenantUrls,
+) -> Result<Option<String>> {
+    let contact = tx::read(deps.db, move |conn| {
+        conn.query_row(
+            r#"SELECT "avatar" FROM "Contact" WHERE "id" = ?1 AND "workspaceId" = ?2"#,
+            params![contact_id, workspace_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(sql_err)
+    })
+    .await?;
+    let Some(avatar) = contact else {
+        return Ok(None);
+    };
+    Ok(crate::contact::avatar::resolve_contact_avatar_url_mirrored(
+        deps,
+        workspace_id,
+        avatar.as_deref(),
+        contact_inbox,
+        urls,
+        now_ms(),
+    )
+    .await)
+}
+
+/// `findContactAvatarUrl` without a contact inbox: the stored picture as a
+/// public URL, the default avatar for the no-avatar sentinel, `None` without
+/// one (or another workspace's contact).
 pub async fn contact_avatar_url(
     db: &Db,
     workspace_id: i64,

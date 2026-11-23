@@ -555,7 +555,7 @@ async fn native_model(
 }
 
 /// The tenant `storageUrl` (`resolveTenantSettings`).
-fn storage_url(deps: &Deps) -> String {
+pub(crate) fn storage_url(deps: &Deps) -> String {
     chatbotx_business::contact::avatar::TenantUrls::from_app_url(
         &deps.app_url,
         std::env::var("NEXT_PUBLIC_STORAGE_URL").ok().as_deref(),

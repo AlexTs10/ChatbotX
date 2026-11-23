@@ -196,6 +196,72 @@ pub struct Request {
     pub tool_choice: ToolChoice,
     /// `output: Output.object({ schema })`: a JSON schema for the answer.
     pub output_schema: Option<Value>,
+    /// `sys:web_search`: the provider's native search tool (see
+    /// [`web_search_support`]); OpenAI then runs on the Responses API.
+    pub web_search: Option<WebSearch>,
+}
+
+/// The native web search of one request.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WebSearch {
+    /// `webSearchAuthorizedDomains` (normalized); empty = any domain.
+    pub allowed_domains: Vec<String>,
+}
+
+/// `OPENAI_MODELS_WITHOUT_SEARCH_FILTER`: they reject `filters`.
+const OPENAI_MODELS_WITHOUT_SEARCH_FILTER: [&str; 4] = [
+    "gpt-4o-mini",
+    "gpt-4o-mini-2024-07-18",
+    "gpt-4o-mini-search-preview",
+    "gpt-4o-mini-search-preview-2025-03-11",
+];
+
+/// `createNativeWebSearchTool`: `Err(omitReason)` when the provider (OpenAI
+/// and Gemini only) or its domain policy cannot search.
+pub fn web_search_support(model: &Model, allowed_domains: &[String]) -> Result<(), &'static str> {
+    match (model.provider.as_str(), model.wire) {
+        ("openai", Wire::OpenAi) => {
+            if !allowed_domains.is_empty()
+                && OPENAI_MODELS_WITHOUT_SEARCH_FILTER.contains(&model.model_id.as_str())
+            {
+                Err("model_domain_filter_not_supported")
+            } else {
+                Ok(())
+            }
+        }
+        ("gemini", Wire::Gemini) if !allowed_domains.is_empty() => {
+            Err("domain_allowlist_not_supported")
+        }
+        ("gemini", Wire::Gemini) => Ok(()),
+        _ => Err("provider_not_supported"),
+    }
+}
+
+/// `normalizeAuthorizedWebSearchDomains`: trimmed, lower case, valid host
+/// names, each once.
+pub fn normalize_web_search_domains(domains: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for domain in domains {
+        let domain = domain.trim().to_lowercase();
+        let valid = !domain.is_empty()
+            && domain.len() <= 253
+            && domain.split('.').all(|label| {
+                !label.is_empty()
+                    && label.len() <= 63
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+                    && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            });
+        if valid && !out.contains(&domain) {
+            out.push(domain);
+        }
+    }
+    out
+}
+
+/// OpenAI with web search runs on the Responses API (`@ai-sdk/openai`).
+fn uses_responses(model: &Model, request: &Request) -> bool {
+    request.web_search.is_some() && model.provider == "openai" && model.wire == Wire::OpenAi
 }
 
 impl Request {
@@ -208,6 +274,7 @@ impl Request {
             max_steps: 1,
             tool_choice: ToolChoice::Unset,
             output_schema: None,
+            web_search: None,
         }
     }
 }
@@ -339,10 +406,14 @@ async fn step(
             body: Some(text),
         });
     }
-    match parsed
-        .as_ref()
-        .and_then(|body| parse_answer(model.wire, body))
-    {
+    let responses = uses_responses(model, request);
+    match parsed.as_ref().and_then(|body| {
+        if responses {
+            parse_responses(body)
+        } else {
+            parse_answer(model.wire, body)
+        }
+    }) {
         Some(answer) => Ok((answer, text)),
         None => Err(LlmError {
             status: Some(status),
@@ -411,6 +482,13 @@ pub fn build_request(
     defs: &[ToolDef],
 ) -> (String, Vec<(String, String)>, Value) {
     let key = model.api_key.clone().unwrap_or_default();
+    if uses_responses(model, request) {
+        return (
+            format!("{}/responses", model.base_url.trim_end_matches('/')),
+            vec![("Authorization".into(), format!("Bearer {key}"))],
+            responses_body(model, request, turns, defs),
+        );
+    }
     match model.wire {
         Wire::OpenAi => {
             let mut headers = Vec::new();
@@ -805,7 +883,142 @@ fn gemini_body(request: &Request, turns: &[Turn], defs: &[ToolDef]) -> Value {
             _ => {}
         }
     }
+    if request.web_search.is_some() {
+        let tools = body.entry("tools").or_insert_with(|| json!([]));
+        if let Some(list) = tools.as_array_mut() {
+            list.push(json!({ "google_search": {} }));
+        }
+    }
     Value::Object(body)
+}
+
+/// The Responses API body (`@ai-sdk/openai` `responses`): function tools
+/// plus `web_search` (`searchContextSize: "medium"`, the domain filter).
+fn responses_body(model: &Model, request: &Request, turns: &[Turn], defs: &[ToolDef]) -> Value {
+    let mut input = Vec::new();
+    for turn in turns {
+        match turn {
+            Turn::User(parts) => {
+                let content: Vec<Value> = parts
+                    .iter()
+                    .map(|part| match part {
+                        Part::Text(text) => json!({ "type": "input_text", "text": text }),
+                        Part::File { url, .. } => {
+                            json!({ "type": "input_image", "image_url": url })
+                        }
+                    })
+                    .collect();
+                input.push(json!({ "role": "user", "content": content }));
+            }
+            Turn::Assistant { text, calls } => {
+                if !text.is_empty() {
+                    input.push(json!({ "role": "assistant", "content": text }));
+                }
+                for call in calls {
+                    input.push(json!({ "type": "function_call", "call_id": call.id,
+                        "name": call.name, "arguments": call.args.to_string() }));
+                }
+            }
+            Turn::Tool(outputs) => {
+                for out in outputs {
+                    input.push(json!({ "type": "function_call_output", "call_id": out.id,
+                        "output": out.output }));
+                }
+            }
+        }
+    }
+    let mut body = Map::new();
+    body.insert("model".into(), json!(model.model_id));
+    body.insert("input".into(), Value::Array(input));
+    body.insert("store".into(), json!(false));
+    set_opt(
+        &mut body,
+        "instructions",
+        request.system.clone().filter(|s| !s.is_empty()),
+    );
+    set_opt(&mut body, "max_output_tokens", request.max_output_tokens);
+    if !is_openai_reasoning(model) {
+        set_opt(&mut body, "temperature", request.temperature);
+    }
+    let mut tools: Vec<Value> = defs
+        .iter()
+        .map(|d| {
+            json!({ "type": "function", "name": d.name, "description": d.description,
+                    "parameters": d.parameters })
+        })
+        .collect();
+    if let Some(search) = &request.web_search {
+        let mut tool = json!({ "type": "web_search", "search_context_size": "medium" });
+        if !search.allowed_domains.is_empty() {
+            tool["filters"] = json!({ "allowed_domains": search.allowed_domains });
+        }
+        tools.push(tool);
+    }
+    body.insert("tools".into(), Value::Array(tools));
+    match &request.tool_choice {
+        ToolChoice::None => {
+            body.insert("tool_choice".into(), json!("none"));
+        }
+        ToolChoice::Tool(name) if !defs.is_empty() => {
+            body.insert(
+                "tool_choice".into(),
+                json!({ "type": "function", "name": name }),
+            );
+        }
+        _ => {
+            body.insert("tool_choice".into(), json!("auto"));
+        }
+    }
+    if let Some(schema) = &request.output_schema {
+        body.insert(
+            "text".into(),
+            json!({ "format": { "type": "json_schema", "name": "response", "strict": true, "schema": schema } }),
+        );
+    }
+    Value::Object(body)
+}
+
+/// The text and function calls of a Responses API answer (`output` items;
+/// `web_search_call` and `reasoning` items are the provider's own).
+fn parse_responses(body: &Value) -> Option<StepAnswer> {
+    let mut answer = StepAnswer::default();
+    for item in body.get("output")?.as_array()? {
+        match item.get("type").and_then(Value::as_str) {
+            Some("message") => {
+                for part in item
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                        answer
+                            .text
+                            .push_str(part.get("text").and_then(Value::as_str).unwrap_or(""));
+                    }
+                }
+            }
+            Some("function_call") => answer.calls.push(ToolCall {
+                id: item
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
+                name: item
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
+                args: item
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .and_then(|a| serde_json::from_str(a).ok())
+                    .unwrap_or_else(|| json!({})),
+            }),
+            _ => {}
+        }
+    }
+    Some(answer)
 }
 
 /// The text and tool calls of one answer.
@@ -1113,5 +1326,56 @@ mod tests {
         .unwrap();
         assert_eq!(answer.text, "b");
         assert_eq!(answer.calls[0].name, "echo");
+    }
+
+    #[test]
+    fn native_web_search_uses_responses_for_openai_and_google_search_for_gemini() {
+        let domains = normalize_web_search_domains(&[
+            " Example.COM ".into(),
+            "example.com".into(),
+            "bad domain".into(),
+        ]);
+        assert_eq!(domains, vec!["example.com".to_owned()]);
+        assert_eq!(web_search_support(&openai("gpt-5"), &domains), Ok(()));
+        assert_eq!(
+            web_search_support(&openai("gpt-4o-mini"), &domains),
+            Err("model_domain_filter_not_supported")
+        );
+        let gemini = Model {
+            provider: "gemini".into(),
+            wire: Wire::Gemini,
+            ..openai("gemini-3.5-flash")
+        };
+        assert_eq!(
+            web_search_support(&gemini, &domains),
+            Err("domain_allowlist_not_supported")
+        );
+        let mut request = Request::new(Some("sys".into()), vec![Turn::user("hi")]);
+        request.web_search = Some(WebSearch {
+            allowed_domains: domains,
+        });
+        let model = openai("gpt-5");
+        let (url, _, body) = build_request(&model, &request, &request.messages, &Echo.defs());
+        assert!(url.ends_with("/responses"), "{url}");
+        assert_eq!(body["instructions"], "sys");
+        assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(body["tools"][0]["name"], "echo");
+        assert_eq!(body["tools"][1]["type"], "web_search");
+        assert_eq!(
+            body["tools"][1]["filters"]["allowed_domains"][0],
+            "example.com"
+        );
+        let answer = parse_responses(&json!({ "output": [
+            { "type": "web_search_call", "id": "ws" },
+            { "type": "message", "content": [{ "type": "output_text", "text": "found" }] },
+            { "type": "function_call", "call_id": "c1", "name": "echo", "arguments": "{\"q\":2}" }
+        ] }))
+        .unwrap();
+        assert_eq!(answer.text, "found");
+        assert_eq!(answer.calls[0].id, "c1");
+        assert_eq!(answer.calls[0].args["q"], 2);
+        request.web_search = Some(WebSearch::default());
+        let (_, _, body) = build_request(&gemini, &request, &request.messages, &[]);
+        assert_eq!(body["tools"][0], json!({ "google_search": {} }));
     }
 }

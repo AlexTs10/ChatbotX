@@ -34,11 +34,27 @@ Open on purpose (DECISIONS Q.P6 "Skip and record"): B2 (53 procedures with
 no caller, `tests/fixtures/not_ported_rpc.txt`), the cloud / enterprise
 items (D2 7, E16, E17, E18), Postgres / Redis upkeep (D2 3), E22.
 
-Open gaps recorded in DECISIONS (2026-11-23): the poll chat runtime (poll
-cards, poll ref links), the rich-response button fallback of a tap, the
-WhatsApp Flow response media download, the AI rich response mode, action
-rules and typing indicator, native provider web search, the provider
-`ErrorLog` rows, `resetContactForResume` on a stopped broadcast.
+Ported on 2026-11-23 (last round): the poll chat runtime, the rich-response
+button fallback, the AI rich response mode, action rules and typing
+indicator, native provider web search (OpenAI Responses `web_search`, Gemini
+`google_search`), the provider `ErrorLog` rows, the WhatsApp Flow response
+media download (`flowFiles`), the flow-action double-tap debounce,
+`resetContactForResume`, the pipeline `assignContactOnAssign` effect, the
+contact export purge cron, Smart Delay, the WhatsApp call claim triggers /
+SLA, the Zalo tag sync (`channelLabelChange`), every `{{variable}}` source
+(calls, lead ads, questionnaires, leaderboard referrer, coupons, pipelines,
+default API token, avatar mirror, attachments, post text, Messenger inbox
+link), the dynamic-image avatar mirror, the deleted-workspaces page, the
+sign-in provider buttons (`authOptions`), Meta catalog GET retries and the
+smart-delay metadata checks.
+
+Still open by design (DECISIONS): the live Instagram profile snapshot of the
+leaderboard (stored snapshot used), the `jsonrepair` pass of rich messages,
+an inline mirror in `ensureAttachmentStored` (the media proxy URL mirrors on
+first fetch), the cloud schedule jobs (`clearExpiredSupportAccess`,
+`maintainLeaderboardPartitions`, `maintainLeaderboardRankings`,
+`maintainMacPartitions`, `reconcileTenants`, `refreshLicense`,
+`syncUserQuota`, `teardownExpiredTrial`, `unsubscribeExpiredTrials`).
 
 ## Summary
 

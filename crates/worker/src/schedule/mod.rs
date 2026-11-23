@@ -28,6 +28,7 @@ pub const PORTED: &[&str] = &[
     "redispatchInboundWebhookRequests",
     "purgeCommentAutomationEvents",
     "purgeExpiredConnectSessions",
+    "purgeExpiredContactExports",
     "purgeWhatsappSignupSessions",
     "purgeCoexistStaging",
     "scanCoexistRuns",
@@ -130,6 +131,16 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         }
         "redispatchTemplateJobs" => {
             crate::template::redispatch(&deps).await?;
+            Value::Null
+        }
+        "purgeExpiredContactExports" => {
+            chatbotx_business::contact_export::purge_expired(
+                &deps.db,
+                deps.files.as_deref(),
+                chatbotx_db::repo::now_ms(),
+            )
+            .await
+            .map_err(|e| crate::fail(e.to_string()))?;
             Value::Null
         }
         "purgeErrorLogs" => {

@@ -14,6 +14,7 @@ pub(crate) fn with_variables(fx: &mut Fixture) {
         sources: DbSources {
             db: fx.deps.db.clone(),
             app_url: "http://app.test".into(),
+            files: None,
         },
         cache: chatbotx_kv::cache::Cache::new(Arc::new(chatbotx_kv::SystemClock)),
         encryption: chatbotx_core::encryption::Encryption::new(

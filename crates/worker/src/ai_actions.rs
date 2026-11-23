@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use chatbotx_business::ai::llm::{ToolDef, Tools};
-use chatbotx_business::conversation_actions::{self, ActionJob, Assigned};
+use chatbotx_business::conversation_actions;
 use chatbotx_business::{contact_custom_field, tag};
 use chatbotx_db::repo::models::{ContactInbox, Conversation};
 use chatbotx_db::repo::now_ms;
@@ -157,33 +157,6 @@ const fn skipped(reason: &'static str) -> Outcome {
     ("skipped", reason)
 }
 
-async fn publish_assigned(deps: &Deps, ws: i64, assigned: Assigned) -> Result<(), String> {
-    if let (Some(realtime), Some(event)) = (&deps.realtime, assigned.event) {
-        realtime.queue_workspace_event(&ws.to_string(), event).await;
-    }
-    if let Some(ActionJob {
-        queue,
-        name,
-        data,
-        job_id,
-    }) = assigned.job
-    {
-        deps.jobs
-            .add(
-                queue,
-                name,
-                data,
-                JobOptions {
-                    job_id,
-                    ..JobOptions::default()
-                },
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 /// One row exists (`SELECT 1 ... LIMIT 1`).
 async fn exists(deps: &Deps, sql: &'static str, a: i64, b: i64) -> Result<bool, String> {
     deps.db
@@ -320,7 +293,7 @@ async fn execute(
                 }
             }
             match conversation_actions::assign_one(db, ws, conversation_id, Some(assigned)).await {
-                Ok(assigned) => publish_assigned(deps, ws, assigned).await?,
+                Ok(assigned) => crate::rich_response::publish_assigned(deps, ws, assigned).await?,
                 Err(e) if matches!(e.code(), Some("invalidAssignee" | "notFound")) => {}
                 Err(e) => return Err(e.to_string()),
             }
@@ -334,7 +307,7 @@ async fn execute(
             let assigned = conversation_actions::assign_one(db, ws, conversation_id, None)
                 .await
                 .map_err(err)?;
-            publish_assigned(deps, ws, assigned).await?;
+            crate::rich_response::publish_assigned(deps, ws, assigned).await?;
         }
         AiAgentAction::TransferToHuman { .. } => {
             conversation_actions::hand_off_if_bot_enabled(
@@ -497,6 +470,9 @@ fn rejected(reason: &str) -> String {
     json!({ "executed": [], "skipped": [{ "reason": reason }], "failed": [] }).to_string()
 }
 
+/// One rule match of the strict input: `(ruleId, [(actionId, value)])`.
+type RuleMatch = (String, Vec<(String, String)>);
+
 impl ActionTool {
     /// `buildActionToolDescription`.
     fn description(&self) -> String {
@@ -590,7 +566,7 @@ impl ActionTool {
     }
 
     /// The strict input: `(ruleId, [(actionId, value)])` per match.
-    fn parse(&self, args: &Value) -> Option<Vec<(String, Vec<(String, String)>)>> {
+    fn parse(&self, args: &Value) -> Option<Vec<RuleMatch>> {
         let object = args.as_object()?;
         if object.keys().any(|k| k != "matches") {
             return None;

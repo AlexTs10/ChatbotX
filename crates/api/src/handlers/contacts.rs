@@ -1,7 +1,8 @@
 //! `features/contacts/api/public/crud.ts` (P3.6-D2 slice contacts core):
 //! `contacts.get / create / update / updateLegacy / delete / block /
 //! unblock / upsert / findByCustomField`; slice contacts list: `contacts.list /
-//! search / count`. The import and sub-resource routes are not ported yet.
+//! search / count`. The import and sub-resource routes live in their own
+//! modules (`contact_imports`, ...).
 
 use chatbotx_business::BusinessError;
 use chatbotx_business::contact::avatar::{AvatarInbox, TenantUrls, resolve_contact_avatar_url};

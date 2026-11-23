@@ -51,6 +51,70 @@ fn automated_response_timing() -> (u64, u64) {
     )
 }
 
+/// `SMART_RESPONSE_DELAY_OPTIONS`.
+const SMART_RESPONSE_DELAY_OPTIONS: [i64; 10] = [3, 5, 10, 15, 20, 30, 45, 60, 120, 180];
+
+/// `isSmartDelayEligible` + `resolveAutomatedResponseTiming`: the
+/// workspace's Smart Delay when it is a valid option, the message matches no
+/// keyword rule and an async responder (default AI agent or Global Router)
+/// exists. `None` = the default timing.
+async fn smart_delay_seconds(
+    deps: &Deps,
+    workspace_id: i64,
+    text: Option<&str>,
+    attachment_file_types: &[String],
+) -> Result<Option<u64>, String> {
+    use chatbotx_business::keyword_match::{MatchInput, matches_any_keyword_rule};
+    let (delay, has_router) = deps
+        .db
+        .read(move |conn| {
+            let delay: Option<i64> = conn
+                .query_row(
+                    r#"SELECT "smartResponseDelaySeconds" FROM "Workspace" WHERE "id" = ?1"#,
+                    [workspace_id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .flatten();
+            let router = conn
+                .query_row(
+                    r#"SELECT 1 FROM "DecisionProfile" WHERE "workspaceId" = ?1 AND "globalRouterEnabled" = 1 LIMIT 1"#,
+                    [workspace_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            Ok((delay, router))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(delay) = delay.filter(|d| SMART_RESPONSE_DELAY_OPTIONS.contains(d)) else {
+        return Ok(None);
+    };
+    let has_input = text.is_some() || !attachment_file_types.is_empty();
+    if has_input {
+        let rules = crate::ai_agent::inbound_rules(deps, workspace_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let input = MatchInput {
+            text: text.map(str::to_owned),
+            attachment_file_types: attachment_file_types.to_vec(),
+        };
+        if matches_any_keyword_rule(
+            &input,
+            &rules.iter().map(|r| r.1.clone()).collect::<Vec<_>>(),
+        ) {
+            return Ok(None);
+        }
+    }
+    let has_agent = has_router
+        || chatbotx_business::ai_agent::find_default(&deps.db, workspace_id)
+            .await
+            .map_err(|e| e.message())?
+            .is_some();
+    Ok(has_agent.then_some(delay as u64))
+}
+
 /// `getKey` of `@chatbotx.io/automated-response`.
 pub fn automated_response_key(conversation_id: i64, contact_inbox_id: i64) -> String {
     format!("automated-response:{conversation_id}-{contact_inbox_id}:messages")
@@ -1601,8 +1665,7 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
         )
         .and_then(|entity| entity.get("flowResponse"))
     {
-        // ponytail: `flowFiles` (the Flow response media download) is not
-        // ported, so a file answer keeps its field unchanged.
+        let flow_files = flow_files(deps, received);
         add_job(
             deps,
             QueueName::Integration,
@@ -1614,6 +1677,7 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
                 "messageId": message_id.to_string(),
                 "templateFlowToken": token,
                 "flowResponse": flow_response,
+                "flowFiles": flow_files,
             }}),
             JobOptions {
                 job_id: Some(format!("template-flow-response-{message_id}")),
@@ -1847,7 +1911,7 @@ pub(crate) async fn enqueue_automated_response_for(
         let rules = crate::ai_agent::inbound_rules(deps, workspace_id).await?;
         let input = MatchInput {
             text: None,
-            attachment_file_types,
+            attachment_file_types: attachment_file_types.clone(),
         };
         if !matches_any_keyword_rule(
             &input,
@@ -1856,9 +1920,21 @@ pub(crate) async fn enqueue_automated_response_for(
             return Ok(());
         }
     }
-    // ponytail: Smart Delay (`smartResponseDelaySeconds`) only applies with
-    // an AI agent / Global Router (Q.D6); until then the default timing.
-    let (delay_secs, ttl_secs) = automated_response_timing();
+    let (delay_secs, ttl_secs) = match smart_delay_seconds(
+        deps,
+        workspace_id,
+        text.as_deref(),
+        &attachment_file_types,
+    )
+    .await
+    {
+        Ok(Some(seconds)) => (seconds, seconds),
+        Ok(None) => automated_response_timing(),
+        Err(err) => {
+            tracing::warn!(%err, "Smart delay lookup failed; using default timing");
+            automated_response_timing()
+        }
+    };
     let key = automated_response_key(conversation_id, contact_inbox_id);
     let opts = JobOptions {
         job_id: Some(format!("automated-response-{message_id}")),
@@ -1897,6 +1973,54 @@ pub(crate) async fn enqueue_automated_response_for(
 
 /// `automatedResponseService.enqueueFlowAction`: a button tap starts the
 /// flow node it names (`runFlowPostback` / `runFlowQuickReply`).
+/// `resolveFlowFiles`: the stored files of a Flow response's file answers
+/// with their public URLs, by answer key (a key whose files all failed stays,
+/// empty). `None` when the response has no files.
+fn flow_files(deps: &Deps, received: &Received) -> Option<Value> {
+    let message = received.message.as_ref()?;
+    let answers = message
+        .content_attributes
+        .as_ref()?
+        .get("files")?
+        .as_object()?;
+    if answers.is_empty() {
+        return None;
+    }
+    let storage_url = crate::heavy::storage_url(deps);
+    let resolved = answers
+        .iter()
+        .map(|(key, files)| {
+            let kept: Vec<Value> = files
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|file| file["status"] == "stored")
+                .filter_map(|file| {
+                    let media_id = file["mediaId"].as_str()?;
+                    let path = message
+                        .attachments
+                        .iter()
+                        .find(|a| a.source_id.as_deref() == Some(media_id))?
+                        .origin_path
+                        .as_str();
+                    let url =
+                        chatbotx_core::utils::storage::get_public_file_url(path, &storage_url)
+                            .ok()?;
+                    Some(json!({
+                        "mediaId": media_id,
+                        "fileName": file["fileName"],
+                        "mimeType": file["mimeType"],
+                        "size": file["size"],
+                        "url": url,
+                    }))
+                })
+                .collect();
+            (key.clone(), Value::Array(kept))
+        })
+        .collect();
+    Some(Value::Object(resolved))
+}
+
 pub(crate) async fn enqueue_flow_action(
     deps: &Deps,
     stored: &Stored,
@@ -1919,7 +2043,27 @@ pub(crate) async fn enqueue_flow_action(
     {
         payload["waFlowResponse"] = flow_response.clone();
     }
-    // ponytail: no per-action debounce key; a double tap runs twice.
+    if let Some(files) = flow_files(deps, &stored.received) {
+        payload["flowFiles"] = files;
+    }
+    // `isDebounceEligible`: a double tap within the TTL runs once (the last
+    // one); a Flow form answer is never debounced.
+    let opts = if kind == "postback" && payload.get("waFlowResponse").is_some() {
+        JobOptions::default()
+    } else {
+        let (delay_secs, ttl_secs) = automated_response_timing();
+        JobOptions {
+            delay_ms: Some(delay_secs * 1000),
+            dedup: Some(Dedup {
+                id: flow_action_key(stored.conversation.id, stored.contact_inbox.id, action),
+                ttl_ms: Some(ttl_secs * 1000),
+                extend: true,
+                replace: true,
+                keep_last_if_active: false,
+            }),
+            ..JobOptions::default()
+        }
+    };
     add_job(
         deps,
         QueueName::Integration,
@@ -1932,9 +2076,19 @@ pub(crate) async fn enqueue_flow_action(
             "messageId": message_id.to_string(),
             "payload": payload,
         }}),
-        JobOptions::default(),
+        opts,
     )
     .await
+}
+
+/// `getFlowActionKey`: the action hashed (sha256, 16 hex chars).
+fn flow_action_key(conversation_id: i64, contact_inbox_id: i64, action: &str) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, action.as_bytes());
+    let hash: String = digest.as_ref()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("automated-response:flow-action:{conversation_id}-{contact_inbox_id}:{hash}")
 }
 
 /// `IntegrationJobAction.messageStatus` (`message-status.ts`): the channel
@@ -2138,6 +2292,14 @@ pub(crate) mod tests {
     use chatbotx_jobs::{AddResult, Enqueuer, JobsError, NewJob};
 
     use super::*;
+
+    #[test]
+    fn flow_action_key_hashes_the_action() {
+        assert_eq!(
+            flow_action_key(1, 2, "a"),
+            "automated-response:flow-action:1-2:ca978112ca1bbdca"
+        );
+    }
 
     #[derive(Default)]
     pub(crate) struct Recording(pub(crate) Mutex<Vec<(QueueName, String, Value, JobOptions)>>);

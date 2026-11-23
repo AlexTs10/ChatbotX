@@ -3,8 +3,8 @@
 //! always come from `order::quote` / `order::place`, never from the cart or
 //! the browser.
 //!
-//! ponytail: an external store (Shopify / WooCommerce) checkout
-//! (`checkoutOnExternalStore`) is not ported: it answers `webshopClosed`.
+//! An external store (Shopify / WooCommerce) checkout runs in
+//! `external_checkout` (`checkoutOnExternalStore`).
 
 use std::collections::HashMap;
 

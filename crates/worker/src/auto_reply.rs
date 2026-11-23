@@ -821,11 +821,38 @@ impl Reply<'_> {
         if toolset.has("connect_user_to_human") {
             system = format!("{system}\n\n{HANDOFF_POLICY}").trim().to_owned();
         }
-        if web_search_selected {
-            system = format!("{system}\n\n{WEB_SEARCH_UNAVAILABLE}")
-                .trim()
-                .to_owned();
-        }
+        // `createNativeWebSearchTool`: the provider's own search, or the
+        // "unavailable" policy when the provider / domain policy cannot.
+        let web_search = if web_search_selected {
+            let raw: Vec<String> = agent
+                .web_search_authorized_domains
+                .0
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect();
+            let allowed_domains = llm::normalize_web_search_domains(&raw);
+            match llm::web_search_support(&model, &allowed_domains) {
+                Ok(()) => Some(llm::WebSearch { allowed_domains }),
+                Err(reason) => {
+                    tracing::info!(
+                        provider,
+                        model_id = model.model_id,
+                        conversation_id = conversation.id,
+                        workspace_id = ws,
+                        reason,
+                        "[automated-response] web search omitted"
+                    );
+                    system = format!("{system}\n\n{WEB_SEARCH_UNAVAILABLE}")
+                        .trim()
+                        .to_owned();
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let rich_mode = agent.is_rich_response && self.message_id.is_some();
         if agent.is_rich_response && self.message_id.is_none() {
             tracing::warn!(
@@ -848,11 +875,13 @@ impl Reply<'_> {
             base: &toolset,
             actions: action_tool,
         };
-        request.tool_choice = if toolset.is_empty() && tools.actions.is_none() {
-            ToolChoice::None
-        } else {
-            ToolChoice::Auto
-        };
+        request.tool_choice =
+            if toolset.is_empty() && tools.actions.is_none() && web_search.is_none() {
+                ToolChoice::None
+            } else {
+                ToolChoice::Auto
+            };
+        request.web_search = web_search;
         let generated = match llm::generate(&*self.deps.ai.http, &model, &request, &tools).await {
             Ok(generated) => generated,
             Err(err) => {

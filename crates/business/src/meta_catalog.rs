@@ -93,7 +93,9 @@ pub trait MetaGraph: Send + Sync {
 }
 
 /// The Graph API over HTTPS (`metaCatalogGraphClient`: bearer header, 30 s
-/// timeout). GET retries are not ported.
+/// timeout, a GET retried up to 3 times on a network error or 408 / 429 /
+/// 5xx with ky's backoff, 300 ms doubling, at most 1 s).
+// ponytail: no `Retry-After` reading (ky waits for it on 429 / 503).
 pub struct HttpGraph {
     pub base_url: String,
 }
@@ -119,6 +121,19 @@ fn http_client() -> Result<&'static reqwest::Client> {
         .map_err(|e| graph_error(502, e))
 }
 
+/// ky `retry.limit`.
+const GET_RETRY_LIMIT: u32 = 3;
+
+/// ky `retry.statusCodes`.
+fn is_retry_status(status: u16) -> bool {
+    matches!(status, 408 | 429 | 500 | 502 | 503 | 504)
+}
+
+/// ky's default backoff (`0.3 * 2 ** (attempt - 1) * 1000`) under `backoffLimit: 1000`.
+fn retry_delay(attempt: u32) -> Duration {
+    Duration::from_millis((300u64 << attempt.min(4)).min(1000))
+}
+
 fn graph_error(status: u16, message: &str) -> BusinessError {
     BusinessError::exception(message, "metaCatalogError", status)
 }
@@ -141,27 +156,40 @@ impl HttpGraph {
             url.query_pairs_mut().extend_pairs(query);
         }
         let client = http_client()?;
-        let request = match form {
-            Some(fields) => client
-                .post(url.as_str())
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(
-                    url::form_urlencoded::Serializer::new(String::new())
-                        .extend_pairs(fields)
-                        .finish(),
-                ),
-            None => client.get(url.as_str()),
+        let mut attempt = 0u32;
+        let (status, bytes) = loop {
+            let request = match form {
+                Some(fields) => client
+                    .post(url.as_str())
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(
+                        url::form_urlencoded::Serializer::new(String::new())
+                            .extend_pairs(fields)
+                            .finish(),
+                    ),
+                None => client.get(url.as_str()),
+            };
+            let sent = request
+                .header("authorization", format!("Bearer {}", auth.access_token))
+                .send()
+                .await;
+            let retryable = match &sent {
+                Ok(response) => is_retry_status(response.status().as_u16()),
+                Err(_) => true,
+            };
+            if form.is_none() && retryable && attempt < GET_RETRY_LIMIT {
+                tokio::time::sleep(retry_delay(attempt)).await;
+                attempt += 1;
+                continue;
+            }
+            let response = sent.map_err(|e| graph_error(502, &e.to_string()))?;
+            let status = response.status().as_u16();
+            let bytes = response
+                .bytes()
+                .await
+                .map_err(|e| graph_error(502, &e.to_string()))?;
+            break (status, bytes);
         };
-        let response = request
-            .header("authorization", format!("Bearer {}", auth.access_token))
-            .send()
-            .await
-            .map_err(|e| graph_error(502, &e.to_string()))?;
-        let status = response.status().as_u16();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| graph_error(502, &e.to_string()))?;
         let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
         if !(200..300).contains(&status) {
             let message = chatbotx_core::utils::graph_error::format_graph_error(body.get("error"))
@@ -952,4 +980,16 @@ pub async fn sync_products<G: MetaGraph>(
         return Err(BusinessError::Repo(repo::Error::msg(error)));
     }
     Ok(run)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_retry_matches_ky() {
+        let ms = |a| retry_delay(a).as_millis();
+        assert_eq!((ms(0), ms(1), ms(2), ms(3)), (300, 600, 1000, 1000));
+        assert!(is_retry_status(429) && is_retry_status(504) && !is_retry_status(400));
+    }
 }

@@ -88,7 +88,11 @@ pub fn workspace_resource(w: &Workspace, prefix: &[Value], meta: &mut Vec<Value>
 }
 
 /// `workspaceDeletionRecordResource`.
-fn deletion_record(r: &WorkspaceDeletionRecord, prefix: &[Value], meta: &mut Vec<Value>) -> Value {
+pub(crate) fn deletion_record(
+    r: &WorkspaceDeletionRecord,
+    prefix: &[Value],
+    meta: &mut Vec<Value>,
+) -> Value {
     json!({
         "id": r.id.to_string(),
         "workspaceId": r.workspace_id.to_string(),

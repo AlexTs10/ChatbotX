@@ -188,8 +188,8 @@ pub fn activity_rows_from_diff(
     rows
 }
 
-/// `PipelineEffect` (the `assignContact` effect is not ported: no
-/// conversation service).
+/// `PipelineEffect` (the `assignContact` effect is
+/// `ItemMutation::assignments`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum PipelineEffect {
     /// `emitPipelineItemEvent` (flow triggers); `metadata` is

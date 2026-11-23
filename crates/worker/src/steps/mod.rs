@@ -212,9 +212,8 @@ pub(crate) async fn run(
             Ok(StepStatus::Success)
         }
         other => {
-            // ponytail: steps of unported domains (ads, ecommerce, ...)
-            // are implicit
-            // successes until their units; see specs/Q.W3.md.
+            // Every step type of the original has a handler; an unknown
+            // type (a newer builder) is an implicit success, as the original.
             tracing::warn!(
                 step_type = other,
                 flow_id = run.flow_version.flow_id,

@@ -351,7 +351,11 @@ fn identity_change(message: &Value, phone_id: &str) -> Option<Value> {
     match system_type.as_str() {
         "user_changed_user_id" => {
             let Some(user_id) = trimmed_text(system, "user_id") else {
-                tracing::warn!(message_id, phone_id, "Whatsapp identity change skipped: malformed system payload");
+                tracing::warn!(
+                    message_id,
+                    phone_id,
+                    "Whatsapp identity change skipped: malformed system payload"
+                );
                 return None;
             };
             // `parsePreviousUserIdFromBody`: "User <name> changed from <a> to <b>."
@@ -405,16 +409,19 @@ fn identity_change(message: &Value, phone_id: &str) -> Option<Value> {
             }))
         }
         "user_changed_number" | "customer_changed_number" => {
-            let (Some(reported), Some(previous_phone)) = (
-                trimmed_text(system, "wa_id"),
-                trimmed_text(message, "from"),
-            ) else {
-                tracing::warn!(message_id, phone_id, "Whatsapp identity change skipped: malformed system payload");
+            let (Some(reported), Some(previous_phone)) =
+                (trimmed_text(system, "wa_id"), trimmed_text(message, "from"))
+            else {
+                tracing::warn!(
+                    message_id,
+                    phone_id,
+                    "Whatsapp identity change skipped: malformed system payload"
+                );
                 return None;
             };
             let system_user_id = text(system, "user_id");
-            let user_id = trimmed_text(message, "from_user_id")
-                .or_else(|| trimmed_text(system, "user_id"));
+            let user_id =
+                trimmed_text(message, "from_user_id").or_else(|| trimmed_text(system, "user_id"));
             let scoped = [from_user_id.as_deref(), system_user_id.as_deref()];
             let new_phone = is_distinct_primary_identity(Some(&reported), &scoped)
                 .then(|| resolve_phone_transition(Some(&previous_phone), Some(&reported), &scoped))
@@ -431,7 +438,12 @@ fn identity_change(message: &Value, phone_id: &str) -> Option<Value> {
             }))
         }
         other => {
-            tracing::info!(message_id, phone_id, system_type = other, "Whatsapp system message skipped: unsupported type");
+            tracing::info!(
+                message_id,
+                phone_id,
+                system_type = other,
+                "Whatsapp system message skipped: unsupported type"
+            );
             None
         }
     }
@@ -507,9 +519,17 @@ fn route_scope_key(scope: &Value) -> String {
 /// `account_update` (`entry.id` is the WABA id), scoped to the route.
 pub fn account_update_jobs(body: &Value, route_scope: &Value, now: i64) -> Vec<WebhookJob> {
     let mut jobs = Vec::new();
-    for entry in body.get("entry").and_then(Value::as_array).into_iter().flatten() {
+    for entry in body
+        .get("entry")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let (Some(waba_id), Some(changes)) = (
-            entry.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()),
+            entry
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty()),
             entry.get("changes").and_then(Value::as_array),
         ) else {
             continue;
@@ -530,7 +550,10 @@ pub fn account_update_jobs(body: &Value, route_scope: &Value, now: i64) -> Vec<W
             continue;
         };
         if occurred_at > now + 5 * 60_000 {
-            tracing::warn!(waba_id, "Whatsapp account_update skipped: time is in the future");
+            tracing::warn!(
+                waba_id,
+                "Whatsapp account_update skipped: time is in the future"
+            );
             continue;
         }
         for change in changes {
@@ -538,7 +561,10 @@ pub fn account_update_jobs(body: &Value, route_scope: &Value, now: i64) -> Vec<W
                 continue;
             }
             let Some(meta_event) = change.pointer("/value/event").and_then(Value::as_str) else {
-                tracing::warn!(waba_id, "Whatsapp account_update skipped: malformed payload");
+                tracing::warn!(
+                    waba_id,
+                    "Whatsapp account_update skipped: malformed payload"
+                );
                 continue;
             };
             let event = match meta_event {
@@ -546,7 +572,11 @@ pub fn account_update_jobs(body: &Value, route_scope: &Value, now: i64) -> Vec<W
                 "ACCOUNT_OFFBOARDED" => "offboarded",
                 "ACCOUNT_RECONNECTED" => "reconnected",
                 other => {
-                    tracing::info!(waba_id, meta_event = other, "Whatsapp account_update ignored: event not handled");
+                    tracing::info!(
+                        waba_id,
+                        meta_event = other,
+                        "Whatsapp account_update ignored: event not handled"
+                    );
                     continue;
                 }
             };

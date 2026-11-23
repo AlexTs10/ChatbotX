@@ -6,8 +6,8 @@
 //! No default-queue worker is ported: the API runs [`run_export`] in the
 //! request after [`start`] (the `bulkTagContacts` precedent), so the
 //! throttled mid-run progress write is not needed. No audit record (the
-//! token path has no user). `purgeExpired` and its schedule are not ported
-//! (no scheduler).
+//! token path has no user). [`purge_expired`] is the daily
+//! `purgeExpiredContactExports` sweep.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -845,4 +845,71 @@ pub async fn list_files(
         id: last.id,
     });
     Ok((page, next))
+}
+
+/// `CONTACT_EXPORT_RETENTION_DAYS`.
+pub const RETENTION_DAYS: i64 = 7;
+const PURGE_BATCH_SIZE: i64 = 500;
+
+/// `purgeExpiredContactExports` (`contactExportService.purgeExpired` batch
+/// by batch): every contact export older than the retention, the stored CSV
+/// first, then its row. A failed object delete keeps the row for the next
+/// sweep. Returns `(deleted, failed)`.
+pub async fn purge_expired(
+    db: &Db,
+    uploader: Option<&Uploader>,
+    now_ms: i64,
+) -> Result<(usize, usize)> {
+    let before = now_ms - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    let (mut deleted, mut failed) = (0, 0);
+    let mut after: Option<(i64, i64)> = None;
+    loop {
+        let batch: Vec<(i64, i64, Option<String>)> = tx::read(db, move |conn| {
+            let (at, id) = after.unwrap_or((i64::MIN, i64::MIN));
+            let mut stmt = conn.prepare(
+                r#"SELECT "id", "createdAt", "path" FROM "File"
+                   WHERE "contextType" = 'export' AND "subType" = 'contacts' AND "createdAt" < ?1
+                     AND ("createdAt", "id") > (?2, ?3)
+                   ORDER BY "createdAt", "id" LIMIT ?4"#,
+            )?;
+            let rows = stmt
+                .query_map(
+                    chatbotx_db::rusqlite::params![before, at, id, PURGE_BATCH_SIZE],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await?;
+        for (id, _, path) in &batch {
+            if let (Some(uploader), Some(path)) = (uploader, path.as_deref())
+                && let Err(error) = uploader.delete_object(path).await
+            {
+                failed += 1;
+                tracing::warn!(%error, file_id = id, "contactExport.purgeExpired: could not delete the export file, keeping its row for a retry");
+                continue;
+            }
+            let id = *id;
+            tx::write(db, move |conn| {
+                conn.execute(r#"DELETE FROM "File" WHERE "id" = ?1"#, [id])?;
+                Ok(())
+            })
+            .await?;
+            deleted += 1;
+        }
+        match batch.last() {
+            Some((id, at, _)) if batch.len() as i64 == PURGE_BATCH_SIZE => after = Some((*at, *id)),
+            _ => break,
+        }
+    }
+    if failed > 0 {
+        tracing::warn!(
+            deleted,
+            failed,
+            "purgeExpiredContactExports: some files could not be deleted, they are retried tomorrow"
+        );
+    } else if deleted > 0 {
+        tracing::info!(deleted, "purgeExpiredContactExports: exports deleted");
+    }
+    Ok((deleted, failed))
 }

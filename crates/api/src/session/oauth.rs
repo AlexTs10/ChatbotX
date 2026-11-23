@@ -172,7 +172,7 @@ impl OAuthState {
 }
 
 /// `platformCredentialService.findDecryptedPlatform({ type })`: `(clientId, clientSecret)`.
-async fn platform_credential(
+pub(crate) async fn platform_credential(
     db: &Db,
     encryption: &Encryption,
     credential_type: &'static str,
@@ -997,14 +997,10 @@ pub async fn discover_generic_provider(
     })
 }
 
-/// The OAuth router state of the server, from the environment:
-/// - the generic provider (`AUTH_OAUTH_*`) when the edition is `cloud` or
-///   `enterprise` (`hasEnterpriseFeatures`; the license check is not ported);
-/// - the root-tenant social credentials (`PlatformCredential`) on `cloud`
-///   (`resolveCredentialForTenant`: community has no social providers).
-pub async fn oauth_state_from_env(auth: Arc<AuthState>, edition: &str) -> OAuthState {
+/// The `AUTH_OAUTH_*` variables.
+pub(crate) fn generic_oauth_env() -> super::GenericOAuthEnv {
     let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-    let env = super::GenericOAuthEnv {
+    super::GenericOAuthEnv {
         enabled: var("AUTH_OAUTH_ENABLED"),
         client_id: var("AUTH_OAUTH_CLIENT_ID"),
         client_secret: var("AUTH_OAUTH_CLIENT_SECRET"),
@@ -1014,7 +1010,57 @@ pub async fn oauth_state_from_env(auth: Arc<AuthState>, edition: &str) -> OAuthS
         userinfo_url: var("AUTH_OAUTH_USERINFO_URL"),
         scopes: var("AUTH_OAUTH_SCOPES"),
         trust_email: var("AUTH_OAUTH_TRUST_EMAIL"),
+    }
+}
+
+/// `resolveAuthPageOptions` minus the sign-up flag: the social providers with a
+/// root-tenant credential (cloud only) and the generic IdP button (cloud /
+/// enterprise with `AUTH_OAUTH_*`).
+pub(crate) async fn auth_page_providers(
+    auth: &AuthState,
+    edition: &str,
+) -> (Vec<&'static str>, Value) {
+    let mut enabled = Vec::new();
+    if edition == "cloud"
+        && let Ok(keys) = chatbotx_core::encryption::Keys::from_env(&chatbotx_core::env::ProcessEnv)
+    {
+        let encryption = Encryption::new(keys);
+        for (provider, credential_type) in [("google", "google"), ("facebook", "messenger")] {
+            if platform_credential(&auth.db, &encryption, credential_type)
+                .await
+                .is_some()
+            {
+                enabled.push(provider);
+            }
+        }
+    }
+    let broker_url = auth
+        .settings
+        .trusted_origins
+        .broker_url
+        .clone()
+        .unwrap_or_else(|| auth.settings.trusted_origins.builder_url.clone());
+    let generic = matches!(edition, "cloud" | "enterprise")
+        && super::generic_oauth_provider(&generic_oauth_env(), &broker_url).is_some();
+    let button = if generic {
+        let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+        serde_json::json!({
+            "displayName": var("NEXT_PUBLIC_AUTH_OAUTH_DISPLAY_NAME").unwrap_or_else(|| "SSO".into()),
+            "logoUrl": var("NEXT_PUBLIC_AUTH_OAUTH_LOGO_URL"),
+        })
+    } else {
+        Value::Null
     };
+    (enabled, button)
+}
+
+/// The OAuth router state of the server, from the environment:
+/// - the generic provider (`AUTH_OAUTH_*`) when the edition is `cloud` or
+///   `enterprise` (`hasEnterpriseFeatures`; the license check is not ported);
+/// - the root-tenant social credentials (`PlatformCredential`) on `cloud`
+///   (`resolveCredentialForTenant`: community has no social providers).
+pub async fn oauth_state_from_env(auth: Arc<AuthState>, edition: &str) -> OAuthState {
+    let env = generic_oauth_env();
     let builder_url = auth.settings.trusted_origins.builder_url.clone();
     let broker_url = auth
         .settings

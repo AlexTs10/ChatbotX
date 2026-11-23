@@ -233,3 +233,30 @@ async fn flow_page_loads_the_editor_props_and_channels_create_checks_the_workspa
     assert_eq!(status, StatusCode::OK, "{options}");
     assert_eq!(options["admins"].as_array().map(Vec::len), Some(1));
 }
+
+#[tokio::test]
+async fn deleted_workspaces_lists_only_the_callers_records() {
+    let state = state().await;
+    state
+        .db
+        .write(|tx| {
+            for (id, owner) in [(1, 101), (2, 999)] {
+                tx.execute(
+                    r#"INSERT INTO "WorkspaceDeletionRecord"
+                       ("id", "workspaceId", "workspaceName", "ownerId", "tenantId", "usageSnapshot", "details")
+                       VALUES (?1, ?1, 'Gone', ?2, 1, '{}', '{}')"#,
+                    [id, owner],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("records");
+    let (status, _) = page(&state, "deletedWorkspaces", false, Value::Null).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, body) = page(&state, "deletedWorkspaces", true, Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"].as_array().map(Vec::len), Some(1), "{body}");
+    assert_eq!(body["data"][0]["ownerId"], "101");
+    assert_eq!(body["pageCount"], 1);
+}

@@ -337,6 +337,30 @@ pub(crate) async fn find_flow_version(
 }
 
 /// `broadcastService.findSendableBroadcast`.
+/// `broadcastService.resetContactForResume`: re-arms one recipient row of a
+/// stopped broadcast (`"contactId"` or `"contactInboxId"`) so Resume targets
+/// it again; a row that already failed stays failed.
+pub(crate) async fn reset_contact_for_resume(
+    deps: &Deps,
+    broadcast_id: i64,
+    key_column: &'static str,
+    key: i64,
+) -> Result<(), JobError> {
+    deps.db
+        .write(move |tx| {
+            tx.execute(
+                &format!(
+                    r#"UPDATE "ContactsOnBroadcasts" SET "sent" = 0
+                       WHERE "broadcastId" = ?1 AND "{key_column}" = ?2 AND "failedAt" IS NULL"#
+                ),
+                params![broadcast_id, key],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(db_fail)
+}
+
 pub(crate) async fn broadcast_is_sendable(
     deps: &Deps,
     broadcast_id: i64,
@@ -372,11 +396,17 @@ pub async fn run_flow_node(
         && let Some(broadcast_id) = meta.get("broadcastId").and_then(id_of)
         && !broadcast_is_sendable(deps, broadcast_id).await?
     {
-        // ponytail: `resetContactForResume` on the first dispatch comes with
-        // the broadcast unit (Q.W2); a skip without reset under-delivers,
-        // never duplicates.
+        // Reset only on the producer's own first dispatch (the explicit
+        // `initialBroadcastDispatch` marker): a re-dispatch skips without a
+        // reset, so Resume never replays the flow head.
+        let initial = data["initialBroadcastDispatch"] == json!(true);
+        if initial && let Some(contact_inbox_id) = data.get("contactInboxId").and_then(id_of) {
+            reset_contact_for_resume(deps, broadcast_id, "contactInboxId", contact_inbox_id)
+                .await?;
+        }
         tracing::debug!(
             broadcast_id,
+            initial_broadcast_dispatch = initial,
             "runFlowNode: broadcast no longer sendable, skipping"
         );
         return Ok(());

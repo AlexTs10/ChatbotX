@@ -382,8 +382,8 @@ fn conversation_id(args: &[Value]) -> Result<i64, OrpcError> {
 
 /// `assignByContactIds`: every conversation of `contactIds` gets the
 /// assignee (`u_<id>` / `t_<id>` / `null`).
-// ponytail: one `assignOne` per conversation; the builder's flow triggers and
-// SLA tracking on assign are not ported (P3.6-D3 decision).
+// ponytail: one `assignOne` per conversation (it runs the assign triggers
+// and the SLA window itself).
 async fn assign(ctx: &Ctx<'_>, input: &Value) -> Result<Value, OrpcError> {
     let input = In(input);
     let contact_ids = input.ids("contactIds")?;

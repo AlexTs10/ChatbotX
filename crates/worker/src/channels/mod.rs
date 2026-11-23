@@ -14,6 +14,7 @@ pub mod threads;
 pub mod tiktok;
 pub mod webchat;
 pub mod whatsapp;
+pub mod whatsapp_flow_media;
 pub mod whatsapp_media;
 pub mod whatsapp_steps;
 pub mod whatsapp_template;

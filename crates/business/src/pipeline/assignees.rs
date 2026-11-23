@@ -140,3 +140,108 @@ pub fn apply_in(
     )?;
     Ok(true)
 }
+
+/// The `assignContact` effect (`assignContactOnAssign`): the item's new
+/// primary assignee, for the contact's conversations after the commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContactAssignment {
+    pub workspace_id: i64,
+    pub contact_id: i64,
+    pub item_id: i64,
+    /// `u_<userId>` or `t_<inboxTeamId>`.
+    pub assigned_id: String,
+    pub previous_assigned_id: Option<String>,
+}
+
+/// `queueAssignmentEffect`: `None` when the setting is off, the item has no
+/// primary or the primary did not change. It never unassigns.
+pub fn queue_assignment_in(
+    conn: &Connection,
+    enabled: bool,
+    item: &chatbotx_db::repo::models::PipelineItem,
+    before: Option<&Assignees>,
+) -> Result<Option<ContactAssignment>> {
+    if !enabled {
+        return Ok(None);
+    }
+    let ws = item.workspace_id;
+    let Some(after) = primary_in(conn, ws, &current_in(conn, ws, item.id)?)? else {
+        return Ok(None);
+    };
+    let before = match before {
+        Some(sets) => primary_in(conn, ws, sets)?,
+        None => None,
+    };
+    if before.as_deref() == Some(after.as_str()) {
+        return Ok(None);
+    }
+    Ok(Some(ContactAssignment {
+        workspace_id: ws,
+        contact_id: item.contact_id,
+        item_id: item.id,
+        assigned_id: after,
+        previous_assigned_id: before,
+    }))
+}
+
+/// The `assignContact` effect runner: the contact's conversations that are
+/// unassigned or still with either side of the transition move to the
+/// item's *current* primary (so late or out-of-order effects end on the
+/// last one); a conversation someone else owns keeps its assignee. The
+/// caller publishes each `Assigned`.
+pub async fn apply_contact_assignments(
+    db: &Db,
+    assignments: &[ContactAssignment],
+) -> Result<Vec<(i64, crate::conversation_actions::Assigned)>> {
+    let mut out = Vec::new();
+    for effect in assignments {
+        let effect = effect.clone();
+        let ws = effect.workspace_id;
+        let targets = tx::read(db, move |conn| {
+            let Some(current) = primary_in(conn, ws, &current_in(conn, ws, effect.item_id)?)?
+            else {
+                return Ok(None);
+            };
+            let from: Vec<Option<String>> = [
+                None,
+                effect.previous_assigned_id.clone(),
+                Some(effect.assigned_id.clone()),
+            ]
+            .into_iter()
+            .filter(|a| a.as_deref() != Some(current.as_str()))
+            .collect();
+            let mut stmt = conn.prepare(
+                r#"SELECT "id", "assignedUserId", "assignedInboxTeamId" FROM "Conversation"
+                   WHERE "workspaceId" = ?1 AND "contactId" = ?2"#,
+            )?;
+            let rows = stmt.query_map([ws, effect.contact_id], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, Option<i64>>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                ))
+            })?;
+            let mut ids = Vec::new();
+            for row in rows {
+                let (id, user, team) = row?;
+                let assignee = user
+                    .map(|u| format!("u_{u}"))
+                    .or_else(|| team.map(|t| format!("t_{t}")));
+                if from.contains(&assignee) {
+                    ids.push(id);
+                }
+            }
+            Ok(Some((current, ids)))
+        })
+        .await?;
+        let Some((current, ids)) = targets else {
+            continue;
+        };
+        for id in ids {
+            let assigned =
+                crate::conversation_actions::assign_one(db, ws, id, Some(current.clone())).await?;
+            out.push((ws, assigned));
+        }
+    }
+    Ok(out)
+}

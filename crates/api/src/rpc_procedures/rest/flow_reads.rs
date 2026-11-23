@@ -1,5 +1,5 @@
-//! The builder reads the flow editor makes for Q.D13 domains whose CRUD is
-//! not ported yet: `decisionProfilesAPI.listActiveForFlow`,
+//! The builder reads the flow editor makes for the Q.D13 domains:
+//! `decisionProfilesAPI.listActiveForFlow`,
 //! `dynamicImagesAPI.getDynamicImageAPI`,
 //! `leaderboardsAPI.listLeaderboardOptionsAPI`.
 

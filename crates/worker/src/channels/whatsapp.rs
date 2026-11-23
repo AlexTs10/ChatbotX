@@ -791,7 +791,7 @@ fn interactive_reply(
                 .clone()
                 .filter(|_| decoded.as_ref().is_some_and(|d| d.button_id.is_some()));
             let body = s(r, "body");
-            // ponytail: the Flow response media download is not ported.
+            // The answer's files are fetched in `receive_message`.
             (
                 body.clone().unwrap_or_default(),
                 postback,
@@ -1047,6 +1047,12 @@ impl Channel for Whatsapp {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
+        let phone_number_id = ctx
+            .auth
+            .pointer("/metadata/phoneNumber/id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
         let loc = chatbotx_files::ChannelMediaLocation {
             channel: ctx.channel.clone(),
             workspace_id: ctx.workspace_id.to_string(),
@@ -1054,13 +1060,32 @@ impl Channel for Whatsapp {
         };
         Box::pin(async move {
             // ponytail: without a file store the Graph media id is kept.
-            if let (Some(media), Some(message)) = (media, received.message.as_mut()) {
+            if let (Some(media), Some(message)) = (media.as_ref(), received.message.as_mut()) {
                 for attachment in &mut message.attachments {
                     super::whatsapp_media::store_inbound_media(
-                        &media, &client, &base, &token, &loc, attachment,
+                        media, &client, &base, &token, &loc, attachment,
                     )
                     .await?;
                 }
+            }
+            // `readFlowResponseMedia`: the files of a Flow answer.
+            if let Some(message) = received.message.as_mut()
+                && let Some(entity) = message.content_attributes.as_mut()
+            {
+                let request = super::whatsapp_flow_media::Request {
+                    client: &client,
+                    graph_url: &base,
+                    token: &token,
+                    phone_number_id: &phone_number_id,
+                };
+                let stored = super::whatsapp_flow_media::read_flow_response_media(
+                    media.as_deref(),
+                    &loc,
+                    &request,
+                    entity,
+                )
+                .await;
+                message.attachments.extend(stored);
             }
             Ok(Some(received))
         })

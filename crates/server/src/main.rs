@@ -530,6 +530,7 @@ fn start_workers(
         variables: chatbotx_worker::variables::VariableDeps::from_env(
             Arc::clone(&shared.db),
             app_url(),
+            Some(Arc::clone(&shared.files)),
         )
         .map(Arc::new),
         ai: Arc::new(chatbotx_worker::ai::Ai::live()),

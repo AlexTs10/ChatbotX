@@ -521,7 +521,7 @@ pub enum ChangeResult {
     Done {
         /// `applied` | `alreadyApplied` | `stale` | `conflict`.
         status: &'static str,
-        contact_inbox: ContactInbox,
+        contact_inbox: Box<ContactInbox>,
         contact_id: i64,
         phone_transition: Option<PhoneTransition>,
     },
@@ -566,7 +566,7 @@ fn done(
     let phone_transition = transition.filter(|_| matches!(status, "applied" | "alreadyApplied"));
     ChangeResult::Done {
         status,
-        contact_inbox,
+        contact_inbox: Box::new(contact_inbox),
         contact_id,
         phone_transition,
     }

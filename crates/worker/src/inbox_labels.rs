@@ -1,11 +1,11 @@
 //! `integration/handlers/inbox_labels` (`channelLabelChange` job): Messenger
-//! page labels mirrored into workspace tags (Q.I1b).
+//! page labels and Zalo OA tags mirrored into workspace tags (Q.I1b). Only
+//! Messenger creates a contact for a labelled user the inbox never saw.
 //!
-//! ponytail: the Zalo channel of this job is not ported (Zalo unit); its
-//! jobs log "unsupported channel" until then. The `tagApplied` /
-//! `tagRemoved` events are not emitted (as the other Rust tag writes, Q.W2).
+//! ponytail: the `tagApplied` / `tagRemoved` events are not emitted (as the
+//! other Rust tag writes, Q.W2).
 
-use chatbotx_db::repo::models::{IntegrationMessenger, TagChannel};
+use chatbotx_db::repo::models::{IntegrationMessenger, IntegrationZalo, TagChannel};
 use chatbotx_db::repo::tag_channel::{self, TagChannelKey};
 use chatbotx_db::repo::{find_one, new_id, now_ms};
 use chatbotx_db::rusqlite::{Connection, OptionalExtension, params, params_from_iter};
@@ -38,12 +38,45 @@ pub enum LabelEvent {
 /// `LabelContext`.
 #[derive(Debug, Clone)]
 struct LabelContext {
+    /// `messenger` | `zalo`.
+    channel: &'static str,
     workspace_id: i64,
     integration_id: i64,
     inbox_id: i64,
 }
 
 const CHANNEL: &str = "messenger";
+const ZALO: &str = "zalo";
+
+/// `zaloChannel.toEvents`: `None` = invalid payload (`zaloTagEventSchema`).
+pub fn zalo_events(payload: &Value) -> Option<Vec<LabelEvent>> {
+    payload.get("oa_id")?.as_str()?;
+    let tag = payload.get("tag")?;
+    let name = tag.get("name")?.as_str()?.to_owned();
+    let user_ids: Vec<String> = match tag.get("user_ids") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(list) => {
+            let list = list.as_array().filter(|l| l.len() <= 200)?;
+            list.iter()
+                .map(|v| v.as_str().map(str::to_owned))
+                .collect::<Option<_>>()?
+        }
+    };
+    Some(match payload.get("event_name")?.as_str()? {
+        // Empty user_ids: ensure the label exists locally (no assignment).
+        "add_user_to_tag" => vec![LabelEvent::Assign {
+            label_id: name.clone(),
+            label_name: name,
+            user_ids,
+        }],
+        "remove_user_from_tag" => vec![LabelEvent::Unassign {
+            label_id: name,
+            user_ids,
+        }],
+        "remove_tag" => vec![LabelEvent::DeleteLabel { label_id: name }],
+        _ => return None,
+    })
+}
 
 /// `messengerChannel.toEvents`: `None` = invalid payload.
 pub fn messenger_events(payload: &Value) -> Option<Vec<LabelEvent>> {
@@ -95,17 +128,28 @@ pub fn messenger_events(payload: &Value) -> Option<Vec<LabelEvent>> {
 /// `handleChannelLabelWebhook`.
 pub async fn handle(deps: &Deps, data: &Value) -> Result<(), JobError> {
     let channel = str_of(data, "integrationType").unwrap_or_default();
-    if channel != CHANNEL {
+    if channel != CHANNEL && channel != ZALO {
         tracing::warn!(channel, "inbox labels: unsupported channel");
         return Ok(());
     }
     let page_id = str_of(data, "integrationIdentifier")
         .unwrap_or_default()
         .to_owned();
-    let Some(ctx) = load_context(deps, page_id.clone()).await? else {
+    let context = if channel == ZALO {
+        load_zalo_context(deps, page_id.clone()).await?
+    } else {
+        load_context(deps, page_id.clone()).await?
+    };
+    let Some(ctx) = context else {
         return Ok(());
     };
-    let Some(events) = messenger_events(data.get("payload").unwrap_or(&Value::Null)) else {
+    let payload = data.get("payload").unwrap_or(&Value::Null);
+    let events = if channel == ZALO {
+        zalo_events(payload)
+    } else {
+        messenger_events(payload)
+    };
+    let Some(events) = events else {
         tracing::warn!(channel, "inbox labels: invalid payload");
         return Ok(());
     };
@@ -146,10 +190,30 @@ async fn load_context(deps: &Deps, page_id: String) -> Result<Option<LabelContex
         return Ok(None);
     }
     Ok(Some(LabelContext {
+        channel: CHANNEL,
         workspace_id: row.workspace_id,
         integration_id: row.id,
         inbox_id: row.inbox_id,
     }))
+}
+
+/// `zaloChannel.loadContext`: the OA's integration while tag sync is on.
+async fn load_zalo_context(deps: &Deps, oa_id: String) -> Result<Option<LabelContext>, JobError> {
+    let row = deps
+        .db
+        .read(move |conn| {
+            find_one::<IntegrationZalo>(conn, r#""oaId" = ?1"#, &[&oa_id]).map_err(crate::repo_err)
+        })
+        .await
+        .map_err(db_error)?;
+    Ok(row
+        .filter(|row| row.sync_tag_enabled_at.is_some())
+        .map(|row| LabelContext {
+            channel: ZALO,
+            workspace_id: row.workspace_id,
+            integration_id: row.id,
+            inbox_id: row.inbox_id,
+        }))
 }
 
 /// `findTagChannel`.
@@ -161,7 +225,12 @@ fn find_tag_channel(
     find_one::<TagChannel>(
         conn,
         r#""workspaceId" = ?1 AND "channelType" = ?2 AND "integrationId" = ?3 AND "externalLabelId" = ?4"#,
-        &[&ctx.workspace_id, &CHANNEL, &ctx.integration_id, &label_id],
+        &[
+            &ctx.workspace_id,
+            &ctx.channel,
+            &ctx.integration_id,
+            &label_id,
+        ],
     )
 }
 
@@ -249,7 +318,7 @@ async fn apply_event(
                 .await
                 .map_err(db_error)?;
             if !done.is_empty() {
-                tracing::info!(channel = CHANNEL, "inbox labels: {done}");
+                tracing::info!(channel = ctx.channel, "inbox labels: {done}");
             }
             Ok(())
         }
@@ -264,7 +333,7 @@ async fn apply_event(
                 .map_err(db_error)?;
             let Some(mapping) = mapping else {
                 tracing::info!(
-                    channel = CHANNEL,
+                    channel = ctx.channel,
                     label_id,
                     "inbox labels: deleted label not mapped to a tag, skipped"
                 );
@@ -274,7 +343,7 @@ async fn apply_event(
                 deps.jobs.as_ref(),
                 ctx.workspace_id,
                 mapping.tag_id,
-                Some((CHANNEL, ctx.integration_id)),
+                Some((ctx.channel, ctx.integration_id)),
             )
             .await;
             Ok(())
@@ -339,7 +408,7 @@ fn ensure_tag_channel(
     let key = TagChannelKey {
         workspace_id: ctx.workspace_id,
         tag_id,
-        channel_type: CHANNEL.to_owned(),
+        channel_type: ctx.channel.to_owned(),
         integration_id: ctx.integration_id,
         external_label_id: label_id.to_owned(),
     };
@@ -365,7 +434,8 @@ async fn find_or_create_inboxes(
         .iter()
         .filter(|id| !found.iter().any(|(_, _, source)| source == *id))
         .collect();
-    if missing.is_empty() {
+    // `createsMissingContacts`: Zalo never creates one.
+    if missing.is_empty() || ctx.channel != CHANNEL {
         return Ok(found);
     }
     let Some((_, _, inbox)) = deps
@@ -398,6 +468,27 @@ mod tests {
 
     fn payload(value: Value) -> Value {
         json!({ "entry": [{ "changes": [{ "field": "inbox_labels", "value": value }] }] })
+    }
+
+    #[test]
+    fn zalo_tag_events() {
+        let event = |name: &str, users: Value| json!({ "oa_id": "oa", "event_name": name, "tag": { "name": "VIP", "user_ids": users } });
+        assert_eq!(
+            zalo_events(&event("add_user_to_tag", json!(["u1"]))),
+            Some(vec![LabelEvent::Assign {
+                label_id: "VIP".into(),
+                label_name: "VIP".into(),
+                user_ids: vec!["u1".into()],
+            }])
+        );
+        assert_eq!(
+            zalo_events(&event("remove_tag", Value::Null)),
+            Some(vec![LabelEvent::DeleteLabel {
+                label_id: "VIP".into()
+            }])
+        );
+        assert_eq!(zalo_events(&event("rename", json!([]))), None);
+        assert_eq!(zalo_events(&json!({ "event_name": "remove_tag" })), None);
     }
 
     #[test]
@@ -466,7 +557,7 @@ mod tests {
                 ] {
                     tx.execute(sql, [])?;
                 }
-                let ctx = LabelContext { workspace_id: 2, integration_id: 3, inbox_id: 4 };
+                let ctx = LabelContext { channel: CHANNEL, workspace_id: 2, integration_id: 3, inbox_id: 4 };
                 let first = ensure_tag_channel(tx, &ctx, "l1", "VIP").map_err(crate::repo_err)?;
                 let again = ensure_tag_channel(tx, &ctx, "l1", "").map_err(crate::repo_err)?;
                 let unknown = ensure_tag_channel(tx, &ctx, "l2", "").map_err(crate::repo_err)?;

@@ -910,10 +910,27 @@ pub(crate) fn item_fields(input: &mut Input, title_required: bool) -> ItemFields
     }
 }
 
-/// Publishes a write's realtime events and sends its flow-trigger events.
+/// Publishes a write's realtime events, sends its flow-trigger events and
+/// runs its `assignContact` effects (`assignContactOnAssign`).
 pub(crate) async fn publish<T>(state: &ApiState, mutation: &ItemMutation<T>) {
     state.publish_pipeline_changes(&mutation.events).await;
     state.emit_triggers(mutation.triggers.clone()).await;
+    match chatbotx_business::pipeline::assignees::apply_contact_assignments(
+        &state.db,
+        &mutation.assignments,
+    )
+    .await
+    {
+        Ok(done) => {
+            for (ws, mut assigned) in done {
+                if let Some(event) = assigned.event.take() {
+                    state.queue_realtime(ws, event).await;
+                }
+                super::conversations::queue_jobs(state, assigned.job).await;
+            }
+        }
+        Err(err) => tracing::warn!(err = %err.message(), "Pipeline assignContact failed"),
+    }
 }
 
 /// `tokenActor` (`actorSourceId` = the API token id).

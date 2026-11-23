@@ -32,7 +32,7 @@ use crate::tx;
 /// The trigger event and the `analytics:dashboard` row of one conversation change.
 /// `resolveAnalyticsAttribution`: the contact's latest connection; a failed read
 /// leaves the row unattributed (the change is already committed).
-async fn emit_change(
+pub(crate) async fn emit_change(
     db: &Db,
     workspace_id: i64,
     conversation_id: i64,

@@ -9,8 +9,8 @@
 //!
 //! Post tracking, commenter avatars, comment attachments and Messenger live
 //! detection: `crate::comment_extras` (Q.P7-V5).
-//! The other low actions (`contactMarkAsRead`, `messageStatus`, echoes,
-//! avatars) fail unrecoverable until their channels exist.
+//! `contactMarkAsRead`, `messageStatus` and `incomingMessageEcho` run the
+//! integration handlers (the producers here queue them on `integration`).
 
 use std::sync::{Arc, LazyLock};
 
@@ -67,6 +67,14 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         return crate::contact_profile::update_contact_avatar(&deps, data)
             .await
             .map(|()| Value::Null);
+    }
+    if matches!(
+        kind.as_str(),
+        crate::inbound::MESSAGE_STATUS
+            | crate::inbound_events::CONTACT_MARK_AS_READ
+            | "incomingMessageEcho"
+    ) {
+        return crate::integration::handle(deps, job).await;
     }
     if kind != "replayMissedComment" {
         return Err(JobError::unrecoverable(format!(

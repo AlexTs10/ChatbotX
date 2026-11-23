@@ -662,8 +662,8 @@ async fn validate_messenger_template(
 /// `sendWhatsappTemplateMessage` / `sendMessengerTemplateMessage`: one
 /// broadcast recipient's template (`schedule/broadcast.rs` enqueues it).
 ///
-/// ponytail: a stopped broadcast skips without `resetContactForResume`
-/// (as `runFlowNode`); Messenger buttons without a flow are sent without a
+/// A stopped broadcast skips and re-arms the recipient
+/// (`skipIfBroadcastNotSendable`). ponytail: Messenger buttons without a flow are sent without a
 /// context flow (`findAnyActive`), so their tap is the same no-op.
 pub async fn send_broadcast_template(
     deps: &Deps,
@@ -691,6 +691,8 @@ pub async fn send_broadcast_template(
     if let Some(id) = broadcast_id
         && !crate::flow::broadcast_is_sendable(deps, id).await?
     {
+        crate::flow::reset_contact_for_resume(deps, id, "contactId", conversation.contact_id)
+            .await?;
         tracing::debug!(
             broadcast_id = id,
             contact_id = conversation.contact_id,
