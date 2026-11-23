@@ -22,6 +22,8 @@ mod sequence_worker;
 mod smart_delay;
 #[path = "whatsapp_ad_referral.rs"]
 mod whatsapp_ad_referral;
+#[path = "whatsapp_automatic_events.rs"]
+mod whatsapp_automatic_events;
 
 // ponytail: one test binary per crate (was one per file: ~200 MB link each,
 // the Dell gate bottleneck). Every tests/*.rs file must be listed above.

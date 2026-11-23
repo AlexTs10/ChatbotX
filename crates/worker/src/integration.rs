@@ -62,6 +62,14 @@ const INBOUND_WEBHOOK_JOB_TYPES: &[&str] = &[
     "coexistWhatsappBuffer",
 ];
 
+/// A bigint id sent as a string (or a number).
+fn id_field(data: &Value, key: &str) -> Option<i64> {
+    match &data[key] {
+        Value::String(s) => s.parse::<i64>().ok(),
+        other => other.as_i64(),
+    }
+}
+
 /// `isChannelOriginatedJob(jobData)`.
 pub fn is_channel_originated_job(job_data: &Value) -> bool {
     let kind = str_of(job_data, "type").unwrap_or("");
@@ -227,6 +235,131 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
                 .map_err(|e| JobError::retryable(e.to_string()))?
         }
         // `handleSendGoogleAdsConversion` (`withBlockedOwnerGuard`).
+        "evaluateConversionTrigger" => {
+            let data = &job.data["data"];
+            let (
+                Some(workspace_id),
+                Some(integration_id),
+                Some(contact_inbox_id),
+                Some(occurrence),
+            ) = (
+                id_field(data, "workspaceId"),
+                id_field(data, "integrationId"),
+                id_field(data, "contactInboxId"),
+                chatbotx_business::ads::conversion::Occurrence::from_json(&data["occurrence"]),
+            )
+            else {
+                return Err(JobError::unrecoverable(
+                    "evaluateConversionTrigger: bad job data",
+                ));
+            };
+            if crate::is_blocked_workspace(&deps.db, &workspace_id.to_string()).await? {
+                return Ok(Value::Null);
+            }
+            let input = chatbotx_business::ads::conversion::EvaluateInput {
+                workspace_id,
+                channel: str_of(data, "channel").unwrap_or_default().to_owned(),
+                integration_id,
+                contact_inbox_id,
+                occurrence,
+            };
+            chatbotx_business::ads::conversion::evaluate_conversion_trigger(
+                &deps.db,
+                deps.jobs.as_ref(),
+                input,
+            )
+            .await
+            .map_err(|e| JobError::retryable(e.message()))?;
+        }
+        "sendConversionEvent" | "sendMetaCapiEvent" => {
+            let data = &job.data["data"];
+            let key = if kind == "sendConversionEvent" {
+                "adsConversionEventId"
+            } else {
+                "metaCapiEventId"
+            };
+            let (Some(event_id), Some(workspace_id)) =
+                (id_field(data, key), id_field(data, "workspaceId"))
+            else {
+                return Err(JobError::unrecoverable(format!("{kind}: bad job data")));
+            };
+            if crate::is_blocked_workspace(&deps.db, &workspace_id.to_string()).await? {
+                return Ok(Value::Null);
+            }
+            let up = chatbotx_business::connection::credentials::HttpUpstream;
+            let send = chatbotx_business::meta_capi_send::SendDeps {
+                db: &deps.db,
+                up: &up,
+                events: deps.events.as_ref(),
+            };
+            if kind == "sendConversionEvent" {
+                chatbotx_business::meta_capi_send::send_conversion_event(
+                    &send,
+                    event_id,
+                    workspace_id,
+                )
+                .await
+            } else {
+                chatbotx_business::meta_capi_send::send_meta_capi_event(
+                    &send,
+                    event_id,
+                    workspace_id,
+                )
+                .await
+            }
+            .map_err(JobError::retryable)?;
+        }
+        "adsAutomaticEvent" => {
+            use chatbotx_business::ads::conversion::{
+                AutomaticPayload, enqueue_send_conversion_event, ingest_automatic_event,
+            };
+            let data = &job.data["data"];
+            let (Some(phone), Some(waba)) = (str_of(data, "phoneNumberId"), str_of(data, "wabaId"))
+            else {
+                return Err(JobError::unrecoverable("adsAutomaticEvent: bad job data"));
+            };
+            let payload =
+                AutomaticPayload::parse(&data["payload"]).map_err(JobError::unrecoverable)?;
+            let (p, w) = (phone.to_owned(), waba.to_owned());
+            let integration = deps
+                .db
+                .read(move |c| {
+                    chatbotx_db::repo::integration_whatsapp::find_by_phone_number_id(
+                        c,
+                        &p,
+                        Some(&w),
+                    )
+                    .map_err(crate::repo_err)
+                })
+                .await
+                .map_err(crate::db_fail)?;
+            let Some(integration) = integration else {
+                tracing::warn!(
+                    phone_number_id = phone,
+                    waba_id = waba,
+                    source_event_id = payload.id,
+                    "Whatsapp automatic event skipped: integration not found"
+                );
+                return Ok(Value::Null);
+            };
+            if crate::is_blocked_workspace(&deps.db, &integration.workspace_id.to_string()).await? {
+                return Ok(Value::Null);
+            }
+            let event = ingest_automatic_event(
+                &deps.db,
+                integration.workspace_id,
+                integration.id,
+                waba.to_owned(),
+                payload,
+            )
+            .await
+            .map_err(|e| JobError::retryable(e.message()))?;
+            if let Some(event) = event {
+                enqueue_send_conversion_event(deps.jobs.as_ref(), &event)
+                    .await
+                    .map_err(|e| JobError::retryable(e.message()))?;
+            }
+        }
         "sendGoogleAdsConversion" => {
             let data = &job.data["data"];
             let id = |key: &str| match &data[key] {

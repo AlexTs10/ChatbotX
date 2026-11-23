@@ -114,9 +114,11 @@ pub async fn handle_heavy(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         );
         return Ok(Value::Null);
     }
+    if kind == "analyzeImage" {
+        return crate::heavy_reader::analyze_image(&deps, &job.data["data"]).await;
+    }
     if kind != "processAIFile" {
-        // ponytail: `analyzeImage` needs a vision reply model (no image part
-        // in `crate::ai` yet); speech to text is a flow-step job.
+        // Speech to text is a flow-step job.
         return Err(JobError::unrecoverable(format!(
             "Heavy job action is not available: {kind}"
         )));

@@ -126,6 +126,8 @@ fn contact_for(contacts: Option<&Vec<Value>>, message: &Value, index: usize) -> 
 /// delivery. Items for another number than `pinned` are dropped.
 pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
     let mut jobs = Vec::new();
+    // Automatic events log-and-skip, so they are queued last.
+    let mut automatic = Vec::new();
     let Some(object) = body.get("object").filter(|o| !o.is_null()) else {
         return jobs;
     };
@@ -142,6 +144,10 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             .flatten()
         {
             jobs.extend(coexist_job(change));
+            if change.get("field").and_then(Value::as_str) == Some("automatic_events") {
+                automatic.extend(automatic_event_jobs(entry, change.get("value"), pinned));
+                continue;
+            }
             if change.get("field").and_then(Value::as_str) == Some("messaging_handovers") {
                 jobs.extend(handover_job(change.get("value"), pinned));
                 continue;
@@ -300,8 +306,68 @@ pub fn webhook_jobs(body: &Value, pinned: Option<&str>) -> Vec<WebhookJob> {
             }
         }
     }
-    // ponytail: automatic events, identity changes and account updates are
-    // not ported yet (calls: `whatsapp_call_webhook`).
+    // ponytail: identity changes and account updates are not ported yet
+    // (calls: `whatsapp_call_webhook`).
+    jobs.extend(automatic);
+    jobs
+}
+
+/// `automaticEventFieldExtractors.automatic_events` +
+/// `enqueueAutomaticEventPayloads`: one `adsAutomaticEvent` per valid event
+/// (`entry.id` is the WABA id).
+fn automatic_event_jobs(
+    entry: &Value,
+    value: Option<&Value>,
+    pinned: Option<&str>,
+) -> Vec<WebhookJob> {
+    let (Some(waba_id), Some(value)) = (entry.get("id").and_then(Value::as_str), value) else {
+        return Vec::new();
+    };
+    let phone = value
+        .pointer("/metadata/phone_number_id")
+        .and_then(Value::as_str)
+        .map(|p| chatbotx_core::js::trim(p).to_owned())
+        .filter(|p| !p.is_empty());
+    let (Some(phone), Some(events)) = (
+        phone,
+        value.get("automatic_events").and_then(Value::as_array),
+    ) else {
+        tracing::warn!("Whatsapp automatic event skipped: malformed payload");
+        return Vec::new();
+    };
+    if pinned.is_some_and(|p| p != phone) {
+        tracing::warn!(
+            pinned,
+            received = phone,
+            "Whatsapp webhook change dropped: phone_number_id does not match the route-loaded integration"
+        );
+        return Vec::new();
+    }
+    let mut jobs = Vec::new();
+    for event in events {
+        let parsed = match chatbotx_business::ads::conversion::AutomaticPayload::parse(event) {
+            Ok(parsed) => parsed,
+            Err(reason) => {
+                tracing::warn!(reason, "Whatsapp automatic event skipped");
+                continue;
+            }
+        };
+        jobs.push(WebhookJob {
+            name: "adsAutomaticEvent",
+            data: json!({ "type": "adsAutomaticEvent", "data": {
+                "integrationType": "whatsapp",
+                "integrationIdentifier": phone,
+                "phoneNumberId": phone,
+                "wabaId": waba_id,
+                "payload": event,
+            }}),
+            job_id: format!(
+                "ads-auto-{}-{}",
+                safe_id_segment(&phone),
+                safe_id_segment(&parsed.id)
+            ),
+        });
+    }
     jobs
 }
 
@@ -508,18 +574,29 @@ pub async fn enqueue_webhook_jobs(
     // Then the VoIP connect signalling (`enqueueVoipConnectSignaling`).
     crate::whatsapp_call_webhook::capture_voip_signals(db, jobs, &parsed, pinned).await?;
     for job in webhook_jobs(&parsed, pinned) {
-        jobs.add(
-            QueueName::Integration,
-            job.name,
-            job.data,
-            JobOptions {
-                job_id: Some(job.job_id),
-                remove_on_fail: Some(Retention::Remove),
-                ..JobOptions::default()
-            },
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        let (name, event_id) = (job.name, job.data.pointer("/data/payload/id").cloned());
+        let added = jobs
+            .add(
+                QueueName::Integration,
+                job.name,
+                job.data,
+                JobOptions {
+                    job_id: Some(job.job_id),
+                    remove_on_fail: Some(Retention::Remove),
+                    ..JobOptions::default()
+                },
+            )
+            .await;
+        match added {
+            Ok(_) => {}
+            // An automatic event is logged and skipped; the webhook still acknowledges.
+            Err(err) if name == "adsAutomaticEvent" => tracing::error!(
+                %err,
+                event_id = ?event_id,
+                "Whatsapp automatic event enqueue failed; webhook will still acknowledge"
+            ),
+            Err(err) => return Err(err.to_string()),
+        }
     }
     Ok(())
 }

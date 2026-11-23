@@ -443,6 +443,39 @@ mod ai_image_and_extract {
     }
 
     #[tokio::test]
+    async fn analyze_image_resolves_contact_variables_in_the_prompt() {
+        let mut fx = Fixture::new().await;
+        setup(&fx).await;
+        super::super::tests::with_variables(&mut fx);
+        photo(&fx, "https://cdn.example.test/cat.png").await;
+        let http = with_ai(&mut fx, vec![FakeHttp::openai_text("A cat")]);
+        let mut step = analyze();
+        step["prompt"] = json!("Describe the image for {{first_name}}");
+        run_step(&fx, step).await;
+        let body = &http.requests()[0].1;
+        assert_eq!(
+            body["messages"][1]["content"][0],
+            json!({ "type": "text", "text": "Describe the image for Ada" })
+        );
+    }
+
+    #[tokio::test]
+    async fn analyze_image_reports_a_provider_error_as_a_step_error() {
+        let mut fx = Fixture::new().await;
+        setup(&fx).await;
+        photo(&fx, "https://cdn.example.test/cat.png").await;
+        with_ai(
+            &mut fx,
+            vec![(
+                404,
+                json!({ "error": { "message": "The requested model was not found." } }),
+            )],
+        );
+        assert!(run_step(&fx, analyze()).await);
+        assert_eq!(answer(&fx).await, None);
+    }
+
+    #[tokio::test]
     async fn analyze_image_rejects_a_value_that_is_not_an_image_url() {
         let mut fx = Fixture::new().await;
         setup(&fx).await;

@@ -97,7 +97,7 @@ fn token_error() -> BusinessError {
     )
 }
 
-fn decrypt_token(raw: &Value, aad: Option<&str>) -> Option<String> {
+pub(crate) fn decrypt_token(raw: &Value, aad: Option<&str>) -> Option<String> {
     let data: EncryptedData = serde_json::from_value(raw.clone()).ok()?;
     let value: Value = process_encryption().decrypt_object(&data, aad).ok()?;
     value["accessToken"]
@@ -241,7 +241,7 @@ fn segment(id: &str) -> String {
 }
 
 /// `MetaConversionsException` message of a Graph error body.
-fn graph_message(body: &Value) -> String {
+pub(crate) fn graph_message(body: &Value) -> String {
     let error = &body["error"];
     let text = |v: &Value| v.as_str().map(str::to_owned);
     let details = match &error["error_data"] {
@@ -332,6 +332,36 @@ async fn create_dataset(integration: &CapiIntegration, token: &str) -> Result<St
     read_dataset_id(&body)
 }
 
+/// `provisionDatasetViaMeta`: WhatsApp creates with the agency System User
+/// token first and retries once with the connect token on an authorization
+/// error; Messenger / Instagram create with the connect token.
+async fn provision_dataset(
+    db: &Db,
+    channel: CapiChannel,
+    integration: &CapiIntegration,
+    token: &str,
+) -> Result<String> {
+    if channel != CapiChannel::Whatsapp {
+        return create_dataset(integration, token).await;
+    }
+    let (ws, id) = (integration.workspace_id, integration.id);
+    let row = tx::read(db, move |conn| {
+        Ok(crate::meta_capi_send::find_integration(
+            conn, channel, ws, id,
+        )?)
+    })
+    .await?
+    .ok_or_else(not_found)?;
+    crate::meta_capi_send::provision_dataset(
+        db,
+        &crate::connection::credentials::HttpUpstream,
+        &row,
+        token,
+    )
+    .await
+    .map_err(|e| request_failed(e.message))
+}
+
 // ---- operations --------------------------------------------------------------
 
 /// `setCapiDataset`: validate + store the given dataset, or create (reuse) the
@@ -366,8 +396,7 @@ pub async fn set_dataset(
             .await?;
         }
         None => {
-            // ponytail: WhatsApp creates with the connect token only (no system-user token first).
-            let created = create_dataset(&integration, &token).await?;
+            let created = provision_dataset(db, channel, &integration, &token).await?;
             if integration.dataset_id.as_deref() != Some(created.as_str()) {
                 update(
                     db,
@@ -457,7 +486,7 @@ pub async fn send_test_event(
     let dataset_id = match integration.dataset_id.clone() {
         Some(dataset_id) => dataset_id,
         None => {
-            let created = create_dataset(&integration, &token).await?;
+            let created = provision_dataset(db, channel, &integration, &token).await?;
             let (table, row_id, ws, value) = (
                 channel.table(),
                 integration.id,
@@ -560,13 +589,17 @@ async fn graph_via(
     Ok(body)
 }
 
+/// `isDatasetAccessError`: Graph code 10, 100, 803 or 200-299.
+fn is_dataset_access_error(body: &Value) -> bool {
+    body["error"]["code"]
+        .as_i64()
+        .is_some_and(|c| matches!(c, 10 | 100 | 803 | 200..=299))
+}
+
 /// `metaConversionsService.connectCapiWithToken`: the stored dataset when the
 /// new token can read it, else a dataset created with that token; then the
 /// dataset id and the encrypted token are written together, the disconnect
 /// flag cleared. `Ok(false)` = the row is gone. Messenger / Instagram only.
-// ponytail: a stored dataset the token cannot read is replaced for any
-// error (the original only for Graph access errors), and the dataset is
-// created with the dedicated token (no agency System User first).
 pub async fn connect_with_token(
     db: &Db,
     upstream: &impl crate::connection::credentials::Upstream,
@@ -579,17 +612,32 @@ pub async fn connect_with_token(
         return Err(request_failed("Meta CAPI access token is missing"));
     }
     let integration = require(db, channel, workspace_id, id).await?;
+    // `findReadableStoredDataset`: only a definite "this token cannot read
+    // it" swaps the dataset; a timeout or rate limit is surfaced.
     let readable = match &integration.dataset_id {
-        Some(dataset) => graph_via(
-            upstream,
-            "GET",
-            &format!("{}?fields=id", segment(dataset)),
-            access_token,
-            None,
-        )
-        .await
-        .ok()
-        .and_then(|body| read_dataset_id(&body).ok()),
+        Some(dataset) => {
+            let (status, text) = upstream
+                .send(crate::connection::credentials::UpstreamRequest {
+                    method: "GET",
+                    url: format!("{API_URL}/{API_VERSION}/{}?fields=id", segment(dataset)),
+                    headers: vec![("authorization".into(), format!("Bearer {access_token}"))],
+                    body: None,
+                })
+                .await
+                .map_err(request_failed)?;
+            let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            if (200..300).contains(&status) {
+                Some(read_dataset_id(&body)?)
+            } else if is_dataset_access_error(&body) {
+                tracing::info!(
+                    integration_id = id,
+                    "Stored CAPI dataset is not readable with the dedicated token; using the dataset linked at Meta"
+                );
+                None
+            } else {
+                return Err(request_failed(graph_message(&body)));
+            }
+        }
         None => None,
     };
     let dataset_id = match readable {

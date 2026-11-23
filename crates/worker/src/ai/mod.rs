@@ -4,6 +4,12 @@
 //! `integration/handlers/shared/ai-agent-runner.ts`.
 
 pub mod chunk;
+pub mod context;
+#[cfg(test)]
+mod context_tests;
+pub mod conversation_source;
+#[cfg(test)]
+mod conversation_source_tests;
 pub mod extract;
 mod office;
 pub mod text;
@@ -20,8 +26,7 @@ use chatbotx_db::repo::conversation_ai_context::find_conversation_ai_context_sta
 use chatbotx_db::repo::message::{
     FindAiContextMessagesOptions, SinceTimeInput, find_ai_context_messages, get_safe_since_time,
 };
-use chatbotx_kv::{DurableKv, SystemClock};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use llm::{AiHttp, Generated, Model, NoTools, Request, ToolChoice, Turn};
 
@@ -31,8 +36,6 @@ pub const MAX_CONVERSATION_HISTORY: i64 = 100;
 pub const MAX_SUMMARY_LENGTH: usize = 1000;
 /// `AI_MESSAGE_HISTORY_LOOKBACK_MS`.
 pub const AI_MESSAGE_HISTORY_LOOKBACK_MS: i64 = 365 * 24 * 60 * 60 * 1000;
-/// `aiContextStore` TTL (24 h).
-const CONTEXT_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// The model transport and the embedder (the provider SDK singletons).
 pub struct Ai {
@@ -115,75 +118,9 @@ pub fn history_turns(history: &[(String, String)]) -> Vec<Turn> {
         .collect()
 }
 
-fn context_key(conversation_id: i64) -> String {
-    format!("ai:ctx:v1:{conversation_id}")
-}
-
 /// `aiContextStore.delete`.
 pub async fn delete_context(db: &Arc<Db>, conversation_id: i64) {
-    let kv = DurableKv::new(Arc::clone(db), Arc::new(SystemClock));
-    if let Err(err) = kv.delete(&[&context_key(conversation_id)]).await {
-        tracing::warn!(err = %err, conversation_id, "AI context delete failed");
-    }
-}
-
-/// `aiContextService.getOrInitContext(...).summary`: the stored summary while
-/// the history marker is unchanged, else a new summary of the history
-/// (stored 24 h). A failure is logged and reads as no summary.
-// ponytail: `appendHistory` and the summarize job are not ported (the
-// summary is not refreshed until the marker changes or the 24 h TTL ends).
-pub async fn context_summary(
-    deps: &crate::Deps,
-    workspace_id: i64,
-    conversation_id: i64,
-    preferred_models: &Value,
-) -> String {
-    let db = &deps.db;
-    let kv = DurableKv::new(Arc::clone(db), Arc::new(SystemClock));
-    let key = context_key(conversation_id);
-    let state = db
-        .read(move |conn| {
-            find_conversation_ai_context_state(conn, conversation_id, workspace_id)
-                .map_err(crate::repo_err)
-        })
-        .await;
-    let state = match state {
-        Ok(Some(state)) => state,
-        Ok(None) => return String::new(),
-        Err(err) => {
-            tracing::error!(err = %err, workspace_id, conversation_id, action = "getOrInitContext", "AI context failed");
-            return String::new();
-        }
-    };
-    let marker = state.ai_context_last_message_id.map(|m| m.to_string());
-    // The part of the cached `AIContext` the worker reads.
-    if let Ok(Some(stored)) = kv.get::<Value>(&key).await
-        && stored.get("markerMessageId").and_then(Value::as_str) == marker.as_deref()
-    {
-        return stored
-            .get("summary")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned();
-    }
-    let history = match history(db, workspace_id, conversation_id, None, false).await {
-        Ok(history) => history,
-        Err(err) => {
-            tracing::error!(err = %err, workspace_id, conversation_id, action = "getOrInitContext", "AI context failed");
-            return String::new();
-        }
-    };
-    let summary = if history.is_empty() {
-        String::new()
-    } else {
-        summarize(deps, workspace_id, &history, None, preferred_models).await
-    };
-    let summary: String = summary.chars().take(MAX_SUMMARY_LENGTH).collect();
-    let stored = json!({ "markerMessageId": marker, "summary": summary });
-    if let Err(err) = kv.put(&key, &stored, Some(CONTEXT_TTL_SECS)).await {
-        tracing::warn!(err = %err, conversation_id, "AI context store failed");
-    }
-    summary
+    context::delete(db, conversation_id).await;
 }
 
 /// `summarizeConversation`'s model: the caller's preferred auto-reply
@@ -225,7 +162,8 @@ async fn summarizer_model(db: &Db, workspace_id: i64, preferred: &Value) -> Opti
     .flatten()
 }
 
-/// `summarizeConversation`: a failure keeps the existing summary.
+/// `summarizeConversation` of `(role, content)` lines: a failure keeps the
+/// existing summary.
 pub async fn summarize(
     deps: &crate::Deps,
     workspace_id: i64,
@@ -243,14 +181,7 @@ pub async fn summarize(
     };
     let lines = history
         .iter()
-        .map(|(sender, text)| {
-            let role = if sender == "contact" {
-                "user"
-            } else {
-                "assistant"
-            };
-            format!("{role}: {text}")
-        })
+        .map(|(role, text)| format!("{role}: {text}"))
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = if existing.is_empty() {
@@ -422,7 +353,11 @@ pub async fn run_agent(
 }
 
 /// `createAgentModel`: `None` for a missing (or disabled) integration.
-async fn agent_model(db: &Db, workspace_id: i64, config: &Value) -> Result<Option<Model>, String> {
+pub(crate) async fn agent_model(
+    db: &Db,
+    workspace_id: i64,
+    config: &Value,
+) -> Result<Option<Model>, String> {
     let config = config.clone();
     db.read(move |conn| {
         let model_id = config.get("model").and_then(Value::as_str).unwrap_or("");

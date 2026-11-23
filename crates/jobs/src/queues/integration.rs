@@ -21,6 +21,8 @@ pub enum IntegrationJobAction {
     SyncRetargetAudience,
     SendConversionEvent,
     SendGoogleAdsConversion,
+    SendMetaCapiEvent,
+    AdsAutomaticEvent,
     AgentMarkAsRead,
     MessageStatus,
     ContactMarkAsRead,
@@ -38,6 +40,8 @@ impl IntegrationJobAction {
             IntegrationJobAction::SyncRetargetAudience => "syncRetargetAudience",
             IntegrationJobAction::SendConversionEvent => "sendConversionEvent",
             IntegrationJobAction::SendGoogleAdsConversion => "sendGoogleAdsConversion",
+            IntegrationJobAction::SendMetaCapiEvent => "sendMetaCapiEvent",
+            IntegrationJobAction::AdsAutomaticEvent => "adsAutomaticEvent",
             IntegrationJobAction::AgentMarkAsRead => "agentMarkAsRead",
             IntegrationJobAction::MessageStatus => "messageStatus",
             IntegrationJobAction::ContactMarkAsRead => "contactMarkAsRead",
@@ -62,12 +66,14 @@ pub fn job_options_by_action(action: IntegrationJobAction) -> JobOptions {
         | IntegrationJobAction::EvaluateConversionTrigger
         | IntegrationJobAction::SyncRetargetAudience
         | IntegrationJobAction::SendGoogleAdsConversion
+        | IntegrationJobAction::SendMetaCapiEvent
         | IntegrationJobAction::RecordEmailTrackingTransition => ads_conversion_retry_options(),
         IntegrationJobAction::SendConversionEvent => JobOptions {
             priority: Some(CAPI_EVENT_PRIORITY),
             ..ads_conversion_retry_options()
         },
         IntegrationJobAction::AgentMarkAsRead
+        | IntegrationJobAction::AdsAutomaticEvent
         | IntegrationJobAction::MessageStatus
         | IntegrationJobAction::ContactMarkAsRead
         | IntegrationJobAction::IncomingMessageEcho

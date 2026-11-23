@@ -478,3 +478,65 @@ async fn instagram_stores_the_page_token_of_the_connected_account() {
     assert_eq!(outcome, CapiOutcome::Error("notFound"));
     assert!(graph.urls().is_empty());
 }
+
+async fn with_stored_dataset(db: &common::TestDb) {
+    setup(db, |tx| {
+        tx.execute(
+            r#"UPDATE "IntegrationMessenger" SET "datasetId" = 'old-ds' WHERE "id" = ?1"#,
+            [MESSENGER],
+        )?;
+        Ok(())
+    })
+    .await;
+}
+
+/// Q.P7-V1 (`findReadableStoredDataset`): a stored dataset the new token
+/// cannot read (Graph access error) is replaced by the dataset linked at Meta.
+#[tokio::test]
+async fn messenger_replaces_a_stored_dataset_the_token_cannot_read() {
+    let db = seeded().await;
+    with_stored_dataset(&db).await;
+    let (_, session) = begin(&db, "messenger", MESSENGER).await;
+    let mut replies = messenger_graph((200, json!({ "access_token": "long" })));
+    replies.insert(
+        4,
+        (
+            400,
+            json!({ "error": { "message": "Unsupported get request", "code": 100 } }),
+        ),
+    );
+    let graph = Script::with(replies);
+    let outcome = complete_meta_capi(&db, &encryption(), APP, &graph, &session, admin(), "c")
+        .await
+        .expect("complete");
+    assert_eq!(outcome, CapiOutcome::Success);
+    let urls = graph.urls();
+    assert!(urls[4].contains("/old-ds?fields=id"));
+    assert!(urls[5].ends_with("/page-1/dataset"));
+    let (dataset, _) = stored(&db, "IntegrationMessenger", MESSENGER).await;
+    assert_eq!(dataset.as_deref(), Some("dataset-1"));
+}
+
+/// Q.P7-V1: a transient error reading the stored dataset (rate limit) is
+/// surfaced; the stored dataset and token are kept.
+#[tokio::test]
+async fn messenger_keeps_the_stored_dataset_on_a_transient_read_error() {
+    let db = seeded().await;
+    with_stored_dataset(&db).await;
+    let (_, session) = begin(&db, "messenger", MESSENGER).await;
+    let mut replies = messenger_graph((200, json!({ "access_token": "long" })));
+    replies[4] = (
+        400,
+        json!({ "error": { "message": "Too many calls", "code": 4 } }),
+    );
+    let graph = Script::with(replies);
+    let outcome = complete_meta_capi(&db, &encryption(), APP, &graph, &session, admin(), "c")
+        .await
+        .expect("complete");
+    assert_eq!(outcome, CapiOutcome::Error("datasetFailed"));
+    assert_eq!(graph.urls().len(), 5);
+    assert_eq!(
+        stored(&db, "IntegrationMessenger", MESSENGER).await,
+        (Some("old-ds".into()), None)
+    );
+}

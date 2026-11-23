@@ -44,14 +44,20 @@ pub const LEAD_ADS: &str = "lead_ads";
 pub const MARKETING_MESSAGES: &str = "facebook_ads";
 pub const MESSAGING_ADS: &str = "messaging_ads";
 pub const META_CATALOG: &str = "meta_catalog";
+/// The dedicated Conversions API connect's purpose (migration 0006).
+pub const META_CAPI_PURPOSE: &str = "meta_capi";
 /// `META_CATALOG_SCOPES`.
 const META_CATALOG_SCOPES: &[&str] = &["catalog_management"];
 /// The connect-session purposes of these flows.
-pub const PURPOSES: &[&str] = &[LEAD_ADS, MARKETING_MESSAGES, MESSAGING_ADS, META_CATALOG];
-/// The dedicated Conversions API connect (`flow: "metaCapi"`): purpose
-/// `messaging_ads` with `nextAction.flow = "metaCapi"`.
-// ponytail: the purpose CHECK has no CAPI value; add `meta_capi` to it with
-// the next ConnectSession schema change and store that instead.
+pub const PURPOSES: &[&str] = &[
+    LEAD_ADS,
+    MARKETING_MESSAGES,
+    MESSAGING_ADS,
+    META_CATALOG,
+    META_CAPI_PURPOSE,
+];
+/// The dedicated Conversions API connect (`flow: "metaCapi"`, purpose
+/// `meta_capi`); the flow name stays on `nextAction`.
 pub const META_CAPI: &str = "metaCapi";
 /// `MESSENGER_CAPI_SCOPES` / `INSTAGRAM_CAPI_SCOPES`.
 const MESSENGER_CAPI_SCOPES: &[&str] = &["page_events", "pages_show_list"];
@@ -93,7 +99,8 @@ impl Flow {
         match self {
             Flow::LeadAds => LEAD_ADS,
             Flow::MarketingMessages => MARKETING_MESSAGES,
-            Flow::MessagingAds { .. } | Flow::MetaCapi { .. } => MESSAGING_ADS,
+            Flow::MessagingAds { .. } => MESSAGING_ADS,
+            Flow::MetaCapi { .. } => META_CAPI_PURPOSE,
             Flow::MetaCatalog => META_CATALOG,
         }
     }
@@ -311,11 +318,7 @@ pub async fn start(
 
 /// The flow a session was started for (`None` = not an ads session).
 pub fn flow_of(session: &SessionRow) -> Option<Flow> {
-    let capi = session.purpose == MESSAGING_ADS
-        && session
-            .next_action
-            .as_ref()
-            .is_some_and(|a| a["flow"] == META_CAPI);
+    let capi = session.purpose == META_CAPI_PURPOSE;
     if !(session.provider == "messenger" || (capi && session.provider == "instagramFacebook")) {
         return None;
     }
