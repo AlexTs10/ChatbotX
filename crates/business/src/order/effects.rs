@@ -74,6 +74,9 @@ impl Deps<'_> {
                 tracing::error!(%error, job = name, "Failed to enqueue outgoing-message job");
             }
         }
+        if let Some(reply) = outgoing.reply {
+            crate::message::record_agent_reply(self.db, reply).await;
+        }
     }
 }
 

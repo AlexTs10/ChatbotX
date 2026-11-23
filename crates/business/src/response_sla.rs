@@ -245,16 +245,65 @@ pub fn compute_snapshot(
     let breaching_seconds =
         (((target_seconds * (100 - breaching_threshold_percent)) as f64 / 100.0).round() as i64)
             .max(1);
-    let schedule = match assigned_user_id {
-        Some(user) => chatbotx_db::repo::working_hours::find_for_user(conn, workspace_id, user)?,
-        None => None,
-    };
-    let Some(schedule) = schedule else {
+    let to_ms = start_ms + MAX_WORKING_WALK_DAYS * MS_PER_DAY;
+    let Some(schedule) = load_schedule(conn, workspace_id, assigned_user_id, start_ms, to_ms)?
+    else {
         return Ok(Some(SlaSnapshot {
             response_due_at: start_ms + target_seconds * 1000,
             response_sla_breaching_at: start_ms + breaching_seconds * 1000,
             response_sla_target_seconds: target_seconds,
         }));
+    };
+    let walk = |seconds| {
+        add_working_seconds(
+            start_ms,
+            seconds,
+            &schedule.intervals,
+            &schedule.zone,
+            &schedule.overrides,
+            MAX_WORKING_WALK_DAYS,
+        )
+    };
+    match (walk(target_seconds), walk(breaching_seconds)) {
+        (Some(due), Some(breaching)) => Ok(Some(SlaSnapshot {
+            response_due_at: due,
+            response_sla_breaching_at: breaching,
+            response_sla_target_seconds: target_seconds,
+        })),
+        _ => {
+            tracing::warn!(
+                workspace_id,
+                target_seconds,
+                "Response SLA deadline not reached within the walk limit; no SLA set"
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// An agent's working schedule as walk inputs.
+pub struct LoadedSchedule {
+    pub working_hours_id: i64,
+    pub intervals: Vec<(i64, i64, i64)>,
+    pub zone: Zone,
+    pub overrides: HashMap<String, Vec<Range>>,
+}
+
+/// `workingHoursService.findForAgent` + `resolveWorkingHoursTimezone` +
+/// `findDateOverridesFor(from, to)`: `None` without a user or a schedule.
+pub fn load_schedule(
+    conn: &Connection,
+    workspace_id: i64,
+    user_id: Option<i64>,
+    from_ms: i64,
+    to_ms: i64,
+) -> chatbotx_db::repo::Result<Option<LoadedSchedule>> {
+    let schedule = match user_id {
+        Some(user) => chatbotx_db::repo::working_hours::find_for_user(conn, workspace_id, user)?,
+        None => None,
+    };
+    let Some(schedule) = schedule else {
+        return Ok(None);
     };
     let timezone: Option<String> = conn
         .query_row(
@@ -267,9 +316,8 @@ pub fn compute_snapshot(
     let resolved = chatbotx_core::utils::datetime::resolve_filter_timezone(timezone.as_deref());
     let zone = Zone::parse(&resolved).unwrap_or_else(Zone::utc);
     // `findDateOverridesFor` (UTC date keys a day either side of the walk).
-    let from_key = date_key((start_ms - MS_PER_DAY).div_euclid(MS_PER_DAY));
-    let to_key =
-        date_key((start_ms + (MAX_WORKING_WALK_DAYS + 1) * MS_PER_DAY).div_euclid(MS_PER_DAY));
+    let from_key = date_key((from_ms - MS_PER_DAY).div_euclid(MS_PER_DAY));
+    let to_key = date_key((to_ms + MS_PER_DAY).div_euclid(MS_PER_DAY));
     let rows = chatbotx_db::repo::working_hours::list_date_overrides_in_range(
         conn,
         workspace_id,
@@ -302,31 +350,56 @@ pub fn compute_snapshot(
         .iter()
         .map(|i| (i.weekday, i.start_minute, i.end_minute))
         .collect();
-    let walk = |seconds| {
-        add_working_seconds(
-            start_ms,
-            seconds,
-            &intervals,
-            &zone,
-            &overrides,
-            MAX_WORKING_WALK_DAYS,
-        )
-    };
-    match (walk(target_seconds), walk(breaching_seconds)) {
-        (Some(due), Some(breaching)) => Ok(Some(SlaSnapshot {
-            response_due_at: due,
-            response_sla_breaching_at: breaching,
-            response_sla_target_seconds: target_seconds,
-        })),
-        _ => {
-            tracing::warn!(
-                workspace_id,
-                target_seconds,
-                "Response SLA deadline not reached within the walk limit; no SLA set"
-            );
-            Ok(None)
-        }
+    Ok(Some(LoadedSchedule {
+        working_hours_id: schedule.id,
+        intervals,
+        zone,
+        overrides,
+    }))
+}
+
+/// `workingSecondsBetween`: whole working seconds in `[from_ms, to_ms)`; a date
+/// override replaces that local date's weekly intervals.
+pub fn working_seconds_between(
+    from_ms: i64,
+    to_ms: i64,
+    intervals: &[(i64, i64, i64)],
+    zone: &Zone,
+    overrides: &HashMap<String, Vec<Range>>,
+) -> i64 {
+    if to_ms <= from_ms || (intervals.is_empty() && overrides.is_empty()) {
+        return 0;
     }
+    let mut weekly: BTreeMap<i64, Vec<Range>> = BTreeMap::new();
+    for &(weekday, start, end) in intervals {
+        weekly.entry(weekday).or_default().push((start, end));
+    }
+    let (mut day, last) = (local_day(zone, from_ms), local_day(zone, to_ms));
+    let mut total = 0;
+    while day <= last {
+        let ranges = match overrides.get(&date_key(day)) {
+            Some(o) => o.clone(),
+            // 1970-01-01 (day 0) was a Thursday (4).
+            None => weekly
+                .get(&(day + 4).rem_euclid(7))
+                .cloned()
+                .unwrap_or_default(),
+        };
+        for (start, end) in ranges {
+            let start_ms = wall_minute_to_instant(day, start, zone);
+            let end_ms = if end >= MINUTES_PER_DAY {
+                wall_minute_to_instant(day + 1, 0, zone)
+            } else {
+                wall_minute_to_instant(day, end, zone)
+            };
+            let overlap = end_ms.min(to_ms) - start_ms.max(from_ms);
+            if overlap > 0 {
+                total += overlap;
+            }
+        }
+        day += 1;
+    }
+    total / 1000
 }
 
 /// `trackWindow`: runs `run` (a statement that can open the DM waiting
@@ -518,6 +591,65 @@ mod tests {
         chrono::DateTime::parse_from_rfc3339(iso)
             .expect("iso")
             .timestamp_millis()
+    }
+
+    /// `working-hours-duration.test.ts` `workingSecondsBetween` (UTC).
+    #[test]
+    fn working_seconds_between_cases_of_the_duration_test() {
+        let utc = Zone::utc();
+        let none = HashMap::new();
+        let whole_day: Vec<_> = (0..7).map(|d| (d, 0, 1440)).collect();
+        // Floors fractional seconds.
+        assert_eq!(
+            working_seconds_between(
+                z("2026-06-01T09:00:00.100Z"),
+                z("2026-06-01T09:01:00.900Z"),
+                &whole_day,
+                &utc,
+                &none
+            ),
+            60
+        );
+        let t = z("2026-06-01T10:00:00Z");
+        assert_eq!(working_seconds_between(t, t, &whole_day, &utc, &none), 0);
+        assert_eq!(
+            working_seconds_between(z("2026-06-01T11:00:00Z"), t, &whole_day, &utc, &none),
+            0
+        );
+        assert_eq!(
+            working_seconds_between(
+                z("2026-06-01T00:00:00Z"),
+                z("2026-06-08T00:00:00Z"),
+                &[],
+                &utc,
+                &none
+            ),
+            0
+        );
+        // Sat 12:00 -> Mon 10:30 on Mon-Fri 09-17 = 1.5h.
+        let weekdays: Vec<_> = (1..=5).map(|d| (d, 540, 1020)).collect();
+        assert_eq!(
+            working_seconds_between(
+                z("2026-06-06T12:00:00Z"),
+                z("2026-06-08T10:30:00Z"),
+                &weekdays,
+                &utc,
+                &none
+            ),
+            5400
+        );
+        // A holiday Monday counts nothing.
+        let holiday = HashMap::from([("2026-06-08".to_owned(), vec![])]);
+        assert_eq!(
+            working_seconds_between(
+                z("2026-06-06T12:00:00Z"),
+                z("2026-06-08T10:30:00Z"),
+                &weekdays,
+                &utc,
+                &holiday
+            ),
+            0
+        );
     }
 
     /// `working-hours-duration.test.ts` `addWorkingSeconds` (Monday 09-17, UTC).

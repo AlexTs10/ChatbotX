@@ -12,6 +12,7 @@ pub mod conversation_source;
 mod conversation_source_tests;
 pub mod extract;
 mod office;
+pub mod stream;
 pub mod text;
 pub mod toolset;
 
@@ -358,12 +359,30 @@ pub(crate) async fn agent_model(
     workspace_id: i64,
     config: &Value,
 ) -> Result<Option<Model>, String> {
+    model_of(db, workspace_id, config, None).await
+}
+
+/// `createReplyModel`: as [`agent_model`], only from an auto-reply integration.
+pub(crate) async fn reply_model(
+    db: &Db,
+    workspace_id: i64,
+    config: &Value,
+) -> Result<Option<Model>, String> {
+    model_of(db, workspace_id, config, Some(true)).await
+}
+
+async fn model_of(
+    db: &Db,
+    workspace_id: i64,
+    config: &Value,
+    auto_reply: Option<bool>,
+) -> Result<Option<Model>, String> {
     let config = config.clone();
     db.read(move |conn| {
         let model_id = config.get("model").and_then(Value::as_str).unwrap_or("");
         if config.get("kind").and_then(Value::as_str) == Some("openaiCompatible") {
             let row = match config.get("integrationId").and_then(crate::id_of) {
-                Some(id) => model::compatible_row(conn, workspace_id, Some(id), None)?,
+                Some(id) => model::compatible_row(conn, workspace_id, Some(id), auto_reply)?,
                 None => None,
             };
             return Ok(row
@@ -371,8 +390,10 @@ pub(crate) async fn agent_model(
                 .map(|row| model::compatible_model(&row, model_id)));
         }
         let provider = config.get("provider").and_then(Value::as_str).unwrap_or("");
-        Ok(model::native_auth(conn, workspace_id, provider, None)?
-            .map(|auth| model::native_model(provider, &auth, model_id)))
+        Ok(
+            model::native_auth(conn, workspace_id, provider, auto_reply)?
+                .map(|auth| model::native_model(provider, &auth, model_id)),
+        )
     })
     .await
     .map_err(|e| e.to_string())?

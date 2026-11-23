@@ -4,10 +4,11 @@
 //! `setBotEnabledByIds`, `updateReadStatus` and `markUnread`.
 //!
 //! The service writes the rows and returns the realtime envelope / job for
-//! the caller (`ApiState`). Not ported here (no event bus, analytics or SLA
-//! service yet): the flow-trigger events, `analytics:dashboard`, the
-//! response-SLA window tracking, the thread release on archive and the
-//! quick-reply follow-up cancel on a bot pause.
+//! the caller (`ApiState`). Each change sends its flow-trigger event and its
+//! `analytics:dashboard` row through [`crate::events::global`].
+//!
+//! ponytail: the actor (`assignedBy`, `archivedBy`, ...) and the dashboard
+//! `triggerContext` are not passed by the callers yet; the events go without them.
 
 use chatbotx_db::Db;
 use chatbotx_db::repo::message::{
@@ -16,6 +17,7 @@ use chatbotx_db::repo::message::{
 use chatbotx_db::repo::models::Conversation;
 use chatbotx_db::repo::sql::{Sql, opt_int};
 use chatbotx_db::repo::{iso, now_ms};
+use chatbotx_db::rusqlite::OptionalExtension as _;
 use chatbotx_jobs::QueueName;
 use chatbotx_rt::protocol::{
     AssignmentRoute, ConversationRoute, route_for_assignment, route_for_conversation,
@@ -26,6 +28,50 @@ use serde_json::{Value as Json, json};
 use crate::conversation_list::find_or_fail_in;
 use crate::errors::{BusinessError, Result};
 use crate::tx;
+
+/// The trigger event and the `analytics:dashboard` row of one conversation change.
+/// `resolveAnalyticsAttribution`: the contact's latest connection; a failed read
+/// leaves the row unattributed (the change is already committed).
+async fn emit_change(
+    db: &Db,
+    workspace_id: i64,
+    conversation_id: i64,
+    contact_id: i64,
+    trigger: Option<(&str, Json)>,
+    dashboard_type: &str,
+    extra: Json,
+) {
+    if let Some((event_type, metadata)) = trigger {
+        crate::events::global::trigger(event_type, workspace_id, contact_id, metadata).await;
+    }
+    let attribution = chatbotx_db::repo::read(db, move |c| {
+        chatbotx_db::repo::contact_inbox::list_latest_analytics_attribution(
+            c,
+            workspace_id,
+            &[contact_id],
+        )
+    })
+    .await
+    .inspect_err(|err| {
+        tracing::warn!(err = %err, workspace_id, "Conversation analytics attribution lookup failed; events stay unattributed");
+    })
+    .ok()
+    .and_then(|rows| rows.into_iter().next());
+    let mut payload = json!({
+        "eventType": dashboard_type,
+        "workspaceId": workspace_id.to_string(),
+        "conversationId": conversation_id.to_string(),
+        "occurredAt": iso(now_ms()),
+    });
+    if let Some((_, inbox_id, channel)) = attribution {
+        payload["channel"] = json!(channel);
+        payload["inboxId"] = json!(inbox_id.to_string());
+    }
+    if let (Json::Object(target), Json::Object(extra)) = (&mut payload, extra) {
+        target.extend(extra);
+    }
+    crate::events::global::dashboard(payload).await;
+}
 
 /// `BOT_DISABLE_DURATION_MS`.
 pub const BOT_DISABLE_DURATION_MS: i64 = 24 * 60 * 60 * 1000;
@@ -109,14 +155,17 @@ pub async fn assign_one(
     assigned_id: Option<String>,
 ) -> Result<Assigned> {
     let now = now_ms();
-    tx::write(db, move |conn| {
+    let (assigned, change) = tx::write(db, move |conn| {
         let (user, team) = resolve_assignment_target(conn, workspace_id, assigned_id.as_deref())?;
         let Some(previous) = crate::conversation_list::find_in(conn, workspace_id, conversation_id)?
         else {
-            return Ok(Assigned {
-                event: None,
-                job: None,
-            });
+            return Ok((
+                Assigned {
+                    event: None,
+                    job: None,
+                },
+                None,
+            ));
         };
         // A reassignment recomputes the open window's SLA for the new agent.
         crate::response_sla::track_window(conn, workspace_id, &[conversation_id], true, |c| {
@@ -162,12 +211,50 @@ pub async fn assign_one(
             }),
             job_id: Some(format!("notify-assigned-{conversation_id}-{user}")),
         });
-        Ok(Assigned {
-            event: Some(event),
-            job,
-        })
+        Ok((
+            Assigned {
+                event: Some(event),
+                job,
+            },
+            Some((previous.contact_id, user.or(team))),
+        ))
     })
-    .await
+    .await?;
+    match change {
+        Some((contact_id, Some(to))) => {
+            let to = to.to_string();
+            emit_change(
+                db,
+                workspace_id,
+                conversation_id,
+                contact_id,
+                Some((
+                    "conversationAssigned",
+                    json!({ "conversationId": conversation_id.to_string(), "assignedTo": to }),
+                )),
+                "conversation:assigned",
+                json!({ "toAssignee": to }),
+            )
+            .await;
+        }
+        Some((contact_id, None)) => {
+            emit_change(
+                db,
+                workspace_id,
+                conversation_id,
+                contact_id,
+                Some((
+                    "conversationUnassigned",
+                    json!({ "conversationId": conversation_id.to_string() }),
+                )),
+                "conversation:unassigned",
+                json!({}),
+            )
+            .await;
+        }
+        None => {}
+    }
+    Ok(assigned)
 }
 
 /// `archiveByIds` / `unarchiveByIds` for one id. Archiving closes the DM
@@ -220,22 +307,39 @@ pub async fn set_archived(
     {
         tracing::warn!(%error, workspace_id, "Unable to enqueue thread release after archiving conversations");
     }
+    if let Some(contact_id) = contact_id {
+        let trigger = archived.then(|| ("archived", json!({ "conversationId": id.to_string() })));
+        let kind = if archived {
+            "conversation:archived"
+        } else {
+            "conversation:unarchived"
+        };
+        emit_change(db, workspace_id, id, contact_id, trigger, kind, json!({})).await;
+    }
     Ok(())
 }
 
 /// `setFollowed` (404 "Conversation not found").
 pub async fn set_followed(db: &Db, workspace_id: i64, id: i64, followed: bool) -> Result<()> {
     let now = now_ms();
-    tx::write(db, move |conn| {
-        find_or_fail_in(conn, workspace_id, id)?;
+    let contact_id = tx::write(db, move |conn| {
+        let conversation = find_or_fail_in(conn, workspace_id, id)?;
         Sql::new(
             "UPDATE \"Conversation\" SET \"followed\" = ?1, \"updatedAt\" = ?2 WHERE \"workspaceId\" = ?3 AND \"id\" = ?4",
             vec![followed.into(), now.into(), workspace_id.into(), id.into()],
         )
         .execute(conn)?;
-        Ok(())
+        Ok(conversation.contact_id)
     })
-    .await
+    .await?;
+    let trigger = followed.then(|| ("followUp", json!({ "conversationId": id.to_string() })));
+    let kind = if followed {
+        "conversation:followed"
+    } else {
+        "conversation:unfollowed"
+    };
+    emit_change(db, workspace_id, id, contact_id, trigger, kind, json!({})).await;
+    Ok(())
 }
 
 /// `setBotEnabledByIds` for one id: enabling clears `botResumeAt`; a pause
@@ -243,7 +347,7 @@ pub async fn set_followed(db: &Db, workspace_id: i64, id: i64, followed: bool) -
 /// challenge (`sqlDropQuickReplyChallenge`).
 pub async fn set_bot_enabled(db: &Db, workspace_id: i64, id: i64, enabled: bool) -> Result<()> {
     let now = now_ms();
-    tx::write(db, move |conn| {
+    let contact_id = tx::write(db, move |conn| {
         let q = if enabled {
             Sql::new(
                 "UPDATE \"Conversation\" SET \"botEnabled\" = 1, \"botResumeAt\" = NULL, \"updatedAt\" = ?1 \
@@ -265,9 +369,121 @@ pub async fn set_bot_enabled(db: &Db, workspace_id: i64, id: i64, enabled: bool)
             )
         };
         q.execute(conn)?;
-        Ok(())
+        Ok(crate::conversation_list::find_in(conn, workspace_id, id)?.map(|c| c.contact_id))
     })
-    .await
+    .await?;
+    // `enableBotState` / `disableBotState`.
+    if let Some(contact_id) = contact_id {
+        let (trigger, kind) = if enabled {
+            (
+                "conversationTransferredToBot",
+                "conversation:transferred_to_bot",
+            )
+        } else {
+            (
+                "conversationTransferredToHuman",
+                "conversation:transferred_to_human",
+            )
+        };
+        let metadata = json!({ "conversationId": id.to_string() });
+        emit_change(
+            db,
+            workspace_id,
+            id,
+            contact_id,
+            Some((trigger, metadata)),
+            kind,
+            json!({}),
+        )
+        .await;
+    }
+    Ok(())
+}
+
+/// `handoffExecutorService.execute` (`handOffIfBotEnabled`): pauses the bot
+/// only while it is still on (the idempotency guard), optionally reopens the
+/// waiting-for-human window (SLA tracked), cancels the quick-reply follow-ups
+/// and sends the transfer events. `false` = already handed off.
+pub async fn hand_off_if_bot_enabled(
+    db: &Db,
+    workspace_id: i64,
+    id: i64,
+    reopen_unanswered_window: bool,
+    reason: &str,
+    source: &str,
+    metadata: Json,
+) -> Result<bool> {
+    let now = now_ms();
+    let contact_id = tx::write(db, move |conn| {
+        let pause = |c: &chatbotx_db::rusqlite::Connection| {
+            c.query_row(
+                r#"UPDATE "Conversation" SET "botEnabled" = 0, "botResumeAt" = ?1, "updatedAt" = ?2,
+                     "additionalAttributes" = CASE WHEN json_extract("additionalAttributes", '$.challenge.type') = 'quickReply'
+                       THEN json_remove("additionalAttributes", '$.challenge') ELSE "additionalAttributes" END,
+                     "awaitingHumanReplySince" = CASE WHEN ?5 = 1
+                       AND "awaitingHumanReplySince" IS NULL AND "sourceId" IS NULL
+                       AND "contactRepliedAt" > COALESCE("adminRepliedAt", -9223372036854775808)
+                       AND "contactRepliedAt" > COALESCE("awaitingHumanReplyClosedAt", -9223372036854775808)
+                       THEN "contactRepliedAt" ELSE "awaitingHumanReplySince" END
+                   WHERE "workspaceId" = ?3 AND "id" = ?4 AND "botEnabled" = 1
+                   RETURNING "contactId""#,
+                chatbotx_db::rusqlite::params![
+                    now + BOT_DISABLE_DURATION_MS,
+                    now,
+                    workspace_id,
+                    id,
+                    reopen_unanswered_window
+                ],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+        };
+        // A handoff that reopens the unanswered window starts the response SLA.
+        let contact_id = if reopen_unanswered_window {
+            crate::response_sla::track_window(conn, workspace_id, &[id], false, pause)?
+        } else {
+            pause(conn)?
+        };
+        if contact_id.is_some() {
+            // Best effort in the original; here the same transaction.
+            crate::smart_delay::cancel_quick_reply_follow_ups_in(
+                conn,
+                workspace_id,
+                None,
+                &[id],
+                None,
+                None,
+            )?;
+        }
+        Ok(contact_id)
+    })
+    .await?;
+    let Some(contact_id) = contact_id else {
+        return Ok(false);
+    };
+    let mut metadata = match metadata {
+        Json::Object(map) => map,
+        _ => Default::default(),
+    };
+    metadata.insert("handoffReason".into(), json!(reason));
+    metadata.insert(
+        "triggerContext".into(),
+        json!({ "triggerSource": "worker", "triggerHandler": "handoffExecutor", "triggerType": source }),
+    );
+    emit_change(
+        db,
+        workspace_id,
+        id,
+        contact_id,
+        Some((
+            "conversationTransferredToHuman",
+            json!({ "conversationId": id.to_string() }),
+        )),
+        "conversation:transferred_to_human",
+        json!({ "metadata": metadata }),
+    )
+    .await;
+    Ok(true)
 }
 
 fn update_read_status_in(

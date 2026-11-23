@@ -2,10 +2,15 @@
 //! knowledge-file search, the AI functions and the MCP server tools of an
 //! agent / step `tools` list.
 //!
-//! ponytail: the system tools (`sys:` — handoff, document / image / URL
-//! readers, web search) come with the automated response (they need the
-//! conversation context getter); the flow steps pass none, as the
-//! original runner passes no `systemFunctionContextGetter`.
+//! The system tools (`sys:` — handoff, document / image / URL readers) and
+//! the AI functions' side effects (saved fields, the linked flow, the output
+//! message) need the conversation: the automated response passes it with
+//! [`Toolset::with_reply`]; the flow steps pass none, as the original runner
+//! passes no `systemFunctionContextGetter`.
+//!
+//! ponytail: `sys:web_search` is the provider's native search tool in the
+//! original (OpenAI Responses / Gemini grounding); the chat-completions
+//! client here has none, so the tool is left out and the prompt says so.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,7 +38,11 @@ enum Entry {
     Files(Vec<String>),
     Function {
         output_message: String,
+        trigger_flow_id: Option<i64>,
+        /// `(argument key, custom field id)` of `dataCollect`.
+        data_collect: Vec<(String, i64)>,
     },
+    System(String),
     Mcp {
         client: Arc<Mutex<McpClient>>,
         tool: String,
@@ -47,6 +56,7 @@ pub struct Toolset {
     workspace_id: i64,
     defs: Vec<ToolDef>,
     entries: HashMap<String, Entry>,
+    reply: Option<Arc<crate::auto_reply::ReplyContext>>,
 }
 
 impl Toolset {
@@ -56,6 +66,26 @@ impl Toolset {
 
     pub fn has(&self, name: &str) -> bool {
         self.entries.contains_key(name)
+    }
+
+    /// The automated response's context: the selected `sys:` tools join and
+    /// the AI functions run their side effects.
+    pub fn with_reply(
+        mut self,
+        reply: Arc<crate::auto_reply::ReplyContext>,
+        tools: &[String],
+        allowed_system_ids: Option<&[&str]>,
+    ) -> Toolset {
+        for id in tool_ids(tools, "sys") {
+            if allowed_system_ids.is_some_and(|allowed| !allowed.contains(&id.as_str())) {
+                continue;
+            }
+            if let Some(def) = system_tool_def(&id) {
+                self.add(def, Entry::System(id));
+            }
+        }
+        self.reply = Some(reply);
+        self
     }
 
     fn add(&mut self, def: ToolDef, entry: Entry) {
@@ -113,6 +143,7 @@ pub async fn load(
         workspace_id,
         defs: Vec::new(),
         entries: HashMap::new(),
+        reply: None,
     };
     let file_ids = tool_ids(tools, "file");
     let fn_ids: Vec<i64> = tool_ids(tools, "fn")
@@ -170,7 +201,7 @@ pub async fn load(
                 let mut values: Vec<i64> = vec![workspace_id];
                 values.extend(&fn_ids);
                 let mut stmt = conn.prepare(&format!(
-                    r#"SELECT "name", "purpose", "outputMessage", "dataCollect" FROM "AIFunction" WHERE "workspaceId" = ? AND "id" IN ({marks}) ORDER BY "id""#
+                    r#"SELECT "name", "purpose", "outputMessage", "dataCollect", "triggerFlowId" FROM "AIFunction" WHERE "workspaceId" = ? AND "id" IN ({marks}) ORDER BY "id""#
                 ))?;
                 let rows = stmt
                     .query_map(params_from_iter(values), |r| {
@@ -179,6 +210,7 @@ pub async fn load(
                             r.get::<_, Option<String>>(1)?,
                             r.get::<_, Option<String>>(2)?,
                             r.get::<_, Option<String>>(3)?,
+                            r.get::<_, Option<i64>>(4)?,
                         ))
                     })?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -187,8 +219,9 @@ pub async fn load(
             .await;
         match rows {
             Ok(rows) => {
-                for (name, purpose, output, data_collect) in rows {
+                for (name, purpose, output, data_collect, trigger_flow_id) in rows {
                     let mut properties = Map::new();
+                    let mut fields = Vec::new();
                     let collect: Value = data_collect
                         .and_then(|d| serde_json::from_str(&d).ok())
                         .unwrap_or(Value::Null);
@@ -197,6 +230,9 @@ pub async fn load(
                         let to = entry.get("to").and_then(Value::as_str).unwrap_or("");
                         if from.is_empty() || to.is_empty() {
                             continue;
+                        }
+                        if let Ok(field) = to.parse::<i64>() {
+                            fields.push((sanitize_key(from), field));
                         }
                         properties.insert(
                             sanitize_key(from),
@@ -211,6 +247,8 @@ pub async fn load(
                         },
                         Entry::Function {
                             output_message: output.unwrap_or_default(),
+                            trigger_flow_id,
+                            data_collect: fields,
                         },
                     );
                 }
@@ -316,6 +354,49 @@ pub async fn load(
     set
 }
 
+/// The `sys:` tool schemas of `system-functions.ts` (web search excepted).
+fn system_tool_def(id: &str) -> Option<ToolDef> {
+    let (description, parameters) = match id {
+        "connect_user_to_human" => (
+            "Transfer the current conversation to a human agent when the user explicitly asks for human support or the assistant cannot safely resolve the issue.",
+            json!({ "type": "object", "properties": {
+                "reason": { "type": "string", "enum": ["user_requested_human", "assistant_cannot_resolve", "high_risk_or_sensitive"],
+                            "description": "The reason for transferring to a human agent" },
+                "userRequestExcerpt": { "type": "string", "description": "A short excerpt of the user's request that triggered this handoff" },
+                "requestedBy": { "type": "string", "enum": ["user", "agent_policy"], "default": "user", "description": "Who initiated the handoff request" },
+                "requiresConfirmation": { "type": "boolean", "default": false, "description": "Whether to ask the user for confirmation before handoff" } },
+                "required": ["reason"] }),
+        ),
+        "document_reader" => (
+            "Read and extract relevant context from user-uploaded documents in the current conversation.",
+            json!({ "type": "object", "properties": {
+                "query": { "type": "string", "description": "The question or information the user wants to extract from the document" },
+                "documentContext": { "type": "string", "description": "Additional context about which document to read if multiple documents exist in the conversation" } },
+                "required": ["query"] }),
+        ),
+        "image_reader" => (
+            "Analyze user-uploaded images in the current conversation and return visual context relevant to the query.",
+            json!({ "type": "object", "properties": {
+                "query": { "type": "string", "description": "The question or information the user wants to extract from uploaded images" },
+                "imageContext": { "type": "string", "description": "Additional context to identify a specific image when multiple images exist" } },
+                "required": ["query"] }),
+        ),
+        "url_context" => (
+            "Retrieve and summarize context from user-provided URLs for the current conversation.",
+            json!({ "type": "object", "properties": {
+                "query": { "type": "string", "description": "The user question that requires URL-derived context" },
+                "url": { "type": "string", "format": "uri", "description": "Specific URL to prioritize when retrieving context" } },
+                "required": ["query"] }),
+        ),
+        _ => return None,
+    };
+    Some(ToolDef {
+        name: id.to_owned(),
+        description: description.to_owned(),
+        parameters,
+    })
+}
+
 impl Tools for Toolset {
     fn defs(&self) -> Vec<ToolDef> {
         self.defs.clone()
@@ -325,7 +406,41 @@ impl Tools for Toolset {
         Box::pin(async move {
             match self.entries.get(name) {
                 None => Err(format!("Model tried to call unavailable tool '{name}'")),
-                Some(Entry::Function { output_message }) => Ok(output_message.clone()),
+                Some(Entry::Function {
+                    output_message,
+                    trigger_flow_id,
+                    data_collect,
+                }) => {
+                    let Some(reply) = &self.reply else {
+                        return Ok(output_message.clone());
+                    };
+                    let fields: Vec<(i64, String)> = data_collect
+                        .iter()
+                        .filter_map(|(key, field)| {
+                            let value = match args.get(key)? {
+                                Value::Null => return None,
+                                Value::String(s) => s.clone(),
+                                other => other.to_string(),
+                            };
+                            (!value.is_empty()).then_some((*field, value))
+                        })
+                        .collect();
+                    match reply
+                        .function_effects(fields, *trigger_flow_id, output_message)
+                        .await
+                    {
+                        Ok(true) => Ok(String::new()),
+                        Ok(false) => Ok(output_message.clone()),
+                        Err(err) => {
+                            tracing::error!(error = %err, workspace_id = self.workspace_id, function_name = name, "[ai-package] getAIFunctionTools: dataCollect save failed");
+                            Ok(output_message.clone())
+                        }
+                    }
+                }
+                Some(Entry::System(id)) => match &self.reply {
+                    Some(reply) => reply.system_tool(id, &args).await,
+                    None => Ok(String::new()),
+                },
                 Some(Entry::Files(file_ids)) => {
                     let query = args.get("query").and_then(Value::as_str).unwrap_or("");
                     let config = FileSearchConfig {

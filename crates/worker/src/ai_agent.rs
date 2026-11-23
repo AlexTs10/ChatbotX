@@ -1,8 +1,8 @@
 //! The `ai-agent` queue (`apps/worker/src/ai-agent/worker.ts`): the story
 //! automations, the comment AI jobs (`low::comment_ai`), the embeddings and
-//! `processAutomatedResponse`, of which only the keyword step is ported
+//! `processAutomatedResponse`: the keyword step here
 //! (`automatedResponseService.process`: `process-messages.ts` +
-//! `dispatch-reply.ts`).
+//! `dispatch-reply.ts`), the rest in `crate::auto_reply`.
 
 use chatbotx_business::keyword_match::{
     KeywordRule, MatchInput, is_keyword_media_file_type, rule_matches_message,
@@ -18,6 +18,7 @@ use chatbotx_db::rusqlite::params;
 use chatbotx_jobs::{JobCtx, JobError, JobOptions, QueueName};
 use serde_json::{Value, json};
 
+use crate::auto_reply::KeywordStatus;
 use crate::inbound::{PROCESS_AUTOMATED_RESPONSE, automated_response_key, kv, workspace_is_active};
 use crate::{Deps, db_fail, fail, id_of, load_contact_inbox, load_conversation, str_of};
 
@@ -130,11 +131,9 @@ pub(crate) async fn process_automated_response(deps: &Deps, data: &Value) -> Res
     if !workspace_is_active(deps, conversation.workspace_id).await? || !conversation.bot_enabled {
         return Ok(());
     }
-    let handled = process_pending_messages(deps, &conversation, &contact_inbox).await?;
-    // ponytail: product search, the AI agent reply, the Global Router and
-    // the default reply flow after a keyword miss are Q.D6.
-    let _ = handled;
-    Ok(())
+    let status = process_pending_messages(deps, &conversation, &contact_inbox).await?;
+    let message_id = data.get("messageId").and_then(id_of);
+    crate::auto_reply::after_keywords(deps, &conversation, &contact_inbox, message_id, status).await
 }
 
 /// `checkOutboundAutomatedResponse` (`replyByOutboundAutomatedResponse`): an
@@ -179,12 +178,12 @@ async fn process_pending_messages(
     deps: &Deps,
     conversation: &Conversation,
     contact_inbox: &ContactInbox,
-) -> Result<bool, JobError> {
+) -> Result<KeywordStatus, JobError> {
     let key = automated_response_key(conversation.id, contact_inbox.id);
     let store = kv(deps);
     let ids: Vec<String> = store.range(&key).await.map_err(|e| fail(e.to_string()))?;
     let ids: Vec<i64> = ids.iter().filter_map(|id| id.parse().ok()).collect();
-    let mut handled = false;
+    let mut status = KeywordStatus::NoEligibleMessage;
     if !ids.is_empty() {
         let since = repo_message::get_safe_since_time(
             contact_inbox.last_message_at.map(SinceTimeInput::Ms),
@@ -210,17 +209,18 @@ async fn process_pending_messages(
             })
             .collect();
         if !messages.is_empty() {
+            status = KeywordStatus::NoMatch;
             let rules = inbound_rules(deps, conversation.workspace_id).await?;
             for message in &messages {
                 if dispatch_reply(deps, conversation, contact_inbox, message, &rules, true).await? {
-                    handled = true;
+                    status = KeywordStatus::Handled;
                     break;
                 }
             }
         }
     }
     store.clear(&key).await.map_err(|e| fail(e.to_string()))?;
-    Ok(handled)
+    Ok(status)
 }
 
 /// `dispatchAutomatedResponseReply`: the first matching rule with a

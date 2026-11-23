@@ -26,6 +26,7 @@ use crate::{cart, ecommerce_settings, order_payment, tx};
 
 pub mod collection;
 mod external_checkout;
+pub mod product_search;
 
 /// Most distinct lines (product and variant pairs) one cart may hold.
 pub const MAX_CART_LINES: usize = 100;

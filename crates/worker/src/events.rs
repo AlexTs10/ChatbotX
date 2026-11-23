@@ -286,6 +286,169 @@ pub async fn emit_message_event(
     }
 }
 
+/// The human sender of a sent message (`SentEventSender` `human`).
+pub struct HumanSender {
+    pub admin_id: i64,
+    /// The persisted message: a stable `<messageId>:<part>` event id.
+    pub message_id: Option<i64>,
+    /// The message's own time, so a re-run lands on the same row.
+    pub occurred_at: i64,
+}
+
+/// `emitMessageSentEvents`: one `message:bot_sent` / `message:human_sent` row
+/// per sent part (the bot rows also count the bot-message quota). Runs after
+/// the channel accepted the send: a failure is logged, never raised.
+pub async fn emit_message_sent(
+    buses: Option<&EventBuses>,
+    workspace_id: i64,
+    contact_inbox: &chatbotx_db::repo::models::ContactInbox,
+    result: &crate::channel::SendResult,
+    trigger: (&str, &str),
+    human: Option<&HumanSender>,
+) {
+    let Some(buses) = buses else { return };
+    let count = result.sent_count;
+    for index in 0..count {
+        let mut metadata = json!({ "triggerContext": {
+            "triggerSource": "worker",
+            "triggerHandler": trigger.0,
+            "triggerType": trigger.1,
+        }});
+        if let Some(provider_id) = result.message_ids.get(index as usize) {
+            metadata["sentPayload"] =
+                json!({ "index": index, "count": count, "providerMessageId": provider_id });
+        }
+        let mut payload = json!({
+            "workspaceId": workspace_id.to_string(),
+            "contactId": contact_inbox.contact_id.to_string(),
+            "source": contact_inbox.source,
+            "sourceId": contact_inbox.source_id,
+            "channel": contact_inbox.channel,
+            "inboxId": contact_inbox.inbox_id.to_string(),
+            "metadata": metadata,
+        });
+        match human {
+            Some(sender) => {
+                payload["eventType"] = json!("message:human_sent");
+                payload["senderType"] = json!("human");
+                payload["adminId"] = json!(sender.admin_id.to_string());
+                if let Some(id) = sender.message_id {
+                    payload["eventId"] = json!(format!("{id}:{index}"));
+                }
+                payload["occurredAt"] = json!(chatbotx_db::repo::iso(sender.occurred_at));
+            }
+            None => {
+                payload["eventType"] = json!("message:bot_sent");
+                payload["senderType"] = json!("bot");
+                payload["occurredAt"] = json!(chatbotx_db::repo::iso(chatbotx_db::repo::now_ms()));
+            }
+        }
+        if let Some(future) = emit(buses, "analytics:dashboard", payload)
+            && let Err(err) = future.await
+        {
+            tracing::error!(err = %err, workspace_id, "Failed to emit sent analytics after a successful send");
+        }
+    }
+}
+
+/// One `message:bot_received` dashboard row (`BotMessageEvent`). `fields`
+/// holds `hasResponse`, `responseType`, `routeType`, `result`, `aiProvider`
+/// and `metadata`; a failure is logged, never raised.
+pub async fn emit_bot_received(
+    buses: Option<&EventBuses>,
+    workspace_id: i64,
+    conversation_id: i64,
+    contact_inbox: &chatbotx_db::repo::models::ContactInbox,
+    message_id: &str,
+    fields: Value,
+) {
+    let Some(buses) = buses else { return };
+    let mut payload = json!({
+        "eventType": "message:bot_received",
+        "workspaceId": workspace_id.to_string(),
+        "conversationId": conversation_id.to_string(),
+        "channel": contact_inbox.channel,
+        "inboxId": contact_inbox.inbox_id.to_string(),
+        "messageId": message_id,
+        "occurredAt": chatbotx_db::repo::iso(chatbotx_db::repo::now_ms()),
+    });
+    if let (Value::Object(target), Value::Object(fields)) = (&mut payload, fields) {
+        target.extend(fields);
+    }
+    if let Some(future) = emit(buses, "analytics:dashboard", payload)
+        && let Err(err) = future.await
+    {
+        tracing::warn!(err = %err, workspace_id, "bot_received analytics emit failed");
+    }
+}
+
+/// The `message:bot_received` row of a send that carried a
+/// `trackingContext` (`sendChatMessage`, `sendFlowStep`): success, or the
+/// `handler_error_to_fallback` row with the `_failed` trigger type.
+pub async fn emit_tracked_bot_received(
+    buses: Option<&EventBuses>,
+    tracking: Option<&Value>,
+    contact_inbox: &chatbotx_db::repo::models::ContactInbox,
+    handler: &str,
+    flow_id: Option<&Value>,
+    ok: bool,
+) {
+    let Some(t) = tracking.filter(|t| t.is_object()) else {
+        return;
+    };
+    let text = |k: &str| match &t[k] {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    };
+    let (Ok(workspace_id), Ok(conversation_id)) = (
+        text("workspaceId").parse::<i64>(),
+        text("conversationId").parse::<i64>(),
+    ) else {
+        return;
+    };
+    let response_type = text("responseType");
+    let route_type = if flow_id.is_some() || response_type == "automated_response" {
+        "flow"
+    } else {
+        "agent"
+    };
+    let start = t["startTime"]
+        .as_i64()
+        .unwrap_or_else(chatbotx_db::repo::now_ms);
+    let trigger_type = text("triggerType");
+    let mut metadata = json!({
+        "latency": chatbotx_db::repo::now_ms() - start,
+        "triggerContext": {
+            "triggerSource": "worker",
+            "triggerHandler": handler,
+            "triggerType": if ok { trigger_type } else { format!("{trigger_type}_failed") },
+        },
+    });
+    if let Some(flow_id) = flow_id {
+        metadata["flowId"] = flow_id.clone();
+    }
+    if !ok {
+        metadata["fallbackReason"] = json!("handler_error_to_fallback");
+    }
+    emit_bot_received(
+        buses,
+        workspace_id,
+        conversation_id,
+        contact_inbox,
+        &text("messageId"),
+        json!({
+            "hasResponse": ok,
+            "responseType": response_type,
+            "routeType": route_type,
+            "result": if ok { "success" } else { "fallback" },
+            "aiProvider": text("aiProvider"),
+            "metadata": metadata,
+        }),
+    )
+    .await;
+}
+
 /// Emits `message:failed` (`sendMessageToChannel`'s catch block and the
 /// terminal `sendFlowStep` catch).
 pub async fn emit_message_failed(

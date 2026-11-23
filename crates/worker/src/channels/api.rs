@@ -48,7 +48,7 @@ pub fn sign_api_payload(signing_secret: &str, timestamp: &str, raw_body: &str) -
 }
 
 /// `crypto.randomUUID()`.
-fn random_uuid() -> String {
+pub(crate) fn random_uuid() -> String {
     let mut bytes = [0u8; 16];
     let _ = SystemRandom::new().fill(&mut bytes);
     bytes[6] = (bytes[6] & 0x0f) | 0x40;

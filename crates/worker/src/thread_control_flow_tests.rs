@@ -247,3 +247,36 @@ fn template_echoes_render_the_definition_with_the_sent_parameters() {
         "a template echo says nothing about ownership"
     );
 }
+
+/// `conversation-routing-parsers.test.ts` "renders a business template history item
+/// through the template definition".
+#[test]
+fn a_business_template_history_item_renders_through_the_definition() {
+    let sent = json!({ "name": "summer_sale_2026", "components": [
+        { "type": "header", "parameters": [{ "type": "image", "image": { "id": "media-1" } }] },
+        { "type": "body", "parameters": [
+            { "type": "text", "text": "Maria" },
+            { "type": "text", "text": "25%" },
+        ] },
+    ]});
+    let definition = json!({ "name": "summer_sale_2026", "components": [
+        { "type": "HEADER", "format": "IMAGE" },
+        { "type": "BODY", "text": "Hi {{1}}, enjoy {{2}} off!" },
+    ]});
+    let context = json!({ "type": "history", "history": { "items": [{
+        "sender_type": "business",
+        "timestamp": "1755690060",
+        "message_echo": {
+            "message": { "to": USER, "type": "template", "template": sent },
+            "template": definition,
+        },
+    }]}});
+    assert_eq!(
+        parse_conversation_context(Some(&context)),
+        Some(json!({ "type": "history", "items": [{
+            "sender": "business",
+            "text": "[image]\nHi Maria, enjoy 25% off!",
+            "timestamp": "1755690060",
+        }]}))
+    );
+}
