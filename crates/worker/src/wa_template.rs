@@ -627,6 +627,176 @@ pub async fn send_template_to_conversation(deps: &Deps, data: &Value) -> Result<
     }
 }
 
+/// `ChatJobAction.sendWhatsappTemplateMessage` / `sendMessengerTemplateMessage`.
+pub const SEND_WHATSAPP_TEMPLATE_MESSAGE: &str = "sendWhatsappTemplateMessage";
+pub const SEND_MESSENGER_TEMPLATE_MESSAGE: &str = "sendMessengerTemplateMessage";
+
+/// `findApprovedByIdForIntegration` through the inbox's Messenger integration.
+async fn validate_messenger_template(
+    deps: &Deps,
+    template_id: i64,
+    inbox_id: i64,
+) -> Result<Option<chatbotx_db::repo::models::MessengerMessageTemplate>, JobError> {
+    use chatbotx_db::repo::models::MessengerMessageTemplate;
+    deps.db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    &format!(
+                        r#"SELECT {} FROM "MessengerMessageTemplate" t
+                           JOIN "IntegrationMessenger" m ON m."id" = t."integrationMessengerId"
+                           JOIN "Inbox" i ON i."id" = m."inboxId"
+                           WHERE t."id" = ?1 AND m."inboxId" = ?2 AND m."workspaceId" = i."workspaceId"
+                             AND t."status" = 'APPROVED'"#,
+                        MessengerMessageTemplate::columns_sql(Some("t"))
+                    ),
+                    params![template_id, inbox_id],
+                    MessengerMessageTemplate::from_row,
+                )
+                .optional()?)
+        })
+        .await
+        .map_err(db_fail)
+}
+
+/// `sendWhatsappTemplateMessage` / `sendMessengerTemplateMessage`: one
+/// broadcast recipient's template (`schedule/broadcast.rs` enqueues it).
+///
+/// ponytail: a stopped broadcast skips without `resetContactForResume`
+/// (as `runFlowNode`); Messenger buttons without a flow are sent without a
+/// context flow (`findAnyActive`), so their tap is the same no-op.
+pub async fn send_broadcast_template(
+    deps: &Deps,
+    kind: &str,
+    data: &Value,
+    will_retry: bool,
+) -> Result<(), JobError> {
+    let Some(conversation) = (match data.get("conversation").and_then(id_of) {
+        Some(id) => load_conversation(&deps.db, id).await?,
+        None => None,
+    }) else {
+        return Err(JobError::unrecoverable(format!(
+            "{kind}: conversation not found"
+        )));
+    };
+    let contact_inbox_id = data.get("contactInbox").and_then(id_of).unwrap_or(-1);
+    let Some(contact_inbox) =
+        load_contact_inbox(&deps.db, contact_inbox_id, conversation.contact_id).await?
+    else {
+        return Err(JobError::unrecoverable(format!(
+            "{kind}: contact inbox not found"
+        )));
+    };
+    let broadcast_id = data.get("broadcastId").and_then(id_of);
+    if let Some(id) = broadcast_id
+        && !crate::flow::broadcast_is_sendable(deps, id).await?
+    {
+        tracing::debug!(
+            broadcast_id = id,
+            contact_id = conversation.contact_id,
+            "{kind}: broadcast no longer sendable, skipping send"
+        );
+        return Ok(());
+    }
+    let metadata = data.get("metadata").filter(|m| !m.is_null()).cloned();
+    let template_data = data.get("templateData").filter(|d| !d.is_null()).cloned();
+    let template_id = str_of(data, "templateId")
+        .map(str::to_owned)
+        .or_else(|| {
+            data.get("templateId")
+                .and_then(id_of)
+                .map(|id| id.to_string())
+        })
+        .unwrap_or_default();
+    let numeric_id = template_id.parse().unwrap_or(-1);
+    let messenger = kind == SEND_MESSENGER_TEMPLATE_MESSAGE;
+    let template = if messenger {
+        validate_messenger_template(deps, numeric_id, contact_inbox.inbox_id)
+            .await?
+            .map(|t| {
+                let params = template_data.clone().unwrap_or_else(|| {
+                    chatbotx_core::flow_config::steps::extract_messenger_template_params(
+                        &t.components.0.as_array().cloned().unwrap_or_default(),
+                        &t.parameter_format,
+                    )
+                });
+                json!({ "id": t.id.to_string(), "name": t.name, "language": t.language,
+                    "parameterFormat": t.parameter_format, "params": params })
+            })
+    } else {
+        validate_template(deps, numeric_id, contact_inbox.inbox_id)
+            .await?
+            .map(|t| {
+                let params = template_data.clone().unwrap_or_else(|| {
+                    extract_template_params(&t.components.0.as_array().cloned().unwrap_or_default())
+                });
+                json!({ "id": t.id.to_string(), "name": t.name, "language": t.language, "params": params })
+            })
+    };
+    let Some(template) = template else {
+        let channel = if messenger { "Messenger" } else { "WhatsApp" };
+        let message = format!("{channel} template not found or not approved: {template_id}");
+        crate::events::emit_message_failed(
+            deps.events.as_ref(),
+            &crate::events::MessageContext::of(&conversation, &contact_inbox),
+            json!({ "messageId": "", "flowId": "" }),
+            json!({ "message": message }),
+            metadata.as_ref(),
+            will_retry,
+        )
+        .await;
+        return Err(fail(message));
+    };
+    if messenger {
+        // `processMessengerTemplate` is the template step of `sendFlowStep`.
+        let buttons: Vec<Value> = data["buttons"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|b| {
+                let label = b["label"].clone();
+                match b.get("flowId").filter(|f| !f.is_null() && *f != "") {
+                    Some(flow_id) => json!({ "id": create_id(), "label": label,
+                        "buttonType": "startExternalFlow",
+                        "beforeStep": { "id": create_id(), "stepType": "startExternalFlow", "flowId": flow_id },
+                        "steps": [] }),
+                    None => json!({ "id": create_id(), "label": label, "buttonType": null,
+                        "beforeStep": null, "steps": [] }),
+                }
+            })
+            .collect();
+        let job = json!({
+            "conversationId": conversation.id.to_string(),
+            "contactInboxId": contact_inbox.id.to_string(),
+            "flowId": "",
+            "metadata": metadata,
+            "isBulkBroadcast": broadcast_id.is_some(),
+            "step": { "id": create_id(), "nodeId": create_id(),
+                "stepType": SEND_MESSENGER_TEMPLATE_MESSAGE, "template": template, "buttons": buttons },
+        });
+        return crate::send_flow_step::send_flow_step(deps, &job).await;
+    }
+    let input = ProcessTemplate {
+        broadcast_id: broadcast_id.map(|id| id.to_string()),
+        is_bulk_broadcast: broadcast_id.is_some(),
+        metadata,
+        template,
+        ..ProcessTemplate::default()
+    };
+    match process_template(deps, &conversation, &contact_inbox, input).await {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            tracing::error!(err = %error.message(), conversation_id = conversation.id, %template_id,
+                "Error sending WhatsApp template message for broadcast");
+            if should_suppress_retryable_channel_error(&error, &contact_inbox.channel) {
+                Ok(())
+            } else {
+                Err(fail(error.message()))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

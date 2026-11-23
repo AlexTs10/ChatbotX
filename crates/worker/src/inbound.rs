@@ -1241,8 +1241,6 @@ pub async fn route_incoming_message(deps: &Deps, stored: &Stored) -> Result<(), 
         return Ok(());
     }
     if let Some(r#ref) = received.r#ref.as_ref().filter(|_| can_automate) {
-        // ponytail: `runRef` (ref links) has no Rust handler yet; queued so
-        // the job is visible.
         add_job(
             deps,
             QueueName::Integration,
@@ -1521,9 +1519,7 @@ pub(crate) async fn enqueue_flow_action(
     {
         payload["waFlowResponse"] = flow_response.clone();
     }
-    // ponytail: the per-action debounce key and the run handlers
-    // (`runFlowPostback` / `runFlowQuickReply`) are the flow-action unit's
-    // (Q.W3); the job is queued with the original payload.
+    // ponytail: no per-action debounce key; a double tap runs twice.
     add_job(
         deps,
         QueueName::Integration,

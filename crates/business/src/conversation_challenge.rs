@@ -134,3 +134,88 @@ pub async fn advance_step_challenge_attempt(db: &Db, input: AdvanceAttempt) -> R
     })
     .await
 }
+
+const IS_QUICK_REPLY: &str =
+    r#"json_extract("additionalAttributes", '$.challenge.type') = 'quickReply'"#;
+
+/// `clearQuickReplyChallenge` filters (`None` = any).
+#[derive(Debug, Clone, Default)]
+pub struct ClearQuickReply {
+    pub node_id: Option<String>,
+    pub except_flow_id: Option<String>,
+    pub attempts: Option<i64>,
+}
+
+/// `clearQuickReplyChallenge`: drops a pending quick-reply challenge that
+/// matches the filters; `true` when one was dropped.
+pub async fn clear_quick_reply_challenge(
+    db: &Db,
+    workspace_id: i64,
+    conversation_id: i64,
+    filter: ClearQuickReply,
+) -> Result<bool> {
+    tx::write(db, move |conn| {
+        Ok(conn.execute(
+            &format!(
+                r#"UPDATE "Conversation" SET "additionalAttributes" = {DROP}
+                   WHERE "id" = ?1 AND "workspaceId" = ?2 AND {IS_QUICK_REPLY}
+                     AND (?3 IS NULL OR CAST(json_extract("additionalAttributes", '$.challenge.data.nodeId') AS TEXT) = ?3)
+                     AND (?4 IS NULL OR CAST(json_extract("additionalAttributes", '$.challenge.data.flowId') AS TEXT) <> ?4)
+                     AND (?5 IS NULL OR CAST(json_extract("additionalAttributes", '$.challenge.data.attempts') AS INTEGER) = ?5)"#
+            ),
+            params![
+                conversation_id,
+                workspace_id,
+                filter.node_id,
+                filter.except_flow_id,
+                filter.attempts
+            ],
+        )? > 0)
+    })
+    .await
+}
+
+/// `armQuickReplyChallenge`: writes the challenge only while the bot is
+/// enabled (a pause that lands first wins); `true` when written.
+pub async fn arm_quick_reply_challenge(
+    db: &Db,
+    workspace_id: i64,
+    conversation_id: i64,
+    challenge: Value,
+) -> Result<bool> {
+    tx::write(db, move |conn| {
+        Ok(conn.execute(
+            &format!(
+                r#"UPDATE "Conversation" SET "additionalAttributes" = {SET}
+                   WHERE "id" = ?2 AND "workspaceId" = ?3 AND "botEnabled" = 1"#
+            ),
+            params![challenge.to_string(), conversation_id, workspace_id],
+        )? > 0)
+    })
+    .await
+}
+
+/// `setQuickReplyChallengeAttempts`: compare-and-set on `attempts`.
+pub async fn set_quick_reply_challenge_attempts(
+    db: &Db,
+    workspace_id: i64,
+    conversation_id: i64,
+    node_id: &str,
+    from_attempts: i64,
+    to_attempts: i64,
+) -> Result<bool> {
+    let node_id = node_id.to_owned();
+    tx::write(db, move |conn| {
+        Ok(conn.execute(
+            &format!(
+                r#"UPDATE "Conversation"
+                   SET "additionalAttributes" = json_set("additionalAttributes", '$.challenge.data.attempts', ?1)
+                   WHERE "id" = ?2 AND "workspaceId" = ?3 AND {IS_QUICK_REPLY}
+                     AND CAST(json_extract("additionalAttributes", '$.challenge.data.nodeId') AS TEXT) = ?4
+                     AND CAST(json_extract("additionalAttributes", '$.challenge.data.attempts') AS INTEGER) = ?5"#
+            ),
+            params![to_attempts, conversation_id, workspace_id, node_id, from_attempts],
+        )? > 0)
+    })
+    .await
+}

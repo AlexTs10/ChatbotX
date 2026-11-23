@@ -47,6 +47,10 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
         SEND_FLOW_MESSAGE => crate::send_flow_step::send_flow_step(&deps, &data).await?,
         SEND_CHAT_MESSAGE => crate::send_flow_step::send_chat_message(&deps, &data).await?,
         SEND_TYPING => send_typing_to_channel(&deps, &data).await?,
+        crate::wa_template::SEND_WHATSAPP_TEMPLATE_MESSAGE
+        | crate::wa_template::SEND_MESSENGER_TEMPLATE_MESSAGE => {
+            crate::wa_template::send_broadcast_template(&deps, &kind, &data, will_retry).await?
+        }
         crate::wa_template::SEND_TEMPLATE_TO_CONVERSATION => {
             crate::wa_template::send_template_to_conversation(&deps, &data).await?
         }

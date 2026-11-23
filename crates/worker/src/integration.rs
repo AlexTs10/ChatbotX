@@ -157,9 +157,17 @@ pub async fn handle(deps: Deps, job: JobCtx) -> Result<Value, JobError> {
             let key = flow_execution_key(&job);
             crate::steps::delay::run_wait_resume(&deps, &job.data["data"], key).await?;
         }
+        crate::steps::delay::RESUME_QUICK_REPLY_FOLLOW_UP => {
+            crate::steps::delay::run_quick_reply_follow_up_resume(&deps, &job.data["data"]).await?;
+        }
         crate::steps::delay::RESUME_FOLLOW_UP => {
             crate::steps::delay::run_follow_up_resume(&deps, &job.data["data"]).await?;
         }
+        crate::flow_action::RUN_FLOW_POSTBACK | crate::flow_action::RUN_FLOW_QUICK_REPLY => {
+            let key = flow_execution_key(&job);
+            crate::flow_action::run_flow_action(&deps, &kind, &job.data["data"], key).await?;
+        }
+        crate::ref_link::RUN_REF => crate::ref_link::run_ref(&deps, &job.data["data"]).await?,
         crate::challenge::RUN_CHALLENGE => {
             crate::challenge::run_challenge(&deps, &job.data["data"]).await?
         }

@@ -283,12 +283,25 @@ impl Run<'_> {
 }
 
 /// `detectFlowVersion`.
-async fn detect_flow_version(
+pub(crate) async fn detect_flow_version(
     deps: &Deps,
     flow_id: i64,
     flow_version_id: Option<i64>,
     workspace_id: i64,
 ) -> Result<(FlowVersion, bool), JobError> {
+    find_flow_version(deps, flow_id, flow_version_id, workspace_id)
+        .await?
+        .ok_or_else(|| fail("FlowVersion not found"))
+}
+
+/// `detectFlowVersion` without the throw: `None` = no published (or pinned)
+/// version; `true` = the published one (`useLatestFlowVersion`).
+pub(crate) async fn find_flow_version(
+    deps: &Deps,
+    flow_id: i64,
+    flow_version_id: Option<i64>,
+    workspace_id: i64,
+) -> Result<Option<(FlowVersion, bool)>, JobError> {
     let version = deps
         .db
         .read(move |conn| {
@@ -320,14 +333,14 @@ async fn detect_flow_version(
         })
         .await
         .map_err(db_fail)?;
-    match version {
-        Some(version) => Ok((version, flow_version_id.is_none())),
-        None => Err(fail("FlowVersion not found")),
-    }
+    Ok(version.map(|version| (version, flow_version_id.is_none())))
 }
 
 /// `broadcastService.findSendableBroadcast`.
-async fn broadcast_is_sendable(deps: &Deps, broadcast_id: i64) -> Result<bool, JobError> {
+pub(crate) async fn broadcast_is_sendable(
+    deps: &Deps,
+    broadcast_id: i64,
+) -> Result<bool, JobError> {
     deps.db
         .read(move |conn| {
             Ok(conn
@@ -476,6 +489,14 @@ pub async fn run_flow_node(
     Ok(())
 }
 
+/// `runStepsAndQuickReplies` for details built by the caller (a quick-reply
+/// retry / follow-up section).
+pub(crate) async fn run_details(run: &Run<'_>, details: &Value) -> Result<(), JobError> {
+    let mut then = None;
+    run_node_steps(run, details, &mut then).await?;
+    run.finish(&mut then).await
+}
+
 /// `releaseContinuationOfMissingTarget`: the run's `thenSendFlow` still
 /// runs when its target was removed; else the job fails.
 async fn release_or_fail(deps: &Deps, data: &Value, message: &str) -> Result<(), JobError> {
@@ -602,8 +623,9 @@ async fn run_node_steps(
         visits.insert(run.target_node_id.clone(), json!(count));
         node_visits = Some(Value::Object(visits));
         record_flow_activity(run).await?;
-        // ponytail: `clearQuickReplyPendingOnFlowEntry` and
-        // `armQuickReplySettings` come with the quick-reply unit.
+        if run.target_type == "node" {
+            crate::quick_reply::clear_on_entry(run).await;
+        }
     }
 
     let before_step = details.get("beforeStep").filter(|s| s.is_object());
@@ -644,6 +666,7 @@ async fn run_node_steps(
         let step_quick_replies = (carrier_id.as_deref() == str_of(step, "id")
             && !quick_replies.is_empty())
         .then(|| Value::Array(quick_replies.clone()));
+        let arms_quick_replies = run.target_type == "node" && step_quick_replies.is_some();
         let outcome = execute_step(
             run,
             step,
@@ -657,7 +680,11 @@ async fn run_node_steps(
         if outcome.branch_target_node_id.is_some() {
             branch_target = outcome.branch_target_node_id.clone();
         }
-        if matches!(outcome.status, StepStatus::Wait | StepStatus::Retry) {
+        let waits = matches!(outcome.status, StepStatus::Wait | StepStatus::Retry);
+        if arms_quick_replies && !waits {
+            crate::quick_reply::arm(run, details).await;
+        }
+        if waits {
             return Ok(());
         }
         if outcome.branched && !continues {

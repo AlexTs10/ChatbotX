@@ -22,6 +22,7 @@ use crate::{Deps, db_fail, id_of};
 
 pub(crate) const RESUME_WAIT: &str = "resumeWait";
 pub(crate) const RESUME_FOLLOW_UP: &str = "resumeFollowUp";
+pub(crate) const RESUME_QUICK_REPLY_FOLLOW_UP: &str = "resumeQuickReplyFollowUp";
 
 /// One `ContactOnSmartDelay` row (`SmartDelayRow`).
 #[derive(Debug, Clone, PartialEq)]
@@ -445,23 +446,7 @@ pub(crate) async fn run_follow_up_resume(deps: &Deps, data: &Value) -> Result<()
     let Some(row) = due_row(find_by_id(&deps.db, id).await.map_err(db_fail)?, "followUp") else {
         return Ok(());
     };
-    let (ws, contact_inbox_id, since) = (row.workspace_id, row.contact_inbox_id, row.created_at);
-    let replied = deps
-        .db
-        .read(move |conn| {
-            Ok(conn
-                .query_row(
-                    r#"SELECT 1 FROM "ContactInbox" ci JOIN "Contact" c ON c."id" = ci."contactId"
-                       WHERE ci."id" = ?1 AND c."workspaceId" = ?2 AND ci."lastIncomingMessageAt" > ?3"#,
-                    params![contact_inbox_id, ws, since],
-                    |_| Ok(()),
-                )
-                .optional()?
-                .is_some())
-        })
-        .await
-        .map_err(db_fail)?;
-    if replied {
+    if contact_replied_since(deps, &row).await? {
         if claim_for_run(&deps.db, row.id, "canceled")
             .await
             .map_err(db_fail)?
@@ -492,4 +477,82 @@ pub(crate) async fn run_follow_up_resume(deps: &Deps, data: &Value) -> Result<()
         .await
         .map(|_| ())
         .map_err(db_fail)
+}
+
+/// `hasIncomingMessageSince(row.createdAt)`.
+async fn contact_replied_since(deps: &Deps, row: &SmartDelayRow) -> Result<bool, JobError> {
+    let (ws, contact_inbox_id, since) = (row.workspace_id, row.contact_inbox_id, row.created_at);
+    deps
+        .db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    r#"SELECT 1 FROM "ContactInbox" ci JOIN "Contact" c ON c."id" = ci."contactId"
+                       WHERE ci."id" = ?1 AND c."workspaceId" = ?2 AND ci."lastIncomingMessageAt" > ?3"#,
+                    params![contact_inbox_id, ws, since],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some())
+        })
+        .await
+        .map_err(db_fail)
+}
+
+/// `runQuickReplyFollowUpResume`: a reply since the row was armed, or a
+/// paused bot, cancels it; else its target runs in this job.
+pub(crate) async fn run_quick_reply_follow_up_resume(
+    deps: &Deps,
+    data: &Value,
+) -> Result<(), JobError> {
+    let Some(id) = data.get("smartDelayId").and_then(id_of) else {
+        return Ok(());
+    };
+    let Some(row) = due_row(
+        find_by_id(&deps.db, id).await.map_err(db_fail)?,
+        "quickReplyFollowUp",
+    ) else {
+        return Ok(());
+    };
+    let conversation = crate::load_conversation(&deps.db, row.conversation_id)
+        .await?
+        .ok_or_else(|| crate::fail("Conversation not found"))?;
+    let contact_inbox =
+        crate::load_contact_inbox(&deps.db, row.contact_inbox_id, conversation.contact_id)
+            .await?
+            .ok_or_else(|| crate::fail("Contact inbox not found"))?;
+    let replied = contact_replied_since(deps, &row).await?;
+    let active = crate::inbound::ensure_active(deps, &conversation).await;
+    if replied || !active {
+        if claim_for_run(&deps.db, row.id, "canceled")
+            .await
+            .map_err(db_fail)?
+        {
+            tracing::info!(
+                smart_delay_id = row.id,
+                replied,
+                active,
+                "Quick reply follow-up canceled: contact engaged or bot inactive"
+            );
+        }
+        return Ok(());
+    }
+    if !claim_for_run(&deps.db, row.id, "completed")
+        .await
+        .map_err(db_fail)?
+    {
+        return Ok(());
+    }
+    if let Err(err) =
+        crate::quick_reply::resume_follow_up(deps, &row, conversation, contact_inbox).await
+    {
+        crate::smart_delay::requeue_claimed_run_or_log(
+            deps,
+            row.id,
+            "Failed to requeue a claimed quick reply follow-up after failure",
+        )
+        .await;
+        return Err(err);
+    }
+    Ok(())
 }

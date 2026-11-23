@@ -20,6 +20,26 @@ The test prints the full lists (`cargo test -p chatbotx-api route_coverage -- --
 and fails when a list changes, so a list only shrinks on purpose: delete the
 line from the fixture in the commit that ports it.
 
+## Status 2026-11-23 (after Q.P7 and Q.D6)
+
+The lists below are the 2026-11-20 snapshot. Since then every unit U1-U6 is
+ported, and all D3 flow steps have a handler. Also ported on 2026-11-23: the job handlers `runFlowPostback`,
+`runFlowQuickReply`, `runRef`, `resumeQuickReplyFollowUp`,
+`sendWhatsappTemplateMessage`, `sendMessengerTemplateMessage`; the
+quick-reply retry and follow-up (`crates/worker/src/quick_reply.rs`); the
+automated reply after a keyword miss (`auto_reply.rs`). E8, E13 and E19 are
+ported (`thread_control.rs`, `heavy.rs`, `mini_app_buttons.rs`).
+
+Open on purpose (DECISIONS Q.P6 "Skip and record"): B2 (53 procedures with
+no caller, `tests/fixtures/not_ported_rpc.txt`), the cloud / enterprise
+items (D2 7, E16, E17, E18), Postgres / Redis upkeep (D2 3), E22.
+
+Open gaps recorded in DECISIONS (2026-11-23): the poll chat runtime (poll
+cards, poll ref links), the WhatsApp Flow form field mapping and the
+rich-response button fallback of a tap, the AI rich response mode, action
+rules and typing indicator, native provider web search, the provider
+`ErrorLog` rows, `resetContactForResume` on a stopped broadcast.
+
 ## Summary
 
 | Group | Not ported | Notes |

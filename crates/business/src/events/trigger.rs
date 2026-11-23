@@ -306,3 +306,28 @@ pub fn contact_info_changes(
 fn trimmed(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|v| !v.is_empty())
 }
+
+/// `contactReferredANewContact` / `contactReferredExistingContact`:
+/// metadata `{ refName, reflinkId }`.
+pub fn contact_referred(
+    is_new_contact: bool,
+    workspace_id: &str,
+    contact_id: &str,
+    ref_name: &str,
+    reflink_id: &str,
+    contact_inbox_id: Option<&str>,
+) -> TriggerEvent {
+    let mut metadata = Map::new();
+    metadata.insert("refName".into(), Value::from(ref_name));
+    metadata.insert("reflinkId".into(), Value::from(reflink_id));
+    event(
+        if is_new_contact {
+            "contactReferredANewContact"
+        } else {
+            "contactReferredExistingContact"
+        },
+        workspace_id,
+        contact_id,
+        with_inbox(metadata, contact_inbox_id),
+    )
+}

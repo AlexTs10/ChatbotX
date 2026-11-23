@@ -206,14 +206,8 @@ pub async fn run_challenge(deps: &Deps, data: &Value) -> Result<(), JobError> {
     let (conversation, contact_inbox) = load(deps, data).await?;
     let challenge = &data["challenge"];
     match challenge["type"].as_str() {
-        // ponytail: the quick-reply retry challenge is never written in Rust
-        // yet (the quick-reply unit arms it); a stray one is left alone.
         Some("quickReply") => {
-            tracing::warn!(
-                conversation_id = conversation.id,
-                "Quick reply challenge resume is not ported; ignored"
-            );
-            Ok(())
+            crate::quick_reply::run_challenge(deps, &conversation, &contact_inbox, challenge).await
         }
         Some("step") => {
             run_step_challenge(
