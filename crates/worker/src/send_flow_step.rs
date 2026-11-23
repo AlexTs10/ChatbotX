@@ -745,6 +745,15 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
                 )
                 .await;
             }
+            crate::events::emit_tracked_bot_received(
+                deps.events.as_ref(),
+                data.get("trackingContext"),
+                &contact_inbox,
+                "sendFlowStep",
+                Some(&json!(flow_id)),
+                true,
+            )
+            .await;
             // A `flow` comment reply reports delivery as a `text` one does
             // (only the first step settles: `deliveredAt IS NULL`).
             crate::low::settle_anchor_delivered(
@@ -765,6 +774,15 @@ pub async fn send_flow_step(deps: &Deps, data: &Value) -> Result<(), JobError> {
         }
         Err(error) => {
             tracing::error!(err = %error, "sendFlowStep error for conversationId: {conversation_id}");
+            crate::events::emit_tracked_bot_received(
+                deps.events.as_ref(),
+                data.get("trackingContext"),
+                &contact_inbox,
+                "sendFlowStep",
+                Some(&json!(flow_id)),
+                false,
+            )
+            .await;
             // Always terminal here: nothing re-attempts the step's send.
             crate::low::settle_anchor_failed(
                 deps,
@@ -930,9 +948,19 @@ pub async fn send_chat_message(deps: &Deps, data: &Value) -> Result<(), JobError
     if !is_bulk {
         queue_message_created(deps, &conversation, contact_inbox.inbox_id, &message_value);
     }
-    if let Err(err) = send_message_to_channel(deps, &send_data, 0, false).await {
+    let sent = send_message_to_channel(deps, &send_data, 0, false).await;
+    if let Err(err) = &sent {
         tracing::error!(err = %err, "sendChatMessage error for conversationId: {conversation_id}");
     }
+    crate::events::emit_tracked_bot_received(
+        deps.events.as_ref(),
+        data.get("trackingContext"),
+        &contact_inbox,
+        "sendChatMessage",
+        None,
+        sent.is_ok(),
+    )
+    .await;
     Ok(())
 }
 

@@ -17,6 +17,7 @@ use chatbotx_db::repo::message::{
 use chatbotx_db::repo::models::Conversation;
 use chatbotx_db::repo::sql::{Sql, opt_int};
 use chatbotx_db::repo::{iso, now_ms};
+use chatbotx_db::rusqlite::OptionalExtension as _;
 use chatbotx_jobs::QueueName;
 use chatbotx_rt::protocol::{
     AssignmentRoute, ConversationRoute, route_for_assignment, route_for_conversation,
@@ -397,6 +398,92 @@ pub async fn set_bot_enabled(db: &Db, workspace_id: i64, id: i64, enabled: bool)
         .await;
     }
     Ok(())
+}
+
+/// `handoffExecutorService.execute` (`handOffIfBotEnabled`): pauses the bot
+/// only while it is still on (the idempotency guard), optionally reopens the
+/// waiting-for-human window (SLA tracked), cancels the quick-reply follow-ups
+/// and sends the transfer events. `false` = already handed off.
+pub async fn hand_off_if_bot_enabled(
+    db: &Db,
+    workspace_id: i64,
+    id: i64,
+    reopen_unanswered_window: bool,
+    reason: &str,
+    source: &str,
+    metadata: Json,
+) -> Result<bool> {
+    let now = now_ms();
+    let contact_id = tx::write(db, move |conn| {
+        let pause = |c: &chatbotx_db::rusqlite::Connection| {
+            c.query_row(
+                r#"UPDATE "Conversation" SET "botEnabled" = 0, "botResumeAt" = ?1, "updatedAt" = ?2,
+                     "additionalAttributes" = CASE WHEN json_extract("additionalAttributes", '$.challenge.type') = 'quickReply'
+                       THEN json_remove("additionalAttributes", '$.challenge') ELSE "additionalAttributes" END,
+                     "awaitingHumanReplySince" = CASE WHEN ?5 = 1
+                       AND "awaitingHumanReplySince" IS NULL AND "sourceId" IS NULL
+                       AND "contactRepliedAt" > COALESCE("adminRepliedAt", -9223372036854775808)
+                       AND "contactRepliedAt" > COALESCE("awaitingHumanReplyClosedAt", -9223372036854775808)
+                       THEN "contactRepliedAt" ELSE "awaitingHumanReplySince" END
+                   WHERE "workspaceId" = ?3 AND "id" = ?4 AND "botEnabled" = 1
+                   RETURNING "contactId""#,
+                chatbotx_db::rusqlite::params![
+                    now + BOT_DISABLE_DURATION_MS,
+                    now,
+                    workspace_id,
+                    id,
+                    reopen_unanswered_window
+                ],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+        };
+        // A handoff that reopens the unanswered window starts the response SLA.
+        let contact_id = if reopen_unanswered_window {
+            crate::response_sla::track_window(conn, workspace_id, &[id], false, pause)?
+        } else {
+            pause(conn)?
+        };
+        if contact_id.is_some() {
+            // Best effort in the original; here the same transaction.
+            crate::smart_delay::cancel_quick_reply_follow_ups_in(
+                conn,
+                workspace_id,
+                None,
+                &[id],
+                None,
+                None,
+            )?;
+        }
+        Ok(contact_id)
+    })
+    .await?;
+    let Some(contact_id) = contact_id else {
+        return Ok(false);
+    };
+    let mut metadata = match metadata {
+        Json::Object(map) => map,
+        _ => Default::default(),
+    };
+    metadata.insert("handoffReason".into(), json!(reason));
+    metadata.insert(
+        "triggerContext".into(),
+        json!({ "triggerSource": "worker", "triggerHandler": "handoffExecutor", "triggerType": source }),
+    );
+    emit_change(
+        db,
+        workspace_id,
+        id,
+        contact_id,
+        Some((
+            "conversationTransferredToHuman",
+            json!({ "conversationId": id.to_string() }),
+        )),
+        "conversation:transferred_to_human",
+        json!({ "metadata": metadata }),
+    )
+    .await;
+    Ok(true)
 }
 
 fn update_read_status_in(

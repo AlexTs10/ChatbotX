@@ -1968,6 +1968,61 @@ pub(crate) mod tests {
         assert!(jobs.0.lock().unwrap().is_empty());
     }
 
+    /// A keyword miss with no AI agent starts the default reply flow, once
+    /// per day per contact (`triggerDefaultReplyFlow`).
+    #[tokio::test]
+    async fn a_keyword_miss_starts_the_throttled_default_reply_flow() {
+        let (deps, jobs) = setup().await;
+        deps.db
+            .write(|tx| {
+                tx.execute(r#"INSERT INTO "Flow" ("id", "name", "workspaceId", "currentVersionId") VALUES (9, 'Default', 2, 19)"#, [])?;
+                tx.execute(r#"UPDATE "Workspace" SET "defaultReply" = '9', "defaultReplyFrequency" = 'oncePerDay' WHERE "id" = 2"#, [])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let run = |source: &'static str| {
+            let deps = deps.clone();
+            let jobs = Arc::clone(&jobs);
+            async move {
+                let mut data = payload();
+                data["payload"]["message"] =
+                    json!({ "sourceId": source, "text": "what is up", "contentType": "text" });
+                incoming_message(&deps, &data).await.unwrap();
+                let queued: Vec<_> = jobs.0.lock().unwrap().drain(..).collect();
+                let data = queued
+                    .iter()
+                    .find(|(_, name, ..)| name == PROCESS_AUTOMATED_RESPONSE)
+                    .map(|(_, _, data, _)| data.clone())
+                    .unwrap();
+                crate::ai_agent::process_automated_response(&deps, &data["data"])
+                    .await
+                    .unwrap();
+                let sent: Vec<_> = jobs.0.lock().unwrap().drain(..).collect();
+                (data, sent)
+            }
+        };
+        let (trigger, sent) = run("m-1").await;
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        let (queue, name, job, _) = &sent[0];
+        assert_eq!(
+            (*queue, name.as_str()),
+            (QueueName::Integration, "sendFlow")
+        );
+        assert_eq!(job["data"]["flowId"], "9");
+        assert_eq!(job["data"]["origin"], "channel");
+        assert_eq!(
+            job["data"]["triggerMessageId"],
+            trigger["data"]["messageId"]
+        );
+        assert_eq!(
+            job["data"]["trackingContext"]["triggerType"],
+            "bot_response_default_reply_flow_no_ai_agent"
+        );
+        let (_, sent) = run("m-2").await;
+        assert!(sent.is_empty(), "throttled for the day: {sent:?}");
+    }
+
     #[tokio::test]
     async fn an_unknown_identifier_is_an_unrecoverable_failure() {
         let (deps, _) = setup().await;

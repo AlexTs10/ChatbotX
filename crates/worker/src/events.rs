@@ -351,6 +351,104 @@ pub async fn emit_message_sent(
     }
 }
 
+/// One `message:bot_received` dashboard row (`BotMessageEvent`). `fields`
+/// holds `hasResponse`, `responseType`, `routeType`, `result`, `aiProvider`
+/// and `metadata`; a failure is logged, never raised.
+pub async fn emit_bot_received(
+    buses: Option<&EventBuses>,
+    workspace_id: i64,
+    conversation_id: i64,
+    contact_inbox: &chatbotx_db::repo::models::ContactInbox,
+    message_id: &str,
+    fields: Value,
+) {
+    let Some(buses) = buses else { return };
+    let mut payload = json!({
+        "eventType": "message:bot_received",
+        "workspaceId": workspace_id.to_string(),
+        "conversationId": conversation_id.to_string(),
+        "channel": contact_inbox.channel,
+        "inboxId": contact_inbox.inbox_id.to_string(),
+        "messageId": message_id,
+        "occurredAt": chatbotx_db::repo::iso(chatbotx_db::repo::now_ms()),
+    });
+    if let (Value::Object(target), Value::Object(fields)) = (&mut payload, fields) {
+        target.extend(fields);
+    }
+    if let Some(future) = emit(buses, "analytics:dashboard", payload)
+        && let Err(err) = future.await
+    {
+        tracing::warn!(err = %err, workspace_id, "bot_received analytics emit failed");
+    }
+}
+
+/// The `message:bot_received` row of a send that carried a
+/// `trackingContext` (`sendChatMessage`, `sendFlowStep`): success, or the
+/// `handler_error_to_fallback` row with the `_failed` trigger type.
+pub async fn emit_tracked_bot_received(
+    buses: Option<&EventBuses>,
+    tracking: Option<&Value>,
+    contact_inbox: &chatbotx_db::repo::models::ContactInbox,
+    handler: &str,
+    flow_id: Option<&Value>,
+    ok: bool,
+) {
+    let Some(t) = tracking.filter(|t| t.is_object()) else {
+        return;
+    };
+    let text = |k: &str| match &t[k] {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    };
+    let (Ok(workspace_id), Ok(conversation_id)) = (
+        text("workspaceId").parse::<i64>(),
+        text("conversationId").parse::<i64>(),
+    ) else {
+        return;
+    };
+    let response_type = text("responseType");
+    let route_type = if flow_id.is_some() || response_type == "automated_response" {
+        "flow"
+    } else {
+        "agent"
+    };
+    let start = t["startTime"]
+        .as_i64()
+        .unwrap_or_else(chatbotx_db::repo::now_ms);
+    let trigger_type = text("triggerType");
+    let mut metadata = json!({
+        "latency": chatbotx_db::repo::now_ms() - start,
+        "triggerContext": {
+            "triggerSource": "worker",
+            "triggerHandler": handler,
+            "triggerType": if ok { trigger_type } else { format!("{trigger_type}_failed") },
+        },
+    });
+    if let Some(flow_id) = flow_id {
+        metadata["flowId"] = flow_id.clone();
+    }
+    if !ok {
+        metadata["fallbackReason"] = json!("handler_error_to_fallback");
+    }
+    emit_bot_received(
+        buses,
+        workspace_id,
+        conversation_id,
+        contact_inbox,
+        &text("messageId"),
+        json!({
+            "hasResponse": ok,
+            "responseType": response_type,
+            "routeType": route_type,
+            "result": if ok { "success" } else { "fallback" },
+            "aiProvider": text("aiProvider"),
+            "metadata": metadata,
+        }),
+    )
+    .await;
+}
+
 /// Emits `message:failed` (`sendMessageToChannel`'s catch block and the
 /// terminal `sendFlowStep` catch).
 pub async fn emit_message_failed(

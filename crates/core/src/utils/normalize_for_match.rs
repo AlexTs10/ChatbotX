@@ -9,6 +9,13 @@ pub fn nfkc(value: &str) -> String {
         .into_owned()
 }
 
+/// `value.normalize("NFC")`.
+pub fn nfc(value: &str) -> String {
+    ComposingNormalizerBorrowed::new_nfc()
+        .normalize(value)
+        .into_owned()
+}
+
 /// `value.normalize("NFD")`.
 pub fn nfd(value: &str) -> String {
     DecomposingNormalizerBorrowed::new_nfd()
