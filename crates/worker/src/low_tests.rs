@@ -152,7 +152,9 @@ async fn a_replay_runs_the_automation_through_the_queues_and_the_channel() {
         .await
         .unwrap();
 
-    assert!(graph.0.lock().unwrap().is_empty());
+    // Only the post tracking reads Graph (the page auth has no `pageId`, so
+    // the Messenger comment lookup is skipped).
+    assert!(only_post_details(&graph), "{:?}", graph.0.lock().unwrap());
     let queued = jobs.0.lock().unwrap().clone();
     let names: Vec<&str> = queued.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
@@ -493,10 +495,7 @@ async fn tag_tracking_counts_a_comment_once() {
     for _ in 0..2 {
         replay_missed_comment(&deps, &graph, &data).await.unwrap();
     }
-    assert!(
-        graph.0.lock().unwrap().is_empty(),
-        "the webhook tags are used"
-    );
+    assert!(only_post_details(&graph), "the webhook tags are used");
     let (total, fresh, claimed): (i64, i64, String) = deps
         .db
         .read(|c| {
@@ -524,6 +523,16 @@ async fn tag_tracking_counts_a_comment_once() {
 #[tokio::test]
 async fn a_messenger_comment_tracks_its_post_and_detects_a_live_video() {
     let (deps, _) = setup().await;
+    deps.db
+        .write(|tx| {
+            tx.execute(
+                r#"UPDATE "IntegrationMessenger" SET "auth" = '{"tokens":{"accessToken":"tok"},"metadata":{"pageId":"p1"}}' WHERE "id" = 5"#,
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let graph = Graph(
         Default::default(),
         json!({ "live_broadcast_timestamp": 1_700_000_000, "message": "My post" }),
@@ -568,4 +577,14 @@ async fn a_messenger_comment_tracks_its_post_and_detects_a_live_video() {
             .unwrap(),
         Some(true)
     );
+}
+
+/// Every recorded Graph call is the comment post's details read.
+fn only_post_details(graph: &Graph) -> bool {
+    graph
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|c| c.contains("/p1_55?fields=message"))
 }
