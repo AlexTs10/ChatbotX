@@ -3,13 +3,10 @@
 //! redirects to a presigned storage URL, a pending one to its provider URL
 //! (or the processing placeholder) while a mirror job runs, a failed one to
 //! the unavailable placeholder.
-//!
-//! ponytail: no `resolveFreshMediaUrl` (a Graph re-derivation of the provider
-//! URL). A pending row with a stored Meta CDN URL redirects to it; any other
-//! pending row (a `wa-media:` id, a retry) shows the processing placeholder
-//! and the mirror job fetches it. A retry on a mirrored row queues a restore
-//! and shows the unavailable placeholder. Port the Graph lookup when
-//! expired-URL renders matter.
+//! A Messenger / Instagram row is re-derived from the Graph message
+//! (`resolveFreshMediaUrl`, Q.P7-V5): a pending row on `?retry=1` (its stored
+//! webhook URL expired) and a mirrored row on `?retry=1` (its object was
+//! evicted; the restore job is queued only when the channel still has it).
 
 use std::sync::Arc;
 
@@ -18,12 +15,15 @@ use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use chatbotx_business::connection::credentials::HttpUpstream;
+use chatbotx_business::media_fresh::{
+    FreshMedia, FreshMediaError, FreshMediaRequest, resolve_fresh_media_url,
+};
 use chatbotx_business::media_url::{
     HYDRATION_CHANNELS, is_failed_origin_path, is_pending_origin_path, verify_media_token,
 };
 use chatbotx_business::tx;
 use chatbotx_core::encryption::MediaTokenKind;
-use chatbotx_core::utils::live_media::{META_MEDIA_HOSTS, is_url_on_hosts};
 use chatbotx_core::utils::request::{
     RequestParts, force_public_https, get_public_origin_from_request,
 };
@@ -236,29 +236,98 @@ async fn handle(
     if is_failed_origin_path(&row.origin_path) {
         return placeholder(&headers, "unavailable.svg");
     }
+    let fresh = |allow_mirrored: bool| {
+        let request = FreshMediaRequest {
+            attachment_id,
+            workspace_id,
+            message_created_at: claims.message_created_at,
+            allow_mirrored,
+            skip_stored_url: is_retry,
+        };
+        let (db, graph_url) = (api.db.clone(), api.graph_url.clone());
+        async move { resolve_fresh_media_url(&db, &HttpUpstream, &graph_url, request).await }
+    };
     if !is_pending_origin_path(&row.origin_path) {
         if is_retry {
-            enqueue(&api, workspace_id, &row, true).await;
-            return placeholder(&headers, "unavailable.svg");
+            // `redirectEvicted`: the channel's copy, restored in the background.
+            return match fresh(true).await {
+                Ok(Some(FreshMedia { url, .. })) => {
+                    enqueue(&api, workspace_id, &row, true).await;
+                    redirect(&url)
+                }
+                Ok(None) => placeholder(&headers, "unavailable.svg"),
+                Err(error) => {
+                    if !matches!(error, FreshMediaError::Terminal(_)) {
+                        tracing::error!(%error, attachment_id, "Failed to resolve fresh media for an evicted attachment");
+                    }
+                    placeholder(&headers, "unavailable.svg")
+                }
+            };
         }
-        let presigned = match api.files.as_deref() {
-            Some(files) => files.get_presigned_download(&row.origin_path, None).await,
-            None => return placeholder(&headers, "unavailable.svg"),
-        };
-        return match presigned {
-            Ok(url) => redirect(&url),
-            Err(error) => {
-                tracing::error!(%error, attachment_id, "Failed to presign mirrored attachment");
-                placeholder(&headers, "unavailable.svg")
-            }
-        };
+        return redirect_mirrored(&api, &headers, &row.origin_path, attachment_id).await;
     }
 
-    enqueue(&api, workspace_id, &row, false).await;
-    if !is_retry && is_url_on_hosts(&row.origin_path, Some(META_MEDIA_HOSTS)) {
-        return redirect(&row.origin_path);
+    match fresh(false).await {
+        Ok(Some(FreshMedia { url, .. })) => {
+            enqueue(&api, workspace_id, &row, false).await;
+            redirect(&url)
+        }
+        Ok(None) => {
+            // A concurrent mirror may have completed between the two reads.
+            let params = FindAttachmentByIdParams {
+                id: attachment_id,
+                message_created_at: claims.message_created_at,
+                workspace_id,
+            };
+            let refreshed = tx::read(&api.db, move |c| {
+                Ok(chatbotx_db::repo::message::find_attachment_by_id(
+                    c, &params,
+                )?)
+            })
+            .await
+            .ok()
+            .flatten();
+            match refreshed {
+                Some(r) if is_failed_origin_path(&r.origin_path) => {
+                    placeholder(&headers, "unavailable.svg")
+                }
+                Some(r) if !is_pending_origin_path(&r.origin_path) => {
+                    redirect_mirrored(&api, &headers, &r.origin_path, attachment_id).await
+                }
+                _ => {
+                    enqueue(&api, workspace_id, &row, false).await;
+                    placeholder(&headers, "processing.svg")
+                }
+            }
+        }
+        Err(FreshMediaError::Terminal(_)) => placeholder(&headers, "unavailable.svg"),
+        Err(error) => {
+            tracing::error!(%error, attachment_id, "Failed to resolve fresh attachment media URL");
+            enqueue(&api, workspace_id, &row, false).await;
+            placeholder(&headers, "processing.svg")
+        }
     }
-    placeholder(&headers, "processing.svg")
+}
+
+/// `redirectMirrored`: a presigned storage URL (a signing failure degrades to
+/// the unavailable placeholder).
+async fn redirect_mirrored(
+    api: &ApiState,
+    headers: &HeaderMap,
+    origin_path: &str,
+    attachment_id: i64,
+) -> Response {
+    let presigned = match api.files.as_deref() {
+        Some(files) => files.get_presigned_download(origin_path, None).await,
+        None => return placeholder(headers, "unavailable.svg"),
+    };
+    match presigned {
+        Ok(url) => redirect(&url),
+        Err(error) => {
+            tracing::error!(%error, attachment_id, "Failed to presign mirrored attachment");
+            placeholder(headers, "unavailable.svg")
+        }
+    }
 }
 
 #[cfg(test)]

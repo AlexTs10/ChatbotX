@@ -217,6 +217,7 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                     let deleted = flow::delete_many(db, ws, first.ids("ids")?)
                         .await
                         .map_err(action_fail)?;
+                    crate::handlers::flows::welcome_delete(ctx.api, ws, &deleted).await;
                     if !deleted.is_empty() {
                         let list = deleted
                             .iter()
@@ -300,9 +301,11 @@ pub(super) async fn action(ctx: &Ctx<'_>, name: &str, args: &[Value]) -> Outcome
                             ))
                         })?;
                     let (nodes, edges) = (version.nodes.0.clone(), version.edges.0.clone());
+                    let flow_id = version.flow_id;
                     flow_version::restore(db, version)
                         .await
                         .map_err(action_fail)?;
+                    crate::handlers::flows::welcome_sync(ctx.api, ws, flow_id, "publish").await;
                     Ok(json!({ "nodes": nodes, "edges": edges }))
                 }
                 "createFolderAction" => {

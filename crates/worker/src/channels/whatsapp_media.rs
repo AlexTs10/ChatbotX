@@ -45,7 +45,7 @@ pub struct WhatsappMedia {
 }
 
 /// `ctx.uploader` for `storeIncomingImage`.
-struct FilesPutter<'a>(&'a Uploader);
+pub(crate) struct FilesPutter<'a>(pub(crate) &'a Uploader);
 
 impl IncomingImageUploader for FilesPutter<'_> {
     async fn put_object(

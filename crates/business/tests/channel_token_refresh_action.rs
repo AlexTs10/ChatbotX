@@ -2,8 +2,8 @@
 //! (the provider branches): `refresh_for_workspaces` over a migrated database
 //! and a scripted provider. The mocked `markTokenRefreshError` is the stored
 //! `tokenRefreshError` and the connection status.
-//! ponytail: the `logMessengerWelcomeProfile` cases are not ported (the
-//! welcome-profile log is not in the Rust port; DECISIONS.md).
+//! `logMessengerWelcomeProfile` (Q.P7-V5) is checked on the read-back request
+//! it sends after a refresh (the log line itself is not asserted).
 
 mod channel_fake;
 mod common;
@@ -258,4 +258,39 @@ async fn reports_is_revoked_false_when_the_revocation_check_says_so() {
             case.name
         );
     }
+}
+
+#[tokio::test]
+async fn messenger_reads_back_the_welcome_profile_after_a_refresh_and_a_failing_read_keeps_the_result()
+ {
+    let db = two_workspaces().await;
+    setup(&db, |tx| {
+        channel_row(tx, "IntegrationMessenger", 78_001, WS, "page-1", &auth())
+    })
+    .await;
+    let http = FakeHttp::new(|r| {
+        if r.url.contains("/me/messenger_profile") {
+            graph_error(500, "down", 2, None)
+        } else {
+            ok(json!({ "access_token": "new-token" }))
+        }
+    });
+    let jobs = RecordingEnqueuer::new();
+    let summary = run(&db, &http, &AuditService::new(jobs.clone()), &[WS]).await;
+    assert_eq!(summary.refreshed, 1);
+    let seen = http.seen();
+    let read = seen.last().expect("read-back");
+    assert!(
+        read.url
+            .contains("/me/messenger_profile?fields=get_started%2Cice_breakers%2Cgreeting"),
+        "{}",
+        read.url
+    );
+    assert_eq!(read.method, "GET");
+    assert!(
+        read.headers
+            .contains(&("Authorization".into(), "Bearer new-token".into())),
+        "{:?}",
+        read.headers
+    );
 }

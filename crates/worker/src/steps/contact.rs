@@ -45,14 +45,28 @@ pub(super) async fn run(
     let (ws, contact_id) = (ctx.workspace_id(), ctx.contact_id());
     match step_type {
         "addContactTag" => {
-            tag::attach_by_names_to_contacts(db, ws, &[contact_id], &names(ctx.step, "tags"))
-                .await
-                .map_err(biz_fail)?;
+            let (_, pairs) = tag::attach_by_names_to_contacts_with_pairs(
+                db,
+                ws,
+                &[contact_id],
+                &names(ctx.step, "tags"),
+            )
+            .await
+            .map_err(biz_fail)?;
+            let jobs = ctx.run.deps.jobs.as_ref();
+            chatbotx_business::tag_sync::enqueue_attach_many(jobs, ws, &pairs).await;
         }
         "removeContactTag" => {
-            tag::detach_by_names_from_contacts(db, ws, &[contact_id], &names(ctx.step, "tags"))
-                .await
-                .map_err(biz_fail)?;
+            let (_, pairs) = tag::detach_by_names_from_contacts_with_pairs(
+                db,
+                ws,
+                &[contact_id],
+                &names(ctx.step, "tags"),
+            )
+            .await
+            .map_err(biz_fail)?;
+            let jobs = ctx.run.deps.jobs.as_ref();
+            chatbotx_business::tag_sync::enqueue_detach_many(jobs, ws, &pairs).await;
         }
         "setCustomField" => set_custom_field(ctx).await,
         "clearCustomField" => {

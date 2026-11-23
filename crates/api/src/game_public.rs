@@ -387,7 +387,7 @@ async fn minigame_page(State(state): State<Arc<ApiState>>, body: Bytes) -> Respo
         );
     };
     let opener_tags = ids(game.general_settings.0.get("openerTagIds"));
-    if let Err(error) = chatbotx_business::tag::attach_to_contact(
+    match chatbotx_business::tag::attach_to_contact(
         &state.db,
         game.workspace_id,
         contact_id,
@@ -395,7 +395,14 @@ async fn minigame_page(State(state): State<Arc<ApiState>>, body: Bytes) -> Respo
     )
     .await
     {
-        tracing::warn!(err = %error, "minigame opener tags failed");
+        Ok(linked) => {
+            if let Some(jobs) = state.jobs.as_deref() {
+                let pairs: Vec<(i64, i64)> = linked.iter().map(|t| (contact_id, *t)).collect();
+                chatbotx_business::tag_sync::enqueue_attach_many(jobs, game.workspace_id, &pairs)
+                    .await;
+            }
+        }
+        Err(error) => tracing::warn!(err = %error, "minigame opener tags failed"),
     }
     let share_url = if game.player_settings.0["sharingNodeId"].is_string() {
         let config = RefConfig::MinigameShare {

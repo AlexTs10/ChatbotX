@@ -265,8 +265,20 @@ async fn connect(
         .flatten(),
         None => None,
     };
-    // ponytail: the branding menu seed and the Messenger tag-sync scan of the
-    // original follow-ups have no Rust service yet; only the warnings remain.
+    // `tagSyncService.enqueueChannelScan` of a Messenger page connect.
+    // ponytail: the branding menu seed of the original follow-ups has no
+    // Rust service yet; only its warning remains.
+    if table == "IntegrationMessenger"
+        && let (Some(id), Some(jobs)) = (row, api.jobs.as_deref())
+    {
+        chatbotx_business::tag_sync::enqueue_channel_scan(
+            jobs,
+            session.workspace_id,
+            "messenger",
+            id,
+        )
+        .await;
+    }
     let warning = if connection.status == "degraded" {
         Some("webhookSubscribeFailed")
     } else if row.is_none() {

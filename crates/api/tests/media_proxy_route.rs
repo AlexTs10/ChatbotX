@@ -1,9 +1,9 @@
 //! `apps/builder/__tests__/media-proxy-route.test.ts` (Q.P6-U1), the
 //! attachment proxy half: token checks, 410, the mirrored / failed /
 //! pending answers, the mirror and restore jobs, the placeholders on the
-//! forwarded origin and the rate limit. The Graph re-derivation cases
-//! (`resolveFreshMediaUrl`) are not ported (see the module docs of
-//! `media_proxy`); the avatar route is not ported.
+//! forwarded origin and the rate limit; the Graph re-derivation cases
+//! (`resolveFreshMediaUrl`, Q.P7-V5) against a local Graph server. The
+//! avatar route is in `avatar_proxy_route.rs`.
 
 mod handlers_common;
 
@@ -66,9 +66,53 @@ async fn exec(f: &Fixture, sql: String) {
         .expect("seed");
 }
 
-/// A messenger message 900 with attachment 1 at `origin_path`.
-async fn setup(origin_path: &str) -> (Fixture, Arc<Jobs>) {
+/// The Graph server: records `path?query`, answers one JSON body.
+#[derive(Default)]
+struct Graph {
+    calls: Mutex<Vec<String>>,
+    answer: Mutex<Option<(u16, Value)>>,
+}
+
+impl Graph {
+    fn answer(&self, status: u16, body: Value) {
+        *self.answer.lock().unwrap() = Some((status, body));
+    }
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+async fn graph_reply(
+    axum::extract::State(g): axum::extract::State<Arc<Graph>>,
+    uri: axum::http::Uri,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    g.calls.lock().unwrap().push(uri.to_string());
+    let (status, body) = g
+        .answer
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or((200, json!({ "attachments": { "data": [] } })));
+    (
+        StatusCode::from_u16(status).unwrap(),
+        [(header::CONTENT_TYPE, "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+/// A messenger message 900 (Graph id `mid-900`) with attachment 1 at
+/// `origin_path`, its page integration and a local Graph server.
+async fn setup(origin_path: &str) -> (Fixture, Arc<Jobs>, Arc<Graph>) {
     let mut f = fixture().await;
+    let graph = Arc::new(Graph::default());
+    let app = axum::Router::new()
+        .fallback(graph_reply)
+        .with_state(Arc::clone(&graph));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    f.state.graph_url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     exec(
         &f,
         format!(
@@ -77,9 +121,11 @@ async fn setup(origin_path: &str) -> (Fixture, Arc<Jobs>) {
                INSERT INTO "ContactInbox" ("id", "originalContactId", "contactId", "inboxId", "channel", "source", "sourceId")
                  VALUES (10, 10, 10, 6, 'messenger', 'direct', 'src-10');
                INSERT INTO "Conversation" ("id", "workspaceId", "contactId") VALUES (10, {WS}, 10);
+               INSERT INTO "IntegrationMessenger" ("id", "auth", "pageId", "name", "conversationStarters", "persistentMenus", "personas", "workspaceId", "inboxId")
+                 VALUES (60, '{{"tokens":{{"accessToken":"page-token"}}}}', 'page-1', 'Page', '[]', '[]', '[]', {WS}, 6);
                INSERT INTO "Message" ("id", "createdAt", "updatedAt", "conversationId", "contactInboxId", "workspaceId", "text",
-                 "messageType", "contentType", "senderType")
-                 VALUES (900, {AT}, {AT}, 10, 10, {WS}, 'hi', 'incoming', 'text', 'contact');
+                 "messageType", "contentType", "senderType", "sourceId")
+                 VALUES (900, {AT}, {AT}, 10, 10, {WS}, 'hi', 'incoming', 'text', 'contact', 'mid-900');
                INSERT INTO "Attachment" ("id", "workspaceId", "conversationId", "messageId", "messageCreatedAt", "fileType", "mimeType", "originPath")
                  VALUES (1, {WS}, 10, 900, {AT}, 'image', 'image/jpeg', '{origin_path}');"#
         ),
@@ -89,7 +135,7 @@ async fn setup(origin_path: &str) -> (Fixture, Arc<Jobs>) {
     f.state.jobs = Some(jobs.clone() as Arc<dyn Enqueuer>);
     let signer = LocalUrlSigner::new("secret", "https://files.test").expect("signer");
     f.state.files = Some(Arc::new(Uploader::in_memory().with_url_signer(signer)));
-    (f, jobs)
+    (f, jobs, graph)
 }
 
 fn token(attachment_id: i64) -> String {
@@ -141,14 +187,14 @@ fn calls(jobs: &Jobs) -> Vec<(QueueName, String, Value, JobOptions)> {
 
 #[tokio::test]
 async fn returns_404_for_an_invalid_token() {
-    let (f, _) = setup("public/a.jpg").await;
+    let (f, _, _) = setup("public/a.jpg").await;
     let (status, ..) = get(&f, "/media/attachment/not-a-token", &[]).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn returns_404_when_an_avatar_token_is_used_on_the_attachment_route() {
-    let (f, _) = setup("public/a.jpg").await;
+    let (f, _, _) = setup("public/a.jpg").await;
     let claims = MediaTokenClaims {
         workspace_id: WS.to_string(),
         kind: MediaTokenKind::Avatar,
@@ -163,7 +209,7 @@ async fn returns_404_when_an_avatar_token_is_used_on_the_attachment_route() {
 
 #[tokio::test]
 async fn returns_410_for_a_non_servable_workspace() {
-    let (f, _) = setup("public/a.jpg").await;
+    let (f, _, _) = setup("public/a.jpg").await;
     exec(
         &f,
         format!(r#"UPDATE "Workspace" SET "scheduledDeletionAt" = 1 WHERE "id" = {WS};"#),
@@ -175,14 +221,14 @@ async fn returns_410_for_a_non_servable_workspace() {
 
 #[tokio::test]
 async fn returns_404_for_an_unknown_attachment() {
-    let (f, _) = setup("public/a.jpg").await;
+    let (f, _, _) = setup("public/a.jpg").await;
     let (status, ..) = get(&f, &format!("/media/attachment/{}", token(2)), &[]).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn redirects_mirrored_media_to_a_fresh_presigned_url_without_graph() {
-    let (f, jobs) = setup("workspace/workspace-1/media.jpg").await;
+    let (f, jobs, _) = setup("workspace/workspace-1/media.jpg").await;
     let (status, location, _) = get(&f, &format!("/media/attachment/{}", token(1)), &[]).await;
     assert_eq!(status, StatusCode::FOUND);
     let location = location.expect("location");
@@ -194,15 +240,29 @@ async fn redirects_mirrored_media_to_a_fresh_presigned_url_without_graph() {
     assert!(calls(&jobs).is_empty());
 }
 
+fn one_attachment(url: &str) -> Value {
+    json!({ "attachments": { "data": [{ "id": "att-1", "mime_type": "image/jpeg", "image_data": { "url": url } }] } })
+}
+
 #[tokio::test]
-async fn retry_on_mirrored_media_enqueues_a_restore_job() {
-    let (f, jobs) = setup("workspace/workspace-1/media.jpg").await;
+async fn retry_on_mirrored_media_redirects_to_fresh_media_and_enqueues_a_restore_job() {
+    let (f, jobs, graph) = setup("workspace/workspace-1/media.jpg").await;
+    graph.answer(
+        200,
+        one_attachment("https://scontent.xx.fbcdn.net/fresh.jpg"),
+    );
     let (status, location, _) =
         get(&f, &format!("/media/attachment/{}?retry=1", token(1)), &[]).await;
     assert_eq!(status, StatusCode::FOUND);
     assert_eq!(
         location.as_deref(),
-        Some("http://localhost:3123/media/unavailable.svg")
+        Some("https://scontent.xx.fbcdn.net/fresh.jpg")
+    );
+    let graph_calls = graph.calls();
+    assert_eq!(graph_calls.len(), 1);
+    assert!(
+        graph_calls[0].starts_with("/v23.0/mid-900?fields=attachments"),
+        "{graph_calls:?}"
     );
     let calls = calls(&jobs);
     assert_eq!(calls.len(), 1);
@@ -222,8 +282,43 @@ async fn retry_on_mirrored_media_enqueues_a_restore_job() {
 }
 
 #[tokio::test]
+async fn retry_on_mirrored_media_without_re_derivable_media_enqueues_nothing() {
+    let (f, jobs, _) = setup("workspace/workspace-1/media.jpg").await;
+    let (_, location, _) = get(&f, &format!("/media/attachment/{}?retry=1", token(1)), &[]).await;
+    assert_eq!(
+        location.as_deref(),
+        Some("http://localhost:3123/media/unavailable.svg")
+    );
+    assert!(calls(&jobs).is_empty());
+}
+
+#[tokio::test]
+async fn retry_on_mirrored_media_degrades_a_graph_failure_to_unavailable() {
+    let (f, jobs, graph) = setup("workspace/workspace-1/media.jpg").await;
+    graph.answer(500, json!({ "error": { "message": "down" } }));
+    let (_, location, _) = get(&f, &format!("/media/attachment/{}?retry=1", token(1)), &[]).await;
+    assert_eq!(
+        location.as_deref(),
+        Some("http://localhost:3123/media/unavailable.svg")
+    );
+    assert!(calls(&jobs).is_empty());
+}
+
+#[tokio::test]
+async fn enqueues_retryable_graph_failures_and_redirects_to_processing() {
+    let (f, jobs, graph) = setup("wa-media:media-1").await;
+    graph.answer(500, json!({ "error": { "message": "down" } }));
+    let (_, location, _) = get(&f, &format!("/media/attachment/{}", token(1)), &[]).await;
+    assert_eq!(
+        location.as_deref(),
+        Some("http://localhost:3123/media/processing.svg")
+    );
+    assert_eq!(calls(&jobs).len(), 1);
+}
+
+#[tokio::test]
 async fn redirects_terminal_media_to_the_unavailable_placeholder() {
-    let (f, jobs) = setup("failed:unresolvable").await;
+    let (f, jobs, _) = setup("failed:unresolvable").await;
     let (status, location, _) = get(&f, &format!("/media/attachment/{}", token(1)), &[]).await;
     assert_eq!(status, StatusCode::FOUND);
     assert_eq!(
@@ -235,8 +330,9 @@ async fn redirects_terminal_media_to_the_unavailable_placeholder() {
 
 #[tokio::test]
 async fn redirects_pending_media_to_its_cdn_url_and_enqueues_one_message_job() {
-    let (f, jobs) = setup("https://lookaside.fbsbx.com/media.jpg").await;
+    let (f, jobs, graph) = setup("https://lookaside.fbsbx.com/media.jpg").await;
     let (status, location, _) = get(&f, &format!("/media/attachment/{}", token(1)), &[]).await;
+    assert!(graph.calls().is_empty(), "the webhook's own URL is served");
     assert_eq!(status, StatusCode::FOUND);
     assert_eq!(
         location.as_deref(),
@@ -252,19 +348,22 @@ async fn redirects_pending_media_to_its_cdn_url_and_enqueues_one_message_job() {
 }
 
 #[tokio::test]
-async fn retry_on_a_pending_attachment_does_not_use_the_stored_webhook_url() {
-    let (f, jobs) = setup("https://lookaside.fbsbx.com/media.jpg").await;
+async fn retry_on_a_pending_attachment_asks_the_provider_instead_of_the_stored_webhook_url() {
+    let (f, jobs, graph) = setup("https://lookaside.fbsbx.com/media.jpg").await;
+    graph.answer(200, one_attachment("https://lookaside.fbsbx.com/fresh.jpg"));
     let (_, location, _) = get(&f, &format!("/media/attachment/{}?retry=1", token(1)), &[]).await;
     assert_eq!(
         location.as_deref(),
-        Some("http://localhost:3123/media/processing.svg")
+        Some("https://lookaside.fbsbx.com/fresh.jpg"),
+        "a single legacy row without a provider id pairs by position"
     );
+    assert_eq!(graph.calls().len(), 1);
     assert_eq!(calls(&jobs).len(), 1);
 }
 
 #[tokio::test]
 async fn redirects_unresolved_pending_media_to_the_processing_placeholder() {
-    let (f, jobs) = setup("wa-media:media-1").await;
+    let (f, jobs, _) = setup("wa-media:media-1").await;
     let (status, location, _) = get(&f, &format!("/media/attachment/{}", token(1)), &[]).await;
     assert_eq!(status, StatusCode::FOUND);
     assert_eq!(
@@ -276,7 +375,7 @@ async fn redirects_unresolved_pending_media_to_the_processing_placeholder() {
 
 #[tokio::test]
 async fn builds_placeholders_from_the_forwarded_public_origin() {
-    let (f, _) = setup("wa-media:media-1").await;
+    let (f, _, _) = setup("wa-media:media-1").await;
     let (_, location, _) = get(
         &f,
         &format!("/media/attachment/{}", token(1)),
@@ -294,7 +393,7 @@ async fn builds_placeholders_from_the_forwarded_public_origin() {
 
 #[tokio::test]
 async fn rate_limits_replay_by_token_and_ip() {
-    let (f, _) = setup("public/a.jpg").await;
+    let (f, _, _) = setup("public/a.jpg").await;
     let path = format!("/media/attachment/{}", token(1));
     let ip = [("x-forwarded-for", "203.0.113.10")];
     for _ in 0..20 {

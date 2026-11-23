@@ -373,6 +373,13 @@ pub(crate) fn not_configured(provider: &str) -> BusinessError {
 /// without `refreshAuth` = `connectionNotRefreshable`.
 pub async fn refresh(db: &Db, id: i64, workspace_id: i64) -> Result<ConnectionRow> {
     let current = tx::read(db, move |conn| find_or_fail(conn, id, workspace_id)).await?;
+    assert_refreshable(&current)?;
+    let http = crate::channel_api::LiveChannelHttp;
+    refresh_with(db, &http, current).await
+}
+
+/// The status checks of [`refresh`].
+pub fn assert_refreshable(current: &ConnectionRow) -> Result<()> {
     if !is_active(&current.status) {
         return Err(inactive());
     }
@@ -389,8 +396,72 @@ pub async fn refresh(db: &Db, id: i64, workspace_id: i64) -> Result<ConnectionRo
             400,
         ));
     }
-    let http = crate::channel_api::LiveChannelHttp;
-    refresh_with(db, &http, current).await
+    Ok(())
+}
+
+/// `refresh` of the Google integrations (Q.P7-V5): `refreshAuth` on the
+/// satellite row (`googleAds` over `up`, `googleCalendar` through
+/// `calendars`), then `recordAuthSaved`. Call after [`assert_refreshable`].
+pub async fn refresh_google(
+    db: &Db,
+    up: &impl crate::connection::credentials::Upstream,
+    calendars: &crate::appointment::external::ExternalCalendars,
+    current: ConnectionRow,
+) -> Result<ConnectionRow> {
+    let (id, workspace_id) = (current.id, current.workspace_id);
+    let Some(integration_id) = current.integration_id else {
+        return Err(not_configured(&current.provider));
+    };
+    let auth = match current.provider.as_str() {
+        "googleAds" => {
+            let integration = tx::read(db, move |conn| {
+                Ok(
+                    repo::integration_google_ads::find_by_workspace_id(conn, workspace_id)?
+                        .filter(|i| i.integration_id == integration_id),
+                )
+            })
+            .await?
+            .ok_or_else(|| not_configured("googleAds"))?;
+            match crate::google_ads_setup::fresh_auth(db, up, &integration, true).await {
+                Ok(auth) => auth,
+                Err(crate::google_ads_setup::TokenFailure::Revoked) => {
+                    return Err(BusinessError::exception(
+                        "Google Ads refresh token was revoked",
+                        "authException",
+                        401,
+                    ));
+                }
+                Err(crate::google_ads_setup::TokenFailure::Other(message)) => {
+                    return Err(BusinessError::exception(
+                        format!("Google Ads token refresh failed: {message}"),
+                        "sdkException",
+                        500,
+                    ));
+                }
+            }
+        }
+        "googleCalendar" => {
+            calendars
+                .refresh_auth(db, workspace_id, integration_id)
+                .await?
+        }
+        other => return Err(not_configured(other)),
+    };
+    // `connectionStateService.recordAuthSaved` (an inactive row keeps its state).
+    let expires_at = auth["tokens"]["expiresAt"]
+        .as_str()
+        .and_then(chatbotx_core::js::parse_date);
+    tx::write(db, move |conn| {
+        conn.execute(
+            r#"UPDATE "Connection" SET "status" = 'connected', "statusReason" = NULL,
+                   "authExpiresAt" = ?3, "lastError" = NULL, "updatedAt" = ?4
+               WHERE "id" = ?1 AND "workspaceId" = ?2 AND "status" IN ('connected', 'degraded')"#,
+            params![id, workspace_id, expires_at, repo::now_ms()],
+        )
+        .map_err(repo_err)?;
+        find_or_fail(conn, id, workspace_id)
+    })
+    .await
 }
 
 /// [`refresh`] past the status checks, over `http`: the channel OAuth
@@ -401,7 +472,7 @@ pub async fn refresh_with(
     current: ConnectionRow,
 ) -> Result<ConnectionRow> {
     if !crate::channel_token_refresh::refresh_connection(db, http, &current).await? {
-        // ponytail: googleAds / googleCalendar `refreshAuth` is not ported.
+        // googleAds / googleCalendar: `refresh_google` (the API passes the calendar keys).
         return Err(not_configured(&current.provider));
     }
     let (id, workspace_id) = (current.id, current.workspace_id);

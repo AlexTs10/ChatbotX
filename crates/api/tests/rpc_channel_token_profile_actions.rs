@@ -4,7 +4,7 @@
 //! migrated database. The provider branches need a scripted channel API and
 //! are covered in `crates/business/tests/channel_token_refresh_action.rs` and
 //! `contact_channel_profile.rs`; here every case stays offline.
-//! ponytail: `logMessengerWelcomeProfile` is not ported (DECISIONS.md).
+//! `logMessengerWelcomeProfile` is checked in `crates/business/tests/channel_token_refresh_action.rs`.
 
 use std::sync::Arc;
 

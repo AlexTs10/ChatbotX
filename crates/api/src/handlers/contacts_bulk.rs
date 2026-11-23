@@ -12,6 +12,7 @@ use chatbotx_business::tag::{
     ContactsOutcome, attach_by_names_to_contacts_with_tags,
     detach_by_names_from_contacts_with_pairs,
 };
+use chatbotx_business::tag_sync;
 use serde_json::{Value, json};
 
 use super::input::{Input, Seg, Str, key};
@@ -60,10 +61,13 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let tags = names(&mut input, "tags");
             input.finish()?;
             let (contact_ids, tags) = (contact_ids.unwrap_or_default(), tags.unwrap_or_default());
-            let (outcome, tag_ids) =
+            let (outcome, tag_ids, linked) =
                 attach_by_names_to_contacts_with_tags(db, ws, &contact_ids, &tags)
                     .await
                     .map_err(|e| business_error(e, CREATING))?;
+            if let Some(jobs) = state.jobs.as_deref() {
+                tag_sync::enqueue_attach_many(jobs, ws, &linked).await;
+            }
             // `emitTagApplied` for every attempted pair (`emitFor: "all"`).
             let workspace = ws.to_string();
             let events: Vec<_> = outcome
@@ -98,6 +102,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                 })
                 .collect();
             state.emit_triggers(events).await;
+            if let Some(jobs) = state.jobs.as_deref() {
+                tag_sync::enqueue_detach_many(jobs, ws, &removed).await;
+            }
             Ok(result(&outcome))
         }
         "contacts.bulkTagByStats" => {
@@ -127,6 +134,9 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
                     })
                     .collect();
                 state.emit_triggers(events).await;
+                if let Some(jobs) = state.jobs.as_deref() {
+                    tag_sync::enqueue_attach_many(jobs, ws, &linked).await;
+                }
             }
             Ok(json(202, json!({ "queued": queued })))
         }

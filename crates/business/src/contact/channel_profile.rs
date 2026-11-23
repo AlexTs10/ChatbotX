@@ -163,7 +163,7 @@ impl IncomingImageUploader for Putter<'_> {
 async fn store_avatar(
     deps: ProfileDeps<'_>,
     url: &str,
-    bearer: &str,
+    bearer: Option<&str>,
     key: String,
     fallback_mime: &str,
 ) -> std::result::Result<Option<String>, String> {
@@ -172,7 +172,7 @@ async fn store_avatar(
     };
     let Some((bytes, mime)) = deps
         .http
-        .download(url.to_owned(), Some(bearer.to_owned()))
+        .download(url.to_owned(), bearer.map(str::to_owned))
         .await?
     else {
         return Ok(None);
@@ -202,13 +202,30 @@ async fn soft_avatar(
     bearer: &str,
     key: String,
 ) -> Option<String> {
-    match store_avatar(deps, url, bearer, key, "application/octet-stream").await {
+    match store_avatar(deps, url, Some(bearer), key, "application/octet-stream").await {
         Ok(avatar) => avatar,
         Err(error) => {
             tracing::error!(%error, "getContactProfilePicture error");
             None
         }
     }
+}
+
+/// `downloadCommenterAvatar` (Q.P7-V5): the commenter's picture from the
+/// comment webhook (Threads) or lookup (TikTok), re-hosted public-read
+/// (`avatar` profile). `bearer` = the Threads token. `Ok(None)` = no store
+/// or no answer.
+pub async fn store_commenter_avatar(
+    deps: ProfileDeps<'_>,
+    workspace_id: i64,
+    url: &str,
+    bearer: Option<&str>,
+) -> std::result::Result<Option<String>, String> {
+    let key = format!(
+        "public/space/{workspace_id}/avatars/{}",
+        chatbotx_core::utils::id::create_id()
+    );
+    store_avatar(deps, url, bearer, key, "image/jpeg").await
 }
 
 fn avatar_key(workspace_id: i64, messenger: bool) -> String {
@@ -450,7 +467,8 @@ pub async fn fetch_profile(
                     get_storage_prefix(&workspace_id.to_string()),
                     chatbotx_core::utils::id::create_id()
                 );
-                profile.avatar = store_avatar(deps, &url, token(auth), key, "image/png").await?;
+                profile.avatar =
+                    store_avatar(deps, &url, Some(token(auth)), key, "image/png").await?;
             }
         }
         Kind::Telegram => {

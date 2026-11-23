@@ -216,6 +216,8 @@ mod rpc_channel_post_options;
 mod rpc_channel_token_profile_actions;
 #[path = "rpc_channels.rs"]
 mod rpc_channels;
+#[path = "rpc_delete_message.rs"]
+mod rpc_delete_message;
 #[path = "rpc_google_ads_settings.rs"]
 mod rpc_google_ads_settings;
 #[path = "rpc_help_items.rs"]

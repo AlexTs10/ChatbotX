@@ -152,7 +152,9 @@ async fn a_replay_runs_the_automation_through_the_queues_and_the_channel() {
         .await
         .unwrap();
 
-    assert!(graph.0.lock().unwrap().is_empty());
+    // Only the post tracking reads Graph (the page auth has no `pageId`, so
+    // the Messenger comment lookup is skipped).
+    assert!(only_post_details(&graph), "{:?}", graph.0.lock().unwrap());
     let queued = jobs.0.lock().unwrap().clone();
     let names: Vec<&str> = queued.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
@@ -493,10 +495,7 @@ async fn tag_tracking_counts_a_comment_once() {
     for _ in 0..2 {
         replay_missed_comment(&deps, &graph, &data).await.unwrap();
     }
-    assert!(
-        graph.0.lock().unwrap().is_empty(),
-        "the webhook tags are used"
-    );
+    assert!(only_post_details(&graph), "the webhook tags are used");
     let (total, fresh, claimed): (i64, i64, String) = deps
         .db
         .read(|c| {
@@ -516,4 +515,76 @@ async fn tag_tracking_counts_a_comment_once() {
     let claimed: Value = serde_json::from_str(&claimed).unwrap();
     assert_eq!(claimed["totalTagged"], 2);
     assert_eq!(claimed["totalNewTagged"], 1);
+}
+
+/// Q.P7-V5 comment extras: a Messenger comment on a live video is marked
+/// live (and the post remembered), and its post is tracked with the Graph
+/// details and linked to the commenter's contact inbox.
+#[tokio::test]
+async fn a_messenger_comment_tracks_its_post_and_detects_a_live_video() {
+    let (deps, _) = setup().await;
+    deps.db
+        .write(|tx| {
+            tx.execute(
+                r#"UPDATE "IntegrationMessenger" SET "auth" = '{"tokens":{"accessToken":"tok"},"metadata":{"pageId":"p1"}}' WHERE "id" = 5"#,
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let graph = Graph(
+        Default::default(),
+        json!({ "live_broadcast_timestamp": 1_700_000_000, "message": "My post" }),
+    );
+    receive_comment(&deps, &graph, &comment(None), None)
+        .await
+        .unwrap();
+    let calls = graph.0.lock().unwrap().clone();
+    assert!(
+        calls.iter().any(|c| c.contains("/55_9?fields=attachment")),
+        "{calls:?}"
+    );
+    assert!(
+        calls.iter().any(|c| c.contains("/p1_55?fields=message")),
+        "{calls:?}"
+    );
+    let (caption, links, attributes): (String, i64, String) = deps
+        .db
+        .read(|c| {
+            Ok(c.query_row(
+                r#"SELECT cp."caption",
+                          (SELECT COUNT(*) FROM "ContactInboxPost" l WHERE l."postId" = cp."id"),
+                          (SELECT "contentAttributes" FROM "Message" WHERE "sourceId" = '55_9')
+                   FROM "ChannelPost" cp WHERE cp."externalPostId" = 'p1_55' AND cp."channel" = 'messenger'"#,
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(caption, "My post");
+    assert_eq!(links, 1);
+    assert!(
+        attributes.contains(r#""isLiveComment":true"#),
+        "{attributes}"
+    );
+    let store = chatbotx_kv::DurableKv::new(deps.db.clone(), Arc::new(chatbotx_kv::SystemClock));
+    assert_eq!(
+        store
+            .get::<bool>("comment-live-post:5:p1_55")
+            .await
+            .unwrap(),
+        Some(true)
+    );
+}
+
+/// Every recorded Graph call is the comment post's details read.
+fn only_post_details(graph: &Graph) -> bool {
+    graph
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|c| c.contains("/p1_55?fields=message"))
 }

@@ -1,8 +1,9 @@
 //! `packages/business/src/tag/service.ts`: the tags of a workspace and the
 //! contact links (`"ContactToTag"`). Private queries on `"Tag"`,
-//! `"ContactToTag"`, `"Contact"`, `"Folder"`. No tag-sync jobs, no
-//! `tagApplied` / `tagRemoved` events, no ads-conversion enqueue, no read
-//! cache, no template edit locks / delete guards (P3.6-D1 rule).
+//! `"ContactToTag"`, `"Contact"`, `"Folder"`. The callers enqueue the
+//! channel tag sync (`crate::tag_sync`, Q.P7-V5) and emit `tagApplied` /
+//! `tagRemoved`; no ads-conversion enqueue, no read cache, no template edit
+//! locks / delete guards (P3.6-D1 rule).
 
 use std::collections::HashSet;
 
@@ -472,33 +473,52 @@ pub async fn attach_by_names_to_contacts(
     contact_ids: &[i64],
     names: &[String],
 ) -> Result<ContactsOutcome> {
+    attach_by_names_to_contacts_with_pairs(db, workspace_id, contact_ids, names)
+        .await
+        .map(|(outcome, _)| outcome)
+}
+
+/// [`attach_by_names_to_contacts`] that also returns the newly linked
+/// `(contactId, tagId)` pairs (the tag-sync enqueue).
+pub async fn attach_by_names_to_contacts_with_pairs(
+    db: &Db,
+    workspace_id: i64,
+    contact_ids: &[i64],
+    names: &[String],
+) -> Result<(ContactsOutcome, Vec<(i64, i64)>)> {
     let contact_ids = contact_ids.to_vec();
     let names = names.to_vec();
     tx::write(db, move |conn| {
+        let skipped = |contact_ids: Vec<i64>| -> Result<(ContactsOutcome, Vec<(i64, i64)>)> {
+            Ok((
+                ContactsOutcome {
+                    processed_contact_ids: Vec::new(),
+                    skipped_contact_ids: contact_ids,
+                },
+                Vec::new(),
+            ))
+        };
         if contact_ids.is_empty() || names.is_empty() {
-            return Ok(ContactsOutcome {
-                processed_contact_ids: Vec::new(),
-                skipped_contact_ids: contact_ids,
-            });
+            return skipped(contact_ids);
         }
         let tags = upsert_in(conn, workspace_id, &names)?;
         if tags.is_empty() {
-            return Ok(ContactsOutcome {
-                processed_contact_ids: Vec::new(),
-                skipped_contact_ids: contact_ids,
-            });
+            return skipped(contact_ids);
         }
         let mut processed = Vec::new();
+        let mut linked = Vec::new();
         for chunk in contact_ids.chunks(CONTACT_CHUNK_SIZE) {
             let contacts = contacts_of(conn, workspace_id, chunk)?;
             for contact_id in &contacts {
                 for tag in &tags {
-                    link(conn, *contact_id, tag.id)?;
+                    if link(conn, *contact_id, tag.id)? {
+                        linked.push((*contact_id, tag.id));
+                    }
                 }
             }
             processed.extend(contacts);
         }
-        Ok(outcome(contact_ids, processed))
+        Ok((outcome(contact_ids, processed), linked))
     })
     .await
 }
@@ -543,13 +563,29 @@ pub async fn replace_contact_tags_by_names(
     contact_id: i64,
     names: &[String],
 ) -> Result<Vec<Tag>> {
+    replace_contact_tags_by_names_with_changes(db, workspace_id, contact_id, names)
+        .await
+        .map(|(tags, _, _)| tags)
+}
+
+/// [`replace_contact_tags_by_names`] that also returns the added and the
+/// removed tag ids (the tag-sync enqueue).
+pub async fn replace_contact_tags_by_names_with_changes(
+    db: &Db,
+    workspace_id: i64,
+    contact_id: i64,
+    names: &[String],
+) -> Result<(Vec<Tag>, Vec<i64>, Vec<i64>)> {
     let names = names.to_vec();
     tx::write(db, move |conn| {
         contact_in_workspace(conn, workspace_id, contact_id)?;
         let tags = upsert_in(conn, workspace_id, &names)?;
         let keep: HashSet<i64> = tags.iter().map(|tag| tag.id).collect();
+        let mut added = Vec::new();
         for tag in &tags {
-            link(conn, contact_id, tag.id)?;
+            if link(conn, contact_id, tag.id)? {
+                added.push(tag.id);
+            }
         }
         let mut stmt = conn
             .prepare(r#"SELECT "tagId" FROM "ContactToTag" WHERE "contactId" = ?1"#)
@@ -559,10 +595,13 @@ pub async fn replace_contact_tags_by_names(
             .map_err(repo_err)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(repo_err)?;
+        let mut removed = Vec::new();
         for tag_id in old.into_iter().filter(|id| !keep.contains(id)) {
-            unlink(conn, contact_id, tag_id)?;
+            if unlink(conn, contact_id, tag_id)? {
+                removed.push(tag_id);
+            }
         }
-        Ok(tags)
+        Ok((tags, added, removed))
     })
     .await
 }
@@ -588,8 +627,9 @@ pub struct BulkAttachOutcome {
 
 /// `bulkAttachToContacts`: links the live workspace tags of `tag_ids` to the
 /// workspace contacts of `contact_ids` (both deduplicated, contacts in
-/// chunks of 200). No tag-sync / ads-conversion enqueue, no
-/// `recoverUnsyncedPairs` (no channel tag sync is ported).
+/// chunks of 200). The caller enqueues the tag sync of `newly_linked`; no
+/// ads-conversion enqueue, no `recoverUnsyncedPairs` (a lost enqueue is
+/// logged, not replayed).
 pub async fn bulk_attach_to_contacts(
     db: &Db,
     workspace_id: i64,
@@ -640,20 +680,22 @@ pub async fn bulk_attach_to_contacts(
 }
 
 /// [`attach_by_names_to_contacts`] that also returns the resolved tag ids
-/// (the route emits `tagApplied` for every processed contact × tag).
+/// (the route emits `tagApplied` for every processed contact × tag) and the
+/// newly linked pairs (the tag-sync enqueue).
 pub async fn attach_by_names_to_contacts_with_tags(
     db: &Db,
     workspace_id: i64,
     contact_ids: &[i64],
     names: &[String],
-) -> Result<(ContactsOutcome, Vec<i64>)> {
+) -> Result<(ContactsOutcome, Vec<i64>, Vec<(i64, i64)>)> {
     let tag_ids = upsert_by_names(db, workspace_id, names)
         .await?
         .into_iter()
         .map(|(id, _)| id)
         .collect();
-    let outcome = attach_by_names_to_contacts(db, workspace_id, contact_ids, names).await?;
-    Ok((outcome, tag_ids))
+    let (outcome, linked) =
+        attach_by_names_to_contacts_with_pairs(db, workspace_id, contact_ids, names).await?;
+    Ok((outcome, tag_ids, linked))
 }
 
 /// [`detach_by_names_from_contacts`] that also returns the removed

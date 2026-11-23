@@ -140,6 +140,9 @@ async fn create(state: &ApiState, call: Call<'_>) -> Reply {
     .map_err(|e| flow_error(e, super::CREATING))?;
     // `createDraft` / `createPublished`: `this.audit("create", ...)`.
     let (flow_id, node_ids) = created;
+    if publish {
+        welcome_sync(state, ws, flow_id, "publish").await;
+    }
     state
         .record_audit("create", &format!("created a new flow (#{flow_id})"))
         .await;
@@ -388,7 +391,7 @@ async fn update(state: &ApiState, call: Call<'_>) -> Reply {
     let enable_in_inbox = input.opt_bool("enableInInbox");
     let flow_id = input.id("id");
     input.finish()?;
-    flow::update(
+    let updated = flow::update(
         &state.db,
         call.workspace_id,
         flow_id.unwrap_or_default(),
@@ -400,6 +403,20 @@ async fn update(state: &ApiState, call: Call<'_>) -> Reply {
     )
     .await
     .map_err(|e| business_error(e, super::MUTATING))?;
+    if let Some(sync) = updated.sync {
+        let reason = if sync == flow::WelcomeSync::Rename {
+            "rename"
+        } else {
+            "publish"
+        };
+        welcome_sync(
+            state,
+            call.workspace_id,
+            flow_id.unwrap_or_default(),
+            reason,
+        )
+        .await;
+    }
     state
         .record_audit(
             "update",
@@ -415,6 +432,7 @@ async fn delete(state: &ApiState, call: Call<'_>) -> Reply {
     let deleted = flow::delete_many(&state.db, call.workspace_id, vec![flow_id])
         .await
         .map_err(|e| business_error(e, super::MUTATING))?;
+    welcome_delete(state, call.workspace_id, &deleted).await;
     // `deleteMany`: no audit record when nothing matched.
     if !deleted.is_empty() {
         let list = deleted
@@ -436,6 +454,13 @@ async fn duplicate(state: &ApiState, call: Call<'_>) -> Reply {
     let copy = flow::duplicate(&state.db, call.workspace_id, flow_id)
         .await
         .map_err(|e| business_error(e, super::MUTATING))?;
+    // Only a published copy is live.
+    if flow_version::find_published(&state.db, call.workspace_id, copy)
+        .await
+        .is_ok_and(|v| v.is_some())
+    {
+        welcome_sync(state, call.workspace_id, copy, "publish").await;
+    }
     state
         .record_audit(
             "create",
@@ -615,7 +640,23 @@ async fn publish(state: &ApiState, call: Call<'_>) -> Reply {
     }
     .await
     .map_err(|e| flow_error(e, super::MUTATING))?;
+    welcome_sync(state, ws, flow_id, "publish").await;
     Ok(no_content())
+}
+
+/// `messengerWelcomeMessageFlowService.enqueueSync` (never fails the route).
+pub(crate) async fn welcome_sync(state: &ApiState, workspace_id: i64, flow_id: i64, reason: &str) {
+    if let Some(jobs) = state.jobs.as_deref() {
+        chatbotx_business::welcome_flow_sync::enqueue_sync(jobs, workspace_id, flow_id, reason)
+            .await;
+    }
+}
+
+/// `messengerWelcomeMessageFlowService.enqueueDelete`.
+pub(crate) async fn welcome_delete(state: &ApiState, workspace_id: i64, flow_ids: &[i64]) {
+    if let Some(jobs) = state.jobs.as_deref() {
+        chatbotx_business::welcome_flow_sync::enqueue_delete(jobs, workspace_id, flow_ids).await;
+    }
 }
 
 /// `flows.validate` (`flowSpecRequest` -> `publishFlowSchema`).

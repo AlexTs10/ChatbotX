@@ -524,7 +524,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/builder/__tests__/me-extension-download-route.test.ts` | C | `crates/api/tests/downloads_routes.rs` | ported | Builder app shell and shared components; builder server code |
 | `apps/builder/__tests__/media-library-actions.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/media-library-public-api.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
-| `apps/builder/__tests__/media-proxy-route.test.ts` | C | `crates/api/tests/avatar_proxy_route.rs`, `crates/api/tests/media_proxy_route.rs` | ported | Media library and file storage; builder server code; avatar part (Q.P6-U3) and attachment part (Q.P6-U1); the Graph re-derivation cases are not ported |
+| `apps/builder/__tests__/media-proxy-route.test.ts` | C | `crates/api/tests/avatar_proxy_route.rs`, `crates/api/tests/media_proxy_route.rs` | ported | Media library and file storage; builder server code; avatar part (Q.P6-U3) and attachment part (Q.P6-U1); the Graph re-derivation cases (Q.P7-V5) |
 | `apps/builder/__tests__/media-public-scope.test.ts` | C | tbd | todo | Media library and file storage; builder server code |
 | `apps/builder/__tests__/message-input-client-id.test.tsx` | B | - | todo | Inbox and live chat (conversations, messages); builder jsdom |
 | `apps/builder/__tests__/message-input-thread-control.test.tsx` | B | - | todo | Thread control (handover protocol); builder jsdom |
@@ -1371,7 +1371,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/leaderboard-follower-check.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/leaderboard-jobs.test.ts` | C | tbd | todo | Leaderboards |
 | `apps/worker/__tests__/leaderboard-sources.test.ts` | C | `crates/worker/src/leaderboard.rs` (unit) | ported | Leaderboards; Q.D13b (pure source rules; DB paths in parity p1-10) |
-| `apps/worker/__tests__/live-comment.test.ts` | C | tbd | todo | Comment automation (FB/IG/Threads/TikTok) |
+| `apps/worker/__tests__/live-comment.test.ts` | C | `crates/worker/src/comment_extras.rs` (`tests`) | ported | Comment automation (FB/IG/Threads/TikTok); Q.P7-V5: the Redis-failure case is n/a (the KV is the database) |
 | `apps/worker/__tests__/lock-contention-deferral.test.ts` | C | `crates/jobs/tests/lock_contention_deferral.rs` | passing | Scheduler and scheduled jobs |
 | `apps/worker/__tests__/low-worker-boot.test.ts` | C | tbd | todo | Worker runtime (boot, queues, shutdown) |
 | `apps/worker/__tests__/mailer-lite-handler.test.ts` | C | tbd | todo | MailerLite integration |
@@ -1525,12 +1525,12 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/summarize-conversation.test.ts` | C | `crates/worker/src/ai/context_tests.rs` | ported | AI flow steps (text, image, speech, extraction) |
 | `apps/worker/__tests__/sweep-stale-whatsapp-calls.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `apps/worker/__tests__/sync-ad-labels.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/sync-channel-labels.test.ts` | C | tbd | todo | Tags and labels |
+| `apps/worker/__tests__/sync-channel-labels.test.ts` | C | `crates/business/tests/sync_channel_labels_job.rs` | ported | Tags and labels |
 | `apps/worker/__tests__/sync-retarget-audience.test.ts` | C | tbd | todo | Facebook Ads integration |
-| `apps/worker/__tests__/sync-tag-create-attach.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/sync-tag-delete.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/sync-tag-detach.test.ts` | C | tbd | todo | Tags and labels |
-| `apps/worker/__tests__/sync-tag.test.ts` | C | tbd | todo | Tags and labels |
+| `apps/worker/__tests__/sync-tag-create-attach.test.ts` | C | `crates/business/tests/tag_sync_jobs.rs` | ported | Tags and labels |
+| `apps/worker/__tests__/sync-tag-delete.test.ts` | C | `crates/business/tests/tag_sync_jobs.rs` | ported | Tags and labels |
+| `apps/worker/__tests__/sync-tag-detach.test.ts` | C | `crates/business/tests/tag_sync_jobs.rs` | ported | Tags and labels |
+| `apps/worker/__tests__/sync-tag.test.ts` | C | `crates/business/tests/tag_sync_jobs.rs` | ported | Tags and labels |
 | `apps/worker/__tests__/sync-template-installation-handler.test.ts` | C | tbd | todo | Template marketplace (install/share/sync) |
 | `apps/worker/__tests__/sync-user-quota-mac.test.ts` | C | tbd | todo | Licensing, billing and quotas |
 | `apps/worker/__tests__/sync-user-quota-monthly-bot-messages.test.ts` | C | tbd | todo | Licensing, billing and quotas |
@@ -1572,7 +1572,7 @@ Status values: `todo`, `ported`, `passing`, `baseline-fail`, `dropped`, `dispute
 | `apps/worker/__tests__/webhook-payload-contact-inbox-leak.test.ts` | C | tbd | todo | Contacts (profiles, notes, activity) |
 | `apps/worker/__tests__/webhook-pipeline-payload.test.ts` | C | tbd | todo | Pipelines (CRM deals) |
 | `apps/worker/__tests__/webhook-worker-audit-context.test.ts` | C | tbd | todo | Outbound webhooks |
-| `apps/worker/__tests__/welcome-message-flows-handler.test.ts` | C | tbd | todo | Messenger channel |
+| `apps/worker/__tests__/welcome-message-flows-handler.test.ts` | C | `crates/business/tests/welcome_flow_sync_jobs.rs` | ported | Messenger channel |
 | `apps/worker/__tests__/whatsapp-call-finalize.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `apps/worker/__tests__/whatsapp-call-handler.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |
 | `apps/worker/__tests__/whatsapp-call-native-media.test.ts` | C | tbd | todo | WhatsApp calling (VoIP) |

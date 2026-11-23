@@ -7,8 +7,8 @@
 //!
 //! AI moderation and AI-agent replies run on the AI queue (`comment_ai`).
 //!
-//! ponytail: not ported (specs/Q.D10.md "Left"): post tracking, commenter
-//! avatars, comment attachments and Messenger live detection.
+//! Post tracking, commenter avatars, comment attachments and Messenger live
+//! detection: `crate::comment_extras` (Q.P7-V5).
 //! The other low actions (`contactMarkAsRead`, `messageStatus`, echoes,
 //! avatars) fail unrecoverable until their channels exist.
 
@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 use crate::channel::{
     Channel, ChannelCtx, InboundInbox, IncomingContact, OutgoingContact, SendFailure, SendMessage,
 };
-use crate::{Deps, db_fail, id_of, str_of};
+use crate::{Deps, comment_extras, db_fail, id_of, str_of};
 
 /// `MAX_ERROR_DETAIL_LENGTH`.
 const MAX_ERROR_DETAIL: usize = 1000;
@@ -430,8 +430,23 @@ async fn receive_comment(
     }
     let authorship_unknown = integration_type == "tiktok" && identity.is_none();
     let identity = identity.unwrap_or(Value::Null);
-    // ponytail: a Messenger live comment is not detected (attachment lookup).
-    let is_live = c["isLive"] == true;
+    let avatar_url = str_of(&identity, "avatarUrl")
+        .or(str_of(c, "fromAvatarUrl"))
+        .map(str::to_owned);
+    // Instagram flags a live comment on the webhook; Facebook's comes from
+    // the attachment lookup (and the remembered live post).
+    let lookup = if integration_type == "messenger" {
+        comment_extras::messenger_comment_lookup(deps, upstream, &ctx, comment_id).await
+    } else {
+        None
+    };
+    let is_live = if integration_type == "messenger" {
+        let lookup_is_live = lookup.as_ref().map(|l| l.is_live);
+        comment_extras::resolve_live_comment(deps, ctx.integration_id, post_id, lookup_is_live)
+            .await
+    } else {
+        c["isLive"] == true
+    };
     let contact = IncomingContact {
         source_id: from_id.to_owned(),
         source_conversation_id: Some(post_id.to_owned()),
@@ -448,6 +463,66 @@ async fn receive_comment(
         crate::inbound::detect_contact_and_conversation(deps, &inbox, &contact, source).await?;
 
     let created_time = c["createdTime"].as_i64().unwrap_or(0);
+    comment_extras::track_post(
+        deps,
+        upstream,
+        &inbox,
+        &ctx,
+        identifier,
+        contact_inbox.id,
+        post_id,
+        created_time,
+    )
+    .await?;
+    if let Some(url) = avatar_url.as_deref() {
+        let bearer = (integration_type == "threads")
+            .then(|| {
+                ctx.auth
+                    .pointer("/tokens/accessToken")
+                    .and_then(Value::as_str)
+            })
+            .flatten();
+        comment_extras::commenter_avatar(
+            deps,
+            inbox.workspace_id,
+            contact_inbox.contact_id,
+            url,
+            bearer,
+            comment_id,
+        )
+        .await;
+    }
+    let attachments = match integration_type {
+        "messenger" => match lookup.and_then(|l| l.attachment) {
+            Some(attachment) => vec![attachment],
+            // The lookup re-hosts photos and GIFs only; a video comment's file
+            // is the webhook's `video` URL.
+            None => match str_of(c, "videoUrl") {
+                Some(url) => comment_extras::download_comment_media(deps, &ctx, url, comment_id)
+                    .await
+                    .into_iter()
+                    .collect(),
+                None => Vec::new(),
+            },
+        },
+        "threads" => {
+            comment_extras::threads_comment_attachments(deps, upstream, &ctx, comment_id).await
+        }
+        _ => match str_of(&identity, "imageUrl") {
+            Some(url) => {
+                tracing::info!(
+                    comment_id,
+                    image_url = url,
+                    "receiveComment: TikTok comment has an image"
+                );
+                comment_extras::download_comment_media(deps, &ctx, url, comment_id)
+                    .await
+                    .into_iter()
+                    .collect()
+            }
+            None => Vec::new(),
+        },
+    };
     let parent_id = match str_of(c, "parentId") {
         Some(parent) => find_by_source(deps, parent, &conversation, now_ms() - 90 * DAY_MS)
             .await?
@@ -480,6 +555,7 @@ async fn receive_comment(
             created_at: Some(only.map_or_else(now_ms, |_| created_time * 1000)),
             updated_at: None,
         },
+        &attachments,
     )
     .await?;
     if !is_new {
@@ -595,21 +671,31 @@ async fn store_message(
     contact_inbox: &ContactInbox,
     conversation: &Conversation,
     input: CreateMessageInput,
+    attachments: &[crate::channel::IncomingAttachment],
 ) -> Result<(Value, i64, bool), JobError> {
+    let attachments =
+        crate::inbound::attachment_inputs(attachments, input.workspace_id, input.conversation_id);
     let (row, id, is_new) = deps
         .db
         .write(move |tx| {
-            let r = repo_message::create_or_update(tx, &input).map_err(crate::repo_err)?;
-            let stored = repo_message::MessageWithAttachments {
-                message: r.message,
-                attachment_count: None,
-                attachments: Vec::new(),
+            let (stored, is_new) = if attachments.is_empty() {
+                let r = repo_message::create_or_update(tx, &input).map_err(crate::repo_err)?;
+                let stored = repo_message::MessageWithAttachments {
+                    message: r.message,
+                    attachment_count: None,
+                    attachments: Vec::new(),
+                };
+                (stored, r.is_new)
+            } else {
+                let r = repo_message::create_or_update_with_attachments(tx, &input, &attachments)
+                    .map_err(crate::repo_err)?;
+                (r.result, r.is_new)
             };
             let id = stored.message.id;
             Ok((
                 chatbotx_business::message::message_json(&stored),
                 id,
-                r.is_new,
+                is_new,
             ))
         })
         .await

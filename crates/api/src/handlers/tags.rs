@@ -3,6 +3,7 @@
 
 use chatbotx_business::events::trigger;
 use chatbotx_business::tag::{self as service, ListTags};
+use chatbotx_business::tag_sync;
 use chatbotx_db::repo::SortItem;
 use chatbotx_db::repo::models::Tag;
 use serde_json::{Value, json};
@@ -193,10 +194,13 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let name = tag_name(&mut input);
             let folder_id = nullish_digits(&mut input, "folderId").flatten();
             input.finish()?;
-            service::create(db, ws, &name.unwrap_or_default(), folder_id)
+            let tag = service::create(db, ws, &name.unwrap_or_default(), folder_id)
                 .await
-                .map(|tag| json(201, tag_json(&tag)))
-                .map_err(|e| business_error(e, CREATING_IN_FOLDER))
+                .map_err(|e| business_error(e, CREATING_IN_FOLDER))?;
+            if let Some(jobs) = state.jobs.as_deref() {
+                tag_sync::enqueue_create(jobs, ws, tag.id).await;
+            }
+            Ok(json(201, tag_json(&tag)))
         }
         "tags.get" => {
             let mut input = Input::from_query(call.params, call.query);
@@ -228,10 +232,11 @@ pub async fn handle(state: &ApiState, route_id: &str, call: Call<'_>) -> Reply {
             let mut input = Input::from_query(call.params, call.query);
             let tag_id = digits(&mut input, "id");
             input.finish()?;
-            service::soft_delete(db, ws, &[tag_id.unwrap_or_default()])
+            let deleted = service::soft_delete(db, ws, &[tag_id.unwrap_or_default()])
                 .await
-                .map(|_| no_content())
-                .map_err(|e| business_error(e, MUTATING))
+                .map_err(|e| business_error(e, MUTATING))?;
+            enqueue_tag_deletes(state, ws, &deleted).await;
+            Ok(no_content())
         }
         "contacts.listTags" => {
             let contact_id = super::contacts::resolve(state, &call, FINDING).await?;
@@ -337,4 +342,22 @@ async fn emit_tag_changes(
                 .map(|tag| trigger::tag_removed(&ws, &contact, &tag.to_string(), None)),
         );
     state.emit_triggers(events.collect::<Vec<_>>()).await;
+    if let Some(jobs) = state.jobs.as_deref() {
+        let pairs = |tags: &[i64]| {
+            tags.iter()
+                .map(|tag| (contact_id, *tag))
+                .collect::<Vec<_>>()
+        };
+        tag_sync::enqueue_attach_many(jobs, workspace_id, &pairs(added)).await;
+        tag_sync::enqueue_detach_many(jobs, workspace_id, &pairs(removed)).await;
+    }
+}
+
+/// `tagSyncService.enqueueDelete` after a soft delete commits.
+pub(crate) async fn enqueue_tag_deletes(state: &ApiState, workspace_id: i64, tag_ids: &[i64]) {
+    if let Some(jobs) = state.jobs.as_deref() {
+        for tag_id in tag_ids {
+            tag_sync::enqueue_delete(jobs, workspace_id, *tag_id, None).await;
+        }
+    }
 }
